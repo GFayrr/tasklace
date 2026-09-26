@@ -1,3 +1,4 @@
+import { builtinModules } from 'node:module';
 import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
@@ -30,6 +31,22 @@ export default defineConfig(
           ignoreEnums: true,
           ignoreNumericLiteralTypes: true,
           ignoreTypeIndexes: true,
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/core/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: String.raw`^(node:.*|electron|${builtinModules.join('|')})(/.*)?$`,
+              message: 'src/core must stay pure: no Node.js or Electron module.',
+            },
+          ],
         },
       ],
     },

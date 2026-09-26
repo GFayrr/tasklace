@@ -9,7 +9,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "lint": "tsc --noEmit && eslint .",
+    "lint": "tsc --noEmit && tsc --noEmit -p tests && eslint .",
     "format": "prettier --write .",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
@@ -17,6 +17,7 @@
     "bench": "vitest run --config vitest.perf.config.ts"
   },
   "devDependencies": {
+    "@types/node": "^24.19.0",
     "@vitest/coverage-v8": "^5.0.2",
     "eslint": "^10.11.0",
     "fast-check": "^4.10.2",

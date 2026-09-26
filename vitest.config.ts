@@ -1,10 +1,11 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 const COVERAGE_THRESHOLD_PERCENT = 90;
 
 export default defineConfig({
   test: {
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
+    exclude: [...configDefaults.exclude, 'tests/perf/**'],
     coverage: {
       provider: 'v8',
       include: ['src/core/**/*.ts'],
