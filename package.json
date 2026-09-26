@@ -13,7 +13,8 @@
     "format": "prettier --write .",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "bench": "vitest run --config vitest.perf.config.ts"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^5.0.2",

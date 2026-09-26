@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { MAX_NON_WORKING_PERIODS, MAX_WORKING_TIME_RANGES } from '../limits';
 import type { DayRange, TimeRange, WorkingCalendar } from '../model/calendar';
 import { MAX_DAY_INDEX, MIN_DAY_INDEX, MONDAY, SATURDAY, SUNDAY, type Weekday } from '../time';
+import { compileOrThrow, dayOf } from '../testing/civil-time';
 import { compileCalendar } from './compile-calendar';
 import { DEFAULT_CALENDAR } from './default-calendar';
+import { isWorkingDay } from './working-time';
 
 /** Builds a calendar from the default one with some fields replaced. */
 function calendarWith(overrides: Partial<WorkingCalendar>): WorkingCalendar {
@@ -12,15 +14,18 @@ function calendarWith(overrides: Partial<WorkingCalendar>): WorkingCalendar {
 
 describe('compileCalendar', () => {
   it('compiles the default calendar into Monday–Friday, 09:00–12:00 and 13:00–17:00', () => {
-    const result = compileCalendar(DEFAULT_CALENDAR);
-    expect(result).toEqual({
-      ok: true,
-      value: {
-        isWorkingWeekday: [false, true, true, true, true, true, false],
-        workingHoursOfDay: [9, 10, 11, 13, 14, 15, 16],
-        nonWorkingPeriods: [],
-      },
-    });
+    const calendar = compileOrThrow(DEFAULT_CALENDAR);
+    expect(calendar.workingHoursOfDay).toEqual([9, 10, 11, 13, 14, 15, 16]);
+    const week = Array.from({ length: 7 }, (_value, offset) => dayOf(2026, 9, 27) + offset);
+    expect(week.map((day) => isWorkingDay(calendar, day))).toEqual([
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+    ]);
   });
 
   it('accepts a single working day per week and a single working hour', () => {
@@ -57,35 +62,26 @@ describe('compileCalendar', () => {
     expect(result.ok && result.value.workingHoursOfDay).toEqual([8, 9, 10, 14, 15]);
   });
 
-  it('sorts and merges overlapping or touching non-working periods', () => {
-    const result = compileCalendar(
-      calendarWith({
-        nonWorkingPeriods: [
-          { firstDay: 30, lastDay: 31 },
-          { firstDay: 10, lastDay: 12 },
-          { firstDay: 13, lastDay: 15 },
-          { firstDay: 11, lastDay: 14 },
-          { firstDay: 20, lastDay: 20 },
-        ],
-      }),
+  it('handles overlapping, touching, nested and unsorted non-working periods', () => {
+    const calendar = compileOrThrow({
+      workingWeekdays: [0, 1, 2, 3, 4, 5, 6],
+      workingTimeRanges: [{ startHour: 9, endHour: 17 }],
+      nonWorkingPeriods: [
+        { firstDay: 30, lastDay: 31 },
+        { firstDay: 10, lastDay: 12 },
+        { firstDay: 13, lastDay: 15 },
+        { firstDay: 11, lastDay: 14 },
+        { firstDay: 20, lastDay: 20 },
+        { firstDay: 40, lastDay: 50 },
+        { firstDay: 42, lastDay: 44 },
+      ],
+    });
+    const nonWorkingDays = Array.from({ length: 60 }, (_value, day) => day).filter(
+      (day) => !isWorkingDay(calendar, day),
     );
-    expect(result.ok && result.value.nonWorkingPeriods).toEqual([
-      { firstDay: 10, lastDay: 15 },
-      { firstDay: 20, lastDay: 20 },
-      { firstDay: 30, lastDay: 31 },
+    expect(nonWorkingDays).toEqual([
+      10, 11, 12, 13, 14, 15, 20, 30, 31, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
     ]);
-  });
-
-  it('keeps a period nested inside a longer one merged into the longer one', () => {
-    const result = compileCalendar(
-      calendarWith({
-        nonWorkingPeriods: [
-          { firstDay: 10, lastDay: 30 },
-          { firstDay: 12, lastDay: 14 },
-        ],
-      }),
-    );
-    expect(result.ok && result.value.nonWorkingPeriods).toEqual([{ firstDay: 10, lastDay: 30 }]);
   });
 
   it('accepts periods on the very first and last supported days', () => {

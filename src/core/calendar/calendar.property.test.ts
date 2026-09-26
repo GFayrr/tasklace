@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
-import type { TimeRange, WorkingCalendar } from '../model/calendar';
-import { compileOrThrow, dayOf } from '../testing/civil-time';
-import { HOURS_PER_DAY, dayIndexOf, type Weekday } from '../time';
+import {
+  calendarArbitrary,
+  durationArbitrary,
+  instantArbitrary,
+  unwrap,
+} from '../testing/arbitraries';
+import { compileOrThrow } from '../testing/civil-time';
+import { HOURS_PER_DAY, dayIndexOf } from '../time';
 import type { CompiledCalendar } from './compile-calendar';
 import { computeTaskSlots } from './task-slots';
 import {
@@ -12,64 +17,10 @@ import {
   subtractWorkingHours,
 } from './working-time';
 
-const FIRST_TEST_DAY = dayOf(2026, 1, 1);
-const MAX_TEST_DURATION_HOURS = 300;
-const TEST_SPAN_DAYS = 400;
-
-/** Turns a set of hours of the day into the smallest list of continuous ranges. */
-function hoursToRanges(hours: readonly number[]): TimeRange[] {
-  const ranges: TimeRange[] = [];
-  for (const hour of [...hours].sort((left, right) => left - right)) {
-    const last = ranges.at(-1);
-    if (last?.endHour === hour) {
-      ranges[ranges.length - 1] = { startHour: last.startHour, endHour: hour + 1 };
-    } else {
-      ranges.push({ startHour: hour, endHour: hour + 1 });
-    }
-  }
-  return ranges;
-}
-
-const calendarArbitrary: fc.Arbitrary<WorkingCalendar> = fc.record({
-  workingWeekdays: fc
-    .uniqueArray(fc.integer({ min: 0, max: 6 }), { minLength: 1, maxLength: 7 })
-    .map((weekdays) => weekdays as Weekday[]),
-  workingTimeRanges: fc
-    .uniqueArray(fc.integer({ min: 0, max: HOURS_PER_DAY - 1 }), { minLength: 1, maxLength: 24 })
-    .map(hoursToRanges),
-  nonWorkingPeriods: fc.array(
-    fc
-      .record({
-        offset: fc.integer({ min: 0, max: TEST_SPAN_DAYS }),
-        length: fc.integer({ min: 0, max: 20 }),
-      })
-      .map(({ offset, length }) => ({
-        firstDay: FIRST_TEST_DAY + offset,
-        lastDay: FIRST_TEST_DAY + offset + length,
-      })),
-    { maxLength: 10 },
-  ),
-});
-
-const instantArbitrary = fc.integer({
-  min: FIRST_TEST_DAY * HOURS_PER_DAY,
-  max: (FIRST_TEST_DAY + TEST_SPAN_DAYS) * HOURS_PER_DAY,
-});
-
-const durationArbitrary = fc.integer({ min: 1, max: MAX_TEST_DURATION_HOURS });
-
 /** Tells whether the hour starting at an instant is a working hour of the calendar. */
 function isWorkingHour(calendar: CompiledCalendar, instant: number): boolean {
   const result = countWorkingHours(calendar, instant, instant + 1);
   return result.ok && result.value === 1;
-}
-
-/** Unwraps a result, failing the property when it is an error. */
-function unwrap<T>(result: { ok: true; value: T } | { ok: false; error: string }): T {
-  if (!result.ok) {
-    throw new Error(result.error);
-  }
-  return result.value;
 }
 
 describe('calendar properties', () => {

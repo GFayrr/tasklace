@@ -1,0 +1,238 @@
+import type { CompiledCalendar } from '../calendar/compile-calendar';
+import { computeTaskSlots, type TaskSlotsErrorCode, type TimeSlot } from '../calendar/task-slots';
+import { lastWorkingHourEnd, subtractWorkingHours } from '../calendar/working-time';
+import { MAX_SEGMENTS_PER_TASK, MAX_SEGMENT_GAP_DAYS } from '../limits';
+import type { SchedulableTask, TaskSegment, WorkTask } from '../model/project';
+import { failure, success, type Result } from '../result';
+import {
+  END_PROJECT_HOUR,
+  MIN_PROJECT_HOUR,
+  dayIndexOf,
+  isProjectHour,
+  startOfDay,
+  type ProjectHour,
+} from '../time';
+
+export interface ScheduledSegment {
+  readonly start: ProjectHour;
+  readonly end: ProjectHour;
+  readonly slots: readonly TimeSlot[];
+}
+
+export interface Placement {
+  readonly start: ProjectHour;
+  readonly end: ProjectHour;
+  readonly segments: readonly ScheduledSegment[];
+}
+
+export type PlacementErrorCode = TaskSlotsErrorCode | 'INVALID_SEGMENTS';
+
+type PlacementResult = Result<Placement, PlacementErrorCode>;
+
+/** Places a task as early as possible from an instant, block after block. */
+export function placeTask(
+  calendar: CompiledCalendar,
+  task: SchedulableTask,
+  earliestStart: ProjectHour,
+): PlacementResult {
+  if (!isProjectHour(earliestStart)) {
+    return failure('INVALID_INSTANT');
+  }
+  if (task.kind === 'milestone') {
+    return success({ start: earliestStart, end: earliestStart, segments: [] });
+  }
+  if (!hasValidSegments(task.segments)) {
+    return failure('INVALID_SEGMENTS');
+  }
+  return placeSegments(calendar, task, earliestStart);
+}
+
+/** Places a task at the earliest start that respects a start bound and an optional end bound. */
+export function placeTaskEarliest(
+  calendar: CompiledCalendar,
+  task: SchedulableTask,
+  earliestStart: ProjectHour,
+  earliestEnd: ProjectHour | null,
+): PlacementResult {
+  const first = placeTask(calendar, task, earliestStart);
+  if (!first.ok || earliestEnd === null || first.value.end >= earliestEnd) {
+    return first;
+  }
+  const workingEnd = lastWorkingHourEnd(calendar, earliestEnd);
+  const endBound = workingEnd.ok ? workingEnd.value : earliestEnd;
+  if (task.kind === 'milestone') {
+    return placeTask(calendar, task, Math.max(earliestStart, endBound));
+  }
+  if (first.value.end >= endBound) {
+    return first;
+  }
+  if (worksContinuously(calendar, task)) {
+    const start = subtractWorkingHours(calendar, endBound, totalDurationHours(task));
+    return start.ok ? placeTask(calendar, task, Math.max(earliestStart, start.value)) : start;
+  }
+  const boundary = findFirstStartWhere(
+    calendar,
+    task,
+    earliestStart,
+    endBound,
+    (placement) => placement.end >= endBound,
+  );
+  return boundary.ok ? placeTask(calendar, task, boundary.value) : boundary;
+}
+
+/** Places a task at the latest start that still starts and ends no later than the given bounds. */
+export function placeTaskLatest(
+  calendar: CompiledCalendar,
+  task: SchedulableTask,
+  latestStart: ProjectHour,
+  latestEnd: ProjectHour,
+): PlacementResult {
+  if (task.kind === 'milestone') {
+    return placeTask(calendar, task, Math.min(latestStart, latestEnd));
+  }
+  const direct = worksContinuously(calendar, task)
+    ? latestContinuousStart(calendar, task, latestStart, latestEnd)
+    : null;
+  if (direct !== null) {
+    return placeTask(calendar, task, direct);
+  }
+  const upperBound = Math.min(latestEnd, END_PROJECT_HOUR - 1);
+  const firstLate = findFirstStartWhere(
+    calendar,
+    task,
+    MIN_PROJECT_HOUR,
+    upperBound,
+    (placement) => placement.start > latestStart || placement.end > latestEnd,
+  );
+  if (!firstLate.ok) {
+    return firstLate;
+  }
+  return placeTask(calendar, task, Math.max(firstLate.value - 1, MIN_PROJECT_HOUR));
+}
+
+/** Tells whether a task always works consecutive working hours, so that its start follows from its end. */
+function worksContinuously(calendar: CompiledCalendar, task: WorkTask): boolean {
+  const [firstWorkingHour] = calendar.workingHoursOfDay;
+  return (
+    task.segments.length === 1 &&
+    (task.hoursPerDay === null || task.hoursPerDay === calendar.workingHoursOfDay.length) &&
+    (task.dailyStartHour === null || task.dailyStartHour <= firstWorkingHour)
+  );
+}
+
+/** Computes directly the latest start of a continuously worked task, or null when out of range. */
+function latestContinuousStart(
+  calendar: CompiledCalendar,
+  task: WorkTask,
+  latestStart: ProjectHour,
+  latestEnd: ProjectHour,
+): ProjectHour | null {
+  const byEnd = subtractWorkingHours(calendar, latestEnd, totalDurationHours(task));
+  const byStart = subtractWorkingHours(calendar, latestStart + 1, 1);
+  return byEnd.ok && byStart.ok ? Math.min(byEnd.value, byStart.value) : null;
+}
+
+/** Sums the durations of every block of a work task. */
+function totalDurationHours(task: WorkTask): number {
+  return task.segments.reduce((total, segment) => total + segment.durationHours, 0);
+}
+
+/** Finds by binary search the first start in a range whose placement satisfies a monotonic predicate. */
+function findFirstStartWhere(
+  calendar: CompiledCalendar,
+  task: WorkTask,
+  low: ProjectHour,
+  high: ProjectHour,
+  predicate: (placement: Placement) => boolean,
+): Result<ProjectHour, PlacementErrorCode> {
+  let lastFalse = low - 1;
+  let firstTrue = high;
+  while (firstTrue - lastFalse > 1) {
+    const middle = (lastFalse + firstTrue) >> 1;
+    const placement = placeTask(calendar, task, middle);
+    if (!placement.ok) {
+      return placement;
+    }
+    if (predicate(placement.value)) {
+      firstTrue = middle;
+    } else {
+      lastFalse = middle;
+    }
+  }
+  return success(firstTrue);
+}
+
+/** Tells whether a task has a supported number of blocks with valid durations and gaps. */
+function hasValidSegments(segments: readonly TaskSegment[]): boolean {
+  if (segments.length === 0 || segments.length > MAX_SEGMENTS_PER_TASK) {
+    return false;
+  }
+  return segments.every(
+    (segment, index) =>
+      Number.isInteger(segment.durationHours) &&
+      segment.durationHours >= 1 &&
+      isValidGap(segment.gapDaysBefore, index === 0),
+  );
+}
+
+/** Tells whether a gap before a block is valid: none for the first block, whole days for the others. */
+function isValidGap(gapDays: number, isFirstSegment: boolean): boolean {
+  if (isFirstSegment) {
+    return gapDays === 0;
+  }
+  return Number.isInteger(gapDays) && gapDays >= 1 && gapDays <= MAX_SEGMENT_GAP_DAYS;
+}
+
+/** Places every block of a work task, each one resuming its gap in days after the previous one. */
+function placeSegments(
+  calendar: CompiledCalendar,
+  task: WorkTask,
+  earliestStart: ProjectHour,
+): PlacementResult {
+  const segments: ScheduledSegment[] = [];
+  let resumeFrom = earliestStart;
+  for (const segment of task.segments) {
+    const previous = segments.at(-1);
+    if (previous !== undefined) {
+      resumeFrom = startOfDay(dayIndexOf(previous.end - 1) + segment.gapDaysBefore);
+    }
+    const placed = placeSegment(calendar, task, segment, resumeFrom);
+    if (!placed.ok) {
+      return placed;
+    }
+    segments.push(placed.value);
+  }
+  const first = segments[0];
+  const last = segments.at(-1);
+  if (first === undefined || last === undefined) {
+    return failure('INVALID_SEGMENTS');
+  }
+  return success({ start: first.start, end: last.end, segments });
+}
+
+/** Places a single block of a work task from an instant. */
+function placeSegment(
+  calendar: CompiledCalendar,
+  task: WorkTask,
+  segment: TaskSegment,
+  start: ProjectHour,
+): Result<ScheduledSegment, PlacementErrorCode> {
+  if (start >= END_PROJECT_HOUR) {
+    return failure('BEYOND_PLANNING_HORIZON');
+  }
+  const slots = computeTaskSlots(calendar, {
+    start,
+    durationHours: segment.durationHours,
+    hoursPerDay: task.hoursPerDay,
+    dailyStartHour: task.dailyStartHour,
+  });
+  if (!slots.ok) {
+    return slots;
+  }
+  const first = slots.value[0];
+  const last = slots.value.at(-1);
+  if (first === undefined || last === undefined) {
+    return failure('INVALID_SEGMENTS');
+  }
+  return success({ start: first.start, end: last.end, slots: slots.value });
+}

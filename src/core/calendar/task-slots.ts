@@ -1,4 +1,5 @@
 import { MAX_TASK_DURATION_HOURS } from '../limits';
+import type { TimeRange } from '../model/calendar';
 import { failure, success, type Result } from '../result';
 import {
   HOURS_PER_DAY,
@@ -50,8 +51,7 @@ export function computeTaskSlots(
   if (placement.durationHours === 0) {
     return success([]);
   }
-  const hours = collectTaskHours(calendar, placement, window.value);
-  return hours.ok ? success(mergeHoursIntoSlots(hours.value)) : hours;
+  return collectTaskSlots(calendar, placement, window.value);
 }
 
 /** Tells whether a task duration is a whole, non-negative and supported number of hours. */
@@ -85,55 +85,82 @@ function computeDailyWindow(
   return window.length === taskHoursPerDay ? success(window) : failure('INVALID_DAILY_START_HOUR');
 }
 
-/** Lists every project hour worked by a task, day after day, until its duration is used up. */
-function collectTaskHours(
+/** Builds the time slots of a task, day after day, until its duration is used up. */
+function collectTaskSlots(
   calendar: CompiledCalendar,
   placement: TaskPlacement,
   window: readonly number[],
-): Result<ProjectHour[], TaskSlotsErrorCode> {
+): Result<TimeSlot[], TaskSlotsErrorCode> {
   const firstHour = nextWorkingHour(calendar, placement.start);
   if (!firstHour.ok) {
     return firstHour;
   }
-  const hours = collectFirstDayHours(calendar, firstHour.value, window, placement.durationHours);
+  const slots: TimeSlot[] = [];
+  const firstDayHours = firstDayHoursOfDay(
+    calendar,
+    firstHour.value,
+    window,
+    placement.durationHours,
+  );
   let day: DayIndex | null = dayIndexOf(firstHour.value);
-  while (hours.length < placement.durationHours) {
+  appendRanges(slots, startOfDay(day), toRanges(firstDayHours));
+  let remaining = placement.durationHours - firstDayHours.length;
+  const fullDayRanges = toRanges(window);
+  while (remaining > 0) {
     day = nextWorkingDay(calendar, day + 1);
     if (day === null) {
       return failure('BEYOND_PLANNING_HORIZON');
     }
-    const dayStart = startOfDay(day);
-    const remaining = placement.durationHours - hours.length;
-    hours.push(...window.slice(0, remaining).map((hour) => dayStart + hour));
+    const ranges =
+      remaining >= window.length ? fullDayRanges : toRanges(window.slice(0, remaining));
+    appendRanges(slots, startOfDay(day), ranges);
+    remaining -= Math.min(remaining, window.length);
   }
-  return success(hours);
+  return success(slots);
 }
 
-/** Lists the hours worked on the first day, starting no earlier than the daily window. */
-function collectFirstDayHours(
+/** Lists the hours of the day worked on the first day, starting no earlier than the daily window. */
+function firstDayHoursOfDay(
   calendar: CompiledCalendar,
   firstHour: ProjectHour,
   window: readonly number[],
   durationHours: number,
-): ProjectHour[] {
-  const dayStart = startOfDay(dayIndexOf(firstHour));
+): number[] {
   const earliestHourOfDay = Math.max(hourOfDay(firstHour), window[0] ?? 0);
-  const hoursOnFirstDay = Math.min(window.length, durationHours);
-  return workingHoursFrom(calendar, earliestHourOfDay)
-    .slice(0, hoursOnFirstDay)
-    .map((hour) => dayStart + hour);
+  return workingHoursFrom(calendar, earliestHourOfDay).slice(
+    0,
+    Math.min(window.length, durationHours),
+  );
 }
 
-/** Groups consecutive project hours into continuous time slots. */
-function mergeHoursIntoSlots(hours: readonly ProjectHour[]): TimeSlot[] {
-  const slots: TimeSlot[] = [];
-  for (const hour of hours) {
-    const last = slots.at(-1);
-    if (last?.end === hour) {
-      slots[slots.length - 1] = { start: last.start, end: hour + 1 };
+/** Groups sorted hours of the day into continuous ranges. */
+function toRanges(hoursOfDay: readonly number[]): TimeRange[] {
+  const ranges: TimeRange[] = [];
+  for (const hour of hoursOfDay) {
+    const last = ranges.at(-1);
+    if (last?.endHour === hour) {
+      ranges[ranges.length - 1] = { startHour: last.startHour, endHour: hour + 1 };
     } else {
-      slots.push({ start: hour, end: hour + 1 });
+      ranges.push({ startHour: hour, endHour: hour + 1 });
     }
   }
-  return slots;
+  return ranges;
+}
+
+/** Appends the ranges of one day to the slots, extending the last slot when they touch. */
+function appendRanges(
+  slots: TimeSlot[],
+  dayStart: ProjectHour,
+  ranges: readonly TimeRange[],
+): void {
+  for (const range of ranges) {
+    const start = dayStart + range.startHour;
+    const end = dayStart + range.endHour;
+    const last = slots.at(-1);
+    if (last?.end === start) {
+      slots[slots.length - 1] = { start: last.start, end };
+    } else {
+      slots.push({ start, end });
+    }
+  }
 }
