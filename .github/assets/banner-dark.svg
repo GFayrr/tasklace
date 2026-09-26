@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320" role="img" aria-labelledby="title">
+  <title id="title">Tasklace — desktop Gantt charts with real-time collaboration</title>
+  <rect width="1280" height="320" fill="#16181D"/>
+  <g font-family="Jost, Futura, 'Century Gothic', system-ui, sans-serif">
+    <text x="120" y="168" font-size="64" font-weight="400" letter-spacing="12.8" fill="#E5E3DB">TASKLACE</text>
+    <text x="122" y="214" font-size="22" font-weight="400" letter-spacing="1.5" fill="#E5E3DB">Desktop Gantt charts · real-time collaboration</text>
+  </g>
+  <g transform="translate(820 76)">
+    <path d="M 128 9 H 144 V 59 H 160" fill="none" stroke="#8B6FC2" stroke-width="1.5"/>
+    <path d="M 240 59 H 256 V 109 H 272" fill="none" stroke="#8B6FC2" stroke-width="1.5"/>
+    <path d="M 368 109 H 384 V 150" fill="none" stroke="#8B6FC2" stroke-width="1.5"/>
+    <rect x="0" y="0" width="128" height="18" rx="4" fill="#1E3A5F" stroke="#8B6FC2" stroke-width="1"/>
+    <rect x="160" y="50" width="80" height="18" rx="4" fill="#1E3A5F" stroke="#8B6FC2" stroke-width="1"/>
+    <rect x="272" y="100" width="96" height="18" rx="4" fill="#1E3A5F" stroke="#8B6FC2" stroke-width="1"/>
+    <path d="M 384 150 l 9 9 l -9 9 l -9 -9 z" fill="#8B6FC2"/>
+  </g>
+</svg>
