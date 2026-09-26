@@ -1,0 +1,5 @@
+coverage/
+dist/
+out/
+LICENSE
+package-lock.json

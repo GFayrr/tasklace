@@ -1,0 +1,5 @@
+export const MIN_PROJECT_YEAR = 1970;
+export const MAX_PROJECT_YEAR = 2200;
+export const MAX_TASK_DURATION_HOURS = 100_000;
+export const MAX_WORKING_TIME_RANGES = 24;
+export const MAX_NON_WORKING_PERIODS = 1_000;
