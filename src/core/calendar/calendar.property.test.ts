@@ -8,12 +8,13 @@ import {
   unwrap,
 } from '../testing/arbitraries';
 import { compileOrThrow } from '../testing/civil-time';
-import { HOURS_PER_DAY, dayIndexOf } from '../time';
+import { HOURS_PER_DAY, MAX_DAY_INDEX, MIN_DAY_INDEX, dayIndexOf, weekdayOf } from '../time';
 import type { CompiledCalendar } from './compile-calendar';
 import { computeTaskSlots } from './task-slots';
 import {
   addWorkingHours,
   countWorkingHours,
+  isWorkingDay,
   nextWorkingHour,
   subtractWorkingHours,
 } from './working-time';
@@ -25,6 +26,34 @@ function isWorkingHour(calendar: CompiledCalendar, instant: number): boolean {
 }
 
 describe('calendar properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
+  it('marks exactly the worked weekdays outside non-working periods as working days', () => {
+    fc.assert(
+      fc.property(
+        calendarArbitrary,
+        fc.array(fc.integer({ min: MIN_DAY_INDEX, max: MAX_DAY_INDEX }), { maxLength: 50 }),
+        (calendarInput, randomDays) => {
+          const calendar = compileOrThrow(calendarInput);
+          const periodEdges = calendarInput.nonWorkingPeriods.flatMap((period) => [
+            period.firstDay - 1,
+            period.firstDay,
+            period.lastDay,
+            period.lastDay + 1,
+          ]);
+          const edges = [MIN_DAY_INDEX, MIN_DAY_INDEX + 6, MAX_DAY_INDEX - 6, MAX_DAY_INDEX];
+          const days = [...edges, ...periodEdges, ...randomDays];
+          for (const day of days) {
+            const expected =
+              calendarInput.workingWeekdays.includes(weekdayOf(day)) &&
+              !calendarInput.nonWorkingPeriods.some(
+                (period) => period.firstDay <= day && day <= period.lastDay,
+              );
+            expect(isWorkingDay(calendar, day)).toBe(expected);
+          }
+        },
+      ),
+    );
+  });
+
   it('the next working hour is a working hour, never earlier, with nothing worked in between', () => {
     fc.assert(
       fc.property(calendarArbitrary, instantArbitrary, (calendarInput, instant) => {

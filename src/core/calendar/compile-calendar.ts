@@ -7,9 +7,10 @@ import {
   MAX_DAY_INDEX,
   MIN_DAY_INDEX,
   weekdayOf,
-  type DayIndex,
   type Weekday,
 } from '../time';
+
+const COPY_GROWTH_FACTOR = 2;
 
 export interface CompiledCalendar {
   readonly workingHoursOfDay: readonly [number, ...number[]];
@@ -55,7 +56,7 @@ export function compileCalendar(
     workingHoursBeforeHourOfDay: countHoursBeforeEachHourOfDay(workingHoursOfDay),
     workingHoursBeforeDay: accumulateWorkingHoursPerDay(
       buildWeekdayMask(calendar.workingWeekdays),
-      mergePeriods(calendar.nonWorkingPeriods),
+      calendar.nonWorkingPeriods,
       workingHoursOfDay.length,
     ),
   });
@@ -164,24 +165,6 @@ function listWorkingHours(ranges: readonly TimeRange[]): number[] {
   return hours.sort((left, right) => left - right);
 }
 
-/** Sorts non-working periods and merges those that overlap or touch. */
-function mergePeriods(periods: readonly DayRange[]): DayRange[] {
-  const sorted = [...periods].sort((left, right) => left.firstDay - right.firstDay);
-  const merged: DayRange[] = [];
-  for (const period of sorted) {
-    const last = merged.at(-1);
-    if (last !== undefined && period.firstDay <= last.lastDay + 1) {
-      merged[merged.length - 1] = {
-        firstDay: last.firstDay,
-        lastDay: Math.max(last.lastDay, period.lastDay),
-      };
-    } else {
-      merged.push(period);
-    }
-  }
-  return merged;
-}
-
 /** Counts, for each hour of the day from 0 to 24, the working hours of a day that start before it. */
 function countHoursBeforeEachHourOfDay(workingHoursOfDay: readonly number[]): number[] {
   return Array.from(
@@ -197,32 +180,30 @@ function accumulateWorkingHoursPerDay(
   hoursPerWorkingDay: number,
 ): Int32Array {
   const dayCount = MAX_DAY_INDEX - MIN_DAY_INDEX + 1;
+  const dailyHours = new Int32Array(dayCount);
+  fillWeeklyPattern(dailyHours, weekdayMask, hoursPerWorkingDay);
+  for (const period of periods) {
+    dailyHours.fill(0, period.firstDay - MIN_DAY_INDEX, period.lastDay - MIN_DAY_INDEX + 1);
+  }
   const totals = new Int32Array(dayCount + 1);
-  let periodIndex = 0;
   for (let offset = 0; offset < dayCount; offset += 1) {
-    const day = MIN_DAY_INDEX + offset;
-    periodIndex = skipPeriodsEndingBefore(periods, periodIndex, day);
-    const worked =
-      weekdayMask[weekdayOf(day)] === true && !isInsidePeriod(periods[periodIndex], day);
-    totals[offset + 1] = (totals[offset] ?? 0) + (worked ? hoursPerWorkingDay : 0);
+    totals[offset + 1] = (totals[offset] ?? 0) + (dailyHours[offset] ?? 0);
   }
   return totals;
 }
 
-/** Returns the index of the first sorted period that ends on or after a day. */
-function skipPeriodsEndingBefore(
-  periods: readonly DayRange[],
-  startIndex: number,
-  day: DayIndex,
-): number {
-  let index = startIndex;
-  while ((periods[index]?.lastDay ?? Number.POSITIVE_INFINITY) < day) {
-    index += 1;
+/** Fills the hours of every day by writing the first week, then copying it forward in doubling blocks. */
+function fillWeeklyPattern(
+  dailyHours: Int32Array,
+  weekdayMask: readonly boolean[],
+  hoursPerWorkingDay: number,
+): void {
+  const firstWeekLength = Math.min(DAYS_PER_WEEK, dailyHours.length);
+  for (let offset = 0; offset < firstWeekLength; offset += 1) {
+    const worked = weekdayMask[weekdayOf(MIN_DAY_INDEX + offset)] === true;
+    dailyHours[offset] = worked ? hoursPerWorkingDay : 0;
   }
-  return index;
-}
-
-/** Tells whether a day falls inside a period, when there is one. */
-function isInsidePeriod(period: DayRange | undefined, day: DayIndex): boolean {
-  return period !== undefined && period.firstDay <= day && day <= period.lastDay;
+  for (let filled = firstWeekLength; filled < dailyHours.length; filled *= COPY_GROWTH_FACTOR) {
+    dailyHours.copyWithin(filled, 0, filled);
+  }
 }
