@@ -6,7 +6,7 @@ import { analyzeProjectStructure, findNewDependencyErrors } from './project-stru
 
 /** Returns the error codes found in a project, or an empty list when it is valid. */
 function errorCodes(tasks: readonly Task[], dependencies: readonly Dependency[] = []): string[] {
-  const result = analyzeProjectStructure({ tasks, dependencies });
+  const result = analyzeProjectStructure({ tasks, dependencies, tags: [] });
   return result.ok ? [] : result.error.map((error) => error.code);
 }
 
@@ -37,6 +37,7 @@ describe('analyzeProjectStructure', () => {
     const tasks = [workTask('c'), workTask('b'), workTask('a')];
     const result = analyzeProjectStructure({
       tasks,
+      tags: [],
       dependencies: [link('a', 'b'), link('b', 'c')],
     });
     expect(result.ok && result.value.graph.order.map((node) => node.task.id)).toEqual([
@@ -126,6 +127,7 @@ describe('analyzeProjectStructure', () => {
 
   it('rejects a two-task cycle and names the tasks involved', () => {
     const result = analyzeProjectStructure({
+      tags: [],
       tasks: [workTask('a'), workTask('b'), workTask('c')],
       dependencies: [link('a', 'b'), link('b', 'a')],
     });
@@ -161,6 +163,7 @@ describe('analyzeProjectStructure', () => {
 
 describe('findNewDependencyErrors', () => {
   const current = {
+    tags: [],
     tasks: [workTask('a'), workTask('b'), workTask('c')],
     dependencies: [link('a', 'b'), link('b', 'c')],
   };

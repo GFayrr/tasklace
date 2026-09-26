@@ -12,6 +12,7 @@ import {
 import { analyzeProjectStructure, type StructureError } from './project-structure';
 import { computeSummaries, type SummarySchedule } from './summaries';
 import type { Placement } from './task-placement';
+import { detectTagConflicts, type TagConflictReport } from '../tags/tag-conflicts';
 import { computeWbsNumbers } from './wbs';
 
 export interface Schedule {
@@ -20,6 +21,7 @@ export interface Schedule {
   readonly wbsNumbers: ReadonlyMap<TaskId, string>;
   readonly floats: ReadonlyMap<TaskId, TaskFloat> | null;
   readonly conflicts: readonly SchedulingConflict[];
+  readonly tagConflicts: TagConflictReport;
 }
 
 export type SchedulingFailure =
@@ -64,6 +66,7 @@ export function scheduleProject(project: Project): Result<Schedule, SchedulingFa
     wbsNumbers: computeWbsNumbers(childrenByParent),
     floats: floats.value === null ? null : keyByTaskId(tasks, floats.value),
     conflicts: forward.value.conflicts,
+    tagConflicts: detectTagConflicts(tasks, project.tags, placements, calendar.value),
   });
 }
 

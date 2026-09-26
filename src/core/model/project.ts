@@ -63,6 +63,7 @@ export interface Tag {
 export interface ProjectOptions {
   readonly criticalPathEnabled: boolean;
   readonly dateConstraintsEnabled: boolean;
+  readonly alwaysShowPatterns: boolean;
 }
 
 export interface Project {

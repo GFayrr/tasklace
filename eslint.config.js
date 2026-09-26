@@ -20,7 +20,7 @@ export default defineConfig(
   },
   {
     files: ['src/core/**/*.ts'],
-    ignores: ['src/**/*.test.ts', 'src/core/testing/**'],
+    ignores: ['src/**/*.test.ts', 'src/core/testing/**', 'src/core/tags/color-matrices.ts'],
     rules: {
       '@typescript-eslint/no-magic-numbers': [
         'error',

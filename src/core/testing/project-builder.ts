@@ -88,7 +88,11 @@ export function project(
     name: 'Test project',
     startDate: PROJECT_START,
     calendar: DEFAULT_CALENDAR,
-    options: { criticalPathEnabled: false, dateConstraintsEnabled: false },
+    options: {
+      criticalPathEnabled: false,
+      dateConstraintsEnabled: false,
+      alwaysShowPatterns: false,
+    },
     tasks,
     dependencies,
     tags: [],

@@ -1,5 +1,11 @@
-import { MAX_DEPENDENCIES, MAX_HIERARCHY_DEPTH, MAX_LAG_HOURS, MAX_TASKS } from '../limits';
-import type { Dependency, DependencyId, Project, Task, TaskId } from '../model/project';
+import {
+  MAX_DEPENDENCIES,
+  MAX_TAGS,
+  MAX_HIERARCHY_DEPTH,
+  MAX_LAG_HOURS,
+  MAX_TASKS,
+} from '../limits';
+import type { Dependency, DependencyId, Project, Tag, TagId, Task, TaskId } from '../model/project';
 import { failure, success, type Result } from '../result';
 import { compareStrings } from '../compare-strings';
 import {
@@ -22,12 +28,15 @@ export type StructureErrorCode =
   | 'SUMMARY_DEPENDENCY'
   | 'DUPLICATE_DEPENDENCY'
   | 'INVALID_LAG'
-  | 'DEPENDENCY_CYCLE';
+  | 'DEPENDENCY_CYCLE'
+  | 'TOO_MANY_TAGS'
+  | 'DUPLICATE_TAG_ID';
 
 export interface StructureError {
   readonly code: StructureErrorCode;
   readonly taskId?: TaskId;
   readonly dependencyId?: DependencyId;
+  readonly tagId?: TagId;
 }
 
 export interface ProjectStructure {
@@ -38,13 +47,16 @@ export interface ProjectStructure {
 
 /** Checks the task tree and the dependency network, then orders tasks for scheduling. */
 export function analyzeProjectStructure(
-  project: Pick<Project, 'tasks' | 'dependencies'>,
+  project: Pick<Project, 'tasks' | 'dependencies' | 'tags'>,
 ): Result<ProjectStructure, readonly StructureError[]> {
   if (project.tasks.length > MAX_TASKS) {
     return failure([{ code: 'TOO_MANY_TASKS' }]);
   }
   if (project.dependencies.length > MAX_DEPENDENCIES) {
     return failure([{ code: 'TOO_MANY_DEPENDENCIES' }]);
+  }
+  if (project.tags.length > MAX_TAGS) {
+    return failure([{ code: 'TOO_MANY_TAGS' }]);
   }
   const { tasks } = project;
   const tasksById = new Map(tasks.map((task) => [task.id, task]));
@@ -54,6 +66,7 @@ export function analyzeProjectStructure(
     ...findDuplicateTaskIds(tasks),
     ...findHierarchyErrors(tasks, tasksById),
     ...checked.errors,
+    ...findDuplicateTagIds(project.tags),
   ];
   if (errors.length > 0) {
     return failure(errors);
@@ -69,11 +82,12 @@ export function analyzeProjectStructure(
 
 /** Lists the problems that adding a dependency would cause, or nothing when it can be added. */
 export function findNewDependencyErrors(
-  project: Pick<Project, 'tasks' | 'dependencies'>,
+  project: Pick<Project, 'tasks' | 'dependencies' | 'tags'>,
   dependency: Dependency,
 ): readonly StructureError[] {
   const result = analyzeProjectStructure({
     tasks: project.tasks,
+    tags: project.tags,
     dependencies: [...project.dependencies, dependency],
   });
   return result.ok ? [] : result.error;
@@ -88,6 +102,19 @@ function findDuplicateTaskIds(tasks: readonly Task[]): StructureError[] {
       errors.push({ code: 'DUPLICATE_TASK_ID', taskId: task.id });
     }
     seen.add(task.id);
+  }
+  return errors;
+}
+
+/** Reports every tag whose identifier is already used by an earlier tag. */
+function findDuplicateTagIds(tags: readonly Tag[]): StructureError[] {
+  const seen = new Set<TagId>();
+  const errors: StructureError[] = [];
+  for (const tag of tags) {
+    if (seen.has(tag.id)) {
+      errors.push({ code: 'DUPLICATE_TAG_ID', tagId: tag.id });
+    }
+    seen.add(tag.id);
   }
   return errors;
 }

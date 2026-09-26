@@ -125,7 +125,11 @@ const projectArbitrary: fc.Arbitrary<GeneratedProject> = calendarArbitrary.chain
           project: project([...summaries, ...leaves], dependencies, {
             startDate,
             calendar: calendarInput,
-            options: { criticalPathEnabled: true, dateConstraintsEnabled: false },
+            options: {
+              criticalPathEnabled: true,
+              dateConstraintsEnabled: false,
+              alwaysShowPatterns: false,
+            },
           }),
         };
       });

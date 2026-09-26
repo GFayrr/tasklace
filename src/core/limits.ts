@@ -9,3 +9,4 @@ export const MAX_HIERARCHY_DEPTH = 32;
 export const MAX_SEGMENTS_PER_TASK = 50;
 export const MAX_SEGMENT_GAP_DAYS = 3_650;
 export const MAX_LAG_HOURS = MAX_TASK_DURATION_HOURS;
+export const MAX_TAGS = 200;

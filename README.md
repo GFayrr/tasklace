@@ -50,13 +50,15 @@ What the scheduling core already supports:
 - Split tasks: one task made of several blocks separated by interruptions.
 - Milestones, nested summary tasks with duration-weighted progress, and WBS numbering (1, 1.1, 1.2…).
 - Optional advanced features, disabled by default: critical path with total and free float, "must finish on" dates and deadlines, with conflicts reported rather than enforced.
+- Optional tags that color the blocks: a 12-color default palette, any custom color, and automatic patterns when two colors could be confused, including for color-blind readers and grayscale prints.
+- Tags representing a person or a team: overlapping work is detected hour by hour and reported as grouped conflict periods, without moving anything.
 - Results that never depend on the order of the data, a prerequisite for real-time collaboration.
 
 ## Roadmap
 
 - [x] Working-time calendar
 - [x] Scheduling engine: dependencies, summaries, split tasks, critical path
-- [ ] Tags and person or team conflict detection
+- [x] Tags and person or team conflict detection
 - [ ] Project file format, validation, JSON and CSV import and export
 - [ ] Desktop application and user interface
 - [ ] PDF export
@@ -100,6 +102,7 @@ src/core/            pure logic, independent of any user interface
   calendar/          working-time calendar and task time slots
   model/             project data types
   scheduling/        dependency graph, forward and backward passes, summaries, WBS
+  tags/              tag colors, patterns and person or team conflicts
   testing/           test helpers and random data generators
 tests/perf/          performance benchmark
 ```

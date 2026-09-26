@@ -14,7 +14,11 @@ import {
 } from '../testing/project-builder';
 import { scheduleProject, type Schedule } from './schedule-project';
 
-const ALL_OPTIONS = { criticalPathEnabled: true, dateConstraintsEnabled: true };
+const ALL_OPTIONS = {
+  criticalPathEnabled: true,
+  dateConstraintsEnabled: true,
+  alwaysShowPatterns: false,
+};
 
 /** Formats the start and end of a scheduled task as "start → end". */
 function datesOf(schedule: Schedule, taskId: string): string {
@@ -285,7 +289,11 @@ describe('scheduleProject: critical path', () => {
   it('finds the critical chain and the floats of the textbook example', () => {
     const schedule = scheduleOrThrow(
       project(tasks, dependencies, {
-        options: { criticalPathEnabled: true, dateConstraintsEnabled: false },
+        options: {
+          criticalPathEnabled: true,
+          dateConstraintsEnabled: false,
+          alwaysShowPatterns: false,
+        },
       }),
     );
     const summaryOf = (id: string): [number, number, boolean] | undefined => {
