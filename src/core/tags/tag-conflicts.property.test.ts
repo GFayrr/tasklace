@@ -4,6 +4,7 @@ import { DEFAULT_CALENDAR } from '../calendar/default-calendar';
 import { countWorkingHours } from '../calendar/working-time';
 import type { Tag, Task, TaskId } from '../model/project';
 import type { Schedule } from '../scheduling/schedule-project';
+import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { compileOrThrow } from '../testing/civil-time';
 import { PROJECT_START, project, scheduleOrThrow, workTask } from '../testing/project-builder';
 import type { ProjectHour } from '../time';
@@ -60,7 +61,7 @@ function activeTasksByHour(
   return byHour;
 }
 
-describe('tag conflict properties', () => {
+describe('tag conflict properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
   it('reports exactly the hours where a person works on two tasks or more, with the right tasks', () => {
     fc.assert(
       fc.property(fc.array(taskArbitrary, { maxLength: 15 }), (shapes) => {

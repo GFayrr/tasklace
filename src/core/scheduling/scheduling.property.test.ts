@@ -14,7 +14,12 @@ import type {
   Task,
   WorkTask,
 } from '../model/project';
-import { calendarArbitrary, instantArbitrary, unwrap } from '../testing/arbitraries';
+import {
+  PROPERTY_TEST_TIMEOUT_MS,
+  calendarArbitrary,
+  instantArbitrary,
+  unwrap,
+} from '../testing/arbitraries';
 import { milestone, project, summary, workTask } from '../testing/project-builder';
 import type { ProjectHour } from '../time';
 import { constrainsSuccessorStart, dependencyAnchor } from './forward-pass';
@@ -185,7 +190,7 @@ function schedulableTasks(input: Project): SchedulableTask[] {
   return input.tasks.filter((task): task is SchedulableTask => task.kind !== 'summary');
 }
 
-describe('scheduling properties', () => {
+describe('scheduling properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
   it('respects every dependency, the project start and every start date', () => {
     fc.assert(
       fc.property(projectArbitrary, (generated) => {

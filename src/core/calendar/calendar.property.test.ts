@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import {
+  PROPERTY_TEST_TIMEOUT_MS,
   calendarArbitrary,
   durationArbitrary,
   instantArbitrary,
@@ -23,7 +24,7 @@ function isWorkingHour(calendar: CompiledCalendar, instant: number): boolean {
   return result.ok && result.value === 1;
 }
 
-describe('calendar properties', () => {
+describe('calendar properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
   it('the next working hour is a working hour, never earlier, with nothing worked in between', () => {
     fc.assert(
       fc.property(calendarArbitrary, instantArbitrary, (calendarInput, instant) => {
