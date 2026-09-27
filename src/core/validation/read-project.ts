@@ -3,13 +3,12 @@ import {
   type CalendarErrorCode,
   type CompiledCalendar,
 } from '../calendar/compile-calendar';
-import { computeDailyWindow } from '../calendar/task-slots';
+import { computeDailyWindow, type DailyWindowErrorCode } from '../calendar/task-slots';
 import {
   MAX_DEPENDENCIES,
   MAX_LAG_HOURS,
   MAX_NON_WORKING_PERIODS,
   MAX_PROJECT_NAME_LENGTH,
-  MAX_REPORTED_ISSUES,
   MAX_SEGMENTS_PER_TASK,
   MAX_SEGMENT_GAP_DAYS,
   MAX_SORT_KEY_LENGTH,
@@ -44,6 +43,7 @@ import {
   MIN_PROJECT_HOUR,
   SATURDAY,
   SUNDAY,
+  WEEKDAYS,
   type DayIndex,
   type ProjectHour,
   type Weekday,
@@ -78,7 +78,10 @@ export const STORED_VALUE_CODEC: ValueCodec = {
   readInstant: (field, issues) =>
     readInteger(field, issues, MIN_PROJECT_HOUR, END_PROJECT_HOUR - 1),
   readDay: (field, issues) => readInteger(field, issues, MIN_DAY_INDEX, MAX_DAY_INDEX),
-  readWeekday: (field, issues) => readInteger(field, issues, SUNDAY, SATURDAY) as Weekday,
+  readWeekday: (field, issues) => {
+    const day = readInteger(field, issues, SUNDAY, SATURDAY);
+    return day === undefined ? undefined : WEEKDAYS[day];
+  },
 };
 
 const PROJECT_KEYS = ['name', 'startDate', 'calendar', 'options', 'tags', 'tasks', 'dependencies'];
@@ -106,11 +109,26 @@ const DEPENDENCY_TYPES: readonly DependencyType[] = [
   'finishToFinish',
   'startToFinish',
 ];
+const DAILY_WINDOW_FIELDS: Readonly<Record<DailyWindowErrorCode, keyof WorkTask>> = {
+  INVALID_HOURS_PER_DAY: 'hoursPerDay',
+  INVALID_DAILY_START_HOUR: 'dailyStartHour',
+};
+const CALENDAR_ERROR_LISTS: Readonly<Record<CalendarErrorCode, keyof WorkingCalendar>> = {
+  NO_WORKING_WEEKDAY: 'workingWeekdays',
+  INVALID_WEEKDAY: 'workingWeekdays',
+  DUPLICATE_WEEKDAY: 'workingWeekdays',
+  NO_WORKING_TIME_RANGE: 'workingTimeRanges',
+  TOO_MANY_WORKING_TIME_RANGES: 'workingTimeRanges',
+  INVALID_WORKING_TIME_RANGE: 'workingTimeRanges',
+  OVERLAPPING_WORKING_TIME_RANGES: 'workingTimeRanges',
+  TOO_MANY_NON_WORKING_PERIODS: 'nonWorkingPeriods',
+  INVALID_NON_WORKING_PERIOD: 'nonWorkingPeriods',
+};
 const SORT_KEY_PATTERN = /^[0-9A-Za-z]+$/;
 const FULL_PROGRESS = 100;
 const LAST_HOUR_OF_DAY = HOURS_PER_DAY - 1;
 
-/** Validates untrusted data and turns it into a project, or lists every problem with its location. */
+/** Validates untrusted data and turns it into a project, or lists the problems found with their locations. */
 export function readProject(
   input: unknown,
   codec: ValueCodec,
@@ -345,16 +363,28 @@ function readWorkTask(
   return allDefined(task) ? task : undefined;
 }
 
-/** Reads the blocks of a task: at least one, no gap before the first, whole days between the others. */
+/** Reads the blocks of a task: at least one, no gap before the first, at least one whole day before each other, and a total duration within the limit. */
 function readSegments(field: Field, issues: IssueList): TaskSegment[] | undefined {
   const segments = readList(field, issues, MAX_SEGMENTS_PER_TASK, (item, list, index) =>
     readSegment(item, list, index === 0),
   );
-  if (segments?.length === 0) {
+  if (segments === undefined) {
+    return undefined;
+  }
+  if (segments.length === 0) {
     issues.add(field.path, 'EMPTY_LIST');
     return undefined;
   }
+  if (totalDurationHours(segments) > MAX_TASK_DURATION_HOURS) {
+    issues.add(field.path, 'OUT_OF_RANGE');
+    return undefined;
+  }
   return segments;
+}
+
+/** Adds up the durations of the blocks of a task. */
+function totalDurationHours(segments: readonly TaskSegment[]): number {
+  return segments.reduce((total, segment) => total + segment.durationHours, 0);
 }
 
 /** Reads one block of a task. */
@@ -399,7 +429,7 @@ function readDependency(field: Field, issues: IssueList): Dependency | undefined
   return allDefined(dependency) ? dependency : undefined;
 }
 
-/** Reads every item of a list, returning nothing when one of them is invalid. */
+/** Reads every item of a list, holes included, returning nothing when one of them is invalid. */
 function readList<T>(
   field: Field,
   issues: IssueList,
@@ -410,7 +440,7 @@ function readList<T>(
   if (items === undefined) {
     return undefined;
   }
-  const values = items.map((_item, index) =>
+  const values = Array.from({ length: items.length }, (_unused, index) =>
     readItem(itemField(items, index, field.path), issues, index),
   );
   return values.every((value) => value !== undefined) ? values : undefined;
@@ -423,7 +453,7 @@ function allDefined<T extends object>(
   return Object.values(value).every((property) => property !== undefined);
 }
 
-/** Adds the calendar and structure problems that only appear once every field is valid, the lists being already within their size limits. */
+/** Adds the calendar, daily pattern and structure problems that can only be checked once every field has been read. */
 function reportSemanticIssues(project: Project, issues: IssueList, rootPath: string): void {
   const prefix = rootPath === '' ? '' : `${rootPath}.`;
   const calendar = compileCalendar(project.calendar);
@@ -436,7 +466,7 @@ function reportSemanticIssues(project: Project, issues: IssueList, rootPath: str
   }
   const structure = analyzeStructureWithinLimits(project);
   if (!structure.ok) {
-    structure.error.slice(0, MAX_REPORTED_ISSUES).forEach((error) => {
+    structure.error.forEach((error) => {
       issues.add(`${prefix}${error.list}[${String(error.index)}]`, error.code);
     });
   }
@@ -455,7 +485,7 @@ function reportDailyWindowIssues(
     }
     const window = computeDailyWindow(calendar, task);
     if (!window.ok) {
-      const field = window.error === 'INVALID_HOURS_PER_DAY' ? 'hoursPerDay' : 'dailyStartHour';
+      const field = DAILY_WINDOW_FIELDS[window.error];
       issues.add(`${prefix}tasks[${String(index)}].${field}`, window.error);
     }
   });
@@ -463,10 +493,6 @@ function reportDailyWindowIssues(
 
 /** Returns the location of a calendar problem inside the calendar. */
 function calendarPath(code: CalendarErrorCode, index: number | undefined): string {
-  const list = code.includes('WEEKDAY')
-    ? 'workingWeekdays'
-    : code.includes('TIME_RANGE')
-      ? 'workingTimeRanges'
-      : 'nonWorkingPeriods';
+  const list = CALENDAR_ERROR_LISTS[code];
   return index === undefined ? `calendar.${list}` : `calendar.${list}[${String(index)}]`;
 }

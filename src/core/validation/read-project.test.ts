@@ -17,6 +17,7 @@ import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { at, dayOf } from '../testing/civil-time';
 import { projectArbitrary } from '../testing/project-arbitrary';
 import { link, milestone, project, splitTask, summary, workTask } from '../testing/project-builder';
+import { scheduleProject } from '../scheduling/schedule-project';
 import { END_PROJECT_HOUR, MAX_DAY_INDEX, MIN_DAY_INDEX, MIN_PROJECT_HOUR } from '../time';
 import { readProject, STORED_VALUE_CODEC } from './read-project';
 import type { ValidationIssue } from './validation-issues';
@@ -147,7 +148,7 @@ describe('readProject: valid input', () => {
       hoursPerDay: 24,
       dailyStartHour: 0,
       segments: [
-        { durationHours: MAX_TASK_DURATION_HOURS, gapDaysBefore: 0 },
+        { durationHours: MAX_TASK_DURATION_HOURS - MAX_SEGMENTS_PER_TASK + 1, gapDaysBefore: 0 },
         ...Array.from({ length: MAX_SEGMENTS_PER_TASK - 1 }, () => ({
           durationHours: 1,
           gapDaysBefore: MAX_SEGMENT_GAP_DAYS,
@@ -291,9 +292,13 @@ describe('readProject: values', () => {
     [{ startDate: END_PROJECT_HOUR }, 'startDate', 'OUT_OF_RANGE'],
     [{ startDate: 1.5 }, 'startDate', 'WRONG_TYPE'],
     [{ startDate: '2026-09-28T09:00' }, 'startDate', 'WRONG_TYPE'],
-    [{ options: { criticalPathEnabled: 1 } }, 'options.criticalPathEnabled', 'WRONG_TYPE'],
+    [
+      { options: { ...RICH_PROJECT.options, criticalPathEnabled: 1 } },
+      'options.criticalPathEnabled',
+      'WRONG_TYPE',
+    ],
   ] as const)('rejects %j at %s', (overrides, path, code) => {
-    expect(issuesOf(projectWith(overrides))[0]).toEqual({ path, code });
+    expect(issuesOf(projectWith(overrides))).toEqual(issue(path, code));
   });
 
   it.each([
@@ -645,5 +650,55 @@ describe('readProject: structure', () => {
   it('stops reporting structure problems at the limit of reported issues', () => {
     const tasks = Array.from({ length: MAX_REPORTED_ISSUES * 2 }, () => workTask('same'));
     expect(structureIssues(tasks, [])).toHaveLength(MAX_REPORTED_ISSUES);
+  });
+});
+
+describe('readProject: holes, totals and scheduling', () => {
+  it('reports holes in lists as missing items', () => {
+    expect(issuesOf(projectWith({ tasks: new Array(1) }))).toEqual(
+      issue('tasks[0]', 'MISSING_FIELD'),
+    );
+    expect(issuesOf(taskWith(1, { segments: new Array(2) }))).toEqual([
+      { path: 'tasks[1].segments[0]', code: 'MISSING_FIELD' },
+      { path: 'tasks[1].segments[1]', code: 'MISSING_FIELD' },
+    ]);
+  });
+
+  it('rejects blocks whose total duration exceeds the maximum task duration', () => {
+    const segments = [
+      { durationHours: MAX_TASK_DURATION_HOURS, gapDaysBefore: 0 },
+      { durationHours: 1, gapDaysBefore: 1 },
+    ];
+    expect(issuesOf(taskWith(1, { segments }))).toEqual(issue('tasks[1].segments', 'OUT_OF_RANGE'));
+  });
+
+  it('ends the issues with TOO_MANY_ISSUES when some are left out', () => {
+    const tasks = Array.from({ length: MAX_REPORTED_ISSUES * 3 }, () => 'not a task');
+    expect(issuesOf(projectWith({ tasks })).at(-1)).toEqual({ path: '', code: 'TOO_MANY_ISSUES' });
+  });
+
+  it.each([
+    [
+      'blocks spread far beyond the planning period',
+      taskWith(1, {
+        segments: [
+          { durationHours: 1, gapDaysBefore: 0 },
+          ...Array.from({ length: MAX_SEGMENTS_PER_TASK - 1 }, () => ({
+            durationHours: 1,
+            gapDaysBefore: MAX_SEGMENT_GAP_DAYS,
+          })),
+        ],
+      }),
+    ],
+    [
+      'a calendar without any working day',
+      calendarWith({ nonWorkingPeriods: [{ firstDay: MIN_DAY_INDEX, lastDay: MAX_DAY_INDEX }] }),
+    ],
+  ])('accepts %s and lets scheduling fail with a typed error', (_label, data) => {
+    const read = readProject(data, STORED_VALUE_CODEC);
+    if (!read.ok) {
+      throw new Error(JSON.stringify(read.error));
+    }
+    expect(scheduleProject(read.value).ok).toBe(false);
   });
 });

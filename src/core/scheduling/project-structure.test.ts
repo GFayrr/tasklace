@@ -161,6 +161,24 @@ describe('analyzeProjectStructure', () => {
   });
 });
 
+describe('analyzeProjectStructure: dependency pairs', () => {
+  it('never mistakes a dangling dependency for a repeated pair', () => {
+    const result = analyzeProjectStructure({
+      tags: [],
+      tasks: [workTask('a'), workTask('b'), workTask('c')],
+      dependencies: [link('b', 'unknown'), link('a', 'c')],
+    });
+    expect(!result.ok && result.error).toEqual([
+      {
+        code: 'UNKNOWN_DEPENDENCY_TASK',
+        list: 'dependencies',
+        index: 0,
+        dependencyId: 'b-unknown',
+      },
+    ]);
+  });
+});
+
 describe('findNewDependencyErrors', () => {
   const current = {
     tags: [],

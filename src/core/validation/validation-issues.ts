@@ -19,7 +19,8 @@ export type ValueIssueCode =
   | 'INVALID_DATE'
   | 'INVALID_COLOR'
   | 'TOO_MANY_ITEMS'
-  | 'EMPTY_LIST';
+  | 'EMPTY_LIST'
+  | 'TOO_MANY_ISSUES';
 
 export type ValidationIssueCode =
   ValueIssueCode | CalendarErrorCode | DailyWindowErrorCode | StructureErrorCode;
@@ -34,14 +35,17 @@ export interface IssueList {
   readonly add: (path: string, code: ValidationIssueCode) => void;
 }
 
-/** Creates an empty list of issues that stops recording once the reporting limit is reached. */
+/** Creates an empty list of issues that ends with a single TOO_MANY_ISSUES entry once the reporting limit is reached. */
 export function createIssueList(): IssueList {
   const issues: ValidationIssue[] = [];
+  const lastSlot = MAX_REPORTED_ISSUES - 1;
   return {
     issues,
     add: (path, code) => {
-      if (issues.length < MAX_REPORTED_ISSUES) {
+      if (issues.length < lastSlot) {
         issues.push({ path, code });
+      } else if (issues.length === lastSlot) {
+        issues.push({ path: '', code: 'TOO_MANY_ISSUES' });
       }
     },
   };

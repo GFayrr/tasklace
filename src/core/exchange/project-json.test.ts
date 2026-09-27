@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
-import { MAX_PROJECT_TEXT_UTF16_UNITS } from '../limits';
-import type { Project } from '../model/project';
-import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
+import { compileCalendar } from '../calendar/compile-calendar';
+import { MAX_PROJECT_TEXT_UTF16_UNITS, MAX_TAG_NAME_LENGTH } from '../limits';
+import type { Project, Task, WorkTask } from '../model/project';
+import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { at, dayOf } from '../testing/civil-time';
 import { projectArbitrary } from '../testing/project-arbitrary';
 import { link, milestone, project, splitTask, summary, workTask } from '../testing/project-builder';
-import type { ValidationIssue } from '../validation/validation-issues';
+import { END_PROJECT_HOUR, MIN_PROJECT_HOUR } from '../time';
+import { createIssueList, type ValidationIssue } from '../validation/validation-issues';
+import { readText } from '../validation/value-readers';
 import {
   exportProjectJson,
   importProjectJson,
@@ -165,6 +168,37 @@ describe('importProjectJson: round trip', () => {
     const { project: content, version, format } = sampleDocument();
     const text = JSON.stringify({ project: content, version, format });
     expect(importProjectJson(text)).toEqual({ ok: true, value: SAMPLE_PROJECT });
+  });
+});
+
+describe('importProjectJson: byte order mark', () => {
+  const text = exportProjectJson(SAMPLE_PROJECT);
+
+  it('accepts a single byte order mark at the start of the text', () => {
+    expect(importProjectJson(`\uFEFF${text}`)).toEqual({ ok: true, value: SAMPLE_PROJECT });
+  });
+
+  it('rejects two byte order marks at the start of the text', () => {
+    expect(importIssues(`\uFEFF\uFEFF${text}`)).toEqual(issue('', 'INVALID_JSON'));
+  });
+
+  it('rejects a byte order mark between two tokens', () => {
+    expect(importIssues(text.replace('"version"', '\uFEFF"version"'))).toEqual(
+      issue('', 'INVALID_JSON'),
+    );
+  });
+
+  it('keeps a byte order mark inside a text value intact', () => {
+    const named = project([workTask('a', { name: 'a\uFEFFb' })]);
+    expect(importProjectJson(`\uFEFF${exportProjectJson(named)}`)).toEqual({
+      ok: true,
+      value: named,
+    });
+  });
+
+  it('never writes a byte order mark', () => {
+    expect(text.startsWith('{')).toBe(true);
+    expect(text.includes('\uFEFF')).toBe(false);
   });
 });
 
@@ -376,3 +410,125 @@ describe('importProjectJson: values', () => {
     });
   });
 });
+
+const MAX_GENERATED_TAGS = 12;
+
+const tagArbitrary = fc.record({
+  id: fc.stringMatching(/^[A-Za-z0-9_-]{1,64}$/),
+  name: fc
+    .string({ unit: 'grapheme', minLength: 1, maxLength: MAX_TAG_NAME_LENGTH })
+    .filter(
+      (name) =>
+        readText({ value: name, path: '' }, createIssueList(), MAX_TAG_NAME_LENGTH) !== undefined,
+    ),
+  color: fc
+    .integer({ min: 0, max: 0xffffff })
+    .map((value) => `#${value.toString(16).padStart(6, '0')}`),
+  representsPersonOrTeam: fc.boolean(),
+});
+
+const fullRangeInstant = fc.integer({ min: MIN_PROJECT_HOUR, max: END_PROJECT_HOUR - 1 });
+
+/** Picks a daily start hour that leaves a work task enough working hours in the day. */
+function dailyStartArbitrary(task: WorkTask, hoursOfDay: readonly number[]) {
+  const hoursPerDay = task.hoursPerDay ?? hoursOfDay.length;
+  return fc.option(fc.constantFrom(...hoursOfDay.slice(0, hoursOfDay.length - hoursPerDay + 1)));
+}
+
+/** Adds random tags, date constraints, daily start hours and options to a generated project. */
+function enrichProject(input: Project): fc.Arbitrary<Project> {
+  const hoursOfDay = unwrap(compileCalendar(input.calendar)).workingHoursOfDay;
+  const tags = fc.uniqueArray(tagArbitrary, {
+    maxLength: MAX_GENERATED_TAGS,
+    selector: (tag) => tag.id,
+  });
+  return tags.chain((generatedTags) => {
+    const tagIds = [...generatedTags.map((tag) => tag.id), 'unknown-tag'];
+    const tasks = fc.tuple(
+      ...input.tasks.map((task): fc.Arbitrary<Task> => {
+        if (task.kind === 'summary') {
+          return fc.constant(task);
+        }
+        const dated = fc.record({
+          tagId: fc.option(fc.constantFrom(...tagIds)),
+          mustFinishOn: fc.option(fullRangeInstant),
+          deadline: fc.option(fullRangeInstant),
+        });
+        if (task.kind === 'milestone') {
+          return dated.map((fields) => ({ ...task, ...fields }));
+        }
+        return fc
+          .tuple(dated, dailyStartArbitrary(task, hoursOfDay))
+          .map(([fields, dailyStartHour]) => ({ ...task, ...fields, dailyStartHour }));
+      }),
+    );
+    const options = fc.record({
+      criticalPathEnabled: fc.boolean(),
+      dateConstraintsEnabled: fc.boolean(),
+      alwaysShowPatterns: fc.boolean(),
+    });
+    return fc.tuple(tasks, options).map(([enrichedTasks, enrichedOptions]) => ({
+      ...input,
+      tags: generatedTags,
+      tasks: enrichedTasks,
+      options: enrichedOptions,
+    }));
+  });
+}
+
+/** Lists the path of every leaf value inside plain JSON data. */
+function leafPaths(value: unknown, path: readonly (string | number)[] = []): (string | number)[][] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => leafPaths(item, [...path, index]));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.entries(value).flatMap(([key, item]) => leafPaths(item, [...path, key]));
+  }
+  return [[...path]];
+}
+
+/** Returns a copy of plain JSON data with the value at a path replaced. */
+function withValueAt(data: unknown, path: readonly (string | number)[], value: unknown): unknown {
+  const [head, ...rest] = path;
+  if (head === undefined) {
+    return value;
+  }
+  if (Array.isArray(data)) {
+    return (data as unknown[]).map((item, index) =>
+      index === head ? withValueAt(item, rest, value) : item,
+    );
+  }
+  const record = data as Data;
+  return { ...record, [head]: withValueAt(record[String(head)], rest, value) };
+}
+
+describe(
+  'importProjectJson: generated and mutated documents',
+  { timeout: PROPERTY_TEST_TIMEOUT_MS },
+  () => {
+    it('reads back every enriched project unchanged', () => {
+      fc.assert(
+        fc.property(
+          projectArbitrary.chain(({ project: input }) => enrichProject(input)),
+          (input) => {
+            expect(importProjectJson(exportProjectJson(input))).toEqual({ ok: true, value: input });
+          },
+        ),
+      );
+    });
+
+    it('never throws when any nested value is replaced, and locates every issue in the project', () => {
+      const document = sampleDocument();
+      const paths = leafPaths(document['project'], ['project']);
+      fc.assert(
+        fc.property(fc.constantFrom(...paths), fc.jsonValue(), (path, value) => {
+          const result = importProjectJson(JSON.stringify(withValueAt(document, path, value)));
+          const outside = result.ok
+            ? []
+            : result.error.filter((found) => !found.path.startsWith('project'));
+          expect(outside).toEqual([]);
+        }),
+      );
+    });
+  },
+);

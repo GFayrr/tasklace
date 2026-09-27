@@ -19,6 +19,15 @@ export const WEDNESDAY: Weekday = 3;
 export const THURSDAY: Weekday = 4;
 export const FRIDAY: Weekday = 5;
 export const SATURDAY: Weekday = 6;
+export const WEEKDAYS: readonly Weekday[] = [
+  SUNDAY,
+  MONDAY,
+  TUESDAY,
+  WEDNESDAY,
+  THURSDAY,
+  FRIDAY,
+  SATURDAY,
+];
 
 export const HOURS_PER_DAY = 24;
 export const DAYS_PER_WEEK = 7;

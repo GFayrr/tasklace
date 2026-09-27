@@ -67,7 +67,7 @@ export interface ProjectStructure {
   readonly graph: DependencyGraph;
 }
 
-/** Checks the size limits, the task tree and the dependency network, then orders tasks for scheduling. */
+/** Checks the size limits, identifiers, the task tree and the dependency network, then orders tasks for scheduling. */
 export function analyzeProjectStructure(
   project: Pick<Project, 'tasks' | 'dependencies' | 'tags'>,
 ): Result<ProjectStructure, readonly StructureError[]> {
@@ -75,7 +75,7 @@ export function analyzeProjectStructure(
   return limitError === null ? analyzeStructureWithinLimits(project) : failure([limitError]);
 }
 
-/** Checks the task tree and the dependency network of a project already known to respect the size limits. */
+/** Checks identifiers, the task tree and the dependency network of a project already within the size limits, then orders tasks for scheduling. */
 export function analyzeStructureWithinLimits(
   project: Pick<Project, 'tasks' | 'dependencies' | 'tags'>,
 ): Result<ProjectStructure, readonly ItemStructureError[]> {
@@ -227,11 +227,11 @@ function checkDependencies(
         (seenPairs.has(pairKey) ? 'DUPLICATE_DEPENDENCY' : null));
     if (code === null) {
       resolved.push({ dependency, predecessorIndex, successorIndex });
+      seenPairs.add(pairKey);
     } else {
       errors.push({ code, list: 'dependencies', index, dependencyId: dependency.id });
     }
     seenIds.add(dependency.id);
-    seenPairs.add(pairKey);
   });
   return { errors, resolved };
 }

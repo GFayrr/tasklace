@@ -26,17 +26,22 @@ export function formatDate(day: DayIndex): string {
   return formatDateTime(startOfDay(day)).slice(0, DATE_TIME_DATE_LENGTH);
 }
 
-/** Reads a "YYYY-MM-DDTHH:00" text into a project hour, rejecting impossible dates. */
+/** Reads a "YYYY-MM-DDTHH:00" text into a project hour, rejecting impossible dates and years outside the project range. */
 export function parseDateTime(text: string): Result<ProjectHour, 'INVALID_DATE_TIME'> {
   const match = DATE_TIME_PATTERN.exec(text);
   if (match === null) {
     return failure('INVALID_DATE_TIME');
   }
-  const [, year, month, day, hour] = match.map((part) => Number.parseInt(part, DECIMAL_RADIX));
-  return toProjectHour({ year: year ?? 0, month: month ?? 0, day: day ?? 0, hour: hour ?? 0 });
+  const [year, month, day, hour] = match
+    .slice(1)
+    .map((part) => Number.parseInt(part, DECIMAL_RADIX));
+  if (year === undefined || month === undefined || day === undefined || hour === undefined) {
+    return failure('INVALID_DATE_TIME');
+  }
+  return toProjectHour({ year, month, day, hour });
 }
 
-/** Reads a "YYYY-MM-DD" text into a day, rejecting impossible dates. */
+/** Reads a "YYYY-MM-DD" text into a day, rejecting impossible dates and years outside the project range. */
 export function parseDate(text: string): Result<DayIndex, 'INVALID_DATE_TIME'> {
   if (!DATE_PATTERN.test(text)) {
     return failure('INVALID_DATE_TIME');

@@ -10,10 +10,10 @@ export type UnknownRecord = Readonly<Record<string, unknown>>;
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9_-]+$/;
 const LAST_C0_CONTROL = 0x1f;
-const FIRST_C1_CONTROL = 0x7f;
+const DELETE_CHARACTER = 0x7f;
 const LAST_C1_CONTROL = 0x9f;
 
-/** Reads a child field of a record by its own property name, never through the prototype chain. */
+/** Returns the field at a key of a record with its path, ignoring inherited properties. */
 export function childField(record: UnknownRecord, key: string, parentPath: string): Field {
   const value = Object.hasOwn(record, key) ? record[key] : undefined;
   return { value, path: parentPath === '' ? key : `${parentPath}.${key}` };
@@ -131,7 +131,7 @@ export function readEnum<T extends string>(
   return match;
 }
 
-/** Reads a user text: non-empty once trimmed, without control characters, within a length counted in Unicode code points so that the bound on stored size does not depend on the UTF-16 encoding. */
+/** Reads a well-formed user text: non-empty once trimmed, without control characters, within a length counted in Unicode code points so that the bound on stored size does not depend on the UTF-16 encoding. */
 export function readText(field: Field, issues: IssueList, maxLength: number): string | undefined {
   const text = readRawString(field, issues);
   if (text === undefined) {
@@ -200,7 +200,7 @@ export function readRawString(field: Field, issues: IssueList): string | undefin
 function hasControlCharacter(text: string): boolean {
   for (const character of text) {
     const code = character.codePointAt(0) ?? 0;
-    if (code <= LAST_C0_CONTROL || (code >= FIRST_C1_CONTROL && code <= LAST_C1_CONTROL)) {
+    if (code <= LAST_C0_CONTROL || (code >= DELETE_CHARACTER && code <= LAST_C1_CONTROL)) {
       return true;
     }
   }

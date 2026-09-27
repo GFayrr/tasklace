@@ -69,7 +69,7 @@ function buildTask(index: number, shape: TaskShape, hoursPerWorkingDay: number):
   return workTask(id, { ...common, segments, hoursPerDay });
 }
 
-/** Keeps only forward links between distinct tasks, one per pair, so that the network is acyclic. */
+/** Turns random link shapes into forward links between distinct tasks, one per pair, so that the network is acyclic. */
 function buildDependencies(taskCount: number, shapes: readonly DependencyShape[]): Dependency[] {
   const byPair = new Map<string, Dependency>();
   for (const shape of shapes) {

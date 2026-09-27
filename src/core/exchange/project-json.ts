@@ -3,7 +3,7 @@ import { MAX_PROJECT_TEXT_UTF16_UNITS } from '../limits';
 import type { WorkingCalendar } from '../model/calendar';
 import type { Project, Task } from '../model/project';
 import { failure, success, type Result } from '../result';
-import type { ProjectHour, Weekday } from '../time';
+import { WEEKDAYS, type ProjectHour } from '../time';
 import { readProject, type ValueCodec } from '../validation/read-project';
 import {
   createIssueList,
@@ -18,6 +18,7 @@ import {
   readRecord,
   type Field,
 } from '../validation/value-readers';
+import { stripLeadingByteOrderMark } from './byte-order-mark';
 
 export const PROJECT_JSON_FORMAT = 'tasklace';
 export const PROJECT_JSON_VERSION = 1;
@@ -39,7 +40,7 @@ const JSON_VALUE_CODEC: ValueCodec = {
   readDay: (field, issues) => readDateText(field, issues, parseDate),
   readWeekday: (field, issues) => {
     const name = readEnum(field, issues, WEEKDAY_NAMES);
-    return name === undefined ? undefined : (WEEKDAY_NAMES.indexOf(name) as Weekday);
+    return name === undefined ? undefined : WEEKDAYS[WEEKDAY_NAMES.indexOf(name)];
   },
 };
 
@@ -61,12 +62,12 @@ export function exportProjectJson(project: Project): string {
   return JSON.stringify(document, null, JSON_INDENTATION);
 }
 
-/** Reads a project from untrusted JSON text, or lists every problem with its location. */
+/** Reads a project from untrusted JSON text, or lists the problems found with their locations. */
 export function importProjectJson(text: string): Result<Project, readonly ValidationIssue[]> {
   if (text.length > MAX_PROJECT_TEXT_UTF16_UNITS) {
     return failure([{ path: '', code: 'TOO_LARGE' }]);
   }
-  const parsed = parseJson(text);
+  const parsed = parseJson(stripLeadingByteOrderMark(text));
   if (!parsed.ok) {
     return failure([{ path: '', code: 'INVALID_JSON' }]);
   }
@@ -78,16 +79,19 @@ export function importProjectJson(text: string): Result<Project, readonly Valida
   return readProject(childField(document, 'project', '').value, JSON_VALUE_CODEC, 'project');
 }
 
-/** Parses JSON text, turning a syntax error into a failed result. */
+/** Parses JSON text, turning a syntax error into a failed result and letting any other error through. */
 function parseJson(text: string): Result<unknown, 'INVALID_JSON'> {
   try {
     return success(JSON.parse(text) as unknown);
-  } catch {
-    return failure('INVALID_JSON');
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return failure('INVALID_JSON');
+    }
+    throw error;
   }
 }
 
-/** Checks the format name and the version of an imported document. */
+/** Checks the format name and the version of an imported document and tells whether no problem has been found so far. */
 function hasSupportedHeader(
   document: Readonly<Record<string, unknown>>,
   issues: IssueList,
@@ -126,7 +130,7 @@ function readDateText<T extends number>(
   return parsed.value;
 }
 
-/** Writes a calendar with weekday names and dates in clear text. */
+/** Converts a calendar into JSON-ready data with weekday names and dates in clear text. */
 function calendarToJson(calendar: WorkingCalendar) {
   return {
     workingWeekdays: calendar.workingWeekdays.map((weekday) => WEEKDAY_NAMES[weekday]),
@@ -138,7 +142,7 @@ function calendarToJson(calendar: WorkingCalendar) {
   };
 }
 
-/** Writes a task with its dates in clear text. */
+/** Converts a task into JSON-ready data with its date constraints in clear text. */
 function taskToJson(task: Task) {
   if (task.kind === 'summary') {
     return task;

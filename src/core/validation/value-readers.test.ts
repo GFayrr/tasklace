@@ -45,13 +45,22 @@ describe('createIssueList', () => {
     ]);
   });
 
-  it('stops recording once the reporting limit is reached', () => {
+  it('ends with a single TOO_MANY_ISSUES entry once the reporting limit is reached', () => {
     const issues = createIssueList();
     for (let index = 0; index < MAX_REPORTED_ISSUES * 2; index += 1) {
       issues.add(`item${String(index)}`, 'WRONG_TYPE');
     }
     expect(issues.issues).toHaveLength(MAX_REPORTED_ISSUES);
-    expect(issues.issues.at(-1)?.path).toBe(`item${String(MAX_REPORTED_ISSUES - 1)}`);
+    expect(issues.issues.at(-2)?.path).toBe(`item${String(MAX_REPORTED_ISSUES - 2)}`);
+    expect(issues.issues.at(-1)).toEqual({ path: '', code: 'TOO_MANY_ISSUES' });
+  });
+
+  it('keeps every issue below the reporting limit', () => {
+    const issues = createIssueList();
+    for (let index = 0; index < MAX_REPORTED_ISSUES - 1; index += 1) {
+      issues.add(`item${String(index)}`, 'WRONG_TYPE');
+    }
+    expect(issues.issues.map((issue) => issue.code)).not.toContain('TOO_MANY_ISSUES');
   });
 });
 
