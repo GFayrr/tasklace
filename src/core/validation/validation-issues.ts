@@ -1,4 +1,5 @@
 import type { CalendarErrorCode } from '../calendar/compile-calendar';
+import type { DailyWindowErrorCode } from '../calendar/task-slots';
 import { MAX_REPORTED_ISSUES } from '../limits';
 import type { StructureErrorCode } from '../scheduling/project-structure';
 
@@ -20,7 +21,8 @@ export type ValueIssueCode =
   | 'TOO_MANY_ITEMS'
   | 'EMPTY_LIST';
 
-export type ValidationIssueCode = ValueIssueCode | CalendarErrorCode | StructureErrorCode;
+export type ValidationIssueCode =
+  ValueIssueCode | CalendarErrorCode | DailyWindowErrorCode | StructureErrorCode;
 
 export interface ValidationIssue {
   readonly path: string;

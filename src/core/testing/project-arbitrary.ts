@@ -8,6 +8,8 @@ const MAX_TASKS = 20;
 const MAX_BLOCK_HOURS = 30;
 const MAX_GAP_DAYS = 10;
 const MAX_LAG = 20;
+const FULL_PROGRESS = 100;
+const HALF_PROGRESS = 50;
 const DEPENDENCY_TYPES: DependencyType[] = [
   'finishToStart',
   'startToStart',
@@ -44,7 +46,7 @@ type TaskShape = typeof taskShapeArbitrary extends fc.Arbitrary<infer Shape> ? S
 type DependencyShape =
   typeof dependencyShapeArbitrary extends fc.Arbitrary<infer Shape> ? Shape : never;
 
-/** Builds a work task or a milestone from a random shape, keeping hours per day within the calendar. */
+/** Builds a work task or a milestone from a random shape, keeping hours per day within the calendar and milestones either not started or done. */
 function buildTask(index: number, shape: TaskShape, hoursPerWorkingDay: number): SchedulableTask {
   const id = `t${String(index).padStart(2, '0')}`;
   const common = {
@@ -53,7 +55,8 @@ function buildTask(index: number, shape: TaskShape, hoursPerWorkingDay: number):
     startNoEarlierThan: shape.startNoEarlierThan,
   };
   if (shape.isMilestone) {
-    return milestone(id, common);
+    const progressPercent = shape.progressPercent < HALF_PROGRESS ? 0 : FULL_PROGRESS;
+    return milestone(id, { ...common, progressPercent });
   }
   const segments = shape.blocks.map((block, blockIndex) => ({
     durationHours: block.durationHours,
@@ -75,7 +78,7 @@ function buildDependencies(taskCount: number, shapes: readonly DependencyShape[]
     if (from < to) {
       const predecessorId = `t${String(from).padStart(2, '0')}`;
       const successorId = `t${String(to).padStart(2, '0')}`;
-      const id = `${predecessorId}->${successorId}`;
+      const id = `${predecessorId}-${successorId}`;
       byPair.set(id, {
         id,
         predecessorId,

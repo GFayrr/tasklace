@@ -1,9 +1,9 @@
 import { formatDate, formatDateTime, parseDate, parseDateTime } from '../civil-format';
-import { MAX_PROJECT_DATA_BYTES } from '../limits';
+import { MAX_PROJECT_TEXT_UTF16_UNITS } from '../limits';
 import type { WorkingCalendar } from '../model/calendar';
 import type { Project, Task } from '../model/project';
 import { failure, success, type Result } from '../result';
-import type { DayIndex, ProjectHour, Weekday } from '../time';
+import type { ProjectHour, Weekday } from '../time';
 import { readProject, type ValueCodec } from '../validation/read-project';
 import {
   createIssueList,
@@ -63,7 +63,7 @@ export function exportProjectJson(project: Project): string {
 
 /** Reads a project from untrusted JSON text, or lists every problem with its location. */
 export function importProjectJson(text: string): Result<Project, readonly ValidationIssue[]> {
-  if (text.length > MAX_PROJECT_DATA_BYTES) {
+  if (text.length > MAX_PROJECT_TEXT_UTF16_UNITS) {
     return failure([{ path: '', code: 'TOO_LARGE' }]);
   }
   const parsed = parseJson(text);
@@ -109,7 +109,7 @@ function hasSupportedHeader(
 }
 
 /** Reads a date written as text with a given parser. */
-function readDateText<T extends ProjectHour | DayIndex>(
+function readDateText<T extends number>(
   field: Field,
   issues: IssueList,
   parse: (text: string) => Result<T, 'INVALID_DATE_TIME'>,

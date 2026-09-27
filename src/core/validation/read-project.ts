@@ -1,4 +1,9 @@
-import { compileCalendar, type CalendarErrorCode } from '../calendar/compile-calendar';
+import {
+  compileCalendar,
+  type CalendarErrorCode,
+  type CompiledCalendar,
+} from '../calendar/compile-calendar';
+import { computeDailyWindow } from '../calendar/task-slots';
 import {
   MAX_DEPENDENCIES,
   MAX_LAG_HOURS,
@@ -28,7 +33,7 @@ import type {
   WorkTask,
 } from '../model/project';
 import { failure, success, type Result } from '../result';
-import { analyzeProjectStructure, type StructureError } from '../scheduling/project-structure';
+import { analyzeStructureWithinLimits } from '../scheduling/project-structure';
 import { isHexColor } from '../tags/color-vision';
 import {
   DAYS_PER_WEEK,
@@ -54,9 +59,11 @@ import {
   readInteger,
   readNullable,
   readPatternString,
+  readPlainObject,
   readRawString,
   readRecord,
   readText,
+  reportUnknownKeys,
   type Field,
   type UnknownRecord,
 } from './value-readers';
@@ -244,21 +251,21 @@ function readColor(field: Field, issues: IssueList): string | undefined {
 
 /** Reads a task of any kind, checking that it only has the fields of its kind. */
 function readTask(field: Field, issues: IssueList, codec: ValueCodec): Task | undefined {
-  const kindRecord = readRecord(field, createIssueList(), WORK_TASK_KEYS);
-  const kind =
-    kindRecord === undefined
-      ? undefined
-      : readEnum(childField(kindRecord, 'kind', field.path), issues, TASK_KINDS);
+  const record = readPlainObject(field, issues);
+  if (record === undefined) {
+    return undefined;
+  }
+  const kind = readEnum(childField(record, 'kind', field.path), issues, TASK_KINDS);
   if (kind === 'summary') {
-    return readSummaryTask(field, issues);
+    return readSummaryTask(record, field.path, issues);
   }
   if (kind === 'milestone') {
-    return readMilestone(field, issues, codec);
+    return readMilestone(record, field.path, issues, codec);
   }
   if (kind === 'task') {
-    return readWorkTask(field, issues, codec);
+    return readWorkTask(record, field.path, issues, codec);
   }
-  readRecord(field, issues, WORK_TASK_KEYS);
+  reportUnknownKeys(record, field.path, issues, WORK_TASK_KEYS);
   return undefined;
 }
 
@@ -274,12 +281,9 @@ function readTaskBase(record: UnknownRecord, path: string, issues: IssueList) {
 }
 
 /** Reads a summary task, which only has the shared fields. */
-function readSummaryTask(field: Field, issues: IssueList): Task | undefined {
-  const record = readRecord(field, issues, SUMMARY_KEYS);
-  if (record === undefined) {
-    return undefined;
-  }
-  const summary = { kind: 'summary' as const, ...readTaskBase(record, field.path, issues) };
+function readSummaryTask(record: UnknownRecord, path: string, issues: IssueList): Task | undefined {
+  reportUnknownKeys(record, path, issues, SUMMARY_KEYS);
+  const summary = { kind: 'summary' as const, ...readTaskBase(record, path, issues) };
   return allDefined(summary) ? summary : undefined;
 }
 
@@ -302,37 +306,38 @@ function readDatedFields(
 }
 
 /** Reads a milestone, whose progress can only be 0 or 100. */
-function readMilestone(field: Field, issues: IssueList, codec: ValueCodec): Milestone | undefined {
-  const record = readRecord(field, issues, MILESTONE_KEYS);
-  if (record === undefined) {
-    return undefined;
-  }
-  const milestone = {
-    kind: 'milestone' as const,
-    ...readDatedFields(record, field.path, issues, codec),
-  };
+function readMilestone(
+  record: UnknownRecord,
+  path: string,
+  issues: IssueList,
+  codec: ValueCodec,
+): Milestone | undefined {
+  reportUnknownKeys(record, path, issues, MILESTONE_KEYS);
+  const milestone = { kind: 'milestone' as const, ...readDatedFields(record, path, issues, codec) };
   const { progressPercent } = milestone;
   if (progressPercent !== undefined && progressPercent !== 0 && progressPercent !== FULL_PROGRESS) {
-    issues.add(`${field.path}.progressPercent`, 'OUT_OF_RANGE');
+    issues.add(`${path}.progressPercent`, 'OUT_OF_RANGE');
     return undefined;
   }
   return allDefined(milestone) ? milestone : undefined;
 }
 
 /** Reads a work task with its blocks and daily working pattern. */
-function readWorkTask(field: Field, issues: IssueList, codec: ValueCodec): WorkTask | undefined {
-  const record = readRecord(field, issues, WORK_TASK_KEYS);
-  if (record === undefined) {
-    return undefined;
-  }
-  const child = (key: string): Field => childField(record, key, field.path);
+function readWorkTask(
+  record: UnknownRecord,
+  path: string,
+  issues: IssueList,
+  codec: ValueCodec,
+): WorkTask | undefined {
+  reportUnknownKeys(record, path, issues, WORK_TASK_KEYS);
+  const child = (key: string): Field => childField(record, key, path);
   const readHoursPerDay = (item: Field, list: IssueList): number | undefined =>
     readInteger(item, list, 1, HOURS_PER_DAY);
   const readDailyStart = (item: Field, list: IssueList): number | undefined =>
     readInteger(item, list, 0, LAST_HOUR_OF_DAY);
   const task = {
     kind: 'task' as const,
-    ...readDatedFields(record, field.path, issues, codec),
+    ...readDatedFields(record, path, issues, codec),
     segments: readSegments(child('segments'), issues),
     hoursPerDay: readNullable(child('hoursPerDay'), issues, readHoursPerDay),
     dailyStartHour: readNullable(child('dailyStartHour'), issues, readDailyStart),
@@ -418,46 +423,42 @@ function allDefined<T extends object>(
   return Object.values(value).every((property) => property !== undefined);
 }
 
-/** Adds the calendar and structure problems that only appear once every field is valid. */
+/** Adds the calendar and structure problems that only appear once every field is valid, the lists being already within their size limits. */
 function reportSemanticIssues(project: Project, issues: IssueList, rootPath: string): void {
   const prefix = rootPath === '' ? '' : `${rootPath}.`;
   const calendar = compileCalendar(project.calendar);
-  if (!calendar.ok) {
+  if (calendar.ok) {
+    reportDailyWindowIssues(project.tasks, calendar.value, issues, prefix);
+  } else {
     calendar.error.forEach((error) => {
       issues.add(`${prefix}${calendarPath(error.code, error.index)}`, error.code);
     });
   }
-  const structure = analyzeProjectStructure(project);
+  const structure = analyzeStructureWithinLimits(project);
   if (!structure.ok) {
-    const indexes = indexIdentifiers(project);
     structure.error.slice(0, MAX_REPORTED_ISSUES).forEach((error) => {
-      issues.add(`${prefix}${structurePath(indexes, error)}`, error.code);
+      issues.add(`${prefix}${error.list}[${String(error.index)}]`, error.code);
     });
   }
 }
 
-interface IdentifierIndexes {
-  readonly tasks: ReadonlyMap<string, number>;
-  readonly dependencies: ReadonlyMap<string, number>;
-  readonly tags: ReadonlyMap<string, number>;
-}
-
-/** Maps every identifier to the position of its first occurrence in its list. */
-function indexIdentifiers(project: Project): IdentifierIndexes {
-  const firstPositions = (items: readonly { readonly id: string }[]): Map<string, number> => {
-    const positions = new Map<string, number>();
-    items.forEach((item, index) => {
-      if (!positions.has(item.id)) {
-        positions.set(item.id, index);
-      }
-    });
-    return positions;
-  };
-  return {
-    tasks: firstPositions(project.tasks),
-    dependencies: firstPositions(project.dependencies),
-    tags: firstPositions(project.tags),
-  };
+/** Reports every work task whose hours per day or daily start hour do not fit the project calendar. */
+function reportDailyWindowIssues(
+  tasks: readonly Task[],
+  calendar: CompiledCalendar,
+  issues: IssueList,
+  prefix: string,
+): void {
+  tasks.forEach((task, index) => {
+    if (task.kind !== 'task') {
+      return;
+    }
+    const window = computeDailyWindow(calendar, task);
+    if (!window.ok) {
+      const field = window.error === 'INVALID_HOURS_PER_DAY' ? 'hoursPerDay' : 'dailyStartHour';
+      issues.add(`${prefix}tasks[${String(index)}].${field}`, window.error);
+    }
+  });
 }
 
 /** Returns the location of a calendar problem inside the calendar. */
@@ -468,23 +469,4 @@ function calendarPath(code: CalendarErrorCode, index: number | undefined): strin
       ? 'workingTimeRanges'
       : 'nonWorkingPeriods';
   return index === undefined ? `calendar.${list}` : `calendar.${list}[${String(index)}]`;
-}
-
-/** Returns the location of a structure problem, pointing at the first item with the faulty identifier. */
-function structurePath(indexes: IdentifierIndexes, error: StructureError): string {
-  if (error.taskId !== undefined) {
-    return indexedPath('tasks', indexes.tasks.get(error.taskId));
-  }
-  if (error.dependencyId !== undefined) {
-    return indexedPath('dependencies', indexes.dependencies.get(error.dependencyId));
-  }
-  if (error.tagId !== undefined) {
-    return indexedPath('tags', indexes.tags.get(error.tagId));
-  }
-  return error.code === 'TOO_MANY_TAGS' ? 'tags' : 'tasks';
-}
-
-/** Writes the path of an item in a list, or of the list itself when the item is unknown. */
-function indexedPath(list: string, index: number | undefined): string {
-  return index === undefined ? list : `${list}[${String(index)}]`;
 }

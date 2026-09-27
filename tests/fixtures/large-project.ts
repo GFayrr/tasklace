@@ -57,7 +57,7 @@ export function buildLargeProject(seed = LARGE_PROJECT_SEED): Project {
     }
     const from = Math.floor(random() * (TASK_COUNT - 1));
     const to = Math.min(TASK_COUNT - 1, from + 1 + Math.floor(random() * MAX_LINK_DISTANCE));
-    const id = `${idOf(from)}->${idOf(to)}`;
+    const id = `${idOf(from)}-${idOf(to)}`;
     const type = LINK_TYPES[Math.floor(random() * LINK_TYPES.length)] ?? 'finishToStart';
     dependencies.set(id, {
       id,

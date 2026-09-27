@@ -165,7 +165,10 @@ describe('tag structure', () => {
       dependencies: [],
       tags: [ALICE, { ...BOB, id: 'alice' }],
     });
-    expect(result).toEqual({ ok: false, error: [{ code: 'DUPLICATE_TAG_ID', tagId: 'alice' }] });
+    expect(result).toEqual({
+      ok: false,
+      error: [{ code: 'DUPLICATE_TAG_ID', list: 'tags', index: 1, tagId: 'alice' }],
+    });
   });
 
   it('rejects too many tags', () => {

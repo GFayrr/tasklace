@@ -14,30 +14,52 @@ import {
   type ResolvedDependency,
 } from './dependency-graph';
 
-export type StructureErrorCode =
-  | 'TOO_MANY_TASKS'
-  | 'TOO_MANY_DEPENDENCIES'
+type LimitErrorCode = 'TOO_MANY_TASKS' | 'TOO_MANY_DEPENDENCIES' | 'TOO_MANY_TAGS';
+type TaskErrorCode =
   | 'DUPLICATE_TASK_ID'
   | 'UNKNOWN_PARENT'
   | 'PARENT_NOT_SUMMARY'
   | 'HIERARCHY_CYCLE'
   | 'HIERARCHY_TOO_DEEP'
+  | 'DEPENDENCY_CYCLE';
+type DependencyErrorCode =
   | 'DUPLICATE_DEPENDENCY_ID'
   | 'UNKNOWN_DEPENDENCY_TASK'
   | 'SELF_DEPENDENCY'
   | 'SUMMARY_DEPENDENCY'
   | 'DUPLICATE_DEPENDENCY'
-  | 'INVALID_LAG'
-  | 'DEPENDENCY_CYCLE'
-  | 'TOO_MANY_TAGS'
-  | 'DUPLICATE_TAG_ID';
+  | 'INVALID_LAG';
 
-export interface StructureError {
-  readonly code: StructureErrorCode;
-  readonly taskId?: TaskId;
-  readonly dependencyId?: DependencyId;
-  readonly tagId?: TagId;
+export type StructureErrorCode =
+  LimitErrorCode | TaskErrorCode | DependencyErrorCode | 'DUPLICATE_TAG_ID';
+
+export interface TaskStructureError {
+  readonly code: TaskErrorCode;
+  readonly list: 'tasks';
+  readonly index: number;
+  readonly taskId: TaskId;
 }
+
+export interface DependencyStructureError {
+  readonly code: DependencyErrorCode;
+  readonly list: 'dependencies';
+  readonly index: number;
+  readonly dependencyId: DependencyId;
+}
+
+export interface TagStructureError {
+  readonly code: 'DUPLICATE_TAG_ID';
+  readonly list: 'tags';
+  readonly index: number;
+  readonly tagId: TagId;
+}
+
+export interface LimitStructureError {
+  readonly code: LimitErrorCode;
+}
+
+export type ItemStructureError = TaskStructureError | DependencyStructureError | TagStructureError;
+export type StructureError = ItemStructureError | LimitStructureError;
 
 export interface ProjectStructure {
   readonly tasks: readonly Task[];
@@ -45,19 +67,18 @@ export interface ProjectStructure {
   readonly graph: DependencyGraph;
 }
 
-/** Checks the task tree and the dependency network, then orders tasks for scheduling. */
+/** Checks the size limits, the task tree and the dependency network, then orders tasks for scheduling. */
 export function analyzeProjectStructure(
   project: Pick<Project, 'tasks' | 'dependencies' | 'tags'>,
 ): Result<ProjectStructure, readonly StructureError[]> {
-  if (project.tasks.length > MAX_TASKS) {
-    return failure([{ code: 'TOO_MANY_TASKS' }]);
-  }
-  if (project.dependencies.length > MAX_DEPENDENCIES) {
-    return failure([{ code: 'TOO_MANY_DEPENDENCIES' }]);
-  }
-  if (project.tags.length > MAX_TAGS) {
-    return failure([{ code: 'TOO_MANY_TAGS' }]);
-  }
+  const limitError = findLimitError(project);
+  return limitError === null ? analyzeStructureWithinLimits(project) : failure([limitError]);
+}
+
+/** Checks the task tree and the dependency network of a project already known to respect the size limits. */
+export function analyzeStructureWithinLimits(
+  project: Pick<Project, 'tasks' | 'dependencies' | 'tags'>,
+): Result<ProjectStructure, readonly ItemStructureError[]> {
   const { tasks } = project;
   const tasksById = new Map(tasks.map((task) => [task.id, task]));
   const indexById = new Map(tasks.map((task, index) => [task.id, index]));
@@ -74,10 +95,32 @@ export function analyzeProjectStructure(
   const nodes = tasks.flatMap((task, index) => (task.kind === 'summary' ? [] : [{ index, task }]));
   const graph = buildDependencyGraph(nodes, tasks.length, checked.resolved);
   if (!graph.ok) {
-    const blockedIds = graph.error.map((node) => node.task.id).sort(compareStrings);
-    return failure(blockedIds.map((taskId) => ({ code: 'DEPENDENCY_CYCLE', taskId })));
+    const blocked = [...graph.error].sort((left, right) =>
+      compareStrings(left.task.id, right.task.id),
+    );
+    return failure(
+      blocked.map((node): TaskStructureError => ({
+        code: 'DEPENDENCY_CYCLE',
+        list: 'tasks',
+        index: node.index,
+        taskId: node.task.id,
+      })),
+    );
   }
   return success({ tasks, childrenByParent: groupByParent(tasks), graph: graph.value });
+}
+
+/** Returns the first size limit exceeded by a project, or null when all are respected. */
+function findLimitError(
+  project: Pick<Project, 'tasks' | 'dependencies' | 'tags'>,
+): LimitStructureError | null {
+  if (project.tasks.length > MAX_TASKS) {
+    return { code: 'TOO_MANY_TASKS' };
+  }
+  if (project.dependencies.length > MAX_DEPENDENCIES) {
+    return { code: 'TOO_MANY_DEPENDENCIES' };
+  }
+  return project.tags.length > MAX_TAGS ? { code: 'TOO_MANY_TAGS' } : null;
 }
 
 /** Lists the problems that adding a dependency would cause, or nothing when it can be added. */
@@ -94,28 +137,28 @@ export function findNewDependencyErrors(
 }
 
 /** Reports every task whose identifier is already used by an earlier task. */
-function findDuplicateTaskIds(tasks: readonly Task[]): StructureError[] {
+function findDuplicateTaskIds(tasks: readonly Task[]): TaskStructureError[] {
   const seen = new Set<TaskId>();
-  const errors: StructureError[] = [];
-  for (const task of tasks) {
+  const errors: TaskStructureError[] = [];
+  tasks.forEach((task, index) => {
     if (seen.has(task.id)) {
-      errors.push({ code: 'DUPLICATE_TASK_ID', taskId: task.id });
+      errors.push({ code: 'DUPLICATE_TASK_ID', list: 'tasks', index, taskId: task.id });
     }
     seen.add(task.id);
-  }
+  });
   return errors;
 }
 
 /** Reports every tag whose identifier is already used by an earlier tag. */
-function findDuplicateTagIds(tags: readonly Tag[]): StructureError[] {
+function findDuplicateTagIds(tags: readonly Tag[]): TagStructureError[] {
   const seen = new Set<TagId>();
-  const errors: StructureError[] = [];
-  for (const tag of tags) {
+  const errors: TagStructureError[] = [];
+  tags.forEach((tag, index) => {
     if (seen.has(tag.id)) {
-      errors.push({ code: 'DUPLICATE_TAG_ID', tagId: tag.id });
+      errors.push({ code: 'DUPLICATE_TAG_ID', list: 'tags', index, tagId: tag.id });
     }
     seen.add(tag.id);
-  }
+  });
   return errors;
 }
 
@@ -123,14 +166,14 @@ function findDuplicateTagIds(tags: readonly Tag[]): StructureError[] {
 function findHierarchyErrors(
   tasks: readonly Task[],
   tasksById: ReadonlyMap<TaskId, Task>,
-): StructureError[] {
-  const errors: StructureError[] = [];
-  for (const task of tasks) {
+): TaskStructureError[] {
+  const errors: TaskStructureError[] = [];
+  tasks.forEach((task, index) => {
     const code = findParentChainError(task, tasksById);
     if (code !== null) {
-      errors.push({ code, taskId: task.id });
+      errors.push({ code, list: 'tasks', index, taskId: task.id });
     }
-  }
+  });
   return errors;
 }
 
@@ -138,7 +181,7 @@ function findHierarchyErrors(
 function findParentChainError(
   task: Task,
   tasksById: ReadonlyMap<TaskId, Task>,
-): StructureErrorCode | null {
+): TaskErrorCode | null {
   if (task.parentId === null) {
     return null;
   }
@@ -169,12 +212,12 @@ function checkDependencies(
   dependencies: readonly Dependency[],
   tasks: readonly Task[],
   indexById: ReadonlyMap<TaskId, number>,
-): { readonly errors: StructureError[]; readonly resolved: ResolvedDependency[] } {
+): { readonly errors: DependencyStructureError[]; readonly resolved: ResolvedDependency[] } {
   const seenIds = new Set<DependencyId>();
   const seenPairs = new Set<number>();
-  const errors: StructureError[] = [];
+  const errors: DependencyStructureError[] = [];
   const resolved: ResolvedDependency[] = [];
-  for (const dependency of dependencies) {
+  dependencies.forEach((dependency, index) => {
     const predecessorIndex = indexById.get(dependency.predecessorId) ?? -1;
     const successorIndex = indexById.get(dependency.successorId) ?? -1;
     const pairKey = predecessorIndex * tasks.length + successorIndex;
@@ -185,11 +228,11 @@ function checkDependencies(
     if (code === null) {
       resolved.push({ dependency, predecessorIndex, successorIndex });
     } else {
-      errors.push({ code, dependencyId: dependency.id });
+      errors.push({ code, list: 'dependencies', index, dependencyId: dependency.id });
     }
     seenIds.add(dependency.id);
     seenPairs.add(pairKey);
-  }
+  });
   return { errors, resolved };
 }
 
@@ -198,7 +241,7 @@ function findDependencyError(
   dependency: Dependency,
   predecessor: Task | undefined,
   successor: Task | undefined,
-): StructureErrorCode | null {
+): DependencyErrorCode | null {
   if (predecessor === undefined || successor === undefined) {
     return 'UNKNOWN_DEPENDENCY_TASK';
   }

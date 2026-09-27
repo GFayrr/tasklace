@@ -30,8 +30,8 @@ export interface TimeSlot {
   readonly end: ProjectHour;
 }
 
-export type TaskSlotsErrorCode =
-  WorkingTimeErrorCode | 'INVALID_DURATION' | 'INVALID_HOURS_PER_DAY' | 'INVALID_DAILY_START_HOUR';
+export type DailyWindowErrorCode = 'INVALID_HOURS_PER_DAY' | 'INVALID_DAILY_START_HOUR';
+export type TaskSlotsErrorCode = WorkingTimeErrorCode | 'INVALID_DURATION' | DailyWindowErrorCode;
 
 /** Computes the exact working time slots a task occupies, from its start to its last hour. */
 export function computeTaskSlots(
@@ -63,11 +63,11 @@ function isValidDuration(durationHours: number): boolean {
   );
 }
 
-/** Returns the hours of the day a task works on after its first day. */
-function computeDailyWindow(
+/** Returns the hours of the day a task works on after its first day, or why its daily pattern does not fit the calendar. */
+export function computeDailyWindow(
   calendar: CompiledCalendar,
-  { hoursPerDay, dailyStartHour }: TaskPlacement,
-): Result<readonly number[], TaskSlotsErrorCode> {
+  { hoursPerDay, dailyStartHour }: Pick<TaskPlacement, 'hoursPerDay' | 'dailyStartHour'>,
+): Result<readonly number[], DailyWindowErrorCode> {
   const hoursPerWorkingDay = calendar.workingHoursOfDay.length;
   const taskHoursPerDay = hoursPerDay ?? hoursPerWorkingDay;
   if (

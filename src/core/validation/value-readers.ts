@@ -30,6 +30,15 @@ export function readRecord(
   issues: IssueList,
   allowedKeys: readonly string[],
 ): UnknownRecord | undefined {
+  const record = readPlainObject(field, issues);
+  if (record !== undefined) {
+    reportUnknownKeys(record, field.path, issues, allowedKeys);
+  }
+  return record;
+}
+
+/** Reads a plain object without looking at its properties. */
+export function readPlainObject(field: Field, issues: IssueList): UnknownRecord | undefined {
   if (!isPresent(field, issues)) {
     return undefined;
   }
@@ -37,11 +46,19 @@ export function readRecord(
     issues.add(field.path, 'WRONG_TYPE');
     return undefined;
   }
-  const record = field.value;
+  return field.value;
+}
+
+/** Reports every property of a record that is not in the allowed list. */
+export function reportUnknownKeys(
+  record: UnknownRecord,
+  path: string,
+  issues: IssueList,
+  allowedKeys: readonly string[],
+): void {
   for (const key of Object.keys(record).filter((key) => !allowedKeys.includes(key))) {
-    issues.add(`${field.path === '' ? '' : `${field.path}.`}${key}`, 'UNKNOWN_FIELD');
+    issues.add(`${path === '' ? '' : `${path}.`}${key}`, 'UNKNOWN_FIELD');
   }
-  return record;
 }
 
 /** Reads an array holding at most a given number of items. */
@@ -114,7 +131,7 @@ export function readEnum<T extends string>(
   return match;
 }
 
-/** Reads a user text: non-empty once trimmed, without control characters, within a length in characters. */
+/** Reads a user text: non-empty once trimmed, without control characters, within a length counted in Unicode code points so that the bound on stored size does not depend on the UTF-16 encoding. */
 export function readText(field: Field, issues: IssueList, maxLength: number): string | undefined {
   const text = readRawString(field, issues);
   if (text === undefined) {
@@ -128,7 +145,7 @@ export function readText(field: Field, issues: IssueList, maxLength: number): st
     issues.add(field.path, 'EMPTY_TEXT');
     return undefined;
   }
-  if ([...text].length > maxLength) {
+  if (Array.from(text).length > maxLength) {
     issues.add(field.path, 'TOO_LONG');
     return undefined;
   }

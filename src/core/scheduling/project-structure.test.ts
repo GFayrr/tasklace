@@ -91,7 +91,7 @@ describe('analyzeProjectStructure', () => {
     ],
     [
       'duplicated dependency identifiers',
-      [link('a', 'b'), { ...link('b', 'm'), id: 'a->b' }],
+      [link('a', 'b'), { ...link('b', 'm'), id: 'a-b' }],
       'DUPLICATE_DEPENDENCY_ID',
     ],
     ['a fractional lag', [link('a', 'b', 'finishToStart', 1.5)], 'INVALID_LAG'],
@@ -132,8 +132,8 @@ describe('analyzeProjectStructure', () => {
       dependencies: [link('a', 'b'), link('b', 'a')],
     });
     expect(!result.ok && result.error).toEqual([
-      { code: 'DEPENDENCY_CYCLE', taskId: 'a' },
-      { code: 'DEPENDENCY_CYCLE', taskId: 'b' },
+      { code: 'DEPENDENCY_CYCLE', list: 'tasks', index: 0, taskId: 'a' },
+      { code: 'DEPENDENCY_CYCLE', list: 'tasks', index: 1, taskId: 'b' },
     ]);
   });
 
@@ -186,6 +186,8 @@ describe('findNewDependencyErrors', () => {
       ...link('a', 'b', 'finishToFinish'),
       id: 'x',
     });
-    expect(errors).toEqual([{ code: 'DUPLICATE_DEPENDENCY', dependencyId: 'x' }]);
+    expect(errors).toEqual([
+      { code: 'DUPLICATE_DEPENDENCY', list: 'dependencies', index: 2, dependencyId: 'x' },
+    ]);
   });
 });
