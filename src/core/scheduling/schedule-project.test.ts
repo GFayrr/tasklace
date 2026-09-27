@@ -389,10 +389,10 @@ describe('scheduleProject: failures', () => {
   });
 
   it('reports a task pulled before the horizon by a dependency lead', () => {
-    const tasks = [taskOf('a', 1, { startNoEarlierThan: at(1970, 1, 5, 9) }), taskOf('b', 1)];
+    const tasks = [taskOf('a', 1, { startNoEarlierThan: at(2020, 1, 6, 9) }), taskOf('b', 1)];
     const result = scheduleProject(
       project(tasks, [link('a', 'b', 'finishToStart', -50)], {
-        startDate: at(1970, 1, 1, 9),
+        startDate: at(2020, 1, 1, 9),
         options: ALL_OPTIONS,
       }),
     );

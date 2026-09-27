@@ -554,17 +554,28 @@ function readList<T>(
   if (items === undefined) {
     return undefined;
   }
-  const values = Array.from({ length: items.length }, (_unused, index) =>
-    readItem(itemField(items, index, field.path), issues, index),
-  );
-  return values.every((value) => value !== undefined) ? values : undefined;
+  const values: T[] = [];
+  let allValid = true;
+  for (let index = 0; index < items.length; index += 1) {
+    const value = readItem(itemField(items, index, field.path), issues, index);
+    allValid &&= value !== undefined;
+    if (value !== undefined) {
+      values.push(value);
+    }
+  }
+  return allValid ? values : undefined;
 }
 
 /** Tells whether every property of a freshly read object is valid, narrowing its type. */
 function allDefined<T extends object>(
   value: T,
 ): value is { [Key in keyof T]: Exclude<T[Key], undefined> } {
-  return Object.values(value).every((property) => property !== undefined);
+  for (const key in value) {
+    if (value[key] === undefined) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Adds the calendar, daily pattern and structure problems that can only be checked once every field has been read. */

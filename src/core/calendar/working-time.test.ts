@@ -185,7 +185,7 @@ describe('subtractWorkingHours', () => {
   });
 
   it('fails when the result falls before the horizon', () => {
-    expect(subtractWorkingHours(calendar, at(1970, 1, 5, 12), 100)).toEqual({
+    expect(subtractWorkingHours(calendar, at(2020, 1, 6, 12), 100)).toEqual({
       ok: false,
       error: 'BEYOND_PLANNING_HORIZON',
     });

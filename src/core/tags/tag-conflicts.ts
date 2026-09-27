@@ -1,9 +1,10 @@
 import type { CompiledCalendar } from '../calendar/compile-calendar';
-import { countWorkingHours } from '../calendar/working-time';
+import type { TimeSlot } from '../calendar/task-slots';
+import { isIdleBetween } from '../calendar/working-time';
 import { compareStrings } from '../compare-strings';
 import { MAX_TASKS } from '../limits';
 import type { Tag, TagId, Task, TaskId } from '../model/project';
-import type { Placement } from '../scheduling/task-placement';
+import { computePlacementSlots, worksFullDays, type Placement } from '../scheduling/task-placement';
 import type { ProjectHour } from '../time';
 
 export interface TagConflict {
@@ -58,7 +59,8 @@ export function detectTagConflicts(
     if (tagId !== null && tag === undefined) {
       tasksWithUnknownTag.push(task.id);
     } else if (tag?.representsPersonOrTeam === true) {
-      appendSlotEvents(eventsByTag, tag.id, task.id, placements.get(task.id));
+      const intervals = workIntervals(task, placements.get(task.id), calendar);
+      appendSlotEvents(eventsByTag, tag.id, task.id, mergeIdleGaps(intervals, calendar));
     }
   }
   const conflicts = [...eventsByTag].flatMap(([tagId, events]) =>
@@ -70,22 +72,50 @@ export function detectTagConflicts(
   };
 }
 
+/** Returns the time a task really works: whole blocks when it works full days, since they then hold only its working hours, its exact slots otherwise. */
+function workIntervals(
+  task: Task,
+  placement: Placement | undefined,
+  calendar: CompiledCalendar,
+): readonly TimeSlot[] {
+  if (task.kind !== 'task' || placement === undefined) {
+    return [];
+  }
+  if (worksFullDays(calendar, task)) {
+    return placement.segments;
+  }
+  const slots = computePlacementSlots(calendar, task, placement);
+  return slots.ok ? slots.value.flat() : placement.segments;
+}
+
+/** Joins the consecutive time slots of a task separated only by time without any working hour, which never changes the conflicts found. */
+function mergeIdleGaps(slots: readonly TimeSlot[], calendar: CompiledCalendar): TimeSlot[] {
+  const merged: TimeSlot[] = [];
+  for (const slot of slots) {
+    const last = merged.at(-1);
+    if (last !== undefined && isIdleBetween(calendar, last.end, slot.start)) {
+      merged[merged.length - 1] = { start: last.start, end: slot.end };
+    } else {
+      merged.push(slot);
+    }
+  }
+  return merged;
+}
+
 /** Adds an encoded start and end event for every time slot of a task to the events of its tag. */
 function appendSlotEvents(
   eventsByTag: Map<TagId, TagEvents>,
   tagId: TagId,
   taskId: TaskId,
-  placement: Placement | undefined,
+  slots: readonly TimeSlot[],
 ): void {
   const events = eventsByTag.get(tagId) ?? { taskIds: [], keys: [] };
   const taskIndex = events.taskIds.push(taskId) - 1;
-  for (const segment of placement?.segments ?? []) {
-    for (const slot of segment.slots) {
-      events.keys.push(
-        encodeEvent(slot.start, START_EVENT, taskIndex),
-        encodeEvent(slot.end, END_EVENT, taskIndex),
-      );
-    }
+  for (const slot of slots) {
+    events.keys.push(
+      encodeEvent(slot.start, START_EVENT, taskIndex),
+      encodeEvent(slot.end, END_EVENT, taskIndex),
+    );
   }
   eventsByTag.set(tagId, events);
 }
@@ -181,8 +211,7 @@ function canContinue(group: ConflictGroup, time: ProjectHour, calendar: Compiled
   if (group.pendingEnd === null) {
     return true;
   }
-  const gap = countWorkingHours(calendar, group.pendingEnd, time);
-  return gap.ok && gap.value === 0;
+  return isIdleBetween(calendar, group.pendingEnd, time);
 }
 
 /** Turns a closed group into a conflict with its end and sorted task identifiers. */

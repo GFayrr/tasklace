@@ -1,11 +1,19 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { compileCalendar, type CompiledCalendar } from '../../src/core/calendar/compile-calendar';
+import type { Project, Task } from '../../src/core/model/project';
+import { computePlacementSlots, type Placement } from '../../src/core/scheduling/task-placement';
+import { scheduleProject } from '../../src/core/scheduling/schedule-project';
 import { readProject, STORED_VALUE_CODEC } from '../../src/core/validation/read-project';
 import { LARGE_PROJECT_SEED, buildLargeProject } from './large-project';
 import { createRandom } from './random';
 
 const LARGE_PROJECT_FINGERPRINT =
   '6293639069451349d290768e94b6a820845c94e611e22092fd28a430baa4eb29';
+
+const SCHEDULE_FINGERPRINT = 'd9e0b7193d5ae304f964f64bb82993bc5d47e6af0ab1d403b0191befa720a576';
+const ADVANCED_SCHEDULE_FINGERPRINT =
+  'f1ba8fcd33f596a158c122dd27a51c3e629900b08c6f7cddec0d48477c72bd33';
 
 /** Returns the SHA-256 fingerprint of a value serialized as JSON. */
 function fingerprint(value: unknown): string {
@@ -47,5 +55,69 @@ describe('buildLargeProject', () => {
     expect(fingerprint(buildLargeProject(LARGE_PROJECT_SEED + 1))).not.toBe(
       LARGE_PROJECT_FINGERPRINT,
     );
+  });
+});
+
+/** Returns a placement with the exact time slots of each block, as schedules used to carry them. */
+function withSlots(calendar: CompiledCalendar, task: Task | undefined, placement: Placement) {
+  if (task?.kind !== 'task') {
+    return {
+      ...placement,
+      segments: placement.segments.map((segment) => ({ ...segment, slots: [] })),
+    };
+  }
+  const slots = computePlacementSlots(calendar, task, placement);
+  if (!slots.ok) {
+    throw new Error(slots.error);
+  }
+  return {
+    ...placement,
+    segments: placement.segments.map((segment, index) => ({
+      ...segment,
+      slots: slots.value[index],
+    })),
+  };
+}
+
+/** Returns the fingerprint of the complete schedule of a project, maps being listed in their order and slots included. */
+function scheduleFingerprint(input: Project): string {
+  const schedule = scheduleProject(input);
+  if (!schedule.ok) {
+    throw new Error(JSON.stringify(schedule.error));
+  }
+  const { placements, summaries, wbsNumbers, floats, conflicts, tagConflicts } = schedule.value;
+  const calendar = compileCalendar(input.calendar);
+  if (!calendar.ok) {
+    throw new Error(JSON.stringify(calendar.error));
+  }
+  const tasksById = new Map(input.tasks.map((task) => [task.id, task]));
+  return fingerprint({
+    placements: [...placements].map(([taskId, placement]) => [
+      taskId,
+      withSlots(calendar.value, tasksById.get(taskId), placement),
+    ]),
+    summaries: [...summaries],
+    wbsNumbers: [...wbsNumbers],
+    floats: floats === null ? null : [...floats],
+    conflicts,
+    tagConflicts,
+  });
+}
+
+describe('large project schedule', () => {
+  it('stays exactly the same, date by date and slot by slot', () => {
+    expect(scheduleFingerprint(buildLargeProject())).toBe(SCHEDULE_FINGERPRINT);
+  });
+
+  it('stays exactly the same with the critical path and date constraints enabled', () => {
+    const advanced = {
+      ...buildLargeProject(),
+      options: {
+        criticalPathEnabled: true,
+        dateConstraintsEnabled: true,
+        alwaysShowPatterns: false,
+      },
+    };
+    expect(scheduleFingerprint(advanced)).toBe(ADVANCED_SCHEDULE_FINGERPRINT);
   });
 });

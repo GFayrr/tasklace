@@ -11,11 +11,16 @@ import {
 } from '../time';
 
 const COPY_GROWTH_FACTOR = 2;
+const MAX_CACHED_CALENDARS = 8;
+const compiledCalendars = new Map<string, CompiledCalendar>();
 
 export interface CompiledCalendar {
   readonly workingHoursOfDay: readonly [number, ...number[]];
   readonly workingHoursBeforeHourOfDay: readonly number[];
   readonly workingHoursBeforeDay: Int32Array;
+  readonly nextWorkingDayOffsets: Int32Array;
+  readonly previousWorkingDayOffsets: Int32Array;
+  readonly workingDayOffsetsByRank: Int32Array;
 }
 
 export type CalendarErrorCode =
@@ -34,8 +39,42 @@ export interface CalendarError {
   readonly index?: number;
 }
 
-/** Validates a working calendar and turns it into a structure optimized for time computations. */
+/** Validates a working calendar and turns it into a structure optimized for time computations, reusing the result for a calendar with the same content. */
 export function compileCalendar(
+  calendar: WorkingCalendar,
+): Result<CompiledCalendar, readonly CalendarError[]> {
+  const key = calendarKey(calendar);
+  const cached = compiledCalendars.get(key);
+  if (cached !== undefined) {
+    return success(cached);
+  }
+  const compiled = compileUncached(calendar);
+  if (compiled.ok) {
+    rememberCalendar(key, compiled.value);
+  }
+  return compiled;
+}
+
+/** Builds a key that is the same for two calendars with the same content, whatever the order of object properties. */
+function calendarKey(calendar: WorkingCalendar): string {
+  return JSON.stringify([
+    calendar.workingWeekdays,
+    calendar.workingTimeRanges.map((range) => [range.startHour, range.endHour]),
+    calendar.nonWorkingPeriods.map((period) => [period.firstDay, period.lastDay]),
+  ]);
+}
+
+/** Keeps a compiled calendar for later reuse, forgetting the oldest one beyond the cache size. */
+function rememberCalendar(key: string, compiled: CompiledCalendar): void {
+  compiledCalendars.set(key, compiled);
+  const [oldestKey] = compiledCalendars.keys();
+  if (compiledCalendars.size > MAX_CACHED_CALENDARS && oldestKey !== undefined) {
+    compiledCalendars.delete(oldestKey);
+  }
+}
+
+/** Validates a working calendar and builds all its lookup tables. */
+function compileUncached(
   calendar: WorkingCalendar,
 ): Result<CompiledCalendar, readonly CalendarError[]> {
   const errors = [
@@ -51,14 +90,18 @@ export function compileCalendar(
     return failure([{ code: 'NO_WORKING_TIME_RANGE' }]);
   }
   const workingHoursOfDay: [number, ...number[]] = [firstHour, ...otherHours];
+  const workingHoursBeforeDay = accumulateWorkingHoursPerDay(
+    buildWeekdayMask(calendar.workingWeekdays),
+    calendar.nonWorkingPeriods,
+    workingHoursOfDay.length,
+  );
   return success({
     workingHoursOfDay,
     workingHoursBeforeHourOfDay: countHoursBeforeEachHourOfDay(workingHoursOfDay),
-    workingHoursBeforeDay: accumulateWorkingHoursPerDay(
-      buildWeekdayMask(calendar.workingWeekdays),
-      calendar.nonWorkingPeriods,
-      workingHoursOfDay.length,
-    ),
+    workingHoursBeforeDay,
+    nextWorkingDayOffsets: linkWorkingDays(workingHoursBeforeDay, 'next'),
+    previousWorkingDayOffsets: linkWorkingDays(workingHoursBeforeDay, 'previous'),
+    workingDayOffsetsByRank: listWorkingDays(workingHoursBeforeDay, workingHoursOfDay.length),
   });
 }
 
@@ -143,6 +186,44 @@ function isValidDayRange({ firstDay, lastDay }: DayRange): boolean {
     firstDay <= lastDay &&
     lastDay <= MAX_DAY_INDEX
   );
+}
+
+/** Gives, for each day of the supported period, the offset of the nearest working day in one direction, that day included, or -1 when there is none. */
+function linkWorkingDays(
+  workingHoursBeforeDay: Int32Array,
+  direction: 'next' | 'previous',
+): Int32Array {
+  const dayCount = workingHoursBeforeDay.length - 1;
+  const links = new Int32Array(dayCount);
+  const step = direction === 'next' ? -1 : 1;
+  let nearest = -1;
+  for (
+    let offset = direction === 'next' ? dayCount - 1 : 0;
+    offset >= 0 && offset < dayCount;
+    offset += step
+  ) {
+    const worked = (workingHoursBeforeDay[offset + 1] ?? 0) > (workingHoursBeforeDay[offset] ?? 0);
+    nearest = worked ? offset : nearest;
+    links[offset] = nearest;
+  }
+  return links;
+}
+
+/** Lists the offset of every working day of the supported period, in order, so that the day of a working hour is found by its rank. */
+function listWorkingDays(
+  workingHoursBeforeDay: Int32Array,
+  hoursPerWorkingDay: number,
+): Int32Array {
+  const dayCount = workingHoursBeforeDay.length - 1;
+  const workingDays = new Int32Array((workingHoursBeforeDay[dayCount] ?? 0) / hoursPerWorkingDay);
+  let rank = 0;
+  for (let offset = 0; offset < dayCount; offset += 1) {
+    if ((workingHoursBeforeDay[offset + 1] ?? 0) > (workingHoursBeforeDay[offset] ?? 0)) {
+      workingDays[rank] = offset;
+      rank += 1;
+    }
+  }
+  return workingDays;
 }
 
 /** Builds a lookup table telling, for each weekday, whether it is worked. */

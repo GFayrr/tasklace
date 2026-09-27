@@ -11,6 +11,7 @@ import {
   placeTaskLatest,
   type Placement,
   type PlacementErrorCode,
+  computePlacementSlots,
 } from './task-placement';
 import type { Result } from '../result';
 
@@ -89,10 +90,9 @@ describe('placeTask', () => {
       ],
       { hoursPerDay: 2 },
     );
-    const result = placeTask(calendar, task, MONDAY_9);
-    expect(result.ok && result.value.segments.map((segment) => segment.slots.length)).toEqual([
-      2, 2,
-    ]);
+    const placed = placeTask(calendar, task, MONDAY_9);
+    const slots = placed.ok ? computePlacementSlots(calendar, task, placed.value) : placed;
+    expect(slots.ok && slots.value.map((blockSlots) => blockSlots.length)).toEqual([2, 2]);
     expect(place(task)).toEqual([
       '2026-09-28 09:00 → 2026-09-29 11:00',
       '2026-10-06 09:00 → 2026-10-07 11:00',
