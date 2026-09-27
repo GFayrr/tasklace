@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { readProject, STORED_VALUE_CODEC } from '../../src/core/validation/read-project';
 import { LARGE_PROJECT_SEED, buildLargeProject } from './large-project';
 import { createRandom } from './random';
 
 const LARGE_PROJECT_FINGERPRINT =
-  '8d6643a1e533d89a30fed1a2bf926fc0c19701505f2dbe6a9dbecf0e20d76803';
+  '431a997ec6b4f3253e7fcf2f0d704917d9922de928879d5b92b035f38cd330a8';
 
 /** Returns the SHA-256 fingerprint of a value serialized as JSON. */
 function fingerprint(value: unknown): string {
@@ -30,6 +31,12 @@ describe('buildLargeProject', () => {
     const generated = buildLargeProject();
     expect(generated.tasks).toHaveLength(10_000);
     expect(generated.dependencies).toHaveLength(20_000);
+  });
+
+  it('generates a project that passes the complete validation unchanged', () => {
+    const generated = buildLargeProject();
+    const read = readProject(JSON.parse(JSON.stringify(generated)), STORED_VALUE_CODEC);
+    expect(read).toEqual({ ok: true, value: generated });
   });
 
   it('generates exactly the same project on every machine for the fixed seed', () => {
