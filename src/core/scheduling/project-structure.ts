@@ -80,8 +80,12 @@ export function analyzeStructureWithinLimits(
   project: Pick<Project, 'tasks' | 'dependencies' | 'tags'>,
 ): Result<ProjectStructure, readonly ItemStructureError[]> {
   const { tasks } = project;
-  const tasksById = new Map(tasks.map((task) => [task.id, task]));
-  const indexById = new Map(tasks.map((task, index) => [task.id, index]));
+  const tasksById = new Map<TaskId, Task>();
+  const indexById = new Map<TaskId, number>();
+  tasks.forEach((task, index) => {
+    tasksById.set(task.id, task);
+    indexById.set(task.id, index);
+  });
   const checked = checkDependencies(project.dependencies, tasks, indexById);
   const errors = [
     ...findDuplicateTaskIds(tasks),
@@ -185,7 +189,7 @@ function findParentChainError(
   if (task.parentId === null) {
     return null;
   }
-  const visited = new Set<TaskId>([task.id]);
+  const visited: TaskId[] = [task.id];
   let parentId: TaskId | null = task.parentId;
   while (parentId !== null) {
     const parent = tasksById.get(parentId);
@@ -195,13 +199,13 @@ function findParentChainError(
     if (parent.kind !== 'summary') {
       return 'PARENT_NOT_SUMMARY';
     }
-    if (visited.has(parent.id)) {
+    if (visited.includes(parent.id)) {
       return 'HIERARCHY_CYCLE';
     }
-    if (visited.size >= MAX_HIERARCHY_DEPTH) {
+    if (visited.length >= MAX_HIERARCHY_DEPTH) {
       return 'HIERARCHY_TOO_DEEP';
     }
-    visited.add(parent.id);
+    visited.push(parent.id);
     parentId = parent.parentId;
   }
   return null;

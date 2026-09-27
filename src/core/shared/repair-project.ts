@@ -10,7 +10,6 @@ import {
 } from '../limits';
 import type { Dependency, Project, Task, TaskId, WorkTask } from '../model/project';
 import { failure, success, type Result } from '../result';
-import { analyzeStructureWithinLimits } from '../scheduling/project-structure';
 
 export type RepairCode =
   | 'TASK_REMOVED'
@@ -45,8 +44,7 @@ const REPAIR_STEPS: readonly RepairStep[] = [
   (project, remaining) => repeatRepair(project, remaining, findTooDeepTask, moveOneToRoot),
   singleRound(removeInvalidDependencies),
   singleRound(removeDuplicateDependencies),
-  (project, remaining) =>
-    repeatRepair(project, remaining, findDependencyCycle, removeGreatestDependency),
+  breakDependencyCycles,
   singleRound(fitDailyPatterns),
 ];
 
@@ -251,20 +249,76 @@ function removeDuplicateDependencies(project: Project): RepairedProject {
   return removeDependencies(project, removedIds);
 }
 
-/** Returns the dependencies of one cycle, found by walking back from the blocked task with the smallest identifier, or null when no cycle is left. */
-function findDependencyCycle(project: Project): readonly [Dependency, ...Dependency[]] | null {
-  const structure = analyzeStructureWithinLimits(project);
-  if (structure.ok) {
-    return null;
-  }
-  const blocked = new Set(
-    structure.error.flatMap((error) => (error.code === 'DEPENDENCY_CYCLE' ? [error.taskId] : [])),
+/** Removes, cycle after cycle, the dependency with the greatest identifier of each dependency cycle, re-examining only the tasks still blocked by a cycle, or returns null when the rounds run out. */
+function breakDependencyCycles(project: Project, remainingRounds: number): RepairStepResult | null {
+  const linkable = new Set(
+    project.tasks.filter((task) => task.kind !== 'summary').map((task) => task.id),
   );
+  let blocked = findBlockedTasks(linkable, project.dependencies);
+  let links = linksWithin(blocked, project.dependencies);
+  const removedIds = new Set<string>();
+  for (let cycle = findCycle(blocked, links); cycle !== null; cycle = findCycle(blocked, links)) {
+    if (removedIds.size >= remainingRounds) {
+      return null;
+    }
+    const greatest = cycle.reduce((kept, dependency) =>
+      compareStrings(dependency.id, kept.id) > 0 ? dependency : kept,
+    );
+    removedIds.add(greatest.id);
+    const left = links.filter((link) => link.id !== greatest.id);
+    blocked = findBlockedTasks(blocked, left);
+    links = linksWithin(blocked, left);
+  }
+  return { ...removeDependencies(project, removedIds), rounds: removedIds.size };
+}
+
+/** Keeps the dependencies whose two tasks both belong to a set. */
+function linksWithin(tasks: ReadonlySet<TaskId>, links: readonly Dependency[]): Dependency[] {
+  return links.filter((link) => tasks.has(link.predecessorId) && tasks.has(link.successorId));
+}
+
+/** Returns the tasks that can never be ordered because they are in or behind a dependency cycle, by peeling off tasks without remaining predecessors. */
+function findBlockedTasks(tasks: ReadonlySet<TaskId>, links: readonly Dependency[]): Set<TaskId> {
+  const remaining = new Map<TaskId, number>([...tasks].map((id) => [id, 0]));
+  const outgoing = new Map<TaskId, TaskId[]>();
+  for (const link of linksWithin(tasks, links)) {
+    remaining.set(link.successorId, (remaining.get(link.successorId) ?? 0) + 1);
+    const successors = outgoing.get(link.predecessorId) ?? [];
+    successors.push(link.successorId);
+    outgoing.set(link.predecessorId, successors);
+  }
+  const ready = [...remaining].flatMap(([id, count]) => (count === 0 ? [id] : []));
+  for (let id = ready.pop(); id !== undefined; id = ready.pop()) {
+    remaining.delete(id);
+    releaseSuccessors(outgoing.get(id) ?? [], remaining, ready);
+  }
+  return new Set(remaining.keys());
+}
+
+/** Decrements the remaining predecessors of each successor and queues those left with none. */
+function releaseSuccessors(
+  successors: readonly TaskId[],
+  remaining: Map<TaskId, number>,
+  ready: TaskId[],
+): void {
+  for (const successor of successors) {
+    const count = (remaining.get(successor) ?? 0) - 1;
+    remaining.set(successor, count);
+    if (count === 0) {
+      ready.push(successor);
+    }
+  }
+}
+
+/** Returns the dependencies of one cycle, found by walking back from the blocked task with the smallest identifier along the incoming dependency with the smallest identifier, or null when no cycle is left. */
+function findCycle(
+  blocked: ReadonlySet<TaskId>,
+  links: readonly Dependency[],
+): readonly [Dependency, ...Dependency[]] | null {
   const incoming = new Map<TaskId, Dependency>();
-  const byId = [...project.dependencies].sort((left, right) => compareStrings(left.id, right.id));
-  for (const dependency of byId.filter((item) => blocked.has(item.predecessorId))) {
-    if (blocked.has(dependency.successorId) && !incoming.has(dependency.successorId)) {
-      incoming.set(dependency.successorId, dependency);
+  for (const link of [...links].sort((left, right) => compareStrings(left.id, right.id))) {
+    if (!incoming.has(link.successorId)) {
+      incoming.set(link.successorId, link);
     }
   }
   const start = [...blocked].sort(compareStrings)[0];
@@ -289,17 +343,6 @@ function walkBackToCycle(
   }
   const [first, ...rest] = taskId === undefined ? [] : path.slice(stepByTask.get(taskId));
   return first === undefined ? null : [first, ...rest];
-}
-
-/** Removes the dependency with the greatest identifier of a cycle. */
-function removeGreatestDependency(
-  project: Project,
-  cycle: readonly [Dependency, ...Dependency[]],
-): RepairedProject {
-  const greatest = cycle.reduce((kept, dependency) =>
-    compareStrings(dependency.id, kept.id) > 0 ? dependency : kept,
-  );
-  return removeDependencies(project, new Set([greatest.id]));
 }
 
 /** Removes a set of dependencies and reports each removal. */
