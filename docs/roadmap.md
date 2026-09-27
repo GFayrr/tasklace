@@ -24,7 +24,7 @@ Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit
 - Readable, versioned JSON export and import, with dates in clear text (`2026-09-28T09:00`).
 - A single UTF-8 byte order mark is removed at the very start of imported text; JSON export never writes one.
 
-### 4b. Shared Yjs model and baseline plan
+### 4b. Shared Yjs model and baseline plan (done)
 
 - Two-way mapping between `Project` and the Yjs document (name, start date, calendar, options, baseline, tasks, dependencies, tags), with changes grouped in transactions.
 - Task order by hand-written fractional indices, so that two simultaneous insertions at the same place never contradict each other.
@@ -36,6 +36,7 @@ Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit
 - Property-based tests: random concurrent edits and merges always end in the same valid state for every participant.
 - Every received update is first tried on a copy: an update that arrives before the one it depends on is held back, and an update that is unreadable, breaks the document schema or would leave an invalid project is refused, the document staying untouched.
 - Adds the `yjs` dependency; `y-protocols` comes with the network protocol in step 7.
+- A shared session keeps a validated, indexed copy of the project: local edits and received updates are checked and repaired only where they change things, falling back to the whole repair when a structural rule is broken, so that editing and merging stay far below one frame on 10,000 tasks.
 
 ### 4c. `.tasklace` project file
 
