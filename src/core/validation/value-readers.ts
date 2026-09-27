@@ -12,6 +12,8 @@ const IDENTIFIER_PATTERN = /^[A-Za-z0-9_-]+$/;
 const LAST_C0_CONTROL = 0x1f;
 const DELETE_CHARACTER = 0x7f;
 const LAST_C1_CONTROL = 0x9f;
+const FIRST_LOW_SURROGATE = 0xdc00;
+const LAST_LOW_SURROGATE = 0xdfff;
 
 /** Returns the field at a key of a record with its path, ignoring inherited properties. */
 export function childField(record: UnknownRecord, key: string, parentPath: string): Field {
@@ -145,7 +147,7 @@ export function readText(field: Field, issues: IssueList, maxLength: number): st
     issues.add(field.path, 'EMPTY_TEXT');
     return undefined;
   }
-  if (Array.from(text).length > maxLength) {
+  if (text.length > maxLength && countCodePoints(text) > maxLength) {
     issues.add(field.path, 'TOO_LONG');
     return undefined;
   }
@@ -196,15 +198,25 @@ export function readRawString(field: Field, issues: IssueList): string | undefin
   return field.value;
 }
 
-/** Tells whether a text contains a control character such as a line break or a null character. */
+/** Tells whether a text contains a control character such as a line break or a null character, all of which are single UTF-16 code units. */
 function hasControlCharacter(text: string): boolean {
-  for (const character of text) {
-    const code = character.codePointAt(0) ?? 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
     if (code <= LAST_C0_CONTROL || (code >= DELETE_CHARACTER && code <= LAST_C1_CONTROL)) {
       return true;
     }
   }
   return false;
+}
+
+/** Counts the Unicode code points of a well-formed text, the second half of each surrogate pair adding nothing. */
+function countCodePoints(text: string): number {
+  let count = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    count += code >= FIRST_LOW_SURROGATE && code <= LAST_LOW_SURROGATE ? 0 : 1;
+  }
+  return count;
 }
 
 /** Reports a missing field and tells whether the field is present. */

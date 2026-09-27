@@ -17,8 +17,8 @@ import {
 
 describe('toProjectHour', () => {
   it('converts a valid wall-clock date and hour', () => {
-    const result = toProjectHour({ year: 1970, month: 1, day: 2, hour: 3 });
-    expect(result).toEqual({ ok: true, value: 27 });
+    const result = toProjectHour({ year: 2020, month: 1, day: 2, hour: 3 });
+    expect(result).toEqual({ ok: true, value: 438_315 });
   });
 
   it('accepts the 29th of February of a leap year', () => {

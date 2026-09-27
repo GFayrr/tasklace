@@ -45,8 +45,14 @@ export function toOklab(hexColor: string, vision: ColorVision = 'normal'): Linea
 
 /** Measures how different two colors look with a given color vision (OKLab distance × 100). */
 export function colorDistance(first: string, second: string, vision: ColorVision): number {
-  const [firstL, firstA, firstB] = toOklab(first, vision);
-  const [secondL, secondA, secondB] = toOklab(second, vision);
+  return oklabDistance(toOklab(first, vision), toOklab(second, vision));
+}
+
+/** Measures how different two colors already converted to OKLab look (distance × 100). */
+export function oklabDistance(
+  [firstL, firstA, firstB]: LinearRgb,
+  [secondL, secondA, secondB]: LinearRgb,
+): number {
   return DISTANCE_SCALE * Math.hypot(firstL - secondL, firstA - secondA, firstB - secondB);
 }
 

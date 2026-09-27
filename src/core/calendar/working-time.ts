@@ -28,8 +28,20 @@ export function nextWorkingDay(calendar: CompiledCalendar, day: DayIndex): DayIn
   if (day > MAX_DAY_INDEX) {
     return null;
   }
-  const hoursBefore = workingHoursBeforeDay(calendar, Math.max(day, MIN_DAY_INDEX));
-  return hoursBefore < totalWorkingHours(calendar) ? dayOfWorkingHour(calendar, hoursBefore) : null;
+  const offset = calendar.nextWorkingDayOffsets[Math.max(day, MIN_DAY_INDEX) - MIN_DAY_INDEX] ?? -1;
+  return offset < 0 ? null : MIN_DAY_INDEX + offset;
+}
+
+/** Returns the working day that comes a given number of working days after a working day, or null past the planning horizon. */
+export function workingDayAfter(
+  calendar: CompiledCalendar,
+  workingDay: DayIndex,
+  count: number,
+): DayIndex | null {
+  const hoursPerWorkingDay = calendar.workingHoursOfDay.length;
+  const rank = workingHoursBeforeDay(calendar, workingDay) / hoursPerWorkingDay + count;
+  const offset = calendar.workingDayOffsetsByRank[rank];
+  return offset === undefined ? null : MIN_DAY_INDEX + offset;
 }
 
 /** Returns the last working day on or before a day, or null before the planning horizon. */
@@ -37,8 +49,9 @@ export function previousWorkingDay(calendar: CompiledCalendar, day: DayIndex): D
   if (day < MIN_DAY_INDEX) {
     return null;
   }
-  const hoursUntilEnd = workingHoursBeforeDay(calendar, Math.min(day, MAX_DAY_INDEX) + 1);
-  return hoursUntilEnd > 0 ? dayOfWorkingHour(calendar, hoursUntilEnd - 1) : null;
+  const offset =
+    calendar.previousWorkingDayOffsets[Math.min(day, MAX_DAY_INDEX) - MIN_DAY_INDEX] ?? -1;
+  return offset < 0 ? null : MIN_DAY_INDEX + offset;
 }
 
 /** Returns the start of the first working hour at or after an instant. */
@@ -136,6 +149,15 @@ export function countWorkingHours(
   return success(workingHoursBefore(calendar, to) - workingHoursBefore(calendar, from));
 }
 
+/** Tells whether no working hour lies between two instants of the supported period, the second one excluded. */
+export function isIdleBetween(
+  calendar: CompiledCalendar,
+  from: ProjectHour,
+  to: ProjectHour,
+): boolean {
+  return workingHoursBefore(calendar, to) === workingHoursBefore(calendar, from);
+}
+
 /** Lists the worked hours of the day that are at or after an hour of the day. */
 export function workingHoursFrom(calendar: CompiledCalendar, minimumHourOfDay: number): number[] {
   return calendar.workingHoursOfDay.filter((hour) => hour >= minimumHourOfDay);
@@ -180,17 +202,8 @@ function boundaryOfWorkingHour(
   return success(startOfDay(day) + hour + (boundary === 'end' ? 1 : 0));
 }
 
-/** Finds, by binary search, the day containing the working hour with a given rank. */
+/** Returns the day containing the working hour with a given rank, every working day having the same number of hours. */
 function dayOfWorkingHour(calendar: CompiledCalendar, rank: number): DayIndex {
-  let low = MIN_DAY_INDEX;
-  let high = MAX_DAY_INDEX;
-  while (low < high) {
-    const middle = (low + high) >> 1;
-    if (workingHoursBeforeDay(calendar, middle + 1) > rank) {
-      high = middle;
-    } else {
-      low = middle + 1;
-    }
-  }
-  return low;
+  const dayRank = Math.floor(rank / calendar.workingHoursOfDay.length);
+  return MIN_DAY_INDEX + (calendar.workingDayOffsetsByRank[dayRank] ?? 0);
 }

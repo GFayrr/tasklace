@@ -22,14 +22,15 @@ describe('civil format', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
   });
 
   it('follows the leap year rules of the Gregorian calendar', () => {
-    expect(parseDateTime('2000-02-29T00:00').ok).toBe(true);
+    expect(parseDateTime('2020-02-29T00:00').ok).toBe(true);
+    expect(parseDateTime('2021-02-29T00:00').ok).toBe(false);
     expect(parseDateTime('2100-02-29T00:00').ok).toBe(false);
     expect(parseDate('2024-02-29').ok).toBe(true);
     expect(parseDate('2100-02-29').ok).toBe(false);
   });
 
   it('writes the first and last hours of the supported period', () => {
-    expect(formatDateTime(MIN_PROJECT_HOUR)).toBe('1970-01-01T00:00');
+    expect(formatDateTime(MIN_PROJECT_HOUR)).toBe('2020-01-01T00:00');
     expect(formatDateTime(END_PROJECT_HOUR - 1)).toBe('2200-12-31T23:00');
     expect(formatDate(MAX_DAY_INDEX)).toBe('2200-12-31');
   });

@@ -67,17 +67,17 @@ describe('compileCalendar', () => {
       workingWeekdays: [0, 1, 2, 3, 4, 5, 6],
       workingTimeRanges: [{ startHour: 9, endHour: 17 }],
       nonWorkingPeriods: [
-        { firstDay: 30, lastDay: 31 },
-        { firstDay: 10, lastDay: 12 },
-        { firstDay: 13, lastDay: 15 },
-        { firstDay: 11, lastDay: 14 },
-        { firstDay: 20, lastDay: 20 },
-        { firstDay: 40, lastDay: 50 },
-        { firstDay: 42, lastDay: 44 },
+        { firstDay: MIN_DAY_INDEX + 30, lastDay: MIN_DAY_INDEX + 31 },
+        { firstDay: MIN_DAY_INDEX + 10, lastDay: MIN_DAY_INDEX + 12 },
+        { firstDay: MIN_DAY_INDEX + 13, lastDay: MIN_DAY_INDEX + 15 },
+        { firstDay: MIN_DAY_INDEX + 11, lastDay: MIN_DAY_INDEX + 14 },
+        { firstDay: MIN_DAY_INDEX + 20, lastDay: MIN_DAY_INDEX + 20 },
+        { firstDay: MIN_DAY_INDEX + 40, lastDay: MIN_DAY_INDEX + 50 },
+        { firstDay: MIN_DAY_INDEX + 42, lastDay: MIN_DAY_INDEX + 44 },
       ],
     });
-    const nonWorkingDays = Array.from({ length: 60 }, (_value, day) => day).filter(
-      (day) => !isWorkingDay(calendar, day),
+    const nonWorkingDays = Array.from({ length: 60 }, (_value, offset) => offset).filter(
+      (offset) => !isWorkingDay(calendar, MIN_DAY_INDEX + offset),
     );
     expect(nonWorkingDays).toEqual([
       10, 11, 12, 13, 14, 15, 20, 30, 31, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
