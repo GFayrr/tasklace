@@ -212,7 +212,11 @@ describe('readProject: shape of the data', () => {
     const calendar = data['calendar'] as Data;
     calendar['timeZone'] = 'UTC';
     (calendar['workingTimeRanges'] as Data[])[0] = { startHour: 13, endHour: 17, minutes: 0 };
-    (calendar['nonWorkingPeriods'] as Data[])[0] = { firstDay: 0, lastDay: 0, label: 'x' };
+    (calendar['nonWorkingPeriods'] as Data[])[0] = {
+      firstDay: MIN_DAY_INDEX,
+      lastDay: MIN_DAY_INDEX,
+      label: 'x',
+    };
     (data['options'] as Data)['darkMode'] = true;
     (data['tags'] as Data[])[0] = { ...DESIGN_TAG, pattern: 'dots' };
     (data['dependencies'] as Data[])[0] = { ...link('a', 'b'), note: '' };

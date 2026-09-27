@@ -131,9 +131,9 @@ describe('exportProjectJson', () => {
   });
 
   it('writes the extreme dates of the supported period', () => {
-    const extreme = project([], [], { startDate: at(1970, 1, 1, 0) });
+    const extreme = project([], [], { startDate: at(2020, 1, 1, 0) });
     expect((JSON.parse(exportProjectJson(extreme)) as { project: Data }).project['startDate']).toBe(
-      '1970-01-01T00:00',
+      '2020-01-01T00:00',
     );
     const late = project([], [], { startDate: at(2200, 12, 31, 23) });
     expect(importProjectJson(exportProjectJson(late))).toEqual({ ok: true, value: late });
@@ -339,7 +339,7 @@ describe('importProjectJson: text and header', () => {
 });
 
 describe('importProjectJson: values', () => {
-  it.each(['1970-01-01T00:00', '2200-12-31T23:00', '2028-02-29T12:00'])(
+  it.each(['2020-01-01T00:00', '2200-12-31T23:00', '2028-02-29T12:00'])(
     'accepts the date and time %s',
     (startDate) => {
       expect(importIssues(projectFieldWith('startDate', startDate))).toEqual([]);
@@ -360,7 +360,7 @@ describe('importProjectJson: values', () => {
     '2026-09-28 09:00',
     '2026-9-28T09:00',
     '2026-09-28',
-    '1969-12-31T23:00',
+    '2019-12-31T23:00',
     '2201-01-01T00:00',
     '+02026-09-28T09:00',
     '２０２６-09-28T09:00',
