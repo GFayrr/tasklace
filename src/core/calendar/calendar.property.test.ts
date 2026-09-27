@@ -8,9 +8,16 @@ import {
   unwrap,
 } from '../testing/arbitraries';
 import { compileOrThrow } from '../testing/civil-time';
-import { HOURS_PER_DAY, MAX_DAY_INDEX, MIN_DAY_INDEX, dayIndexOf, weekdayOf } from '../time';
+import {
+  END_PROJECT_HOUR,
+  HOURS_PER_DAY,
+  MAX_DAY_INDEX,
+  MIN_DAY_INDEX,
+  dayIndexOf,
+  weekdayOf,
+} from '../time';
 import type { CompiledCalendar } from './compile-calendar';
-import { computeTaskSlots } from './task-slots';
+import { computeSegmentBounds, computeTaskSlots } from './task-slots';
 import {
   addWorkingHours,
   countWorkingHours,
@@ -146,6 +153,33 @@ describe('calendar properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
             }),
           );
           expect(slots.at(-1)?.end).toBe(unwrap(addWorkingHours(calendar, start, durationHours)));
+        },
+      ),
+    );
+  });
+
+  it('computes the bounds of a block directly exactly like its first and last slots, errors included', () => {
+    const startArbitrary = fc.oneof(
+      instantArbitrary,
+      fc.integer({ min: END_PROJECT_HOUR - HOURS_PER_DAY * 30, max: END_PROJECT_HOUR - 1 }),
+    );
+    fc.assert(
+      fc.property(
+        calendarArbitrary,
+        startArbitrary,
+        fc.oneof(durationArbitrary, fc.integer({ min: 1, max: 5_000 })),
+        fc.option(fc.integer({ min: 1, max: HOURS_PER_DAY })),
+        fc.option(fc.integer({ min: 0, max: HOURS_PER_DAY - 1 })),
+        (calendarInput, start, durationHours, hoursPerDay, dailyStartHour) => {
+          const calendar = compileOrThrow(calendarInput);
+          const placement = { start, durationHours, hoursPerDay, dailyStartHour };
+          const slots = computeTaskSlots(calendar, placement);
+          const bounds = computeSegmentBounds(calendar, placement);
+          const first = slots.ok ? slots.value[0] : undefined;
+          const last = slots.ok ? slots.value.at(-1) : undefined;
+          expect(bounds).toEqual(
+            slots.ok ? { ok: true, value: { start: first?.start, end: last?.end } } : slots,
+          );
         },
       ),
     );

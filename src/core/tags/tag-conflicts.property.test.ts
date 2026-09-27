@@ -4,7 +4,8 @@ import { DEFAULT_CALENDAR } from '../calendar/default-calendar';
 import { countWorkingHours } from '../calendar/working-time';
 import type { Tag, Task, TaskId } from '../model/project';
 import type { Schedule } from '../scheduling/schedule-project';
-import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
+import { computePlacementSlots } from '../scheduling/task-placement';
+import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { compileOrThrow } from '../testing/civil-time';
 import { PROJECT_START, project, scheduleOrThrow, workTask } from '../testing/project-builder';
 import type { ProjectHour } from '../time';
@@ -19,25 +20,39 @@ const TAG_CHOICES = ['alice', 'bob', 'design', 'deleted', null] as const;
 const HOURS_IN_TWO_WEEKS = 14 * 24;
 const calendar = compileOrThrow(DEFAULT_CALENDAR);
 
+const LATEST_AFTERNOON_HOURS = 4;
+
 const taskArbitrary = fc.record({
   tagId: fc.constantFrom(...TAG_CHOICES),
-  durationHours: fc.integer({ min: 1, max: 20 }),
+  blocks: fc.array(
+    fc.record({
+      durationHours: fc.integer({ min: 1, max: 20 }),
+      gapDaysBefore: fc.integer({ min: 1, max: 5 }),
+    }),
+    { minLength: 1, maxLength: 3 },
+  ),
   hoursPerDay: fc.option(fc.integer({ min: 1, max: 7 })),
+  dailyStartHour: fc.option(fc.constantFrom(9, 13)),
   startOffset: fc.integer({ min: 0, max: HOURS_IN_TWO_WEEKS }),
 });
 
 type TaskShape = typeof taskArbitrary extends fc.Arbitrary<infer Shape> ? Shape : never;
 
-/** Builds tagged tasks from random shapes, all starting within two weeks of the project start. */
+/** Builds tagged, possibly split tasks from random shapes, all starting within two weeks of the project start. */
 function buildTasks(shapes: readonly TaskShape[]): Task[] {
-  return shapes.map((shape, index) =>
-    workTask(`t${String(index).padStart(2, '0')}`, {
+  return shapes.map((shape, index) => {
+    const fitsAfternoon = shape.hoursPerDay !== null && shape.hoursPerDay <= LATEST_AFTERNOON_HOURS;
+    return workTask(`t${String(index).padStart(2, '0')}`, {
       tagId: shape.tagId,
-      segments: [{ durationHours: shape.durationHours, gapDaysBefore: 0 }],
+      segments: shape.blocks.map((block, position) => ({
+        durationHours: block.durationHours,
+        gapDaysBefore: position === 0 ? 0 : block.gapDaysBefore,
+      })),
       hoursPerDay: shape.hoursPerDay,
+      dailyStartHour: fitsAfternoon ? shape.dailyStartHour : null,
       startNoEarlierThan: PROJECT_START + shape.startOffset,
-    }),
-  );
+    });
+  });
 }
 
 /** Lists, hour by hour, which tasks of a tag are working, by brute force over every slot. */
@@ -50,8 +65,12 @@ function activeTasksByHour(
   for (const task of tasks.filter(
     (candidate) => candidate.kind !== 'summary' && candidate.tagId === tagId,
   )) {
-    const slots =
-      schedule.placements.get(task.id)?.segments.flatMap((segment) => segment.slots) ?? [];
+    const placement = schedule.placements.get(task.id);
+    const slotsByBlock =
+      placement === undefined || task.kind !== 'task'
+        ? []
+        : unwrap(computePlacementSlots(calendar, task, placement));
+    const slots = slotsByBlock.flat();
     slots.forEach((slot) => {
       for (let hour = slot.start; hour < slot.end; hour += 1) {
         byHour.set(hour, [...(byHour.get(hour) ?? []), task.id]);

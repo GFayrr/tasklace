@@ -1,5 +1,10 @@
 import type { CompiledCalendar } from '../calendar/compile-calendar';
-import { computeTaskSlots, type TaskSlotsErrorCode, type TimeSlot } from '../calendar/task-slots';
+import {
+  computeSegmentBounds,
+  computeTaskSlots,
+  type TaskSlotsErrorCode,
+  type TimeSlot,
+} from '../calendar/task-slots';
 import { lastWorkingHourEnd, subtractWorkingHours } from '../calendar/working-time';
 import { MAX_SEGMENTS_PER_TASK, MAX_SEGMENT_GAP_DAYS } from '../limits';
 import type { SchedulableTask, TaskSegment, WorkTask } from '../model/project';
@@ -16,7 +21,6 @@ import {
 export interface ScheduledSegment {
   readonly start: ProjectHour;
   readonly end: ProjectHour;
-  readonly slots: readonly TimeSlot[];
 }
 
 export interface Placement {
@@ -110,14 +114,40 @@ export function placeTaskLatest(
   return placeTask(calendar, task, Math.max(firstLate.value - 1, MIN_PROJECT_HOUR));
 }
 
-/** Tells whether a task always works consecutive working hours, so that its start follows from its end. */
-function worksContinuously(calendar: CompiledCalendar, task: WorkTask): boolean {
+/** Computes on demand the exact working time slots of every block of a placed work task. */
+export function computePlacementSlots(
+  calendar: CompiledCalendar,
+  task: WorkTask,
+  placement: Placement,
+): Result<TimeSlot[][], TaskSlotsErrorCode> {
+  const slotsByBlock: TimeSlot[][] = [];
+  for (const [index, segment] of placement.segments.entries()) {
+    const slots = computeTaskSlots(calendar, {
+      start: segment.start,
+      durationHours: task.segments[index]?.durationHours ?? 0,
+      hoursPerDay: task.hoursPerDay,
+      dailyStartHour: task.dailyStartHour,
+    });
+    if (!slots.ok) {
+      return slots;
+    }
+    slotsByBlock.push(slots.value);
+  }
+  return success(slotsByBlock);
+}
+
+/** Tells whether a task works every working hour of its working days, so that each block covers all working time between its bounds. */
+export function worksFullDays(calendar: CompiledCalendar, task: WorkTask): boolean {
   const [firstWorkingHour] = calendar.workingHoursOfDay;
   return (
-    task.segments.length === 1 &&
     (task.hoursPerDay === null || task.hoursPerDay === calendar.workingHoursOfDay.length) &&
     (task.dailyStartHour === null || task.dailyStartHour <= firstWorkingHour)
   );
+}
+
+/** Tells whether a task always works consecutive working hours, so that its start follows from its end. */
+function worksContinuously(calendar: CompiledCalendar, task: WorkTask): boolean {
+  return task.segments.length === 1 && worksFullDays(calendar, task);
 }
 
 /** Computes directly the latest start of a continuously worked task, or null when out of range. */
@@ -220,19 +250,10 @@ function placeSegment(
   if (start >= END_PROJECT_HOUR) {
     return failure('BEYOND_PLANNING_HORIZON');
   }
-  const slots = computeTaskSlots(calendar, {
+  return computeSegmentBounds(calendar, {
     start,
     durationHours: segment.durationHours,
     hoursPerDay: task.hoursPerDay,
     dailyStartHour: task.dailyStartHour,
   });
-  if (!slots.ok) {
-    return slots;
-  }
-  const first = slots.value[0];
-  const last = slots.value.at(-1);
-  if (first === undefined || last === undefined) {
-    return failure('INVALID_SEGMENTS');
-  }
-  return success({ start: first.start, end: last.end, slots: slots.value });
 }

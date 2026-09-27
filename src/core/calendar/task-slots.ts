@@ -14,6 +14,7 @@ import type { CompiledCalendar } from './compile-calendar';
 import {
   nextWorkingDay,
   nextWorkingHour,
+  workingDayAfter,
   workingHoursFrom,
   type WorkingTimeErrorCode,
 } from './working-time';
@@ -33,18 +34,17 @@ export interface TimeSlot {
 export type DailyWindowErrorCode = 'INVALID_HOURS_PER_DAY' | 'INVALID_DAILY_START_HOUR';
 export type TaskSlotsErrorCode = WorkingTimeErrorCode | 'INVALID_DURATION' | DailyWindowErrorCode;
 
+export interface SegmentBounds {
+  readonly start: ProjectHour;
+  readonly end: ProjectHour;
+}
+
 /** Computes the exact working time slots a task occupies, from its start to its last hour. */
 export function computeTaskSlots(
   calendar: CompiledCalendar,
   placement: TaskPlacement,
 ): Result<TimeSlot[], TaskSlotsErrorCode> {
-  if (!isProjectHour(placement.start)) {
-    return failure('INVALID_INSTANT');
-  }
-  if (!isValidDuration(placement.durationHours)) {
-    return failure('INVALID_DURATION');
-  }
-  const window = computeDailyWindow(calendar, placement);
+  const window = checkPlacement(calendar, placement);
   if (!window.ok) {
     return window;
   }
@@ -52,6 +52,55 @@ export function computeTaskSlots(
     return success([]);
   }
   return collectTaskSlots(calendar, placement, window.value);
+}
+
+/** Computes where a block of work starts and ends straight from the calendar tables, whatever its length, as its first and last time slots would. */
+export function computeSegmentBounds(
+  calendar: CompiledCalendar,
+  placement: TaskPlacement,
+): Result<SegmentBounds, TaskSlotsErrorCode> {
+  const window = checkPlacement(calendar, placement);
+  if (!window.ok) {
+    return window;
+  }
+  const firstHour = nextWorkingHour(calendar, placement.start);
+  if (placement.durationHours === 0 || !firstHour.ok) {
+    return firstHour.ok ? failure('INVALID_DURATION') : firstHour;
+  }
+  const firstDay = dayIndexOf(firstHour.value);
+  const firstDayHours = firstDayHoursOfDay(
+    calendar,
+    firstHour.value,
+    window.value,
+    placement.durationHours,
+  );
+  const start = startOfDay(firstDay) + (firstDayHours[0] ?? 0);
+  const remaining = placement.durationHours - firstDayHours.length;
+  if (remaining === 0) {
+    return success({ start, end: startOfDay(firstDay) + (firstDayHours.at(-1) ?? 0) + 1 });
+  }
+  const dailyHours = window.value.length;
+  const extraDays = Math.ceil(remaining / dailyHours);
+  const lastDay = workingDayAfter(calendar, firstDay, extraDays);
+  if (lastDay === null) {
+    return failure('BEYOND_PLANNING_HORIZON');
+  }
+  const lastDayHours = remaining - (extraDays - 1) * dailyHours;
+  return success({ start, end: startOfDay(lastDay) + (window.value[lastDayHours - 1] ?? 0) + 1 });
+}
+
+/** Checks the start and duration of a block and returns the hours of the day it works on after its first day. */
+function checkPlacement(
+  calendar: CompiledCalendar,
+  placement: TaskPlacement,
+): Result<readonly number[], TaskSlotsErrorCode> {
+  if (!isProjectHour(placement.start)) {
+    return failure('INVALID_INSTANT');
+  }
+  if (!isValidDuration(placement.durationHours)) {
+    return failure('INVALID_DURATION');
+  }
+  return computeDailyWindow(calendar, placement);
 }
 
 /** Tells whether a task duration is a whole, non-negative and supported number of hours. */
