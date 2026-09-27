@@ -24,6 +24,10 @@ export const REPAIR_ORIGIN = Symbol('merge repair');
 
 export type SharedOrigin = typeof LOCAL_ORIGIN | typeof REMOTE_ORIGIN | typeof REPAIR_ORIGIN;
 
+export type EntryRoot = typeof TASKS_ROOT | typeof DEPENDENCIES_ROOT | typeof TAGS_ROOT;
+
+export type ProjectHeader = Omit<Project, 'tasks' | 'dependencies' | 'tags'>;
+
 export type SharedProjectData = { readonly [Key in keyof Project]: unknown } & {
   readonly tasks: readonly unknown[];
 };
@@ -40,10 +44,15 @@ const PROJECT_FIELD_KEYS: readonly string[] = [
   'alwaysShowPatterns',
   'baseline',
 ];
-const ENTRY_KEYS_BY_ROOT: readonly (readonly [string, readonly string[]])[] = [
+const ENTRY_KEYS_BY_ROOT: readonly (readonly [EntryRoot, readonly string[]])[] = [
   [TASKS_ROOT, WORK_TASK_KEYS.filter((key) => key !== 'id')],
   [DEPENDENCIES_ROOT, DEPENDENCY_KEYS.filter((key) => key !== 'id')],
   [TAGS_ROOT, TAG_KEYS.filter((key) => key !== 'id')],
+];
+const CALENDAR_FIELD_KEYS: readonly string[] = [
+  'workingWeekdays',
+  'workingTimeRanges',
+  'nonWorkingPeriods',
 ];
 
 const NEW_TASK_DURATION_HOURS = 1;
@@ -88,6 +97,74 @@ export function findSchemaIssues(document: Y.Doc): readonly ValidationIssue[] {
   return issues.issues;
 }
 
+/** Lists what does not belong at the top of a shared document: unknown roots and unknown or nested project fields. */
+export function findRootIssues(document: Y.Doc): readonly ValidationIssue[] {
+  const issues = createIssueList();
+  for (const name of [...document.share.keys()].filter((root) => !ROOTS.includes(root))) {
+    issues.add(name, 'UNKNOWN_FIELD');
+  }
+  checkFields(document.getMap(PROJECT_ROOT), PROJECT_ROOT, PROJECT_FIELD_KEYS, issues);
+  return issues.issues;
+}
+
+/** Lists what does not belong in one entry of a shared document, a missing entry having nothing to report. */
+export function findEntryIssues(
+  document: Y.Doc,
+  root: EntryRoot,
+  id: string,
+): readonly ValidationIssue[] {
+  const issues = createIssueList();
+  const entry = document.getMap(root).get(id);
+  const allowedKeys = ENTRY_KEYS_BY_ROOT.find(([name]) => name === root)?.[1] ?? [];
+  if (entry instanceof Y.Map) {
+    checkFields(entry, `${root}.${id}`, allowedKeys, issues);
+  } else if (entry !== undefined) {
+    issues.add(`${root}.${id}`, 'WRONG_TYPE');
+  }
+  return issues.issues;
+}
+
+/** Reads one entry of a shared document as a plain record carrying its identifier, or undefined when it no longer exists. */
+export function readEntry(document: Y.Doc, root: EntryRoot, id: string): unknown {
+  const entry = document.getMap(root).get(id);
+  return entry instanceof Y.Map ? { ...entry.toJSON(), id } : entry;
+}
+
+/** Reads the project fields of a shared document as plain, still untrusted data. */
+export function readHeaderData(document: Y.Doc): SharedProjectData {
+  return { ...readData(document, keepFieldsOfKind, false) };
+}
+
+/** Tells whether a project field of a shared document belongs to the calendar. */
+export function isCalendarField(key: string): boolean {
+  return CALENDAR_FIELD_KEYS.includes(key);
+}
+
+/** Keeps only the fields of the kind of a task, the others staying hidden in the shared document. */
+export function viewTaskFields(entry: unknown): unknown {
+  return keepFieldsOfKind(entry);
+}
+
+/** Presents a task entry with all its fields, hidden ones included, as a work task. */
+export function viewTaskUnion(entry: unknown): unknown {
+  return asWorkTask(entry);
+}
+
+/** Writes the project fields of a shared document, changing only what differs. */
+export function writeProjectHeader(document: Y.Doc, header: ProjectHeader): void {
+  setChangedFields(document.getMap(PROJECT_ROOT), headerFields(header));
+}
+
+/** Writes one task, dependency or tag into a shared document, filling the hidden fields of a new task with defaults. */
+export function writeEntry(document: Y.Doc, root: EntryRoot, item: { readonly id: string }): void {
+  writeItem(document.getMap(root), item, root === TASKS_ROOT ? HIDDEN_TASK_DEFAULTS : {});
+}
+
+/** Deletes one task, dependency or tag from a shared document. */
+export function deleteEntry(document: Y.Doc, root: EntryRoot, id: string): void {
+  document.getMap(root).delete(id);
+}
+
 /** Writes a project into a shared document in one transaction, changing only what differs. */
 export function writeSharedProject(
   document: Y.Doc,
@@ -95,26 +172,35 @@ export function writeSharedProject(
   origin: SharedOrigin | null,
 ): void {
   document.transact(() => {
-    const { calendar, options } = project;
-    setChangedFields(document.getMap(PROJECT_ROOT), {
-      name: project.name,
-      startDate: project.startDate,
-      workingWeekdays: calendar.workingWeekdays,
-      workingTimeRanges: calendar.workingTimeRanges,
-      nonWorkingPeriods: calendar.nonWorkingPeriods,
-      criticalPathEnabled: options.criticalPathEnabled,
-      dateConstraintsEnabled: options.dateConstraintsEnabled,
-      alwaysShowPatterns: options.alwaysShowPatterns,
-      baseline: project.baseline,
-    });
+    writeProjectHeader(document, project);
     writeEntries(document.getMap(TASKS_ROOT), project.tasks, HIDDEN_TASK_DEFAULTS);
     writeEntries(document.getMap(DEPENDENCIES_ROOT), project.dependencies, {});
     writeEntries(document.getMap(TAGS_ROOT), project.tags, {});
   }, origin);
 }
 
-/** Reads the raw content of a shared document, presenting each task entry through a given view. */
-function readData(document: Y.Doc, viewTask: (entry: unknown) => unknown): SharedProjectData {
+/** Lists the fields of the project root of a shared document for a project header. */
+function headerFields(header: ProjectHeader): object {
+  const { calendar, options } = header;
+  return {
+    name: header.name,
+    startDate: header.startDate,
+    workingWeekdays: calendar.workingWeekdays,
+    workingTimeRanges: calendar.workingTimeRanges,
+    nonWorkingPeriods: calendar.nonWorkingPeriods,
+    criticalPathEnabled: options.criticalPathEnabled,
+    dateConstraintsEnabled: options.dateConstraintsEnabled,
+    alwaysShowPatterns: options.alwaysShowPatterns,
+    baseline: header.baseline,
+  };
+}
+
+/** Reads the raw content of a shared document, presenting each task entry through a given view, with or without its lists. */
+function readData(
+  document: Y.Doc,
+  viewTask: (entry: unknown) => unknown,
+  withLists = true,
+): SharedProjectData {
   const root = document.getMap(PROJECT_ROOT);
   return {
     name: root.get('name'),
@@ -130,9 +216,9 @@ function readData(document: Y.Doc, viewTask: (entry: unknown) => unknown): Share
       alwaysShowPatterns: root.get('alwaysShowPatterns'),
     },
     baseline: root.get('baseline'),
-    tasks: readEntries(document.getMap(TASKS_ROOT)).map(viewTask),
-    dependencies: readEntries(document.getMap(DEPENDENCIES_ROOT)),
-    tags: readEntries(document.getMap(TAGS_ROOT)),
+    tasks: withLists ? readEntries(document.getMap(TASKS_ROOT)).map(viewTask) : [],
+    dependencies: withLists ? readEntries(document.getMap(DEPENDENCIES_ROOT)) : [],
+    tags: withLists ? readEntries(document.getMap(TAGS_ROOT)) : [],
   };
 }
 
@@ -204,15 +290,24 @@ function writeEntries(
   for (const id of [...entries.keys()].filter((key) => !ids.has(key))) {
     entries.delete(id);
   }
-  for (const { id, ...fields } of items) {
-    const existing = entries.get(id);
-    const entry = existing instanceof Y.Map ? existing : new Y.Map<unknown>();
-    if (entry !== existing) {
-      entries.set(id, entry);
-      setChangedFields(entry, hiddenDefaults);
-    }
-    setChangedFields(entry, fields);
+  for (const item of items) {
+    writeItem(entries, item, hiddenDefaults);
   }
+}
+
+/** Writes one item into a shared map keyed by identifier, filling the hidden fields of a new entry with defaults. */
+function writeItem(
+  entries: Y.Map<unknown>,
+  { id, ...fields }: { readonly id: string },
+  hiddenDefaults: object,
+): void {
+  const existing = entries.get(id);
+  const entry = existing instanceof Y.Map ? existing : new Y.Map<unknown>();
+  if (entry !== existing) {
+    entries.set(id, entry);
+    setChangedFields(entry, hiddenDefaults);
+  }
+  setChangedFields(entry, fields);
 }
 
 /** Sets every field of a shared map whose stored value differs from the given one or is a nested shared type. */
