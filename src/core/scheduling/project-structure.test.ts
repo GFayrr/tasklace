@@ -91,7 +91,7 @@ describe('analyzeProjectStructure', () => {
     ],
     [
       'duplicated dependency identifiers',
-      [link('a', 'b'), { ...link('b', 'm'), id: 'a->b' }],
+      [link('a', 'b'), { ...link('b', 'm'), id: 'a-b' }],
       'DUPLICATE_DEPENDENCY_ID',
     ],
     ['a fractional lag', [link('a', 'b', 'finishToStart', 1.5)], 'INVALID_LAG'],
@@ -132,8 +132,8 @@ describe('analyzeProjectStructure', () => {
       dependencies: [link('a', 'b'), link('b', 'a')],
     });
     expect(!result.ok && result.error).toEqual([
-      { code: 'DEPENDENCY_CYCLE', taskId: 'a' },
-      { code: 'DEPENDENCY_CYCLE', taskId: 'b' },
+      { code: 'DEPENDENCY_CYCLE', list: 'tasks', index: 0, taskId: 'a' },
+      { code: 'DEPENDENCY_CYCLE', list: 'tasks', index: 1, taskId: 'b' },
     ]);
   });
 
@@ -158,6 +158,24 @@ describe('analyzeProjectStructure', () => {
     expect(errorCodes(manyTasks)).toEqual(['TOO_MANY_TASKS']);
     const manyLinks = Array.from({ length: MAX_DEPENDENCIES + 1 }, () => link('x', 'y'));
     expect(errorCodes([], manyLinks)).toEqual(['TOO_MANY_DEPENDENCIES']);
+  });
+});
+
+describe('analyzeProjectStructure: dependency pairs', () => {
+  it('never mistakes a dangling dependency for a repeated pair', () => {
+    const result = analyzeProjectStructure({
+      tags: [],
+      tasks: [workTask('a'), workTask('b'), workTask('c')],
+      dependencies: [link('b', 'unknown'), link('a', 'c')],
+    });
+    expect(!result.ok && result.error).toEqual([
+      {
+        code: 'UNKNOWN_DEPENDENCY_TASK',
+        list: 'dependencies',
+        index: 0,
+        dependencyId: 'b-unknown',
+      },
+    ]);
   });
 });
 
@@ -186,6 +204,8 @@ describe('findNewDependencyErrors', () => {
       ...link('a', 'b', 'finishToFinish'),
       id: 'x',
     });
-    expect(errors).toEqual([{ code: 'DUPLICATE_DEPENDENCY', dependencyId: 'x' }]);
+    expect(errors).toEqual([
+      { code: 'DUPLICATE_DEPENDENCY', list: 'dependencies', index: 2, dependencyId: 'x' },
+    ]);
   });
 });

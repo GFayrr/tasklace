@@ -75,7 +75,7 @@ export function link(
   type: DependencyType = 'finishToStart',
   lagHours = 0,
 ): Dependency {
-  return { id: `${predecessorId}->${successorId}`, predecessorId, successorId, type, lagHours };
+  return { id: `${predecessorId}-${successorId}`, predecessorId, successorId, type, lagHours };
 }
 
 /** Builds a project starting on Monday 28 September 2026 at 09:00 with the default calendar. */
