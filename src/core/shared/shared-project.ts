@@ -32,8 +32,14 @@ export interface SharedRepair {
 export type MergeFailure =
   | { readonly kind: 'malformedUpdate'; readonly reason: string }
   | { readonly kind: 'incompleteUpdate' }
-  | { readonly kind: 'invalidProject'; readonly issues: readonly ValidationIssue[] }
-  | { readonly kind: 'repairDiverged'; readonly issues: readonly ValidationIssue[] };
+  | { readonly kind: 'invalidProject'; readonly issues: readonly ValidationIssue[] };
+
+interface TrialMerge {
+  readonly repairs: readonly SharedRepair[];
+  readonly mergedUpdate: Uint8Array;
+}
+
+const repairClientIds = new WeakMap<Y.Doc, number>();
 
 const MERGE_LIST_LIMITS: ListLimits = {
   tasks: NOMINAL_LIST_LIMITS.tasks * MERGE_LIST_LIMIT_FACTOR,
@@ -64,7 +70,7 @@ export function applySharedChange(
   return changed;
 }
 
-/** Merges an untrusted update into a shared document and repairs the result in one transaction, after checking on a copy that the update is readable, complete and yields a valid project. */
+/** Merges an untrusted update into a shared document together with its repairs, in one transaction, after checking on a copy that the update is readable, complete and yields a valid project. */
 export function mergeSharedUpdate(
   document: Y.Doc,
   update: Uint8Array,
@@ -73,11 +79,8 @@ export function mergeSharedUpdate(
   if (!trial.ok) {
     return trial;
   }
-  const merged = document.transact(() => {
-    Y.applyUpdate(document, update);
-    return repairSharedDocument(document);
-  }, REMOTE_ORIGIN);
-  return merged.ok ? merged : failure({ kind: 'repairDiverged', issues: merged.error });
+  Y.applyUpdate(document, trial.value.mergedUpdate, REMOTE_ORIGIN);
+  return success(trial.value.repairs);
 }
 
 /** Repairs the merged content of a shared document in place, or leaves it untouched when it cannot be made valid. */
@@ -113,11 +116,8 @@ export function repairSharedDocument(
   return success([...rounded.repairs, ...repaired.value.repairs]);
 }
 
-/** Merges an update into a throwaway copy of a document and repairs it there, turning any exception raised by untrusted bytes into a failure. */
-function tryUpdate(
-  document: Y.Doc,
-  update: Uint8Array,
-): Result<readonly SharedRepair[], MergeFailure> {
+/** Merges an update into a throwaway copy of a document and repairs it there under the document's repair identity, returning what the document is missing, and turning any exception raised by untrusted bytes into a failure. */
+function tryUpdate(document: Y.Doc, update: Uint8Array): Result<TrialMerge, MergeFailure> {
   const trial = new Y.Doc();
   try {
     Y.applyUpdate(trial, Y.encodeStateAsUpdate(document));
@@ -125,12 +125,31 @@ function tryUpdate(
     if (trial.store.pendingStructs !== null || trial.store.pendingDs !== null) {
       return failure({ kind: 'incompleteUpdate' });
     }
+    trial.clientID = repairClientId(document);
     const repairs = repairSharedDocument(trial);
-    return repairs.ok ? repairs : failure({ kind: 'invalidProject', issues: repairs.error });
+    if (!repairs.ok) {
+      return failure({ kind: 'invalidProject', issues: repairs.error });
+    }
+    const mergedUpdate = Y.encodeStateAsUpdate(trial, Y.encodeStateVector(document));
+    return success({ repairs: repairs.value, mergedUpdate });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return failure({ kind: 'malformedUpdate', reason });
   }
+}
+
+/** Returns the identity under which a document writes its merge repairs, stable for the document and different from its own, so that repairs can travel inside a received update. */
+function repairClientId(document: Y.Doc): number {
+  const known = repairClientIds.get(document);
+  if (known !== undefined && known !== document.clientID) {
+    return known;
+  }
+  let candidate = new Y.Doc().clientID;
+  while (candidate === document.clientID) {
+    candidate = new Y.Doc().clientID;
+  }
+  repairClientIds.set(document, candidate);
+  return candidate;
 }
 
 /** Rounds to 0 or 100 the progress of every milestone whose progress is partial. */

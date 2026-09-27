@@ -512,6 +512,35 @@ describe('merging interrupted and concurrent updates', () => {
     expect(projectOf(right).name).toBe('Renamed');
   });
 
+  it('keeps its own identity and a bounded number of clients across merges that need repairs', () => {
+    const [left, right] = createPeers(BASE_PROJECT, 2);
+    if (left === undefined || right === undefined) {
+      throw new Error('Missing participant');
+    }
+    const identities = [left.clientID, right.clientID];
+    for (let round = 0; round < 5; round += 1) {
+      const [first, second] = [`x${String(round)}`, `y${String(round)}`];
+      change(left, (current) => ({
+        ...current,
+        tasks: [...current.tasks, workTask(first), workTask(second)],
+      }));
+      syncAll([left, right]);
+      change(left, (current) => ({
+        ...current,
+        dependencies: [...current.dependencies, link(first, second)],
+      }));
+      change(right, (current) => ({
+        ...current,
+        dependencies: [...current.dependencies, link(second, first)],
+      }));
+      expect(sync(left, right).length).toBeGreaterThan(0);
+      syncAll([left, right]);
+    }
+    expect([left.clientID, right.clientID]).toEqual(identities);
+    expect(Y.encodeStateVector(right).length).toBeLessThan(40);
+    expect(readSharedData(left)).toEqual(readSharedData(right));
+  });
+
   it('never lets observers see the merged content before it is repaired', () => {
     const [left, right] = createPeers(BASE_PROJECT, 2);
     if (left === undefined || right === undefined) {
