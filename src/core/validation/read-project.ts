@@ -21,6 +21,8 @@ import {
 } from '../limits';
 import type { DayRange, TimeRange, WorkingCalendar } from '../model/calendar';
 import type {
+  Baseline,
+  BaselineEntry,
   Dependency,
   DependencyType,
   Milestone,
@@ -84,12 +86,21 @@ export const STORED_VALUE_CODEC: ValueCodec = {
   },
 };
 
-const PROJECT_KEYS = ['name', 'startDate', 'calendar', 'options', 'tags', 'tasks', 'dependencies'];
+const PROJECT_KEYS = [
+  'name',
+  'startDate',
+  'calendar',
+  'options',
+  'tags',
+  'tasks',
+  'dependencies',
+  'baseline',
+];
 const CALENDAR_KEYS = ['workingWeekdays', 'workingTimeRanges', 'nonWorkingPeriods'];
 const TIME_RANGE_KEYS = ['startHour', 'endHour'];
 const DAY_RANGE_KEYS = ['firstDay', 'lastDay'];
 const OPTION_KEYS = ['criticalPathEnabled', 'dateConstraintsEnabled', 'alwaysShowPatterns'];
-const TAG_KEYS = ['id', 'name', 'color', 'representsPersonOrTeam'];
+export const TAG_KEYS = ['id', 'name', 'color', 'representsPersonOrTeam'];
 const SUMMARY_KEYS = ['id', 'kind', 'name', 'parentId', 'sortKey'];
 const MILESTONE_KEYS = [
   ...SUMMARY_KEYS,
@@ -99,9 +110,30 @@ const MILESTONE_KEYS = [
   'mustFinishOn',
   'deadline',
 ];
-const WORK_TASK_KEYS = [...MILESTONE_KEYS, 'segments', 'hoursPerDay', 'dailyStartHour'];
+export const WORK_TASK_KEYS = [...MILESTONE_KEYS, 'segments', 'hoursPerDay', 'dailyStartHour'];
+
+export interface ListLimits {
+  readonly tasks: number;
+  readonly dependencies: number;
+  readonly tags: number;
+}
+
+export const NOMINAL_LIST_LIMITS: ListLimits = {
+  tasks: MAX_TASKS,
+  dependencies: MAX_DEPENDENCIES,
+  tags: MAX_TAGS,
+};
+
+export const TASK_KEYS_BY_KIND: Readonly<Record<Task['kind'], readonly string[]>> = {
+  summary: SUMMARY_KEYS,
+  milestone: MILESTONE_KEYS,
+  task: WORK_TASK_KEYS,
+};
 const SEGMENT_KEYS = ['durationHours', 'gapDaysBefore'];
-const DEPENDENCY_KEYS = ['id', 'predecessorId', 'successorId', 'type', 'lagHours'];
+const BASELINE_KEYS = ['takenAt', 'entries'];
+const BASELINE_ENTRY_KEYS = ['taskId', 'start', 'end', 'durationHours'];
+const MAX_BASELINE_DURATION_HOURS = END_PROJECT_HOUR - MIN_PROJECT_HOUR;
+export const DEPENDENCY_KEYS = ['id', 'predecessorId', 'successorId', 'type', 'lagHours'];
 const TASK_KINDS = ['task', 'milestone', 'summary'] as const;
 const DEPENDENCY_TYPES: readonly DependencyType[] = [
   'finishToStart',
@@ -135,7 +167,12 @@ export function readProject(
   rootPath = '',
 ): Result<Project, readonly ValidationIssue[]> {
   const issues = createIssueList();
-  const project = readProjectFields({ value: input, path: rootPath }, issues, codec);
+  const project = readProjectFields(
+    { value: input, path: rootPath },
+    issues,
+    codec,
+    NOMINAL_LIST_LIMITS,
+  );
   if (project === undefined) {
     return failure(issues.issues);
   }
@@ -143,11 +180,25 @@ export function readProject(
   return issues.issues.length > 0 ? failure(issues.issues) : success(project);
 }
 
+/** Validates every field of untrusted data, with given list limits, without checking the calendar, the daily patterns or the structure. */
+export function readProjectShape(
+  input: unknown,
+  codec: ValueCodec,
+  limits: ListLimits,
+): Result<Project, readonly ValidationIssue[]> {
+  const issues = createIssueList();
+  const project = readProjectFields({ value: input, path: '' }, issues, codec, limits);
+  return project === undefined || issues.issues.length > 0
+    ? failure(issues.issues)
+    : success(project);
+}
+
 /** Reads every field of a project, returning nothing when one of them is invalid. */
 function readProjectFields(
   field: Field,
   issues: IssueList,
   codec: ValueCodec,
+  limits: ListLimits,
 ): Project | undefined {
   const record = readRecord(field, issues, PROJECT_KEYS);
   if (record === undefined) {
@@ -159,9 +210,14 @@ function readProjectFields(
     startDate: codec.readInstant(child('startDate'), issues),
     calendar: readCalendar(child('calendar'), issues, codec),
     options: readOptions(child('options'), issues),
-    tags: readList(child('tags'), issues, MAX_TAGS, readTag),
-    tasks: readList(child('tasks'), issues, MAX_TASKS, (item, list) => readTask(item, list, codec)),
-    dependencies: readList(child('dependencies'), issues, MAX_DEPENDENCIES, readDependency),
+    tags: readList(child('tags'), issues, limits.tags, readTag),
+    tasks: readList(child('tasks'), issues, limits.tasks, (item, list) =>
+      readTask(item, list, codec),
+    ),
+    dependencies: readList(child('dependencies'), issues, limits.dependencies, readDependency),
+    baseline: readNullable(child('baseline'), issues, (item, list) =>
+      readBaseline(item, list, codec),
+    ),
   };
   return allDefined(project) ? project : undefined;
 }
@@ -427,6 +483,64 @@ function readDependency(field: Field, issues: IssueList): Dependency | undefined
     lagHours: readInteger(child('lagHours'), issues, -MAX_LAG_HOURS, MAX_LAG_HOURS),
   };
   return allDefined(dependency) ? dependency : undefined;
+}
+
+/** Reads a baseline plan: when it was taken and the frozen dates of each task, at most once per task. */
+function readBaseline(field: Field, issues: IssueList, codec: ValueCodec): Baseline | undefined {
+  const record = readRecord(field, issues, BASELINE_KEYS);
+  if (record === undefined) {
+    return undefined;
+  }
+  const entriesField = childField(record, 'entries', field.path);
+  const baseline = {
+    takenAt: codec.readInstant(childField(record, 'takenAt', field.path), issues),
+    entries: readList(entriesField, issues, MAX_TASKS, (item, list) =>
+      readBaselineEntry(item, list, codec),
+    ),
+  };
+  if (baseline.entries !== undefined) {
+    reportDuplicateBaselineTasks(baseline.entries, entriesField.path, issues);
+  }
+  return allDefined(baseline) ? baseline : undefined;
+}
+
+/** Reads the frozen start, end and duration of one task, the end never coming before the start. */
+function readBaselineEntry(
+  field: Field,
+  issues: IssueList,
+  codec: ValueCodec,
+): BaselineEntry | undefined {
+  const record = readRecord(field, issues, BASELINE_ENTRY_KEYS);
+  if (record === undefined) {
+    return undefined;
+  }
+  const child = (key: string): Field => childField(record, key, field.path);
+  const entry = {
+    taskId: readIdentifier(child('taskId'), issues),
+    start: codec.readInstant(child('start'), issues),
+    end: codec.readInstant(child('end'), issues),
+    durationHours: readInteger(child('durationHours'), issues, 0, MAX_BASELINE_DURATION_HOURS),
+  };
+  if (entry.start !== undefined && entry.end !== undefined && entry.end < entry.start) {
+    issues.add(`${field.path}.end`, 'OUT_OF_RANGE');
+    return undefined;
+  }
+  return allDefined(entry) ? entry : undefined;
+}
+
+/** Reports every baseline entry whose task already has an earlier entry. */
+function reportDuplicateBaselineTasks(
+  entries: readonly BaselineEntry[],
+  path: string,
+  issues: IssueList,
+): void {
+  const seen = new Set<string>();
+  entries.forEach((entry, index) => {
+    if (seen.has(entry.taskId)) {
+      issues.add(`${path}[${String(index)}]`, 'DUPLICATE_ENTRY');
+    }
+    seen.add(entry.taskId);
+  });
 }
 
 /** Reads every item of a list, holes included, returning nothing when one of them is invalid. */

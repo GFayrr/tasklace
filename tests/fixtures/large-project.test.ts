@@ -5,7 +5,7 @@ import { LARGE_PROJECT_SEED, buildLargeProject } from './large-project';
 import { createRandom } from './random';
 
 const LARGE_PROJECT_FINGERPRINT =
-  '431a997ec6b4f3253e7fcf2f0d704917d9922de928879d5b92b035f38cd330a8';
+  '6293639069451349d290768e94b6a820845c94e611e22092fd28a430baa4eb29';
 
 /** Returns the SHA-256 fingerprint of a value serialized as JSON. */
 function fingerprint(value: unknown): string {
