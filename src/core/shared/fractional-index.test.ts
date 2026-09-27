@@ -30,7 +30,6 @@ describe('keyBetween', () => {
   it('refuses keys in the wrong order, equal keys and malformed keys', () => {
     expect(keyBetween('b', 'a')).toEqual({ ok: false, error: 'NO_SORT_KEY_BETWEEN' });
     expect(keyBetween('a', 'a')).toEqual({ ok: false, error: 'NO_SORT_KEY_BETWEEN' });
-    expect(keyBetween('a0', null)).toEqual({ ok: false, error: 'INVALID_SORT_KEY' });
     expect(keyBetween(null, '')).toEqual({ ok: false, error: 'INVALID_SORT_KEY' });
     expect(keyBetween('a-b', null)).toEqual({ ok: false, error: 'INVALID_SORT_KEY' });
   });
@@ -80,6 +79,33 @@ describe('keyBetween', () => {
           expect(keys).toEqual([...keys].sort());
           expect(new Set(keys).size).toBe(keys.length);
         }),
+      );
+    },
+  );
+});
+
+describe('keyBetween with trailing zeros', () => {
+  it('ignores trailing zero digits, which do not change the place of a key', () => {
+    const key = unwrap(keyBetween('a0', 'b00'));
+    expect(key > 'a0' && key < 'b00').toBe(true);
+    expect(keyBetween('a', 'a00')).toEqual({ ok: false, error: 'NO_SORT_KEY_BETWEEN' });
+    expect(keyBetween(null, '000')).toEqual({ ok: false, error: 'NO_SORT_KEY_BETWEEN' });
+    expect(unwrap(keyBetween('00', null)) > '00').toBe(true);
+  });
+
+  it(
+    'finds a key around any key accepted by the validation',
+    { timeout: PROPERTY_TEST_TIMEOUT_MS },
+    () => {
+      fc.assert(
+        fc.property(
+          fc.stringMatching(/^[0-9A-Za-z]{1,8}$/).filter((key) => /[1-9A-Za-z]/.test(key)),
+          (key) => {
+            const after = unwrap(keyBetween(key, null));
+            const before = unwrap(keyBetween(null, key));
+            expect(after > key && before < key).toBe(true);
+          },
+        ),
       );
     },
   );

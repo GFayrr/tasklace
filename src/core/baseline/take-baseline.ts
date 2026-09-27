@@ -4,12 +4,19 @@ import type { Baseline, BaselineEntry, Project, Task, TaskId } from '../model/pr
 import type { Schedule } from '../scheduling/schedule-project';
 import { isProjectHour, type ProjectHour } from '../time';
 
-export interface TakenBaseline {
-  readonly baseline: Baseline;
-  readonly skippedTaskIds: readonly TaskId[];
+export type SkipReason = 'NO_DATES' | 'OUT_OF_PERIOD';
+
+export interface SkippedTask {
+  readonly taskId: TaskId;
+  readonly reason: SkipReason;
 }
 
-/** Freezes the scheduled start, end and duration of every task, skipping those whose dates cannot be stored. */
+export interface TakenBaseline {
+  readonly baseline: Baseline;
+  readonly skipped: readonly SkippedTask[];
+}
+
+/** Freezes the scheduled start, end and duration of every task, listing with a reason those that cannot be frozen. */
 export function takeBaseline(
   project: Pick<Project, 'tasks'>,
   schedule: Pick<Schedule, 'placements' | 'summaries'>,
@@ -17,36 +24,37 @@ export function takeBaseline(
   takenAt: ProjectHour,
 ): TakenBaseline {
   const entries: BaselineEntry[] = [];
-  const skippedTaskIds: TaskId[] = [];
+  const skipped: SkippedTask[] = [];
   for (const task of project.tasks) {
     const entry = freezeTask(task, schedule, calendar);
-    if (entry === null) {
-      skippedTaskIds.push(task.id);
+    if (typeof entry === 'string') {
+      skipped.push({ taskId: task.id, reason: entry });
     } else {
       entries.push(entry);
     }
   }
-  return { baseline: { takenAt, entries }, skippedTaskIds };
+  return { baseline: { takenAt, entries }, skipped };
 }
 
-/** Returns the frozen dates of one task, or null when it has no dates or they fall outside the supported period. */
+/** Returns the frozen dates and duration of one task, or the reason why they cannot be frozen. */
 function freezeTask(
   task: Task,
   schedule: Pick<Schedule, 'placements' | 'summaries'>,
   calendar: CompiledCalendar,
-): BaselineEntry | null {
+): BaselineEntry | SkipReason {
   const dates =
     task.kind === 'summary' ? schedule.summaries.get(task.id) : schedule.placements.get(task.id);
   const start = dates?.start ?? null;
   const end = dates?.end ?? null;
-  if (start === null || end === null || !isProjectHour(start) || !isProjectHour(end)) {
-    return null;
+  if (start === null || end === null) {
+    return 'NO_DATES';
   }
-  const durationHours = frozenDuration(task, start, end, calendar);
-  return durationHours === null ? null : { taskId: task.id, start, end, durationHours };
+  const durationHours =
+    isProjectHour(start) && isProjectHour(end) ? frozenDuration(task, start, end, calendar) : null;
+  return durationHours === null ? 'OUT_OF_PERIOD' : { taskId: task.id, start, end, durationHours };
 }
 
-/** Returns the duration of a task: its blocks for a work task, zero for a milestone, working hours for a summary. */
+/** Returns the duration of a task: its blocks for a work task, zero for a milestone, working hours for a summary, or null when those hours cannot be counted. */
 function frozenDuration(
   task: Task,
   start: ProjectHour,

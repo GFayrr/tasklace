@@ -5,11 +5,11 @@ const DIGITS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 const BASE = DIGITS.length;
 const ZERO_DIGIT = DIGITS.charAt(0);
 const MIDPOINT_DIVISOR = 2;
-const KEY_PATTERN = /^[0-9A-Za-z]*[1-9A-Za-z]$/;
+const KEY_PATTERN = /^[0-9A-Za-z]+$/;
 
 export type SortKeyErrorCode = 'INVALID_SORT_KEY' | 'NO_SORT_KEY_BETWEEN';
 
-/** Returns a sort key strictly between two keys, either of which may be missing, or explains why none fits. */
+/** Returns a sort key strictly between two keys, either of which may be missing, or explains why none fits, trailing zero digits being ignored as they do not change the place of a key. */
 export function keyBetween(
   before: string | null,
   after: string | null,
@@ -17,14 +17,16 @@ export function keyBetween(
   if (!isUsableKey(before) || !isUsableKey(after)) {
     return failure('INVALID_SORT_KEY');
   }
-  if (before !== null && after !== null && before >= after) {
+  const low = before === null ? '' : stripTrailingZeros(before);
+  const high = after === null ? null : stripTrailingZeros(after);
+  if (high === '' || (high !== null && low >= high)) {
     return failure('NO_SORT_KEY_BETWEEN');
   }
-  const key = midpoint(before ?? '', after);
+  const key = midpoint(low, high);
   return key.length > MAX_SORT_KEY_LENGTH ? failure('NO_SORT_KEY_BETWEEN') : success(key);
 }
 
-/** Returns a given number of short, evenly spaced and increasing sort keys, used to renumber siblings. */
+/** Returns a given number of short, evenly spaced and increasing sort keys. */
 export function spreadKeys(count: number): string[] {
   let width = 1;
   while (BASE ** width <= count + 1) {
@@ -36,7 +38,7 @@ export function spreadKeys(count: number): string[] {
   );
 }
 
-/** Tells whether a key is missing or made of base 62 digits without a trailing zero. */
+/** Tells whether a key is missing or made of base 62 digits. */
 function isUsableKey(key: string | null): boolean {
   return key === null || KEY_PATTERN.test(key);
 }
@@ -82,7 +84,7 @@ function toDigits(value: number, width: number): string {
 /** Removes the trailing zero digits of a key, which do not change its place in the order. */
 function stripTrailingZeros(key: string): string {
   let end = key.length;
-  while (end > 1 && key.charAt(end - 1) === ZERO_DIGIT) {
+  while (end > 0 && key.charAt(end - 1) === ZERO_DIGIT) {
     end -= 1;
   }
   return key.slice(0, end);

@@ -26,15 +26,15 @@ Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit
 
 ### 4b. Shared Yjs model and baseline plan
 
-- Two-way mapping between `Project` and the Yjs document (tasks, dependencies, tags, calendar, options), with changes grouped in transactions.
+- Two-way mapping between `Project` and the Yjs document (name, start date, calendar, options, baseline, tasks, dependencies, tags), with changes grouped in transactions.
 - Task order by hand-written fractional indices, so that two simultaneous insertions at the same place never contradict each other.
-- Deterministic repair of merged data that became invalid, run as soon as updates are merged and before anything is saved; running it again changes nothing, and the user is informed:
+- Deterministic repair of merged data that became invalid, run as soon as updates are merged and before anything is saved; running it again changes nothing, and the user is informed. For example:
   - a task pointing at a deleted tag loses its tag;
   - in a dependency cycle, the dependency with the greatest identifier is removed;
   - in a hierarchy loop, the task of the loop with the smallest identifier is moved to the root.
 - Baseline plan: a single frozen snapshot per project, stored as one Yjs value with the time it was taken.
 - Property-based tests: random concurrent edits and merges always end in the same valid state for every participant.
-- An update that arrives before the one it depends on is held back, and an update that would leave an invalid project is refused, the document staying untouched.
+- Every received update is first tried on a copy: an update that arrives before the one it depends on is held back, and an update that is unreadable, breaks the document schema or would leave an invalid project is refused, the document staying untouched.
 - Adds the `yjs` dependency; `y-protocols` comes with the network protocol in step 7.
 
 ### 4c. `.tasklace` project file

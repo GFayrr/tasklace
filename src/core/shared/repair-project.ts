@@ -1,8 +1,15 @@
 import { compileCalendar, type CompiledCalendar } from '../calendar/compile-calendar';
 import { computeDailyWindow } from '../calendar/task-slots';
 import { compareStrings } from '../compare-strings';
-import { MAX_DEPENDENCIES, MAX_HIERARCHY_DEPTH, MAX_TAGS, MAX_TASKS } from '../limits';
+import {
+  MAX_DEPENDENCIES,
+  MAX_HIERARCHY_DEPTH,
+  MAX_MERGE_REPAIR_ROUNDS,
+  MAX_TAGS,
+  MAX_TASKS,
+} from '../limits';
 import type { Dependency, Project, Task, TaskId, WorkTask } from '../model/project';
+import { failure, success, type Result } from '../result';
 import { analyzeStructureWithinLimits } from '../scheduling/project-structure';
 
 export type RepairCode =
@@ -24,29 +31,65 @@ export interface RepairedProject {
   readonly repairs: readonly Repair[];
 }
 
-type RepairStep = (project: Project) => RepairedProject;
+interface RepairStepResult extends RepairedProject {
+  readonly rounds: number;
+}
+
+type RepairStep = (project: Project, remainingRounds: number) => RepairStepResult | null;
 
 const REPAIR_STEPS: readonly RepairStep[] = [
-  trimToLimits,
-  clearUnknownTags,
-  moveTasksUnderInvalidParents,
-  breakHierarchyLoops,
-  flattenTooDeepTasks,
-  removeInvalidDependencies,
-  removeDuplicateDependencies,
-  breakDependencyCycles,
-  fitDailyPatterns,
+  singleRound(trimToLimits),
+  singleRound(clearUnknownTags),
+  singleRound(moveTasksUnderInvalidParents),
+  (project, remaining) => repeatRepair(project, remaining, findLoopTask, moveOneToRoot),
+  (project, remaining) => repeatRepair(project, remaining, findTooDeepTask, moveOneToRoot),
+  singleRound(removeInvalidDependencies),
+  singleRound(removeDuplicateDependencies),
+  (project, remaining) =>
+    repeatRepair(project, remaining, findDependencyCycle, removeGreatestDependency),
+  singleRound(fitDailyPatterns),
 ];
 
-/** Turns a project whose fields are valid but whose merged content breaks a rule into a valid one, using only identifiers to decide. */
-export function repairProject(project: Project): RepairedProject {
-  return REPAIR_STEPS.reduce<RepairedProject>(
-    (current, step) => {
-      const next = step(current.project);
-      return { project: next.project, repairs: [...current.repairs, ...next.repairs] };
-    },
-    { project, repairs: [] },
-  );
+/** Turns a project whose fields are valid but whose merged content breaks a rule into a valid one, always making the same choices whatever the order of the data, or refuses when too many rounds of repair are needed. */
+export function repairProject(project: Project): Result<RepairedProject, 'TOO_MANY_REPAIRS'> {
+  let current: RepairedProject = { project, repairs: [] };
+  let usedRounds = 0;
+  for (const step of REPAIR_STEPS) {
+    const next = step(current.project, MAX_MERGE_REPAIR_ROUNDS - usedRounds);
+    if (next === null) {
+      return failure('TOO_MANY_REPAIRS');
+    }
+    usedRounds += next.rounds;
+    current = { project: next.project, repairs: [...current.repairs, ...next.repairs] };
+  }
+  return success(current);
+}
+
+/** Wraps a repair done in one pass so that it takes no round of the repair budget. */
+function singleRound(repair: (project: Project) => RepairedProject): RepairStep {
+  return (project) => ({ ...repair(project), rounds: 0 });
+}
+
+/** Repeats a repair while a problem is found, one round per problem, or returns null when the rounds run out. */
+function repeatRepair<T>(
+  project: Project,
+  remainingRounds: number,
+  findProblem: (current: Project) => T | null,
+  fixProblem: (current: Project, problem: T) => RepairedProject,
+): RepairStepResult | null {
+  const repairs: Repair[] = [];
+  let current = project;
+  let rounds = 0;
+  for (let problem = findProblem(current); problem !== null; problem = findProblem(current)) {
+    if (rounds >= remainingRounds) {
+      return null;
+    }
+    const fixed = fixProblem(current, problem);
+    repairs.push(...fixed.repairs);
+    current = fixed.project;
+    rounds += 1;
+  }
+  return { project: current, repairs, rounds };
 }
 
 /** Keeps the tasks, dependencies and tags with the smallest identifiers when a list exceeds its limit. */
@@ -57,9 +100,9 @@ function trimToLimits(project: Project): RepairedProject {
   return {
     project: { ...project, tasks: tasks.kept, dependencies: dependencies.kept, tags: tags.kept },
     repairs: [
-      ...tasks.removedIds.map((id) => ({ code: 'TASK_REMOVED' as const, id })),
-      ...dependencies.removedIds.map((id) => ({ code: 'DEPENDENCY_REMOVED' as const, id })),
-      ...tags.removedIds.map((id) => ({ code: 'TAG_REMOVED' as const, id })),
+      ...sortedRepairs('TASK_REMOVED', new Set(tasks.removedIds)),
+      ...sortedRepairs('DEPENDENCY_REMOVED', new Set(dependencies.removedIds)),
+      ...sortedRepairs('TAG_REMOVED', new Set(tags.removedIds)),
     ],
   };
 }
@@ -79,17 +122,15 @@ function keepSmallestIds<T extends { readonly id: string }>(
 /** Removes the tag of every task that points at a tag that no longer exists. */
 function clearUnknownTags(project: Project): RepairedProject {
   const tagIds = new Set(project.tags.map((tag) => tag.id));
-  const cleared = project.tasks.filter(
-    (task) => task.kind !== 'summary' && task.tagId !== null && !tagIds.has(task.tagId),
-  );
-  const clearedIds = new Set(cleared.map((task) => task.id));
-  const tasks = project.tasks.map((task) =>
-    clearedIds.has(task.id) && task.kind !== 'summary' ? { ...task, tagId: null } : task,
-  );
-  return {
-    project: { ...project, tasks },
-    repairs: sortedRepairs('TAG_CLEARED', clearedIds),
-  };
+  const clearedIds = new Set<TaskId>();
+  const tasks = project.tasks.map((task): Task => {
+    if (task.kind === 'summary' || task.tagId === null || tagIds.has(task.tagId)) {
+      return task;
+    }
+    clearedIds.add(task.id);
+    return { ...task, tagId: null };
+  });
+  return { project: { ...project, tasks }, repairs: sortedRepairs('TAG_CLEARED', clearedIds) };
 }
 
 /** Moves to the root every task whose parent no longer exists or is no longer a summary. */
@@ -101,19 +142,6 @@ function moveTasksUnderInvalidParents(project: Project): RepairedProject {
       .map((task) => task.id),
   );
   return moveToRoot(project, movedIds);
-}
-
-/** Moves to the root, loop after loop, the task with the smallest identifier of each loop in the task tree. */
-function breakHierarchyLoops(project: Project): RepairedProject {
-  const repairs: RepairedProject[] = [];
-  let current = project;
-  for (let loopTaskId = findLoopTask(current); loopTaskId !== null;) {
-    const moved = moveToRoot(current, new Set([loopTaskId]));
-    repairs.push(moved);
-    current = moved.project;
-    loopTaskId = findLoopTask(current);
-  }
-  return { project: current, repairs: repairs.flatMap((step) => step.repairs) };
 }
 
 /** Returns the smallest identifier of the first loop found in the task tree, visiting tasks by identifier, or null. */
@@ -129,54 +157,59 @@ function findLoopTask(project: Project): TaskId | null {
   return null;
 }
 
-/** Follows the parents of a task and returns the tasks of the loop it runs into, or nothing when it reaches the root. */
+/** Follows the parents of a task and returns the tasks of the loop it runs into, or nothing when it reaches the root or an already explored task. */
 function walkToLoop(
   startId: TaskId,
   parentById: ReadonlyMap<TaskId, TaskId | null>,
   finished: Set<TaskId>,
 ): TaskId[] {
   const path: TaskId[] = [];
+  const onPath = new Set<TaskId>();
   let id: TaskId | null = startId;
-  while (id !== null && !finished.has(id) && !path.includes(id)) {
+  while (id !== null && !finished.has(id) && !onPath.has(id)) {
     path.push(id);
+    onPath.add(id);
     id = parentById.get(id) ?? null;
   }
   path.forEach((visited) => finished.add(visited));
-  return id !== null && path.includes(id) ? path.slice(path.indexOf(id)) : [];
-}
-
-/** Moves to the root, one at a time, the too deep task with the smallest identifier until the tree fits the depth limit. */
-function flattenTooDeepTasks(project: Project): RepairedProject {
-  const repairs: RepairedProject[] = [];
-  let current = project;
-  for (let deepTaskId = findTooDeepTask(current); deepTaskId !== null;) {
-    const moved = moveToRoot(current, new Set([deepTaskId]));
-    repairs.push(moved);
-    current = moved.project;
-    deepTaskId = findTooDeepTask(current);
-  }
-  return { project: current, repairs: repairs.flatMap((step) => step.repairs) };
+  return id !== null && onPath.has(id) ? path.slice(path.indexOf(id)) : [];
 }
 
 /** Returns the smallest identifier among the tasks nested deeper than the limit, or null, in a tree without loops. */
 function findTooDeepTask(project: Project): TaskId | null {
   const parentById = new Map(project.tasks.map((task) => [task.id, task.parentId]));
-  const depthById = new Map<TaskId, number>();
-  const depthOf = (id: TaskId): number => {
-    const known = depthById.get(id);
-    if (known !== undefined) {
-      return known;
-    }
-    const parentId = parentById.get(id) ?? null;
-    const depth = parentId === null ? 1 : depthOf(parentId) + 1;
-    depthById.set(id, depth);
-    return depth;
-  };
+  const depthById = computeDepths(parentById);
   const tooDeep = project.tasks
     .map((task) => task.id)
-    .filter((id) => depthOf(id) > MAX_HIERARCHY_DEPTH)
+    .filter((id) => (depthById.get(id) ?? 0) > MAX_HIERARCHY_DEPTH)
     .sort(compareStrings);
   return tooDeep[0] ?? null;
+}
+
+/** Computes the depth of every task, a root task having depth 1, without recursion so that long chains stay safe. */
+function computeDepths(parentById: ReadonlyMap<TaskId, TaskId | null>): Map<TaskId, number> {
+  const depthById = new Map<TaskId, number>();
+  for (const startId of parentById.keys()) {
+    const path: TaskId[] = [];
+    const onPath = new Set<TaskId>();
+    let id: TaskId | null = startId;
+    while (id !== null && !depthById.has(id) && !onPath.has(id)) {
+      path.push(id);
+      onPath.add(id);
+      id = parentById.get(id) ?? null;
+    }
+    let depth = id === null ? 0 : (depthById.get(id) ?? 0);
+    for (const visited of path.reverse()) {
+      depth += 1;
+      depthById.set(visited, depth);
+    }
+  }
+  return depthById;
+}
+
+/** Moves one task to the root of the task tree. */
+function moveOneToRoot(project: Project, id: TaskId): RepairedProject {
+  return moveToRoot(project, new Set([id]));
 }
 
 /** Moves a set of tasks to the root of the task tree and reports each move. */
@@ -205,46 +238,27 @@ function removeInvalidDependencies(project: Project): RepairedProject {
 
 /** Keeps only the dependency with the smallest identifier between the same two tasks. */
 function removeDuplicateDependencies(project: Project): RepairedProject {
-  const keptByPair = new Map<string, Dependency>();
+  const keptPairs = new Set<string>();
   const byId = [...project.dependencies].sort((left, right) => compareStrings(left.id, right.id));
   const removedIds = new Set<string>();
   for (const dependency of byId) {
     const pair = JSON.stringify([dependency.predecessorId, dependency.successorId]);
-    if (keptByPair.has(pair)) {
+    if (keptPairs.has(pair)) {
       removedIds.add(dependency.id);
-    } else {
-      keptByPair.set(pair, dependency);
     }
+    keptPairs.add(pair);
   }
   return removeDependencies(project, removedIds);
 }
 
-/** Removes, cycle after cycle, the dependency with the greatest identifier of each dependency cycle. */
-function breakDependencyCycles(project: Project): RepairedProject {
-  const repairs: RepairedProject[] = [];
-  let current = project;
-  for (let cycle = findDependencyCycle(current); cycle.length > 0;) {
-    const greatest = [...cycle].sort((left, right) => compareStrings(right.id, left.id))[0];
-    const removed = removeDependencies(
-      current,
-      new Set(greatest === undefined ? [] : [greatest.id]),
-    );
-    repairs.push(removed);
-    current = removed.project;
-    cycle = findDependencyCycle(current);
-  }
-  return { project: current, repairs: repairs.flatMap((step) => step.repairs) };
-}
-
-/** Returns the dependencies of one cycle, found by walking back from the blocked task with the smallest identifier, or nothing. */
-function findDependencyCycle(project: Project): Dependency[] {
+/** Returns the dependencies of one cycle, found by walking back from the blocked task with the smallest identifier, or null when no cycle is left. */
+function findDependencyCycle(project: Project): readonly [Dependency, ...Dependency[]] | null {
   const structure = analyzeStructureWithinLimits(project);
+  if (structure.ok) {
+    return null;
+  }
   const blocked = new Set(
-    structure.ok
-      ? []
-      : structure.error.flatMap((error) =>
-          error.code === 'DEPENDENCY_CYCLE' ? [error.taskId] : [],
-        ),
+    structure.error.flatMap((error) => (error.code === 'DEPENDENCY_CYCLE' ? [error.taskId] : [])),
   );
   const incoming = new Map<TaskId, Dependency>();
   const byId = [...project.dependencies].sort((left, right) => compareStrings(left.id, right.id));
@@ -254,11 +268,14 @@ function findDependencyCycle(project: Project): Dependency[] {
     }
   }
   const start = [...blocked].sort(compareStrings)[0];
-  return start === undefined ? [] : walkBackToCycle(start, incoming);
+  return start === undefined ? null : walkBackToCycle(start, incoming);
 }
 
-/** Follows one incoming dependency after another from a blocked task and returns those that close a cycle. */
-function walkBackToCycle(start: TaskId, incoming: ReadonlyMap<TaskId, Dependency>): Dependency[] {
+/** Follows one incoming dependency after another from a blocked task and returns the dependencies of the cycle it reaches, or null. */
+function walkBackToCycle(
+  start: TaskId,
+  incoming: ReadonlyMap<TaskId, Dependency>,
+): readonly [Dependency, ...Dependency[]] | null {
   const stepByTask = new Map<TaskId, number>();
   const path: Dependency[] = [];
   let taskId: TaskId | undefined = start;
@@ -270,7 +287,19 @@ function walkBackToCycle(start: TaskId, incoming: ReadonlyMap<TaskId, Dependency
     }
     taskId = dependency?.predecessorId;
   }
-  return taskId === undefined ? [] : path.slice(stepByTask.get(taskId));
+  const [first, ...rest] = taskId === undefined ? [] : path.slice(stepByTask.get(taskId));
+  return first === undefined ? null : [first, ...rest];
+}
+
+/** Removes the dependency with the greatest identifier of a cycle. */
+function removeGreatestDependency(
+  project: Project,
+  cycle: readonly [Dependency, ...Dependency[]],
+): RepairedProject {
+  const greatest = cycle.reduce((kept, dependency) =>
+    compareStrings(dependency.id, kept.id) > 0 ? dependency : kept,
+  );
+  return removeDependencies(project, new Set([greatest.id]));
 }
 
 /** Removes a set of dependencies and reports each removal. */
@@ -309,10 +338,13 @@ function fitDailyPattern(
   const reduced = tooManyHours ? { ...task, hoursPerDay: hoursPerWorkingDay } : task;
   const window = computeDailyWindow(calendar, reduced);
   const cleared = window.ok ? reduced : { ...reduced, dailyStartHour: null };
-  const repairs: Repair[] = [
-    ...(tooManyHours ? [{ code: 'HOURS_PER_DAY_REDUCED' as const, id: task.id }] : []),
-    ...(window.ok ? [] : [{ code: 'DAILY_START_HOUR_CLEARED' as const, id: task.id }]),
-  ];
+  const repairs: Repair[] = [];
+  if (tooManyHours) {
+    repairs.push({ code: 'HOURS_PER_DAY_REDUCED', id: task.id });
+  }
+  if (!window.ok) {
+    repairs.push({ code: 'DAILY_START_HOUR_CLEARED', id: task.id });
+  }
   return { task: cleared, repairs };
 }
 

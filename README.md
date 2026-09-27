@@ -55,13 +55,14 @@ What the core already supports:
 - Results that never depend on the order of the data, a prerequisite for real-time collaboration.
 - Complete validation of untrusted project data before anything is loaded, with each problem reported at its exact location.
 - JSON import and export: readable, versioned documents with dates in clear text.
+- A shared project model where concurrent edits always merge into the same valid project for everyone, and a frozen baseline plan.
 
 ## Roadmap
 
 - [x] Working-time calendar
 - [x] Scheduling engine: dependencies, summaries, split tasks, critical path
 - [x] Tags and person or team conflict detection
-- [ ] Project file format, validation, JSON and CSV import and export (in progress: validation and JSON are done)
+- [ ] Project file format, validation, JSON and CSV import and export (in progress: validation, JSON and the shared model are done)
 - [ ] Desktop application and user interface
 - [ ] PDF export
 - [ ] Real-time collaboration on the local network

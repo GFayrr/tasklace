@@ -21,7 +21,8 @@ export type ValueIssueCode =
   | 'TOO_MANY_ITEMS'
   | 'EMPTY_LIST'
   | 'TOO_MANY_ISSUES'
-  | 'DUPLICATE_ENTRY';
+  | 'DUPLICATE_ENTRY'
+  | 'TOO_MANY_REPAIRS';
 
 export type ValidationIssueCode =
   ValueIssueCode | CalendarErrorCode | DailyWindowErrorCode | StructureErrorCode;

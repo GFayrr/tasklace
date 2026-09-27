@@ -59,7 +59,7 @@ function sync(from: Y.Doc, to: Y.Doc): readonly SharedRepair[] {
   return merged.value;
 }
 
-/** Exchanges updates between every pair of participants until nothing changes any more. */
+/** Exchanges updates between every pair of participants for as many rounds as there are participants, plus one. */
 function syncAll(peers: readonly Y.Doc[]): void {
   const rounds = peers.length + 1;
   const pairs = peers.flatMap((left) =>
@@ -282,10 +282,8 @@ describe('merging untrusted updates', () => {
       throw new Error('Missing participant');
     }
     const before = Y.encodeStateAsUpdate(peer);
-    expect(mergeSharedUpdate(peer, new Uint8Array([255, 255, 255, 255, 1, 2, 3]))).toEqual({
-      ok: false,
-      error: { kind: 'malformedUpdate' },
-    });
+    const merged = mergeSharedUpdate(peer, new Uint8Array([255, 255, 255, 255, 1, 2, 3]));
+    expect(merged.ok || merged.error.kind).toBe('malformedUpdate');
     expect(Y.encodeStateAsUpdate(peer)).toEqual(before);
   });
 
@@ -339,6 +337,232 @@ describe('merging untrusted updates', () => {
   });
 });
 
+/** Returns the shared entry of a task in a participant's document, failing the test when it is missing. */
+function taskEntry(peer: Y.Doc, id: string): Y.Map<unknown> {
+  const entry = peer.getMap(TASKS_ROOT).get(id);
+  if (!(entry instanceof Y.Map)) {
+    throw new Error(`Missing task ${id}`);
+  }
+  return entry;
+}
+
+/** Tampers with a copy of a participant's document and returns the result of merging the tampered update into another participant. */
+function mergeTampered(from: Y.Doc, to: Y.Doc, tamper: (malicious: Y.Doc) => void) {
+  const malicious = new Y.Doc();
+  malicious.clientID = 99;
+  Y.applyUpdate(malicious, Y.encodeStateAsUpdate(from));
+  tamper(malicious);
+  const before = Y.encodeStateAsUpdate(to);
+  const merged = mergeSharedUpdate(to, Y.encodeStateAsUpdate(malicious, Y.encodeStateVector(to)));
+  return {
+    merged,
+    untouched: JSON.stringify(Y.encodeStateAsUpdate(to)) === JSON.stringify(before),
+  };
+}
+
+describe('merging updates that break the shared schema', () => {
+  it.each<[string, (malicious: Y.Doc) => void]>([
+    ['an unknown field on a task', (malicious) => taskEntry(malicious, 'a').set('junk', 'x')],
+    [
+      'an invalid hidden field',
+      (malicious) => taskEntry(malicious, 'm').set('segments', 'garbage'),
+    ],
+    [
+      'a missing hidden field',
+      (malicious) => {
+        taskEntry(malicious, 'm').delete('segments');
+      },
+    ],
+    ['an identifier inside an entry', (malicious) => taskEntry(malicious, 'a').set('id', 'b')],
+    ['an unknown project field', (malicious) => malicious.getMap('project').set('extra', 1)],
+    ['an unknown root', (malicious) => malicious.getMap('other').set('x', 1)],
+    [
+      'an entry that is not a map',
+      (malicious) => malicious.getMap(TASKS_ROOT).set('z', { kind: 'task' }),
+    ],
+    ['a nested shared type', (malicious) => taskEntry(malicious, 'a').set('name', new Y.Text('a'))],
+  ])('refuses %s and leaves the document untouched', (_label, tamper) => {
+    const [source, victim] = createPeers(BASE_PROJECT, 2);
+    if (source === undefined || victim === undefined) {
+      throw new Error('Missing participant');
+    }
+    const { merged, untouched } = mergeTampered(source, victim, tamper);
+    expect(merged.ok || merged.error.kind).toBe('invalidProject');
+    expect(untouched).toBe(true);
+  });
+
+  it('keeps accepting honest updates after refusing a tampered hidden field', () => {
+    const [honest, victim] = createPeers(BASE_PROJECT, 2);
+    if (honest === undefined || victim === undefined) {
+      throw new Error('Missing participant');
+    }
+    mergeTampered(honest, victim, (malicious) =>
+      taskEntry(malicious, 'm').set('segments', 'garbage'),
+    );
+    change(honest, (current) => mapTask(current, 'm', () => workTask('m')));
+    expect(sync(honest, victim)).toEqual([]);
+    syncAll([honest, victim]);
+    expect(readSharedData(honest)).toEqual(readSharedData(victim));
+  });
+});
+
+describe('merging within limits and budgets', () => {
+  it('trims tags added offline beyond the limit, keeping the smallest identifiers', () => {
+    const tags = (prefix: string): Tag[] =>
+      Array.from({ length: 150 }, (_unused, position) => ({
+        ...DESIGN,
+        id: `${prefix}${String(position).padStart(3, '0')}`,
+      }));
+    const [left, right] = createPeers(project([workTask('a')]), 2);
+    if (left === undefined || right === undefined) {
+      throw new Error('Missing participant');
+    }
+    change(left, (current) => ({ ...current, tags: tags('a') }));
+    change(right, (current) => ({ ...current, tags: tags('b') }));
+    const repairs = sync(right, left);
+    syncAll([left, right]);
+    expect(repairs).toHaveLength(100);
+    expect(repairs.every((repair) => repair.code === 'TAG_REMOVED' && repair.id >= 'b050')).toBe(
+      true,
+    );
+    expect(projectOf(left).tags).toHaveLength(200);
+    expect(readSharedData(left)).toEqual(readSharedData(right));
+  });
+
+  it(
+    'refuses without crashing a chain of tasks far deeper than the limit',
+    { timeout: PROPERTY_TEST_TIMEOUT_MS },
+    () => {
+      const [source, victim] = createPeers(project([workTask('a')]), 2);
+      if (source === undefined || victim === undefined) {
+        throw new Error('Missing participant');
+      }
+      const chainLength = 20_000;
+      const { merged, untouched } = mergeTampered(source, victim, (malicious) => {
+        malicious.transact(() => {
+          for (let position = 0; position < chainLength; position += 1) {
+            const entry = new Y.Map<unknown>();
+            malicious.getMap(TASKS_ROOT).set(`c${String(position)}`, entry);
+            const parentId = position === chainLength - 1 ? null : `c${String(position + 1)}`;
+            Object.entries({ ...workTask('c'), kind: 'summary', parentId })
+              .filter(([key]) => key !== 'id')
+              .forEach(([key, value]) => {
+                entry.set(key, value);
+              });
+          }
+        });
+      });
+      expect(merged.ok || merged.error).toEqual({
+        kind: 'invalidProject',
+        issues: [{ path: '', code: 'TOO_MANY_REPAIRS' }],
+      });
+      expect(untouched).toBe(true);
+    },
+  );
+
+  it('refuses a merge needing more rounds of repair than the budget', () => {
+    const pairs = Array.from({ length: 150 }, (_unused, position) =>
+      String(position).padStart(3, '0'),
+    );
+    const base = project(pairs.flatMap((id) => [summary(`p${id}`), summary(`q${id}`)]));
+    const result = (() => {
+      const [left, right] = createPeers(base, 2);
+      if (left === undefined || right === undefined) {
+        throw new Error('Missing participant');
+      }
+      change(left, (current) => ({
+        ...current,
+        tasks: current.tasks.map((task) =>
+          task.id.startsWith('p') ? { ...task, parentId: `q${task.id.slice(1)}` } : task,
+        ),
+      }));
+      change(right, (current) => ({
+        ...current,
+        tasks: current.tasks.map((task) =>
+          task.id.startsWith('q') ? { ...task, parentId: `p${task.id.slice(1)}` } : task,
+        ),
+      }));
+      return mergeSharedUpdate(right, Y.encodeStateAsUpdate(left, Y.encodeStateVector(right)));
+    })();
+    expect(result.ok || result.error).toEqual({
+      kind: 'invalidProject',
+      issues: [{ path: '', code: 'TOO_MANY_REPAIRS' }],
+    });
+  });
+});
+
+describe('merging interrupted and concurrent updates', () => {
+  it('refuses every truncated update, as after a disconnection, then accepts the complete one', () => {
+    const [left, right] = createPeers(BASE_PROJECT, 2);
+    if (left === undefined || right === undefined) {
+      throw new Error('Missing participant');
+    }
+    change(left, (current) => ({
+      ...current,
+      name: 'Renamed',
+      tasks: [...current.tasks, workTask('new')],
+    }));
+    const update = Y.encodeStateAsUpdate(left, Y.encodeStateVector(right));
+    const before = Y.encodeStateAsUpdate(right);
+    for (let length = 0; length < update.length; length += 1) {
+      expect(mergeSharedUpdate(right, update.slice(0, length)).ok).toBe(false);
+    }
+    expect(Y.encodeStateAsUpdate(right)).toEqual(before);
+    expect(mergeSharedUpdate(right, update).ok).toBe(true);
+    expect(projectOf(right).name).toBe('Renamed');
+  });
+
+  it('never lets observers see the merged content before it is repaired', () => {
+    const [left, right] = createPeers(BASE_PROJECT, 2);
+    if (left === undefined || right === undefined) {
+      throw new Error('Missing participant');
+    }
+    change(left, (current) => ({
+      ...current,
+      dependencies: [...current.dependencies, link('c', 'm')],
+    }));
+    change(right, (current) => ({
+      ...current,
+      dependencies: [...current.dependencies, link('m', 'c')],
+    }));
+    const seen: boolean[] = [];
+    right.on('update', () => {
+      seen.push(readSharedProject(right).ok);
+    });
+    sync(left, right);
+    expect(seen).toEqual([true]);
+  });
+
+  it('clears a daily start hour that no longer fits a working day shortened at the same time', () => {
+    const result = mergeConcurrent(
+      BASE_PROJECT,
+      (current) => ({
+        ...current,
+        calendar: { ...current.calendar, workingTimeRanges: MORNING_ONLY },
+      }),
+      (current) =>
+        mapTask(current, 'c', (task) => ({ ...task, hoursPerDay: 2, dailyStartHour: 14 })),
+    );
+    expect(result.repairs).toEqual([{ code: 'DAILY_START_HOUR_CLEARED', id: 'c' }]);
+  });
+
+  it.each([
+    [49, 0],
+    [50, 100],
+    [1, 0],
+    [99, 100],
+  ])('rounds a progress of %i to %i when the task became a milestone', (progress, rounded) => {
+    const result = mergeConcurrent(
+      BASE_PROJECT,
+      (current) => mapTask(current, 'c', () => milestone('c')),
+      (current) => mapTask(current, 'c', (task) => ({ ...task, progressPercent: progress })),
+    );
+    expect(result.project.tasks.find((task) => task.id === 'c')).toEqual(
+      milestone('c', { progressPercent: rounded }),
+    );
+  });
+});
+
 type Operation =
   | {
       readonly type: 'addLink';
@@ -365,7 +589,14 @@ type Operation =
 type Step =
   | { readonly type: 'edit'; readonly peer: number; readonly operation: Operation }
   | { readonly type: 'sync'; readonly from: number; readonly to: number }
-  | { readonly type: 'replay'; readonly update: number; readonly to: number };
+  | { readonly type: 'replay'; readonly update: number; readonly to: number }
+  | {
+      readonly type: 'tamper';
+      readonly from: number;
+      readonly to: number;
+      readonly key: string;
+      readonly value: unknown;
+    };
 
 const index = fc.nat({ max: 20 });
 const operationArbitrary: fc.Arbitrary<Operation> = fc.oneof(
@@ -409,7 +640,7 @@ const operationArbitrary: fc.Arbitrary<Operation> = fc.oneof(
   }),
 );
 
-/** Builds the steps of a random session between a number of participants. */
+/** Generates one random step of a session between a number of participants: an edit, a sync, a replayed update or a tampered update. */
 function stepArbitrary(peerCount: number): fc.Arbitrary<Step> {
   const peer = fc.nat({ max: peerCount - 1 });
   return fc.oneof(
@@ -429,10 +660,29 @@ function stepArbitrary(peerCount: number): fc.Arbitrary<Step> {
       weight: 1,
       arbitrary: fc.record({ type: fc.constant('replay' as const), update: fc.nat(), to: peer }),
     },
+    {
+      weight: 1,
+      arbitrary: fc.record({
+        type: fc.constant('tamper' as const),
+        from: peer,
+        to: peer,
+        key: fc.constantFrom(
+          'segments',
+          'progressPercent',
+          'name',
+          'junk',
+          'kind',
+          'hoursPerDay',
+          'tagId',
+          'parentId',
+        ),
+        value: fc.jsonValue(),
+      }),
+    },
   );
 }
 
-/** Converts a task to another kind, as the interface would, keeping its identifier, name, parent and order. */
+/** Converts a task to another kind, as the interface would, keeping its identifier, name, parent, order and tag. */
 function convert(task: Task, kind: Task['kind']): Task {
   const common = { name: task.name, parentId: task.parentId, sortKey: task.sortKey };
   const dated = task.kind === 'summary' ? {} : { tagId: task.tagId };
@@ -570,43 +820,87 @@ function deleteTask(current: Project, id: string | undefined): Project {
   };
 }
 
+interface SessionCounters {
+  acceptedEdits: number;
+  repairedMerges: number;
+}
+
+/** Plays one step of a random session, checking that syncs always succeed and that no document is ever left invalid. */
+function playStep(
+  peers: readonly Y.Doc[],
+  updates: Uint8Array[],
+  step: Step,
+  position: number,
+  counters: SessionCounters,
+): void {
+  if (step.type === 'edit') {
+    const peer = peers[step.peer];
+    const edited =
+      peer !== undefined &&
+      applySharedChange(peer, toChange(step.operation, `n${String(step.peer)}x${String(position)}`))
+        .ok;
+    counters.acceptedEdits += edited ? 1 : 0;
+    return;
+  }
+  const to = peers[step.to];
+  const from = step.type === 'replay' ? undefined : peers[step.from];
+  if (to === undefined) {
+    return;
+  }
+  const update = buildUpdate(step, from, to, updates, position);
+  if (update === undefined) {
+    return;
+  }
+  updates.push(update);
+  const merged = mergeSharedUpdate(to, update);
+  counters.repairedMerges += merged.ok && merged.value.length > 0 ? 1 : 0;
+  expect(step.type !== 'sync' || merged.ok).toBe(true);
+  expect(readSharedProject(to).ok).toBe(true);
+}
+
+/** Builds the update carried by a sync, a replay or a tampering step. */
+function buildUpdate(
+  step: Exclude<Step, { readonly type: 'edit' }>,
+  from: Y.Doc | undefined,
+  to: Y.Doc,
+  updates: readonly Uint8Array[],
+  position: number,
+): Uint8Array | undefined {
+  if (step.type === 'replay') {
+    return updates[step.update % Math.max(updates.length, 1)];
+  }
+  if (from === undefined || step.type === 'sync') {
+    return from === undefined ? undefined : Y.encodeStateAsUpdate(from, Y.encodeStateVector(to));
+  }
+  const malicious = new Y.Doc();
+  malicious.clientID = 1_000 + position;
+  Y.applyUpdate(malicious, Y.encodeStateAsUpdate(from));
+  const [firstId] = [...malicious.getMap(TASKS_ROOT).keys()].sort(compareStrings);
+  const entry = firstId === undefined ? undefined : malicious.getMap(TASKS_ROOT).get(firstId);
+  if (entry instanceof Y.Map) {
+    entry.set(step.key, step.value);
+  }
+  return Y.encodeStateAsUpdate(malicious, Y.encodeStateVector(to));
+}
+
 describe('collaboration properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
-  it('ends in the same valid project for every participant after random edits and merges', () => {
+  it('ends in the same valid project for every participant after random edits, merges and tampered updates', () => {
+    const counters: SessionCounters = { acceptedEdits: 0, repairedMerges: 0 };
     fc.assert(
       fc.property(
         fc
           .integer({ min: 2, max: 4 })
           .chain((peerCount) =>
-            fc.tuple(fc.constant(peerCount), fc.array(stepArbitrary(peerCount), { maxLength: 40 })),
+            fc.tuple(
+              fc.constant(peerCount),
+              fc.array(stepArbitrary(peerCount), { minLength: 15, maxLength: 40 }),
+            ),
           ),
         ([peerCount, steps]) => {
           const peers = createPeers(BASE_PROJECT, peerCount);
           const updates: Uint8Array[] = [];
           steps.forEach((step, position) => {
-            if (step.type === 'edit') {
-              const peer = peers[step.peer];
-              if (peer !== undefined) {
-                applySharedChange(
-                  peer,
-                  toChange(step.operation, `n${String(step.peer)}x${String(position)}`),
-                );
-              }
-              return;
-            }
-            const to = peers[step.to];
-            const from = step.type === 'sync' ? peers[step.from] : undefined;
-            const update =
-              from === undefined || to === undefined
-                ? updates[step.type === 'replay' ? step.update % Math.max(updates.length, 1) : 0]
-                : Y.encodeStateAsUpdate(from, Y.encodeStateVector(to));
-            if (to !== undefined && update !== undefined) {
-              updates.push(update);
-              const merged = mergeSharedUpdate(to, update);
-              if (step.type === 'sync') {
-                expect(merged.ok).toBe(true);
-              }
-              expect(merged.ok || merged.error.kind).not.toBe('malformedUpdate');
-            }
+            playStep(peers, updates, step, position, counters);
           });
           syncAll(peers);
           const [first, ...others] = peers.map((peer) => readSharedData(peer));
@@ -620,5 +914,7 @@ describe('collaboration properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () =
         },
       ),
     );
+    expect(counters.acceptedEdits).toBeGreaterThan(0);
+    expect(counters.repairedMerges).toBeGreaterThan(0);
   });
 });

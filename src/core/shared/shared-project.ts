@@ -1,23 +1,45 @@
 import * as Y from 'yjs';
+import { MERGE_LIST_LIMIT_FACTOR } from '../limits';
 import type { Project } from '../model/project';
 import { failure, success, type Result } from '../result';
-import { readProject, readProjectShape, STORED_VALUE_CODEC } from '../validation/read-project';
+import {
+  NOMINAL_LIST_LIMITS,
+  readProject,
+  readProjectShape,
+  STORED_VALUE_CODEC,
+  type ListLimits,
+} from '../validation/read-project';
 import type { ValidationIssue } from '../validation/validation-issues';
-import { repairProject, type Repair } from './repair-project';
-import { readSharedData, writeSharedProject, type SharedProjectData } from './shared-document';
+import { repairProject, type RepairCode } from './repair-project';
+import {
+  findSchemaIssues,
+  LOCAL_ORIGIN,
+  readSharedData,
+  readSharedTaskUnions,
+  REMOTE_ORIGIN,
+  REPAIR_ORIGIN,
+  writeSharedProject,
+  type SharedProjectData,
+} from './shared-document';
 
-export const LOCAL_ORIGIN = Symbol('local change');
-export const REMOTE_ORIGIN = Symbol('remote update');
-export const REPAIR_ORIGIN = Symbol('merge repair');
+export type SharedRepairCode = RepairCode | 'MILESTONE_PROGRESS_ROUNDED';
 
-export type SharedRepair =
-  Repair | { readonly code: 'MILESTONE_PROGRESS_ROUNDED'; readonly id: string };
+export interface SharedRepair {
+  readonly code: SharedRepairCode;
+  readonly id: string;
+}
 
 export type MergeFailure =
-  | { readonly kind: 'malformedUpdate' }
+  | { readonly kind: 'malformedUpdate'; readonly reason: string }
   | { readonly kind: 'incompleteUpdate' }
-  | { readonly kind: 'invalidProject'; readonly issues: readonly ValidationIssue[] };
+  | { readonly kind: 'invalidProject'; readonly issues: readonly ValidationIssue[] }
+  | { readonly kind: 'repairDiverged'; readonly issues: readonly ValidationIssue[] };
 
+const MERGE_LIST_LIMITS: ListLimits = {
+  tasks: NOMINAL_LIST_LIMITS.tasks * MERGE_LIST_LIMIT_FACTOR,
+  dependencies: NOMINAL_LIST_LIMITS.dependencies * MERGE_LIST_LIMIT_FACTOR,
+  tags: NOMINAL_LIST_LIMITS.tags * MERGE_LIST_LIMIT_FACTOR,
+};
 const FULL_PROGRESS = 100;
 const HALF_PROGRESS = 50;
 
@@ -42,57 +64,76 @@ export function applySharedChange(
   return changed;
 }
 
-/** Merges an untrusted update into a shared document, repairing the result, or leaves the document untouched when the update is malformed, still waits for earlier updates, or yields an invalid project. */
+/** Merges an untrusted update into a shared document and repairs the result in one transaction, after checking on a copy that the update is readable, complete and yields a valid project. */
 export function mergeSharedUpdate(
   document: Y.Doc,
   update: Uint8Array,
 ): Result<readonly SharedRepair[], MergeFailure> {
-  const trial = new Y.Doc();
-  Y.applyUpdate(trial, Y.encodeStateAsUpdate(document));
-  if (!applyUntrustedUpdate(trial, update)) {
-    return failure({ kind: 'malformedUpdate' });
+  const trial = tryUpdate(document, update);
+  if (!trial.ok) {
+    return trial;
   }
-  if (trial.store.pendingStructs !== null || trial.store.pendingDs !== null) {
-    return failure({ kind: 'incompleteUpdate' });
-  }
-  const trialRepairs = repairSharedDocument(trial);
-  if (!trialRepairs.ok) {
-    return failure({ kind: 'invalidProject', issues: trialRepairs.error });
-  }
-  Y.applyUpdate(document, update, REMOTE_ORIGIN);
-  const repairs = repairSharedDocument(document);
-  return repairs.ok ? repairs : failure({ kind: 'invalidProject', issues: repairs.error });
+  const merged = document.transact(() => {
+    Y.applyUpdate(document, update);
+    return repairSharedDocument(document);
+  }, REMOTE_ORIGIN);
+  return merged.ok ? merged : failure({ kind: 'repairDiverged', issues: merged.error });
 }
 
-/** Repairs the merged content of a shared document in place, or leaves it untouched when its fields are invalid. */
+/** Repairs the merged content of a shared document in place, or leaves it untouched when it cannot be made valid. */
 export function repairSharedDocument(
   document: Y.Doc,
 ): Result<readonly SharedRepair[], readonly ValidationIssue[]> {
+  const schemaIssues = findSchemaIssues(document);
+  if (schemaIssues.length > 0) {
+    return failure(schemaIssues);
+  }
+  const hiddenFields = readProjectShape(
+    readSharedTaskUnions(document),
+    STORED_VALUE_CODEC,
+    MERGE_LIST_LIMITS,
+  );
+  if (!hiddenFields.ok) {
+    return hiddenFields;
+  }
   const rounded = roundMilestoneProgress(readSharedData(document));
-  const shape = readProjectShape(rounded.data, STORED_VALUE_CODEC);
+  const shape = readProjectShape(rounded.data, STORED_VALUE_CODEC, MERGE_LIST_LIMITS);
   if (!shape.ok) {
     return shape;
   }
   const repaired = repairProject(shape.value);
-  const valid = readProject(repaired.project, STORED_VALUE_CODEC);
+  if (!repaired.ok) {
+    return failure([{ path: '', code: repaired.error }]);
+  }
+  const valid = readProject(repaired.value.project, STORED_VALUE_CODEC);
   if (!valid.ok) {
     return valid;
   }
   writeSharedProject(document, valid.value, REPAIR_ORIGIN);
-  return success([...rounded.repairs, ...repaired.repairs]);
+  return success([...rounded.repairs, ...repaired.value.repairs]);
 }
 
-/** Applies an update received from another participant, telling whether it could be decoded. */
-function applyUntrustedUpdate(document: Y.Doc, update: Uint8Array): boolean {
+/** Merges an update into a throwaway copy of a document and repairs it there, turning any exception raised by untrusted bytes into a failure. */
+function tryUpdate(
+  document: Y.Doc,
+  update: Uint8Array,
+): Result<readonly SharedRepair[], MergeFailure> {
+  const trial = new Y.Doc();
   try {
-    Y.applyUpdate(document, update);
-    return true;
-  } catch {
-    return false;
+    Y.applyUpdate(trial, Y.encodeStateAsUpdate(document));
+    Y.applyUpdate(trial, update);
+    if (trial.store.pendingStructs !== null || trial.store.pendingDs !== null) {
+      return failure({ kind: 'incompleteUpdate' });
+    }
+    const repairs = repairSharedDocument(trial);
+    return repairs.ok ? repairs : failure({ kind: 'invalidProject', issues: repairs.error });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return failure({ kind: 'malformedUpdate', reason });
   }
 }
 
-/** Rounds to 0 or 100 the progress of milestones that took the progress of a work task during a merge. */
+/** Rounds to 0 or 100 the progress of every milestone whose progress is partial. */
 function roundMilestoneProgress(data: SharedProjectData): {
   readonly data: SharedProjectData;
   readonly repairs: readonly SharedRepair[];

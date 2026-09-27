@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
-import { MAX_HIERARCHY_DEPTH, MAX_TAGS, MAX_TASKS } from '../limits';
+import { MAX_DEPENDENCIES, MAX_HIERARCHY_DEPTH, MAX_TAGS, MAX_TASKS } from '../limits';
 import type { Dependency, Project, Tag, Task } from '../model/project';
-import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
+import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { link, milestone, project, summary, workTask } from '../testing/project-builder';
 import { readProject, STORED_VALUE_CODEC } from '../validation/read-project';
 import { repairProject } from './repair-project';
@@ -14,13 +14,13 @@ const DESIGN: Tag = {
   representsPersonOrTeam: false,
 };
 
-/** Repairs a project built from tasks, dependencies and tags. */
+/** Repairs a project built from tasks, dependencies and optional project overrides, failing the test when the repair is refused. */
 function repair(
   tasks: readonly Task[],
   dependencies: readonly Dependency[] = [],
   overrides: Partial<Project> = {},
 ) {
-  return repairProject(project(tasks, dependencies, overrides));
+  return unwrap(repairProject(project(tasks, dependencies, overrides)));
 }
 
 /** Tells whether a project passes the complete validation. */
@@ -34,7 +34,7 @@ describe('repairProject', () => {
       [summary('s'), workTask('a', { parentId: 's' }), milestone('m')],
       [link('a', 'm')],
     );
-    expect(repairProject(valid)).toEqual({ project: valid, repairs: [] });
+    expect(repairProject(valid)).toEqual({ ok: true, value: { project: valid, repairs: [] } });
   });
 
   it('clears the tag of tasks pointing at a deleted tag', () => {
@@ -150,6 +150,35 @@ describe('repairProject', () => {
     expect(result.repairs).toEqual([]);
   });
 
+  it('repairs what the removal of tasks beyond the limit leaves behind', () => {
+    const fillers = Array.from({ length: MAX_TASKS }, (_unused, index) =>
+      milestone(`a${String(index).padStart(6, '0')}`),
+    );
+    const result = repair(
+      [...fillers, summary('z1'), workTask('z2', { parentId: 'z1' })],
+      [link('a000000', 'z2')],
+    );
+    expect(result.repairs).toEqual([
+      { code: 'TASK_REMOVED', id: 'z1' },
+      { code: 'TASK_REMOVED', id: 'z2' },
+      { code: 'DEPENDENCY_REMOVED', id: 'a000000-z2' },
+    ]);
+    expect(isValid(result.project)).toBe(true);
+  });
+
+  it('keeps the dependencies with the smallest identifiers beyond the limit', () => {
+    const dependencies = Array.from({ length: MAX_DEPENDENCIES + 1 }, (_unused, index) => ({
+      ...link('a', 'b'),
+      id: `d${String(index).padStart(6, '0')}`,
+    }));
+    const result = repair([workTask('a'), workTask('b')], dependencies);
+    expect(result.repairs[0]).toEqual({
+      code: 'DEPENDENCY_REMOVED',
+      id: `d${String(MAX_DEPENDENCIES).padStart(6, '0')}`,
+    });
+    expect(result.project.dependencies.map((dependency) => dependency.id)).toEqual(['d000000']);
+  });
+
   it('keeps the tasks and tags with the smallest identifiers beyond the limits', () => {
     const tasks = Array.from({ length: MAX_TASKS + 2 }, (_unused, index) =>
       milestone(`m${String(index).padStart(6, '0')}`),
@@ -188,6 +217,10 @@ const brokenProjectArbitrary = fc
       minLength: IDS.length,
       maxLength: IDS.length,
     }),
+    dailyStartHours: fc.array(fc.option(fc.integer({ min: 0, max: 23 })), {
+      minLength: IDS.length,
+      maxLength: IDS.length,
+    }),
     links: fc.array(
       fc.record({
         id: fc.stringMatching(/^[a-z]{1,3}$/),
@@ -197,7 +230,7 @@ const brokenProjectArbitrary = fc
       { maxLength: 12 },
     ),
   })
-  .map(({ kinds, parents, tags, hoursPerDay, links }): Project => {
+  .map(({ kinds, parents, tags, hoursPerDay, dailyStartHours, links }): Project => {
     const tasks = IDS.map((id, index): Task => {
       const parentId = parents[index] ?? null;
       const kind = kinds[index] ?? 'task';
@@ -207,7 +240,12 @@ const brokenProjectArbitrary = fc
       const tagId = tags[index] ?? null;
       return kind === 'milestone'
         ? milestone(id, { parentId, tagId })
-        : workTask(id, { parentId, tagId, hoursPerDay: hoursPerDay[index] ?? null });
+        : workTask(id, {
+            parentId,
+            tagId,
+            hoursPerDay: hoursPerDay[index] ?? null,
+            dailyStartHour: dailyStartHours[index] ?? null,
+          });
     });
     const dependencies = [...new Map(links.map((item) => [item.id, item])).values()].map(
       (item) => ({ ...link(item.from, item.to), id: item.id }),
@@ -219,29 +257,38 @@ describe('repairProject properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () =
   it('always yields a valid project that a second repair leaves unchanged', () => {
     fc.assert(
       fc.property(brokenProjectArbitrary, (broken) => {
-        const once = repairProject(broken);
+        const once = unwrap(repairProject(broken));
         expect(readProject(once.project, STORED_VALUE_CODEC).ok).toBe(true);
-        expect(repairProject(once.project)).toEqual({ project: once.project, repairs: [] });
+        expect(repairProject(once.project)).toEqual({
+          ok: true,
+          value: { project: once.project, repairs: [] },
+        });
       }),
     );
   });
 
   it('does not depend on the order of the data', () => {
     fc.assert(
-      fc.property(brokenProjectArbitrary, fc.nat(), (broken, seed) => {
-        const reversed = {
-          ...broken,
-          tasks: [...broken.tasks].reverse(),
-          dependencies: [...broken.dependencies].sort(() => (seed % 2 === 0 ? -1 : 1)),
-        };
-        const byId = <T extends { readonly id: string }>(items: readonly T[]): T[] =>
-          [...items].sort((left, right) => (left.id < right.id ? -1 : 1));
-        const first = repairProject(broken);
-        const second = repairProject(reversed);
-        expect(second.repairs).toEqual(first.repairs);
-        expect(byId(second.project.tasks)).toEqual(byId(first.project.tasks));
-        expect(byId(second.project.dependencies)).toEqual(byId(first.project.dependencies));
-      }),
+      fc.property(
+        brokenProjectArbitrary.chain((broken) =>
+          fc.record({
+            broken: fc.constant(broken),
+            tasks: fc.shuffledSubarray([...broken.tasks], { minLength: broken.tasks.length }),
+            dependencies: fc.shuffledSubarray([...broken.dependencies], {
+              minLength: broken.dependencies.length,
+            }),
+          }),
+        ),
+        ({ broken, tasks, dependencies }) => {
+          const byId = <T extends { readonly id: string }>(items: readonly T[]): T[] =>
+            [...items].sort((left, right) => (left.id < right.id ? -1 : 1));
+          const first = unwrap(repairProject(broken));
+          const second = unwrap(repairProject({ ...broken, tasks, dependencies }));
+          expect(second.repairs).toEqual(first.repairs);
+          expect(byId(second.project.tasks)).toEqual(byId(first.project.tasks));
+          expect(byId(second.project.dependencies)).toEqual(byId(first.project.dependencies));
+        },
+      ),
     );
   });
 });

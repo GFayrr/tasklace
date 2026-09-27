@@ -100,7 +100,7 @@ const CALENDAR_KEYS = ['workingWeekdays', 'workingTimeRanges', 'nonWorkingPeriod
 const TIME_RANGE_KEYS = ['startHour', 'endHour'];
 const DAY_RANGE_KEYS = ['firstDay', 'lastDay'];
 const OPTION_KEYS = ['criticalPathEnabled', 'dateConstraintsEnabled', 'alwaysShowPatterns'];
-const TAG_KEYS = ['id', 'name', 'color', 'representsPersonOrTeam'];
+export const TAG_KEYS = ['id', 'name', 'color', 'representsPersonOrTeam'];
 const SUMMARY_KEYS = ['id', 'kind', 'name', 'parentId', 'sortKey'];
 const MILESTONE_KEYS = [
   ...SUMMARY_KEYS,
@@ -110,7 +110,19 @@ const MILESTONE_KEYS = [
   'mustFinishOn',
   'deadline',
 ];
-const WORK_TASK_KEYS = [...MILESTONE_KEYS, 'segments', 'hoursPerDay', 'dailyStartHour'];
+export const WORK_TASK_KEYS = [...MILESTONE_KEYS, 'segments', 'hoursPerDay', 'dailyStartHour'];
+
+export interface ListLimits {
+  readonly tasks: number;
+  readonly dependencies: number;
+  readonly tags: number;
+}
+
+export const NOMINAL_LIST_LIMITS: ListLimits = {
+  tasks: MAX_TASKS,
+  dependencies: MAX_DEPENDENCIES,
+  tags: MAX_TAGS,
+};
 
 export const TASK_KEYS_BY_KIND: Readonly<Record<Task['kind'], readonly string[]>> = {
   summary: SUMMARY_KEYS,
@@ -121,7 +133,7 @@ const SEGMENT_KEYS = ['durationHours', 'gapDaysBefore'];
 const BASELINE_KEYS = ['takenAt', 'entries'];
 const BASELINE_ENTRY_KEYS = ['taskId', 'start', 'end', 'durationHours'];
 const MAX_BASELINE_DURATION_HOURS = END_PROJECT_HOUR - MIN_PROJECT_HOUR;
-const DEPENDENCY_KEYS = ['id', 'predecessorId', 'successorId', 'type', 'lagHours'];
+export const DEPENDENCY_KEYS = ['id', 'predecessorId', 'successorId', 'type', 'lagHours'];
 const TASK_KINDS = ['task', 'milestone', 'summary'] as const;
 const DEPENDENCY_TYPES: readonly DependencyType[] = [
   'finishToStart',
@@ -155,7 +167,12 @@ export function readProject(
   rootPath = '',
 ): Result<Project, readonly ValidationIssue[]> {
   const issues = createIssueList();
-  const project = readProjectFields({ value: input, path: rootPath }, issues, codec);
+  const project = readProjectFields(
+    { value: input, path: rootPath },
+    issues,
+    codec,
+    NOMINAL_LIST_LIMITS,
+  );
   if (project === undefined) {
     return failure(issues.issues);
   }
@@ -163,13 +180,14 @@ export function readProject(
   return issues.issues.length > 0 ? failure(issues.issues) : success(project);
 }
 
-/** Validates every field of untrusted data without checking the calendar, the daily patterns or the structure. */
+/** Validates every field of untrusted data, with given list limits, without checking the calendar, the daily patterns or the structure. */
 export function readProjectShape(
   input: unknown,
   codec: ValueCodec,
+  limits: ListLimits,
 ): Result<Project, readonly ValidationIssue[]> {
   const issues = createIssueList();
-  const project = readProjectFields({ value: input, path: '' }, issues, codec);
+  const project = readProjectFields({ value: input, path: '' }, issues, codec, limits);
   return project === undefined || issues.issues.length > 0
     ? failure(issues.issues)
     : success(project);
@@ -180,6 +198,7 @@ function readProjectFields(
   field: Field,
   issues: IssueList,
   codec: ValueCodec,
+  limits: ListLimits,
 ): Project | undefined {
   const record = readRecord(field, issues, PROJECT_KEYS);
   if (record === undefined) {
@@ -191,9 +210,11 @@ function readProjectFields(
     startDate: codec.readInstant(child('startDate'), issues),
     calendar: readCalendar(child('calendar'), issues, codec),
     options: readOptions(child('options'), issues),
-    tags: readList(child('tags'), issues, MAX_TAGS, readTag),
-    tasks: readList(child('tasks'), issues, MAX_TASKS, (item, list) => readTask(item, list, codec)),
-    dependencies: readList(child('dependencies'), issues, MAX_DEPENDENCIES, readDependency),
+    tags: readList(child('tags'), issues, limits.tags, readTag),
+    tasks: readList(child('tasks'), issues, limits.tasks, (item, list) =>
+      readTask(item, list, codec),
+    ),
+    dependencies: readList(child('dependencies'), issues, limits.dependencies, readDependency),
     baseline: readNullable(child('baseline'), issues, (item, list) =>
       readBaseline(item, list, codec),
     ),
