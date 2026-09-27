@@ -87,6 +87,17 @@ export function mergeSharedUpdate(
 export function repairSharedDocument(
   document: Y.Doc,
 ): Result<readonly SharedRepair[], readonly ValidationIssue[]> {
+  const repaired = repairDocumentProject(document);
+  return repaired.ok ? success(repaired.value.repairs) : repaired;
+}
+
+/** Repairs the merged content of a shared document in place and returns the repairs with the resulting valid project. */
+export function repairDocumentProject(
+  document: Y.Doc,
+): Result<
+  { readonly repairs: readonly SharedRepair[]; readonly project: Project },
+  readonly ValidationIssue[]
+> {
   const schemaIssues = findSchemaIssues(document);
   if (schemaIssues.length > 0) {
     return failure(schemaIssues);
@@ -113,7 +124,10 @@ export function repairSharedDocument(
     return valid;
   }
   writeSharedProject(document, valid.value, REPAIR_ORIGIN);
-  return success([...rounded.repairs, ...repaired.value.repairs]);
+  return success({
+    repairs: [...rounded.repairs, ...repaired.value.repairs],
+    project: valid.value,
+  });
 }
 
 /** Merges an update into a throwaway copy of a document and repairs it there under the document's repair identity, returning what the document is missing, and turning any exception raised by untrusted bytes into a failure. */
@@ -170,7 +184,7 @@ function roundMilestoneProgress(data: SharedProjectData): {
 }
 
 /** Returns a milestone record with its progress rounded, or null when the record is not a milestone with a partial progress. */
-function roundedProgress(
+export function roundedProgress(
   task: unknown,
 ): (Readonly<Record<string, unknown>> & { readonly progressPercent: number }) | null {
   if (typeof task !== 'object' || task === null || !('kind' in task) || task.kind !== 'milestone') {

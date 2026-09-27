@@ -372,7 +372,7 @@ function fitDailyPatterns(project: Project): RepairedProject {
 }
 
 /** Fits the daily working pattern of one work task into the calendar. */
-function fitDailyPattern(
+export function fitDailyPattern(
   task: WorkTask,
   calendar: CompiledCalendar,
 ): { readonly task: Task; readonly repairs: readonly Repair[] } {
