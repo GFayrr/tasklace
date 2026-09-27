@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace is in early development. The scheduling core is built and tested, but there is no user interface or downloadable release yet.
+> Tasklace is in early development. The scheduling core, project validation and JSON exchange are built and tested, but there is no user interface or downloadable release yet.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -41,7 +41,7 @@ Most Gantt tools are either heavyweight project-management suites or online serv
 
 ## Features
 
-What the scheduling core already supports:
+What the core already supports:
 
 - Automatic scheduling from the project start date, task start dates, durations and dependencies.
 - Finish-to-start, start-to-start, finish-to-finish and start-to-finish dependencies, with lags and leads in working hours; dependency cycles are rejected.
@@ -53,20 +53,23 @@ What the scheduling core already supports:
 - Optional tags that color the blocks: a 12-color default palette, any custom color, and automatic patterns when two colors could be confused, including for color-blind readers and grayscale prints.
 - Tags representing a person or a team: overlapping work is detected hour by hour and reported as grouped conflict periods, without moving anything.
 - Results that never depend on the order of the data, a prerequisite for real-time collaboration.
+- Complete validation of untrusted project data before anything is loaded, with each problem reported at its exact location.
+- JSON import and export: readable, versioned documents with dates in clear text.
+- A shared project model where concurrent edits always merge into the same valid project for everyone, and a frozen baseline plan.
 
 ## Roadmap
 
 - [x] Working-time calendar
 - [x] Scheduling engine: dependencies, summaries, split tasks, critical path
 - [x] Tags and person or team conflict detection
-- [ ] Project file format, validation, JSON and CSV import and export
+- [ ] Project file format, validation, JSON and CSV import and export (in progress: validation, JSON and the shared model are done)
 - [ ] Desktop application and user interface
 - [ ] PDF export
 - [ ] Real-time collaboration on the local network
 - [ ] End-to-end encrypted relay and deployment guide
 - [ ] Portable Windows executable
 
-Windows comes first; the code stays cross-platform so that macOS and Linux versions can follow.
+Windows comes first; the code stays cross-platform so that macOS and Linux versions can follow. The [detailed roadmap](docs/roadmap.md) describes each step.
 
 ## Install
 
@@ -93,18 +96,25 @@ The following commands are for development only.
 | `npm run format`       | Format the code with Prettier                      |
 | `npm run format:check` | Check formatting without changing files            |
 
-The test suite covers edge cases extensively and uses property-based testing to check scheduling invariants on thousands of random projects. Continuous integration runs formatting, linting and tests on Windows and Linux for every push and pull request.
+The test suite covers edge cases extensively and uses property-based testing to check scheduling invariants and data exchange on thousands of random projects, and to make sure that no malformed input is ever accepted. Continuous integration runs formatting, linting and tests on Windows and Linux for every push and pull request.
 
 ## Project structure
 
 ```
 src/core/            pure logic, independent of any user interface
+  baseline/          baseline plan snapshots
   calendar/          working-time calendar and task time slots
+  exchange/          JSON import and export
   model/             project data types
   scheduling/        dependency graph, forward and backward passes, summaries, WBS
+  shared/            shared Yjs document, merge repairs and fractional ordering
   tags/              tag colors, patterns and person or team conflicts
   testing/           test helpers and random data generators
+  validation/        validation of untrusted project data
+docs/                roadmap and user documentation
+tests/fixtures/      large test projects generated from fixed seeds
 tests/perf/          performance benchmark
+tests/repository/    repository hygiene checks
 ```
 
 ## Maintainers

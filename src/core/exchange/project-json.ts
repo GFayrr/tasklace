@@ -1,7 +1,7 @@
 import { formatDate, formatDateTime, parseDate, parseDateTime } from '../civil-format';
 import { MAX_PROJECT_TEXT_UTF16_UNITS } from '../limits';
 import type { WorkingCalendar } from '../model/calendar';
-import type { Project, Task } from '../model/project';
+import type { Baseline, Project, Task } from '../model/project';
 import { failure, success, type Result } from '../result';
 import { WEEKDAYS, type ProjectHour } from '../time';
 import { readProject, type ValueCodec } from '../validation/read-project';
@@ -57,6 +57,7 @@ export function exportProjectJson(project: Project): string {
       tags: project.tags,
       tasks: project.tasks.map(taskToJson),
       dependencies: project.dependencies,
+      baseline: project.baseline === null ? null : baselineToJson(project.baseline),
     },
   };
   return JSON.stringify(document, null, JSON_INDENTATION);
@@ -138,6 +139,18 @@ function calendarToJson(calendar: WorkingCalendar) {
     nonWorkingPeriods: calendar.nonWorkingPeriods.map((period) => ({
       firstDay: formatDate(period.firstDay),
       lastDay: formatDate(period.lastDay),
+    })),
+  };
+}
+
+/** Converts a baseline plan into JSON-ready data with its dates in clear text. */
+function baselineToJson(baseline: Baseline) {
+  return {
+    takenAt: formatDateTime(baseline.takenAt),
+    entries: baseline.entries.map((entry) => ({
+      ...entry,
+      start: formatDateTime(entry.start),
+      end: formatDateTime(entry.end),
     })),
   };
 }

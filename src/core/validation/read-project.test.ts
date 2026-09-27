@@ -203,6 +203,7 @@ describe('readProject: shape of the data', () => {
       'tags',
       'tasks',
       'dependencies',
+      'baseline',
     ]);
   });
 
@@ -700,5 +701,44 @@ describe('readProject: holes, totals and scheduling', () => {
       throw new Error(JSON.stringify(read.error));
     }
     expect(scheduleProject(read.value).ok).toBe(false);
+  });
+});
+
+describe('readProject: baseline', () => {
+  const entry = {
+    taskId: 'a',
+    start: at(2026, 9, 28, 9),
+    end: at(2026, 9, 28, 17),
+    durationHours: 7,
+  };
+  const withBaseline = (entries: readonly unknown[]): Data =>
+    projectWith({ baseline: { takenAt: at(2026, 9, 27, 18), entries } });
+
+  it('accepts a baseline, even with an entry for a task deleted since', () => {
+    expect(issuesOf(withBaseline([entry, { ...entry, taskId: 'deleted' }]))).toEqual([]);
+  });
+
+  it('rejects an entry ending before it starts', () => {
+    expect(issuesOf(withBaseline([{ ...entry, end: entry.start - 1 }]))).toEqual(
+      issue('baseline.entries[0].end', 'OUT_OF_RANGE'),
+    );
+  });
+
+  it('rejects two entries for the same task', () => {
+    expect(issuesOf(withBaseline([entry, entry]))).toEqual(
+      issue('baseline.entries[1]', 'DUPLICATE_ENTRY'),
+    );
+  });
+
+  it('rejects missing, unknown and out of range baseline fields', () => {
+    expect(issuesOf(projectWith({ baseline: { entries: [] } }))).toEqual(
+      issue('baseline.takenAt', 'MISSING_FIELD'),
+    );
+    expect(issuesOf(withBaseline([{ ...entry, progress: 0 }]))).toEqual(
+      issue('baseline.entries[0].progress', 'UNKNOWN_FIELD'),
+    );
+    expect(issuesOf(withBaseline([{ ...entry, durationHours: -1 }]))).toEqual(
+      issue('baseline.entries[0].durationHours', 'OUT_OF_RANGE'),
+    );
   });
 });

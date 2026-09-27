@@ -96,6 +96,7 @@ export function project(
     tasks,
     dependencies,
     tags: [],
+    baseline: null,
     ...overrides,
   };
 }
