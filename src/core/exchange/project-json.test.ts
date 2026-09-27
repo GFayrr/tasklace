@@ -171,6 +171,32 @@ describe('importProjectJson: round trip', () => {
   });
 });
 
+describe('project JSON: baseline', () => {
+  it('writes the baseline dates in clear text and reads them back', () => {
+    const baseline = {
+      takenAt: at(2026, 9, 27, 18),
+      entries: [
+        { taskId: 'a', start: at(2026, 10, 1, 9), end: at(2026, 10, 2, 17), durationHours: 14 },
+      ],
+    };
+    const input = { ...SAMPLE_PROJECT, baseline };
+    const text = exportProjectJson(input);
+    expect((JSON.parse(text) as { project: Data }).project['baseline']).toEqual({
+      takenAt: '2026-09-27T18:00',
+      entries: [
+        { taskId: 'a', start: '2026-10-01T09:00', end: '2026-10-02T17:00', durationHours: 14 },
+      ],
+    });
+    expect(importProjectJson(text)).toEqual({ ok: true, value: input });
+  });
+
+  it('rejects a baseline date written as a number', () => {
+    expect(importIssues(projectFieldWith('baseline', { takenAt: 0, entries: [] }))).toEqual(
+      issue('project.baseline.takenAt', 'WRONG_TYPE'),
+    );
+  });
+});
+
 describe('importProjectJson: byte order mark', () => {
   const text = exportProjectJson(SAMPLE_PROJECT);
 

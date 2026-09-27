@@ -34,7 +34,8 @@ Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit
   - in a hierarchy loop, the task of the loop with the smallest identifier is moved to the root.
 - Baseline plan: a single frozen snapshot per project, stored as one Yjs value with the time it was taken.
 - Property-based tests: random concurrent edits and merges always end in the same valid state for every participant.
-- Adds the `yjs` and `y-protocols` dependencies.
+- An update that arrives before the one it depends on is held back, and an update that would leave an invalid project is refused, the document staying untouched.
+- Adds the `yjs` dependency; `y-protocols` comes with the network protocol in step 7.
 
 ### 4c. `.tasklace` project file
 

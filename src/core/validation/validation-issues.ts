@@ -20,7 +20,8 @@ export type ValueIssueCode =
   | 'INVALID_COLOR'
   | 'TOO_MANY_ITEMS'
   | 'EMPTY_LIST'
-  | 'TOO_MANY_ISSUES';
+  | 'TOO_MANY_ISSUES'
+  | 'DUPLICATE_ENTRY';
 
 export type ValidationIssueCode =
   ValueIssueCode | CalendarErrorCode | DailyWindowErrorCode | StructureErrorCode;

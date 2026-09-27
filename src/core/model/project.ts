@@ -66,6 +66,18 @@ export interface ProjectOptions {
   readonly alwaysShowPatterns: boolean;
 }
 
+export interface BaselineEntry {
+  readonly taskId: TaskId;
+  readonly start: ProjectHour;
+  readonly end: ProjectHour;
+  readonly durationHours: number;
+}
+
+export interface Baseline {
+  readonly takenAt: ProjectHour;
+  readonly entries: readonly BaselineEntry[];
+}
+
 export interface Project {
   readonly name: string;
   readonly startDate: ProjectHour;
@@ -74,4 +86,5 @@ export interface Project {
   readonly tasks: readonly Task[];
   readonly dependencies: readonly Dependency[];
   readonly tags: readonly Tag[];
+  readonly baseline: Baseline | null;
 }

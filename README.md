@@ -101,10 +101,12 @@ The test suite covers edge cases extensively and uses property-based testing to 
 
 ```
 src/core/            pure logic, independent of any user interface
+  baseline/          baseline plan snapshots
   calendar/          working-time calendar and task time slots
   exchange/          JSON import and export
   model/             project data types
   scheduling/        dependency graph, forward and backward passes, summaries, WBS
+  shared/            shared Yjs document, merge repairs and fractional ordering
   tags/              tag colors, patterns and person or team conflicts
   testing/           test helpers and random data generators
   validation/        validation of untrusted project data
