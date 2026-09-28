@@ -87,14 +87,15 @@ npm install
 
 The following commands are for development only.
 
-| Command                | Purpose                                            |
-| ---------------------- | -------------------------------------------------- |
-| `npm test`             | Run unit and property-based tests with coverage    |
-| `npm run test:watch`   | Run tests in watch mode                            |
-| `npm run bench`        | Check performance on 10,000 tasks and 20,000 links |
-| `npm run lint`         | Type-check with TypeScript and lint with ESLint    |
-| `npm run format`       | Format the code with Prettier                      |
-| `npm run format:check` | Check formatting without changing files            |
+| Command                | Purpose                                                 |
+| ---------------------- | ------------------------------------------------------- |
+| `npm test`             | Run unit and property-based tests with coverage         |
+| `npm run test:watch`   | Run tests in watch mode                                 |
+| `npm run bench`        | Check performance on 10,000 tasks and 20,000 links      |
+| `npm run bench:growth` | Check that key operations grow as their complexity says |
+| `npm run lint`         | Type-check with TypeScript and lint with ESLint         |
+| `npm run format`       | Format the code with Prettier                           |
+| `npm run format:check` | Check formatting without changing files                 |
 
 The test suite covers edge cases extensively and uses property-based testing to check scheduling invariants and data exchange on thousands of random projects, and to make sure that no malformed input is ever accepted. Continuous integration runs formatting, linting and tests on Windows and Linux for every push and pull request.
 
@@ -113,6 +114,7 @@ src/core/            pure logic, independent of any user interface
   validation/        validation of untrusted project data
 docs/                roadmap and user documentation
 tests/fixtures/      large test projects generated from fixed seeds
+tests/growth/        growth checks of key operations, run in CI
 tests/perf/          performance benchmark
 tests/repository/    repository hygiene checks
 ```

@@ -24,3 +24,18 @@ jobs:
       - run: npm run format:check
       - run: npm run lint
       - run: npm test
+
+  growth-and-benchmarks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Check the growth of key operations (blocking)
+        run: npm run bench:growth -- --silent=false
+      - name: Report the millisecond targets (indicative)
+        run: npm run bench -- --silent=false
+        continue-on-error: true
