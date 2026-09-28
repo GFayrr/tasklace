@@ -96,11 +96,10 @@ function issue(path: string, code: ValidationIssue['code']): ValidationIssue[] {
 }
 
 describe('exportProjectJson', () => {
-  it('writes a versioned document indented with two spaces', () => {
+  it('writes a compact versioned document', () => {
     const text = exportProjectJson(SAMPLE_PROJECT);
-    expect(text.startsWith('{\n  "format": "tasklace",\n  "version": 1,\n  "project": {')).toBe(
-      true,
-    );
+    expect(text.startsWith('{"format":"tasklace","version":1,"project":{')).toBe(true);
+    expect(text).not.toMatch(/\n/);
     const document = JSON.parse(text) as Data;
     expect(document['format']).toBe(PROJECT_JSON_FORMAT);
     expect(document['version']).toBe(PROJECT_JSON_VERSION);
@@ -236,9 +235,12 @@ describe('importProjectJson: text and header', () => {
     },
   );
 
-  it('rejects a text longer than the maximum size before parsing it', () => {
+  it('rejects a text longer than the maximum size before parsing it, and only then', () => {
     expect(importIssues(' '.repeat(MAX_PROJECT_TEXT_UTF16_UNITS + 1))).toEqual(
       issue('', 'TOO_LARGE'),
+    );
+    expect(importIssues(' '.repeat(MAX_PROJECT_TEXT_UTF16_UNITS))).toEqual(
+      issue('', 'INVALID_JSON'),
     );
   });
 
@@ -281,7 +283,9 @@ describe('importProjectJson: text and header', () => {
   });
 
   it('rejects a version too large to be a JSON number', () => {
-    const text = exportProjectJson(SAMPLE_PROJECT).replace('"version": 1', '"version": 1e400');
+    const exported = exportProjectJson(SAMPLE_PROJECT);
+    const text = exported.replace('"version":1', '"version":1e400');
+    expect(text).not.toBe(exported);
     expect(importIssues(text)).toEqual(issue('version', 'WRONG_TYPE'));
   });
 
@@ -298,10 +302,9 @@ describe('importProjectJson: text and header', () => {
   });
 
   it('reports an own __proto__ key without polluting objects', () => {
-    const text = exportProjectJson(SAMPLE_PROJECT).replace(
-      '"project": {',
-      '"project": {"__proto__": {"polluted": true}, ',
-    );
+    const exported = exportProjectJson(SAMPLE_PROJECT);
+    const text = exported.replace('"project":{', '"project":{"__proto__": {"polluted": true}, ');
+    expect(text).not.toBe(exported);
     expect(importIssues(`{"__proto__": {"polluted": true}, ${text.slice(1)}`)).toEqual(
       issue('__proto__', 'UNKNOWN_FIELD'),
     );

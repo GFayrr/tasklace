@@ -97,13 +97,16 @@ export function findSchemaIssues(document: Y.Doc): readonly ValidationIssue[] {
   return issues.issues;
 }
 
-/** Lists what does not belong at the top of a shared document: unknown roots and unknown or nested project fields. */
+/** Lists what does not belong at the top of a shared document: unknown roots, unknown or nested project fields and hidden list content. */
 export function findRootIssues(document: Y.Doc): readonly ValidationIssue[] {
   const issues = createIssueList();
   for (const name of [...document.share.keys()].filter((root) => !ROOTS.includes(root))) {
     issues.add(name, 'UNKNOWN_FIELD');
   }
   checkFields(document.getMap(PROJECT_ROOT), PROJECT_ROOT, PROJECT_FIELD_KEYS, issues);
+  for (const [root] of ENTRY_KEYS_BY_ROOT) {
+    checkSequenceContent(document.getMap(root), root, issues);
+  }
   return issues.issues;
 }
 
@@ -229,6 +232,7 @@ function checkEntries(
   allowedKeys: readonly string[],
   issues: IssueList,
 ): void {
+  checkSequenceContent(entries, root, issues);
   for (const [id, entry] of entries.entries()) {
     if (entry instanceof Y.Map) {
       checkFields(entry, `${root}.${id}`, allowedKeys, issues);
@@ -245,11 +249,22 @@ function checkFields(
   allowedKeys: readonly string[],
   issues: IssueList,
 ): void {
+  checkSequenceContent(fields, path, issues);
   for (const [key, value] of fields.entries()) {
     if (!allowedKeys.includes(key)) {
       issues.add(`${path}.${key}`, 'UNKNOWN_FIELD');
     } else if (value instanceof Y.AbstractType) {
       issues.add(`${path}.${key}`, 'WRONG_TYPE');
+    }
+  }
+}
+
+/** Reports a shared map that also holds live list or text content, which the schema never allows and a map would hide. */
+function checkSequenceContent(type: Y.Map<unknown>, path: string, issues: IssueList): void {
+  for (let item = type._start; item !== null; item = item.right) {
+    if (!item.deleted) {
+      issues.add(path, 'WRONG_TYPE');
+      return;
     }
   }
 }

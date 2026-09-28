@@ -49,6 +49,22 @@ const MERGE_LIST_LIMITS: ListLimits = {
 const FULL_PROGRESS = 100;
 const HALF_PROGRESS = 50;
 
+/** Checks a shared document exactly as it is, without any repair: schema, hidden task fields and the complete project. */
+export function validateSharedDocument(
+  document: Y.Doc,
+): Result<Project, readonly ValidationIssue[]> {
+  const schemaIssues = findSchemaIssues(document);
+  if (schemaIssues.length > 0) {
+    return failure(schemaIssues);
+  }
+  const hiddenFields = readProjectShape(
+    readSharedTaskUnions(document),
+    STORED_VALUE_CODEC,
+    NOMINAL_LIST_LIMITS,
+  );
+  return hiddenFields.ok ? readSharedProject(document) : hiddenFields;
+}
+
 /** Reads and fully validates the project held by a shared document. */
 export function readSharedProject(document: Y.Doc): Result<Project, readonly ValidationIssue[]> {
   return readProject(readSharedData(document), STORED_VALUE_CODEC);

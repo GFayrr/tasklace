@@ -5,6 +5,7 @@ import type { DependencyType, Project, Tag, Task } from '../model/project';
 import { compareStrings } from '../compare-strings';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { at } from '../testing/civil-time';
+import { hideListContent } from '../testing/hidden-list-content';
 import { projectArbitrary } from '../testing/project-arbitrary';
 import { link, milestone, project, summary, workTask } from '../testing/project-builder';
 import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
@@ -381,6 +382,24 @@ describe('merging updates that break the shared schema', () => {
       (malicious) => malicious.getMap(TASKS_ROOT).set('z', { kind: 'task' }),
     ],
     ['a nested shared type', (malicious) => taskEntry(malicious, 'a').set('name', new Y.Text('a'))],
+    [
+      'list content in a root',
+      (malicious) => {
+        hideListContent(malicious.getMap(TASKS_ROOT));
+      },
+    ],
+    [
+      'list content in the project',
+      (malicious) => {
+        hideListContent(malicious.getMap('project'));
+      },
+    ],
+    [
+      'list content in an entry',
+      (malicious) => {
+        hideListContent(taskEntry(malicious, 'a'));
+      },
+    ],
   ])('refuses %s and leaves the document untouched', (_label, tamper) => {
     const [source, victim] = createPeers(BASE_PROJECT, 2);
     if (source === undefined || victim === undefined) {
