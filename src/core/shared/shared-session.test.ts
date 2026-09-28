@@ -5,6 +5,7 @@ import { compareStrings } from '../compare-strings';
 import { MAX_HIERARCHY_DEPTH, MAX_TAGS } from '../limits';
 import type { DependencyType, Project, Tag, Task } from '../model/project';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
+import { hideListContent } from '../testing/hidden-list-content';
 import { link, milestone, project, summary, workTask } from '../testing/project-builder';
 import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
 import { applyOperation, type SharedOperation } from './shared-operations';
@@ -74,6 +75,15 @@ function applyBoth(session: SharedSession, operation: SharedOperation): boolean 
   return result.ok;
 }
 
+/** Returns the shared entry of a task, failing the test when it is missing. */
+function entryOf(document: Y.Doc, id: string): Y.Map<unknown> {
+  const entry = document.getMap(TASKS_ROOT).get(id);
+  if (!(entry instanceof Y.Map)) {
+    throw new Error(`Missing task ${id}`);
+  }
+  return entry;
+}
+
 /** Merges an update into a session and, on a copy, through the reference, checking that both agree. */
 function mergeBoth(session: SharedSession, update: Uint8Array): boolean {
   const reference = copyOf(session.document);
@@ -120,6 +130,9 @@ describe('shared session', () => {
       tasks: [...BASE_PROJECT.tasks, workTask('lost', { tagId: 'deleted' })],
     });
     const session = openSharedSession(imported);
+    expect(session.ok && session.value.openingRepairs).toEqual([
+      { code: 'TAG_CLEARED', id: 'lost' },
+    ]);
     expect(
       session.ok && session.value.project().tasks.find((task) => task.id === 'lost'),
     ).toMatchObject({
@@ -300,6 +313,24 @@ describe('shared session edge cases', () => {
     expect(
       mergeBoth(victim, Y.encodeStateAsUpdate(malicious, Y.encodeStateVector(victim.document))),
     ).toBe(false);
+  });
+
+  it.each<[string, (malicious: Y.Doc) => Y.Map<unknown>]>([
+    ['a root', (malicious) => malicious.getMap(TASKS_ROOT)],
+    ['the project', (malicious) => malicious.getMap('project')],
+    ['an entry', (malicious) => entryOf(malicious, 'a')],
+  ])('refuses list content hidden in %s through the fast path', (_label, target) => {
+    const [source, victim] = openSessions(BASE_PROJECT, 2);
+    if (source === undefined || victim === undefined) {
+      throw new Error('Missing session');
+    }
+    const malicious = copyOf(source.document);
+    malicious.clientID = 77;
+    hideListContent(target(malicious));
+    const update = Y.encodeStateAsUpdate(malicious, Y.encodeStateVector(victim.document));
+    const before = readSharedData(victim.document);
+    expect(victim.merge(update).ok).toBe(false);
+    expect(readSharedData(victim.document)).toEqual(before);
   });
 
   it('rounds, clears and fits tasks in one fast merge, reporting repairs in order', () => {

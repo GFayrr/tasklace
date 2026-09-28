@@ -24,7 +24,6 @@ export const PROJECT_JSON_FORMAT = 'tasklace';
 export const PROJECT_JSON_VERSION = 1;
 
 const DOCUMENT_KEYS = ['format', 'version', 'project'];
-const JSON_INDENTATION = 2;
 const WEEKDAY_NAMES = [
   'sunday',
   'monday',
@@ -44,7 +43,7 @@ const JSON_VALUE_CODEC: ValueCodec = {
   },
 };
 
-/** Writes a project as readable, versioned JSON with dates in clear text. */
+/** Writes a project as compact, versioned JSON with dates in clear text, compact so that the largest allowed project stays within the import limit. */
 export function exportProjectJson(project: Project): string {
   const document = {
     format: PROJECT_JSON_FORMAT,
@@ -60,7 +59,7 @@ export function exportProjectJson(project: Project): string {
       baseline: project.baseline === null ? null : baselineToJson(project.baseline),
     },
   };
-  return JSON.stringify(document, null, JSON_INDENTATION);
+  return JSON.stringify(document);
 }
 
 /** Reads a project from untrusted JSON text, or lists the problems found with their locations. */
