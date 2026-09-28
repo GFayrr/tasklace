@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import {
   encodeTasklaceFile,
+  HEADER_BYTES,
   openTasklaceFile,
   readTasklaceFile,
 } from '../../src/core/file/tasklace-file';
@@ -40,9 +41,18 @@ describe('tasklace file with real compression', { timeout: PROPERTY_TEST_TIMEOUT
   });
 
   it('refuses a damaged compressed stream with a correct checksum', () => {
-    const damaged = Uint8Array.from(file.subarray(16));
+    const damaged = Uint8Array.from(file.subarray(HEADER_BYTES));
     damaged.fill(0xff, 0, 8);
     const stateSize = Y.encodeStateAsUpdate(document).length;
     expect(readCode(forgeFile(file, damaged, stateSize))).toBe('DECOMPRESSION_FAILED');
+  });
+
+  it('refuses bytes after the end of the compressed stream, and a stream cut short', () => {
+    const payload = file.subarray(HEADER_BYTES);
+    const stateSize = Y.encodeStateAsUpdate(document).length;
+    const trailing = Uint8Array.from([...payload, 0]);
+    expect(readCode(forgeFile(file, trailing, stateSize))).toBe('DECOMPRESSION_FAILED');
+    const cut = payload.subarray(0, payload.length - 1);
+    expect(readCode(forgeFile(file, cut, stateSize))).toBe('DECOMPRESSION_FAILED');
   });
 });

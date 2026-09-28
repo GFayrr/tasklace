@@ -2,11 +2,19 @@ import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import * as Y from 'yjs';
 import { compareStrings } from '../compare-strings';
-import { MAX_FILE_BYTES, MAX_UNCOMPRESSED_BYTES } from '../limits';
+import { MAX_FILE_BYTES, MAX_TAGS, MAX_UNCOMPRESSED_BYTES } from '../limits';
 import type { Project } from '../model/project';
 import { failure, success } from '../result';
-import { createSharedDocument, readSharedData, TASKS_ROOT } from '../shared/shared-document';
+import {
+  createSharedDocument,
+  readSharedData,
+  TAGS_ROOT,
+  TASKS_ROOT,
+} from '../shared/shared-document';
+import { mergeSharedUpdate } from '../shared/shared-project';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
+import { at } from '../testing/civil-time';
+import { hideListContent } from '../testing/hidden-list-content';
 import { projectArbitrary } from '../testing/project-arbitrary';
 import { link, milestone, project, summary, workTask } from '../testing/project-builder';
 import { crc32 } from './crc32';
@@ -37,14 +45,26 @@ const storingCompressor: Compressor = {
   },
 };
 
+const SIGNATURE_BYTES = 4;
+const VIEW_PADDING_BYTES = 3;
+
 const SAMPLE: Project = project(
   [
     summary('phase'),
-    workTask('a', { parentId: 'phase', name: 'Écrire « le plan » 📝' }),
+    workTask('a', { parentId: 'phase', name: 'Écrire « le plan » 📝', tagId: 'design' }),
     workTask('b', { parentId: 'phase', hoursPerDay: 3 }),
     milestone('m', { progressPercent: 100 }),
   ],
   [link('a', 'b'), link('b', 'm')],
+  {
+    tags: [{ id: 'design', name: 'Design', color: '#336699', representsPersonOrTeam: true }],
+    baseline: {
+      takenAt: at(2026, 9, 27, 10),
+      entries: [
+        { taskId: 'a', start: at(2026, 9, 28, 9), end: at(2026, 9, 28, 17), durationHours: 7 },
+      ],
+    },
+  },
 );
 
 /** Writes a project as a .tasklace file with the stand-in compressor. */
@@ -91,6 +111,29 @@ function storedPayload(state: Uint8Array): Uint8Array {
   return storingCompressor.compress(state);
 }
 
+/** Tells whether a file holds an ASCII text anywhere in its bytes. */
+function containsText(file: Uint8Array, text: string): boolean {
+  return Array.from(file, (byte) => String.fromCharCode(byte))
+    .join('')
+    .includes(text);
+}
+
+/** Returns the shared entry of a task, failing the test when it is missing. */
+function taskEntry(document: Y.Doc, id: string): Y.Map<unknown> {
+  const entry = document.getMap(TASKS_ROOT).get(id);
+  if (!(entry instanceof Y.Map)) {
+    throw new Error(`Missing task ${id}`);
+  }
+  return entry;
+}
+
+/** Writes the sample project as a file after changing its shared document. */
+function tampered(change: (document: Y.Doc) => void): Uint8Array {
+  const document = createSharedDocument(SAMPLE);
+  change(document);
+  return encodeTasklaceFile(document, storingCompressor);
+}
+
 /** Sorts the lists of a project by identifier. */
 function sorted(input: Project): Project {
   const byId = <T extends { readonly id: string }>(items: readonly T[]): T[] =>
@@ -122,6 +165,60 @@ describe('tasklace file', () => {
     );
   });
 
+  it('keeps the Yjs history, so that copies made before still merge after reading', () => {
+    const document = createSharedDocument(SAMPLE);
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(document));
+    const read = readTasklaceFile(
+      encodeTasklaceFile(document, storingCompressor),
+      storingCompressor,
+    );
+    if (!read.ok) {
+      throw new Error(read.error.code);
+    }
+    expect(Y.encodeStateVector(read.value)).toEqual(Y.encodeStateVector(document));
+    peer.getMap('project').set('name', 'Renamed by a peer');
+    const merged = mergeSharedUpdate(
+      read.value,
+      Y.encodeStateAsUpdate(peer, Y.encodeStateVector(read.value)),
+    );
+    expect(merged).toEqual(success([]));
+    expect(readSharedData(read.value)).toEqual(readSharedData(peer));
+  });
+
+  it('leaves the text of deleted content out of the file', () => {
+    const secret = 'SECRET-FORMER-NAME';
+    const document = createSharedDocument(SAMPLE);
+    taskEntry(document, 'b').set('name', secret);
+    expect(containsText(encodeTasklaceFile(document, storingCompressor), secret)).toBe(true);
+    taskEntry(document, 'b').set('name', 'Public name');
+    expect(containsText(encodeTasklaceFile(document, storingCompressor), secret)).toBe(false);
+  });
+
+  it('reads a file lying inside a larger buffer', () => {
+    const file = fileOf(SAMPLE);
+    const buffer = new Uint8Array(VIEW_PADDING_BYTES + file.length + VIEW_PADDING_BYTES);
+    buffer.set(file, VIEW_PADDING_BYTES);
+    const view = buffer.subarray(VIEW_PADDING_BYTES, VIEW_PADDING_BYTES + file.length);
+    expect(readCode(view)).toBe('ok');
+  });
+
+  it('opens a file pointing at a missing tag without the tag, and reports it', () => {
+    const lost = tampered((document) => {
+      taskEntry(document, 'b').set('tagId', 'deleted');
+    });
+    const opened = openTasklaceFile(lost, storingCompressor);
+    if (!opened.ok) {
+      throw new Error(opened.error.code);
+    }
+    expect(opened.value.openingRepairs).toEqual([{ code: 'TAG_CLEARED', id: 'b' }]);
+    expect(opened.value.project().tasks.find((task) => task.id === 'b')).toMatchObject({
+      tagId: null,
+    });
+    const clean = openTasklaceFile(fileOf(SAMPLE), storingCompressor);
+    expect(clean.ok && clean.value.openingRepairs).toEqual([]);
+  });
+
   it('starts with the signature, the version and no flags', () => {
     const file = fileOf(SAMPLE);
     expect([...file.subarray(0, 8)]).toEqual([0x54, 0x53, 0x4b, 0x4c, 1, 0, 0, 0]);
@@ -141,10 +238,20 @@ describe('reading an untrusted tasklace file', () => {
     }
   });
 
-  it('refuses a file without the signature', () => {
-    const copy = Uint8Array.from(file);
-    copy[0] = 0;
-    expect(readCode(copy)).toBe('NOT_A_TASKLACE_FILE');
+  it('refuses a file with any byte of the signature changed', () => {
+    for (let position = 0; position < SIGNATURE_BYTES; position += 1) {
+      const copy = Uint8Array.from(file);
+      copy[position] = 0;
+      expect(readCode(copy)).toBe('NOT_A_TASKLACE_FILE');
+    }
+  });
+
+  it('accepts the limits themselves and refuses an empty content', () => {
+    expect(readCode(new Uint8Array(MAX_FILE_BYTES))).toBe('NOT_A_TASKLACE_FILE');
+    expect(readCode(rewritten(file, { declaredSize: MAX_UNCOMPRESSED_BYTES }))).toBe(
+      'DECOMPRESSION_FAILED',
+    );
+    expect(readCode(rewritten(file, { declaredSize: 0 }))).toBe('INVALID_CONTENT');
   });
 
   it.each([0, 2, 65_535])('refuses the format version %i and reports it', (version) => {
@@ -203,11 +310,6 @@ describe('reading an untrusted tasklace file', () => {
   });
 
   it('refuses a readable document holding an invalid project, without repairing it', () => {
-    const tampered = (change: (document: Y.Doc) => void): Uint8Array => {
-      const document = createSharedDocument(SAMPLE);
-      change(document);
-      return encodeTasklaceFile(document, storingCompressor);
-    };
     const cycle = tampered((document) => {
       const entry = new Y.Map<unknown>();
       document.getMap('dependencies').set('m-a', entry);
@@ -229,7 +331,34 @@ describe('reading an untrusted tasklace file', () => {
         entry.set('segments', 'garbage');
       }
     });
-    for (const invalid of [cycle, unknownField, badHiddenField]) {
+    const hiddenList = tampered((document) => {
+      hideListContent(document.getMap(TASKS_ROOT));
+    });
+    const unknownRoot = tampered((document) => {
+      document.getMap('other').set('x', 1);
+    });
+    const plainEntry = tampered((document) => {
+      document.getMap(TASKS_ROOT).set('z', { kind: 'task' });
+    });
+    const tooManyTags = tampered((document) => {
+      for (let index = 0; index <= MAX_TAGS; index += 1) {
+        const tag = new Y.Map<unknown>();
+        document.getMap(TAGS_ROOT).set(`extra${String(index)}`, tag);
+        tag.set('name', 'Extra');
+        tag.set('color', '#336699');
+        tag.set('representsPersonOrTeam', false);
+      }
+    });
+    const invalidFiles = [
+      cycle,
+      unknownField,
+      badHiddenField,
+      hiddenList,
+      unknownRoot,
+      plainEntry,
+      tooManyTags,
+    ];
+    for (const invalid of invalidFiles) {
       const read = readTasklaceFile(invalid, storingCompressor);
       expect(read.ok || read.error.code).toBe('INVALID_PROJECT');
       expect(openTasklaceFile(invalid, storingCompressor).ok).toBe(false);

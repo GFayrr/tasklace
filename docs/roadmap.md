@@ -40,12 +40,14 @@ Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit
 
 ### 4c. `.tasklace` project file (done)
 
-- Container: `TSKL` signature, format version, flags, CRC-32 checksum, compressed Yjs state, pruned history.
-- Compression is injected into the core; the `node:zlib` implementation, with a capped output size, lives in `src/main/`.
-- Defensive reading, in this order, before anything is loaded: maximum size, signature, version, checksum, capped decompression against decompression bombs, guarded Yjs decoding, complete validation (4a).
+- Container: 16-byte header (`TSKL` signature, format version, reserved flags, CRC-32 checksum, declared uncompressed size), then the compressed Yjs state, whose deleted content Yjs has already removed.
+- Compression is injected into the core; the real `node:zlib` implementation, with a capped output size, will live in `src/main/` (step 5).
+- Defensive reading, in this order, before anything is loaded: maximum size, signature, version, flags, checksum, declared size, capped decompression against decompression bombs, guarded Yjs decoding, strict schema and complete validation (4a), without any repair.
 - Maximum sizes measured on the largest possible project, then fixed as powers of two above it: 128 MiB for a file, 512 MiB once decompressed.
+- Opening a file will run in a separate process with capped memory, so that a forged file can never bring the application down.
 - Fast compression (zlib level 1): the file is slightly larger, but saving, which happens automatically, is much faster.
-- Test files generated in memory from fixed seeds: random, truncated, altered, wrong version, decompression bomb.
+- JSON export is compact, so that the largest possible project stays within the 256 Mi-unit import limit.
+- Test files generated in memory: random, truncated, altered, wrong version or flags, lying declared size, decompression bomb, hidden content.
 
 ### 4d. CSV import and export
 

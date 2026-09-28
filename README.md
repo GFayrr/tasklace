@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace is in early development. The scheduling core, project validation and JSON exchange are built and tested, but there is no user interface or downloadable release yet.
+> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON exchange are built and tested, but there is no user interface or downloadable release yet.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -54,7 +54,8 @@ What the core already supports:
 - Tags representing a person or a team: overlapping work is detected hour by hour and reported as grouped conflict periods, without moving anything.
 - Results that never depend on the order of the data, a prerequisite for real-time collaboration.
 - Complete validation of untrusted project data before anything is loaded, with each problem reported at its exact location.
-- JSON import and export: readable, versioned documents with dates in clear text.
+- `.tasklace` project files: compressed, checksummed and fully checked before opening, so that a damaged or forged file is refused without ever being loaded.
+- JSON import and export: compact, versioned documents with dates in clear text.
 - A shared project model where concurrent edits always merge into the same valid project for everyone, and a frozen baseline plan.
 
 ## Roadmap
@@ -62,7 +63,7 @@ What the core already supports:
 - [x] Working-time calendar
 - [x] Scheduling engine: dependencies, summaries, split tasks, critical path
 - [x] Tags and person or team conflict detection
-- [ ] Project file format, validation, JSON and CSV import and export (in progress: validation, JSON and the shared model are done)
+- [ ] Project file format, validation, JSON and CSV import and export (in progress: validation, JSON, the shared model and the `.tasklace` file are done)
 - [ ] Desktop application and user interface
 - [ ] PDF export
 - [ ] Real-time collaboration on the local network
@@ -106,6 +107,7 @@ src/core/            pure logic, independent of any user interface
   baseline/          baseline plan snapshots
   calendar/          working-time calendar and task time slots
   exchange/          JSON import and export
+  file/              .tasklace project file: header, checksum and defensive reading
   model/             project data types
   scheduling/        dependency graph, forward and backward passes, summaries, WBS
   shared/            shared Yjs document, merge repairs and fractional ordering
@@ -113,6 +115,7 @@ src/core/            pure logic, independent of any user interface
   testing/           test helpers and random data generators
   validation/        validation of untrusted project data
 docs/                roadmap and user documentation
+tests/file/          .tasklace files with real compression, decompression bombs
 tests/fixtures/      large test projects generated from fixed seeds
 tests/growth/        growth checks of key operations, run in CI
 tests/perf/          performance benchmark

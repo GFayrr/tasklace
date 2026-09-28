@@ -1,13 +1,14 @@
 import * as Y from 'yjs';
 import { MAX_FILE_BYTES, MAX_UNCOMPRESSED_BYTES } from '../limits';
 import { failure, success, type Result } from '../result';
-import { openSharedSession, type SharedSession } from '../shared/shared-session';
+import { openValidatedSession, type SharedSession } from '../shared/shared-session';
 import { validateSharedDocument } from '../shared/shared-project';
+import type { Project } from '../model/project';
 import type { ValidationIssue } from '../validation/validation-issues';
 import { crc32 } from './crc32';
 
-export const TASKLACE_SIGNATURE = Uint8Array.from('TSKL', (character) => character.charCodeAt(0));
-export const TASKLACE_FORMAT_VERSION = 1;
+const TASKLACE_SIGNATURE = Uint8Array.from('TSKL', (character) => character.charCodeAt(0));
+const TASKLACE_FORMAT_VERSION = 1;
 export const HEADER_BYTES = 16;
 
 const VERSION_OFFSET = 4;
@@ -39,7 +40,12 @@ export type FileError =
   | { readonly code: 'INVALID_CONTENT' }
   | { readonly code: 'INVALID_PROJECT'; readonly issues: readonly ValidationIssue[] };
 
-/** Writes a shared document as a .tasklace file: header, checksum, then its compressed Yjs state. */
+interface ValidatedFile {
+  readonly document: Y.Doc;
+  readonly project: Project;
+}
+
+/** Writes a shared document as a .tasklace file: a header holding the uncompressed size and a checksum of everything after it, then the compressed Yjs state. */
 export function encodeTasklaceFile(document: Y.Doc, compressor: Compressor): Uint8Array {
   const state = Y.encodeStateAsUpdate(document);
   const payload = compressor.compress(state);
@@ -59,12 +65,8 @@ export function openTasklaceFile(
   file: Uint8Array,
   compressor: Compressor,
 ): Result<SharedSession, FileError> {
-  const document = readTasklaceFile(file, compressor);
-  if (!document.ok) {
-    return document;
-  }
-  const session = openSharedSession(document.value);
-  return session.ok ? session : failure({ code: 'INVALID_PROJECT', issues: session.error });
+  const read = readValidatedFile(file, compressor);
+  return read.ok ? success(openValidatedSession(read.value.document, read.value.project)) : read;
 }
 
 /** Reads an untrusted .tasklace file into a shared document holding a valid project, checking size, header, checksum, decompression, content and project in this order. */
@@ -72,6 +74,15 @@ export function readTasklaceFile(
   file: Uint8Array,
   compressor: Compressor,
 ): Result<Y.Doc, FileError> {
+  const read = readValidatedFile(file, compressor);
+  return read.ok ? success(read.value.document) : read;
+}
+
+/** Reads and checks an untrusted .tasklace file, returning its shared document with the project it validated. */
+function readValidatedFile(
+  file: Uint8Array,
+  compressor: Compressor,
+): Result<ValidatedFile, FileError> {
   const header = checkHeader(file);
   if (!header.ok) {
     return header;
@@ -85,10 +96,12 @@ export function readTasklaceFile(
     return document;
   }
   const project = validateSharedDocument(document.value);
-  return project.ok ? document : failure({ code: 'INVALID_PROJECT', issues: project.error });
+  return project.ok
+    ? success({ document: document.value, project: project.value })
+    : failure({ code: 'INVALID_PROJECT', issues: project.error });
 }
 
-/** Checks the size, signature, version, flags and checksum of a file and returns the declared size of its content. */
+/** Checks the size, signature, version, flags and checksum of a file and returns the uncompressed size it declares. */
 function checkHeader(file: Uint8Array): Result<number, FileError> {
   if (file.length > MAX_FILE_BYTES) {
     return failure({ code: 'TOO_LARGE' });
@@ -115,7 +128,7 @@ function checkHeader(file: Uint8Array): Result<number, FileError> {
   return success(view.getUint32(DECLARED_SIZE_OFFSET, LITTLE_ENDIAN));
 }
 
-/** Decompresses the content of a file without ever producing more than its declared size, itself capped. */
+/** Decompresses the content of a file without ever producing more than its declared size, itself capped, an empty state never being a document. */
 function decompressPayload(
   file: Uint8Array,
   declaredSize: number,
@@ -123,6 +136,9 @@ function decompressPayload(
 ): Result<Uint8Array, FileError> {
   if (declaredSize > MAX_UNCOMPRESSED_BYTES) {
     return failure({ code: 'DECOMPRESSION_BOMB' });
+  }
+  if (declaredSize === 0) {
+    return failure({ code: 'INVALID_CONTENT' });
   }
   const state = compressor.decompress(file.subarray(HEADER_BYTES), declaredSize);
   if (!state.ok) {

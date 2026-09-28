@@ -36,7 +36,6 @@ import {
   viewTaskUnion,
   writeEntry,
   writeProjectHeader,
-  writeSharedProject,
   type EntryRoot,
 } from './shared-document';
 import {
@@ -59,6 +58,7 @@ import {
 
 export interface SharedSession {
   readonly document: Y.Doc;
+  readonly openingRepairs: readonly SharedRepair[];
   readonly project: () => Project;
   readonly apply: (operation: SharedOperation) => Result<void, readonly ValidationIssue[]>;
   readonly merge: (update: Uint8Array) => Result<readonly SharedRepair[], MergeFailure>;
@@ -103,20 +103,25 @@ const FAST_REPAIR_ORDER: readonly SharedRepairCode[] = [
 
 type SharedType = Y.Transaction['changed'] extends Map<infer Type, unknown> ? Type : never;
 
-/** Opens a session on a valid shared document, clearing references to missing tags, and keeps a validated, indexed copy of its project and a trial copy of the document. */
+/** Opens a session on a valid shared document, clearing and reporting references to missing tags, and keeps a validated, indexed copy of its project and a trial copy of the document. */
 export function openSharedSession(
   document: Y.Doc,
 ): Result<SharedSession, readonly ValidationIssue[]> {
   const read = readSharedProject(document);
-  if (!read.ok) {
-    return read;
-  }
-  const tagIds = new Set(read.value.tags.map((tag) => tag.id));
-  const opened = {
-    ...read.value,
-    tasks: read.value.tasks.map((task) => withKnownTag(task, (id) => tagIds.has(id))),
-  };
-  writeSharedProject(document, opened, REPAIR_ORIGIN);
+  return read.ok ? success(openValidatedSession(document, read.value)) : read;
+}
+
+/** Opens a session on a shared document whose project was already read and validated, so that it is not validated twice. */
+export function openValidatedSession(document: Y.Doc, project: Project): SharedSession {
+  const tagIds = new Set(project.tags.map((tag) => tag.id));
+  const tasks = project.tasks.map((task) => withKnownTag(task, (id) => tagIds.has(id)));
+  const cleared = tasks.filter((task, index) => task !== project.tasks[index]);
+  document.transact(() => {
+    cleared.forEach((task) => {
+      writeEntry(document, TASKS_ROOT, task);
+    });
+  }, REPAIR_ORIGIN);
+  const opened = { ...project, tasks };
   const session: SessionState = {
     state: createProjectState(opened),
     shadow: copyDocument(document, newRepairClientId(document)),
@@ -128,12 +133,15 @@ export function openSharedSession(
       Y.applyUpdate(session.shadow, update);
     }
   });
-  return success({
+  return {
     document,
+    openingRepairs: cleared
+      .map((task): SharedRepair => ({ code: 'TAG_CLEARED', id: task.id }))
+      .sort((left, right) => compareStrings(left.id, right.id)),
     project: () => currentProject(session),
     apply: (operation) => applyOperationToSession(session, document, operation),
     merge: (update) => mergeIntoSession(session, document, update),
-  });
+  };
 }
 
 /** Returns the project of a session, rebuilt from the indexed state only after it changed. */
