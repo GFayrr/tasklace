@@ -2,8 +2,8 @@ import type { Dependency, DependencyType, Project, Tag, Task } from '../../src/c
 import { milestone, project, splitTask, workTask } from '../../src/core/testing/project-builder';
 import { createRandom } from './random';
 
-const TASK_COUNT = 10_000;
-const DEPENDENCY_COUNT = 20_000;
+export const LARGE_PROJECT_TASK_COUNT = 10_000;
+const DEPENDENCIES_PER_TASK = 2;
 const MAX_LINK_DISTANCE = 50;
 const MAX_DURATION_HOURS = 40;
 const MILESTONE_RATIO = 0.1;
@@ -24,12 +24,16 @@ const LINK_TYPES: DependencyType[] = [
   'finishToFinish',
 ];
 
-/** Builds a realistic large project from a seed: short tasks, some milestones and split tasks, local links, 20 people. */
-export function buildLargeProject(seed = LARGE_PROJECT_SEED): Project {
+/** Builds a realistic large project from a seed and a number of tasks: short tasks, some milestones and split tasks, twice as many local links, 20 people. */
+export function buildLargeProject(
+  seed = LARGE_PROJECT_SEED,
+  taskCount = LARGE_PROJECT_TASK_COUNT,
+): Project {
   const random = createRandom(seed);
+  const dependencyCount = taskCount * DEPENDENCIES_PER_TASK;
   const idOf = (index: number): string => `t${String(index)}`;
   const tagOf = (index: number): string => `person${String(index % PERSON_COUNT)}`;
-  const tasks: Task[] = Array.from({ length: TASK_COUNT }, (_value, index) => {
+  const tasks: Task[] = Array.from({ length: taskCount }, (_value, index) => {
     const roll = random();
     const durationHours = 1 + Math.floor(random() * MAX_DURATION_HOURS);
     if (roll < MILESTONE_RATIO) {
@@ -51,12 +55,12 @@ export function buildLargeProject(seed = LARGE_PROJECT_SEED): Project {
     });
   });
   const dependencies = new Map<string, Dependency>();
-  for (let attempt = 0; dependencies.size < DEPENDENCY_COUNT; attempt += 1) {
-    if (attempt > DEPENDENCY_COUNT * MAX_ATTEMPTS_PER_DEPENDENCY) {
+  for (let attempt = 0; dependencies.size < dependencyCount; attempt += 1) {
+    if (attempt > dependencyCount * MAX_ATTEMPTS_PER_DEPENDENCY) {
       throw new Error('The random generator produced too few distinct dependencies');
     }
-    const from = Math.floor(random() * (TASK_COUNT - 1));
-    const to = Math.min(TASK_COUNT - 1, from + 1 + Math.floor(random() * MAX_LINK_DISTANCE));
+    const from = Math.floor(random() * (taskCount - 1));
+    const to = Math.min(taskCount - 1, from + 1 + Math.floor(random() * MAX_LINK_DISTANCE));
     const id = `${idOf(from)}-${idOf(to)}`;
     const type = LINK_TYPES[Math.floor(random() * LINK_TYPES.length)] ?? 'finishToStart';
     dependencies.set(id, {

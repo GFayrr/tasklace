@@ -5,7 +5,7 @@ const COVERAGE_THRESHOLD_PERCENT = 90;
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
-    exclude: [...configDefaults.exclude, 'tests/perf/**'],
+    exclude: [...configDefaults.exclude, 'tests/perf/**', 'tests/growth/**'],
     coverage: {
       provider: 'v8',
       include: ['src/core/**/*.ts'],
