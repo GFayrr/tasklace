@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON exchange are built and tested, but there is no user interface or downloadable release yet.
+> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested, but there is no user interface or downloadable release yet.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -56,6 +56,7 @@ What the core already supports:
 - Complete validation of untrusted project data before anything is loaded, with each problem reported at its exact location.
 - `.tasklace` project files: compressed, checksummed and fully checked before opening, so that a damaged or forged file is refused without ever being loaded.
 - JSON import and export: compact, versioned documents with dates in clear text.
+- CSV import and export of the task table for Excel or LibreOffice, with regional dates and separators, errors reported by row and, when a single cell is at fault, by column, and protection against formula injection.
 - A shared project model where concurrent edits always merge into the same valid project for everyone, and a frozen baseline plan.
 
 ## Roadmap
@@ -63,7 +64,7 @@ What the core already supports:
 - [x] Working-time calendar
 - [x] Scheduling engine: dependencies, summaries, split tasks, critical path
 - [x] Tags and person or team conflict detection
-- [ ] Project file format, validation, JSON and CSV import and export (in progress: validation, JSON, the shared model and the `.tasklace` file are done)
+- [x] Project file format, validation, JSON and CSV import and export
 - [ ] Desktop application and user interface
 - [ ] PDF export
 - [ ] Real-time collaboration on the local network
@@ -106,7 +107,7 @@ The test suite covers edge cases extensively and uses property-based testing to 
 src/core/            pure logic, independent of any user interface
   baseline/          baseline plan snapshots
   calendar/          working-time calendar and task time slots
-  exchange/          JSON import and export
+  exchange/          JSON and CSV import and export
   file/              .tasklace project file: header, checksum and defensive reading
   model/             project data types
   scheduling/        dependency graph, forward and backward passes, summaries, WBS

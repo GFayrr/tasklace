@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { compileCalendar, type CompiledCalendar } from '../../src/core/calendar/compile-calendar';
+import { exportProjectCsv } from '../../src/core/exchange/csv/project-csv-export';
+import { importProjectCsv } from '../../src/core/exchange/csv/project-csv-import';
+import type { RegionalFormat } from '../../src/core/exchange/csv/regional-format';
 import { exportProjectJson, importProjectJson } from '../../src/core/exchange/project-json';
 import type { Project } from '../../src/core/model/project';
 import { scheduleProject, type Schedule } from '../../src/core/scheduling/schedule-project';
 import { placeTask } from '../../src/core/scheduling/task-placement';
 import { detectTagConflicts } from '../../src/core/tags/tag-conflicts';
+import { unwrap } from '../../src/core/testing/arbitraries';
 import { at } from '../../src/core/testing/civil-time';
 import { project, workTask } from '../../src/core/testing/project-builder';
 import { readProject, STORED_VALUE_CODEC } from '../../src/core/validation/read-project';
@@ -20,6 +24,12 @@ import {
 } from './measure-growth';
 
 const SHORT_TASK_HOURS = 2_000;
+const CSV_FORMAT: RegionalFormat = {
+  listSeparator: ';',
+  dateOrder: 'dayMonthYear',
+  dateSeparator: '/',
+  twelveHourClock: false,
+};
 const PLACEMENTS_PER_RUN = 200;
 
 /** Schedules a project, failing the test when scheduling fails. */
@@ -70,6 +80,31 @@ describe('growth of whole-project operations (n tasks, 2n dependencies)', () => 
       () => importProjectJson(largeText),
     );
     console.info(`JSON import: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
+  });
+
+  it('imports CSV in linear time', () => {
+    const smallText = unwrap(exportProjectCsv(small, scheduleOf(small), CSV_FORMAT));
+    const largeText = unwrap(exportProjectCsv(large, scheduleOf(large), CSV_FORMAT));
+    const options = { format: CSV_FORMAT, projectName: 'Growth', fallbackStart: small.startDate };
+    expect(importProjectCsv(smallText, options).ok).toBe(true);
+    expect(importProjectCsv(largeText, options).ok).toBe(true);
+    const ratio = growthRatio(
+      () => importProjectCsv(smallText, options),
+      () => importProjectCsv(largeText, options),
+    );
+    console.info(`CSV import: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
+  });
+
+  it('exports CSV in quasi-linear time', () => {
+    const smallSchedule = scheduleOf(small);
+    const largeSchedule = scheduleOf(large);
+    const ratio = growthRatio(
+      () => unwrap(exportProjectCsv(small, smallSchedule, CSV_FORMAT)),
+      () => unwrap(exportProjectCsv(large, largeSchedule, CSV_FORMAT)),
+    );
+    console.info(`CSV export: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
   });
 
