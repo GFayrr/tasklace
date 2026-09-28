@@ -14,7 +14,8 @@
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "format:check": "prettier --check .",
-    "bench": "vitest run --config vitest.perf.config.ts"
+    "bench": "vitest run --config vitest.perf.config.ts",
+    "bench:growth": "vitest run --config vitest.growth.config.ts"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",

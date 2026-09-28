@@ -4,5 +4,6 @@ export default defineConfig({
   test: {
     include: ['tests/perf/**/*.perf.test.ts'],
     testTimeout: 120_000,
+    fileParallelism: false,
   },
 });
