@@ -38,12 +38,13 @@ Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit
 - Adds the `yjs` dependency; `y-protocols` comes with the network protocol in step 7.
 - A shared session keeps a validated, indexed copy of the project: local edits and received updates are checked and repaired only where they change things, falling back to the whole repair when a structural rule is broken, so that editing and merging stay far below one frame on 10,000 tasks.
 
-### 4c. `.tasklace` project file
+### 4c. `.tasklace` project file (done)
 
 - Container: `TSKL` signature, format version, flags, CRC-32 checksum, compressed Yjs state, pruned history.
 - Compression is injected into the core; the `node:zlib` implementation, with a capped output size, lives in `src/main/`.
 - Defensive reading, in this order, before anything is loaded: maximum size, signature, version, checksum, capped decompression against decompression bombs, guarded Yjs decoding, complete validation (4a).
-- Maximum file size measured on the largest possible project, then fixed.
+- Maximum sizes measured on the largest possible project, then fixed as powers of two above it: 128 MiB for a file, 512 MiB once decompressed.
+- Fast compression (zlib level 1): the file is slightly larger, but saving, which happens automatically, is much faster.
 - Test files generated in memory from fixed seeds: random, truncated, altered, wrong version, decompression bomb.
 
 ### 4d. CSV import and export

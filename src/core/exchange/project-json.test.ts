@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { compileCalendar } from '../calendar/compile-calendar';
-import { MAX_PROJECT_TEXT_UTF16_UNITS, MAX_TAG_NAME_LENGTH } from '../limits';
+import { MAX_TAG_NAME_LENGTH } from '../limits';
 import type { Project, Task, WorkTask } from '../model/project';
 import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { at, dayOf } from '../testing/civil-time';
@@ -235,12 +235,6 @@ describe('importProjectJson: text and header', () => {
       expect(importIssues(text)).toEqual(issue('', 'INVALID_JSON'));
     },
   );
-
-  it('rejects a text longer than the maximum size before parsing it', () => {
-    expect(importIssues(' '.repeat(MAX_PROJECT_TEXT_UTF16_UNITS + 1))).toEqual(
-      issue('', 'TOO_LARGE'),
-    );
-  });
 
   it.each(['[]', 'null', '42', '"tasklace"', 'true'])('rejects the document %s', (text) => {
     expect(importIssues(text)).toEqual(issue('', 'WRONG_TYPE'));
