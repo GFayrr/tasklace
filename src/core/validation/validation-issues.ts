@@ -2,6 +2,7 @@ import type { CalendarErrorCode } from '../calendar/compile-calendar';
 import type { DailyWindowErrorCode } from '../calendar/task-slots';
 import { MAX_REPORTED_ISSUES } from '../limits';
 import type { StructureErrorCode } from '../scheduling/project-structure';
+import type { PlacementErrorCode } from '../scheduling/task-placement';
 
 export type ValueIssueCode =
   | 'INVALID_JSON'
@@ -24,8 +25,22 @@ export type ValueIssueCode =
   | 'DUPLICATE_ENTRY'
   | 'TOO_MANY_REPAIRS';
 
+export type ImportIssueCode =
+  | 'INVALID_CSV'
+  | 'INVALID_NOTATION'
+  | 'INVALID_NUMBER'
+  | 'UNSUPPORTED_UNIT'
+  | 'UNKNOWN_REFERENCE'
+  | 'DURATION_MISMATCH'
+  | 'UNSCHEDULABLE';
+
 export type ValidationIssueCode =
-  ValueIssueCode | CalendarErrorCode | DailyWindowErrorCode | StructureErrorCode;
+  | ValueIssueCode
+  | ImportIssueCode
+  | CalendarErrorCode
+  | DailyWindowErrorCode
+  | StructureErrorCode
+  | PlacementErrorCode;
 
 export interface ValidationIssue {
   readonly path: string;
