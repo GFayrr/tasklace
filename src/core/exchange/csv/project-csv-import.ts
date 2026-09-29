@@ -3,7 +3,7 @@ import { MAX_CSV_COLUMNS, MAX_CSV_TEXT_UTF16_UNITS, MAX_TASKS } from '../../limi
 import type { Project, Task, TaskId } from '../../model/project';
 import { failure, success, type Result } from '../../result';
 import {
-  scheduleProject,
+  scheduleWithRequestedStarts,
   type Schedule,
   type SchedulingFailure,
 } from '../../scheduling/schedule-project';
@@ -12,7 +12,13 @@ import { readProject, STORED_VALUE_CODEC } from '../../validation/read-project';
 import type { ValidationIssue } from '../../validation/validation-issues';
 import { stripLeadingByteOrderMark } from '../byte-order-mark';
 import type { CsvColumn } from './csv-columns';
-import { readTable, rowPath, type CsvWarning, type ParsedRow } from './csv-rows';
+import {
+  readTable,
+  rowPath,
+  selectKnownColumns,
+  type CsvWarning,
+  type ParsedRow,
+} from './csv-rows';
 import { planTasks, type PlannedTask, type TaskPlan } from './csv-task-plan';
 import { parseCsv, type CsvSyntaxError } from './csv-text';
 import type { CsvDate, RegionalFormat } from './regional-format';
@@ -62,10 +68,9 @@ export function importProjectCsv(
   if (text.length > MAX_CSV_TEXT_UTF16_UNITS) {
     return failure([{ path: '', code: 'TOO_LARGE' }]);
   }
-  const table = parseCsv(stripLeadingByteOrderMark(text), options.format.listSeparator, {
-    maxColumns: MAX_CSV_COLUMNS,
-    maxRows: MAX_TASKS,
-  });
+  const limits = { maxColumns: MAX_CSV_COLUMNS, maxRows: MAX_TASKS };
+  const separator = options.format.listSeparator;
+  const table = parseCsv(stripLeadingByteOrderMark(text), separator, limits, selectKnownColumns);
   if (!table.ok) {
     return failure([syntaxIssue(table.error)]);
   }
@@ -154,48 +159,33 @@ function taskIssuePath(planned: PlannedTask, field: string | undefined): string 
   return rowPath(row.rowNumber, column);
 }
 
-/** Schedules the project, then sets a "not before" constraint only on the tasks it would start before their table date, and schedules again when one was set. */
+/** Schedules the project once, the start date of each work task or milestone row becoming a "not before" constraint only where the task, placed after its predecessors, would otherwise start earlier. */
 function constrainStarts(
   project: Project,
   plan: TaskPlan,
 ): Result<ScheduledProject, readonly ValidationIssue[]> {
   const rowsById = new Map(plan.tasks.map(({ task, row }) => [task.id, row]));
-  const free = scheduleOrIssue(project, rowsById);
-  if (!free.ok) {
-    return free;
-  }
-  const tasks = project.tasks.map((task) =>
-    withStartConstraint(task, rowsById.get(task.id)?.start ?? null, free.value),
+  const requestedStarts = new Map(
+    plan.tasks.flatMap(({ task, row }) =>
+      task.kind === 'summary' || row.start === null
+        ? []
+        : [[task.id, startHourOf(row.start)] as const],
+    ),
   );
-  if (tasks.every((task, index) => task === project.tasks[index])) {
-    return success({ project, schedule: free.value });
+  const scheduled = scheduleWithRequestedStarts(project, requestedStarts);
+  if (!scheduled.ok) {
+    return failure([schedulingIssue(scheduled.error, rowsById)]);
   }
-  const constrainedProject = { ...project, tasks };
-  const schedule = scheduleOrIssue(constrainedProject, rowsById);
-  return schedule.ok
-    ? success({ project: constrainedProject, schedule: schedule.value })
-    : schedule;
+  const { schedule, keptStarts } = scheduled.value;
+  const tasks = project.tasks.map((task) => withKeptStart(task, keptStarts.get(task.id)));
+  return success({ project: { ...project, tasks }, schedule });
 }
 
-/** Adds the start date of a row to its task as a "not before" constraint when the free schedule starts the task earlier. */
-function withStartConstraint(task: Task, start: CsvDate | null, schedule: Schedule): Task {
-  if (task.kind === 'summary' || start === null) {
-    return task;
-  }
-  const requested = startHourOf(start);
-  const placement = schedule.placements.get(task.id);
-  return placement !== undefined && placement.start < requested
-    ? { ...task, startNoEarlierThan: requested }
-    : task;
-}
-
-/** Schedules a project, turning a failure into an issue at the row of the task that could not be placed. */
-function scheduleOrIssue(
-  project: Project,
-  rowsById: ReadonlyMap<TaskId, ParsedRow>,
-): Result<Schedule, readonly ValidationIssue[]> {
-  const schedule = scheduleProject(project);
-  return schedule.ok ? schedule : failure([schedulingIssue(schedule.error, rowsById)]);
+/** Gives a task the start date the schedule kept for it, if any. */
+function withKeptStart(task: Task, start: ProjectHour | undefined): Task {
+  return task.kind === 'summary' || start === undefined
+    ? task
+    : { ...task, startNoEarlierThan: start };
 }
 
 /** Turns a scheduling failure into an issue carrying the reason a task could not be placed, at its row. */

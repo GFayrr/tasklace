@@ -19,6 +19,10 @@ export interface RegionalFormat {
   readonly twelveHourClock: boolean;
 }
 
+export type DateParser = (text: string) => Result<CsvDate, 'INVALID_DATE'>;
+
+export type DateTimeFormatter = (hour: ProjectHour) => string;
+
 export type CsvDate =
   | { readonly kind: 'dateTime'; readonly hour: ProjectHour }
   | { readonly kind: 'date'; readonly day: DayIndex };
@@ -63,6 +67,36 @@ export function formatRegionalDateTime(hour: ProjectHour, format: RegionalFormat
     yearMonthDay: [year, month, day],
   }[format.dateOrder];
   return `${parts.join(format.dateSeparator)} ${formatHour(civil.hour, format.twelveHourClock)}`;
+}
+
+/** Returns a function writing project hours in the regional format, each distinct hour being formatted only once. */
+export function createDateTimeFormatter(format: RegionalFormat): DateTimeFormatter {
+  const formatted = new Map<ProjectHour, string>();
+  return (hour) => {
+    const known = formatted.get(hour);
+    if (known !== undefined) {
+      return known;
+    }
+    const text = formatRegionalDateTime(hour, format);
+    formatted.set(hour, text);
+    return text;
+  };
+}
+
+/** Returns a function reading dates like parseCsvDate, each distinct text short enough to be a date being read only once. */
+export function createDateParser(format: RegionalFormat): DateParser {
+  const parsed = new Map<string, Result<CsvDate, 'INVALID_DATE'>>();
+  return (text) => {
+    const known = parsed.get(text);
+    if (known !== undefined) {
+      return known;
+    }
+    const result = parseCsvDate(text, format);
+    if (text.length <= MAX_DATE_LENGTH) {
+      parsed.set(text, result);
+    }
+    return result;
+  };
 }
 
 /** Reads a date, with or without an hour, in ISO form or in the regional date order with any of "/", "." or "-", refusing minutes or seconds other than zero. */

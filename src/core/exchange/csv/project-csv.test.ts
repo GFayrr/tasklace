@@ -24,7 +24,7 @@ import {
   workTask,
 } from '../../testing/project-builder';
 import type { ValidationIssue } from '../../validation/validation-issues';
-import { parseCsv } from './csv-text';
+import { keepAllColumns, parseCsv } from './csv-text';
 import { CSV_BYTE_ORDER_MARK, exportProjectCsv } from './project-csv-export';
 import { importProjectCsv, type CsvImport } from './project-csv-import';
 import type { RegionalFormat } from './regional-format';
@@ -300,7 +300,9 @@ describe('importProjectCsv round trip', () => {
           const schedule = scheduleProject(input);
           fc.pre(schedule.ok);
           const text = unwrap(exportProjectCsv(input, schedule.value, FRENCH));
-          const table = unwrap(parseCsv(text.slice(CSV_BYTE_ORDER_MARK.length), ';', TABLE_LIMITS));
+          const table = unwrap(
+            parseCsv(text.slice(CSV_BYTE_ORDER_MARK.length), ';', TABLE_LIMITS, keepAllColumns),
+          );
           const cells = [table.header, ...table.rows.map((row) => row.cells)].flat();
           expect(cells.filter((cell) => FORMULA_TRIGGERS.includes(cell.charAt(0)))).toEqual([]);
         }),
@@ -414,6 +416,20 @@ describe('importProjectCsv choices made for the user', () => {
     expect(issuesOf('1;X;;;7', '2;A;;;;;1')).toEqual([
       { path: 'rows[3].duration', code: 'MISSING_FIELD' },
     ]);
+  });
+
+  it('keeps no start date for a task its predecessor already pushes past it', () => {
+    const imported = importLines(
+      '1;C;01/10/2026 09:00;;7',
+      '2;A;05/10/2026 09:00;;7',
+      '3;B;03/10/2026 09:00;;7;;2',
+    );
+    expect(
+      imported.project.tasks.map((task) =>
+        task.kind === 'summary' ? null : task.startNoEarlierThan,
+      ),
+    ).toEqual([null, at(2026, 10, 5, 9), null]);
+    expect(imported.warnings).toEqual([{ path: 'rows[4].start', code: 'START_DIFFERS' }]);
   });
 
   it('keeps a date without hour as a start at the first working hour of that day', () => {

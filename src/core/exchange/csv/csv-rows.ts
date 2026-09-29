@@ -8,8 +8,13 @@ import {
 } from '../../validation/validation-issues';
 import { restoreFormula } from './csv-cells';
 import { readHeader, type CsvColumn } from './csv-columns';
-import type { CsvRow, CsvTable } from './csv-text';
-import { parseCsvDate, type CsvDate, type RegionalFormat } from './regional-format';
+import type { ColumnSelector, CsvRow, CsvTable } from './csv-text';
+import {
+  createDateParser,
+  type CsvDate,
+  type DateParser,
+  type RegionalFormat,
+} from './regional-format';
 import {
   parseBlocks,
   parsePredecessors,
@@ -55,7 +60,7 @@ type CellIssue = 'INVALID_NOTATION' | 'INVALID_NUMBER' | 'INVALID_DATE' | 'TOO_M
 
 interface RowContext {
   readonly columns: ColumnIndexes;
-  readonly format: RegionalFormat;
+  readonly parseDate: DateParser;
   readonly issues: IssueList;
   readonly warnings: CsvWarning[];
   readonly budget: { remainingPredecessors: number };
@@ -71,6 +76,9 @@ export function rowPath(rowNumber: number, column?: CsvColumn): string {
   return column === undefined ? row : `${row}.${column}`;
 }
 
+/** Selects the columns whose header names a known column in a supported unit, so that the reader skips the cells of every other column. */
+export const selectKnownColumns: ColumnSelector = (header) => readHeader(header).kind === 'column';
+
 /** Reads the cells of every row into typed values, or lists each unreadable cell and column at its location, with warnings about what is ignored. */
 export function readTable(
   table: CsvTable,
@@ -81,7 +89,7 @@ export function readTable(
   const columns = readColumns(table.header, issues, warnings);
   const context: RowContext = {
     columns,
-    format,
+    parseDate: createDateParser(format),
     issues,
     warnings,
     budget: { remainingPredecessors: MAX_DEPENDENCIES },
@@ -127,7 +135,7 @@ function readRow(row: CsvRow, context: RowContext): ParsedRow {
   };
   const read = <T>(column: CsvColumn, parse: (text: string) => Result<T, CellIssue>): T | null =>
     readCell(cell(column), rowPath(row.rowNumber, column), parse, context.issues);
-  const { budget, format } = context;
+  const { budget, parseDate } = context;
   const predecessors =
     read('predecessors', (text) => parsePredecessors(text, budget.remainingPredecessors)) ?? [];
   budget.remainingPredecessors -= predecessors.length;
@@ -135,8 +143,8 @@ function readRow(row: CsvRow, context: RowContext): ParsedRow {
     rowNumber: row.rowNumber,
     wbs: read('wbs', parseWbs),
     name: cell('name'),
-    start: read('start', (text) => parseCsvDate(text, format)),
-    end: read('end', (text) => parseCsvDate(text, format)),
+    start: read('start', parseDate),
+    end: read('end', parseDate),
     durationHours: read('duration', (text) => parseNumber(text, DURATION_PATTERN)),
     progressPercent: read('progress', (text) => parseNumber(text, PROGRESS_PATTERN)),
     predecessors,
@@ -173,11 +181,11 @@ function reportUnknownColumn(cell: string, index: number, warnings: CsvWarning[]
 
 /** Warns about every column without header that still holds a value in some row, since that value is ignored. */
 function blankColumnWarnings(table: CsvTable): CsvWarning[] {
-  return table.header.flatMap((cell, index): CsvWarning[] => {
-    const isIgnored =
-      cell.trim() === '' && table.rows.some((row) => (row.cells[index] ?? '').trim() !== '');
-    return isIgnored ? [{ path: columnPath(index), code: 'UNKNOWN_COLUMN' }] : [];
-  });
+  return table.header.flatMap((cell, index): CsvWarning[] =>
+    cell.trim() === '' && table.filledBlankColumns.has(index)
+      ? [{ path: columnPath(index), code: 'UNKNOWN_COLUMN' }]
+      : [],
+  );
 }
 
 /** Returns the location of a column by its position in the spreadsheet, the first column being 1. */
