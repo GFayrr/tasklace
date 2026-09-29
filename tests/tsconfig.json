@@ -3,5 +3,6 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["."]
+  "include": [".", "../electron.vite.config.ts", "../playwright.config.ts"],
+  "exclude": ["e2e"]
 }

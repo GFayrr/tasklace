@@ -91,6 +91,9 @@ The following commands are for development only.
 
 | Command                | Purpose                                                 |
 | ---------------------- | ------------------------------------------------------- |
+| `npm run dev`          | Start the desktop application in development mode       |
+| `npm run build`        | Build the main process, the preload bridge and the page |
+| `npm run test:e2e`     | Build, then test the running application end to end     |
 | `npm test`             | Run unit and property-based tests with coverage         |
 | `npm run test:watch`   | Run tests in watch mode                                 |
 | `npm run bench`        | Check performance on 10,000 tasks and 20,000 links      |
@@ -115,6 +118,9 @@ src/core/            pure logic, independent of any user interface
   tags/              tag colors, patterns and person or team conflicts
   testing/           test helpers and random data generators
   validation/        validation of untrusted project data
+src/main/            Electron main process: window, security, bridge requests
+src/preload/         minimal typed bridge between the page and the main process
+src/renderer/        user interface
 docs/                roadmap and user documentation
 tests/file/          .tasklace files with real compression, decompression bombs
 tests/fixtures/      large test projects generated from fixed seeds

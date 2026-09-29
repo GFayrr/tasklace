@@ -59,3 +59,42 @@ Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit
 - Predecessors are imported and exported as `1.2FS+2h`: WBS number, dependency type (FS, SS, FF, SF) and lag.
 - Protection against formula injection: a cell starting with `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed with an apostrophe on export, which the import removes.
 - Import limited to 128 Mi UTF-16 units, above the export of the largest allowed project.
+- Faster import and export (step 4 follow-up): one scheduling pass per import, keeping only the start dates the schedule needs; dates parsed and formatted once each; blank lines and unknown columns skipped without building their cells.
+
+## Step 5: secure Electron shell and Svelte user interface
+
+Step 5 turns the core into a desktop application. It is developed on a single branch, one sub-step after the other, each ending with its own commit. The sub-steps that do not shape the look of the application come first.
+
+### 5a. Tooling and secure shell
+
+- Electron, electron-vite and Playwright; development, build and end-to-end test commands.
+- Main process: a single window with context isolation, sandbox, no Node.js in the page and web security; a strict content security policy; no remote content; navigation, new windows and permission requests refused; a single running instance; external links opened only for an allowlist of `https` addresses.
+- Preload bridge: a minimal, typed API exposed with `contextBridge`; every channel is listed and every message is validated by the main process with hand-written validators.
+- Lint rules keep the page away from Node.js and Electron, and the core pure.
+- End-to-end tests check the security settings in the running application; continuous integration runs them on Linux and Windows.
+
+### 5b. Files and isolated decoding
+
+- The real zlib compressor, with a capped output size, in the main process; file sizes checked in bytes before reading.
+- Opening a `.tasklace` file and importing JSON or CSV run in a worker thread with a capped memory, so that a forged file can only stop that worker.
+- Automatic saving after a short pause, written to a temporary file then renamed; a hidden local copy for offline work; recent files; open, save, import and export dialogs.
+- The regional format of the system (list separator, date order, clock) is read by the main process for CSV exchange; every error code of the core maps to a translated message.
+
+### 5c. Interface foundations
+
+- Svelte 5 application with the Fayr design tokens, light and dark themes and the Jost font embedded with its licence.
+- Translation structure (`en.json`, typed keys, no text in code, languages loaded on demand); dates and numbers in the regional format.
+- Scheduling in a Web Worker; the page holds the shared project and applies local edits and received updates; undo and redo are local to each user.
+
+### 5d. Task table and timeline
+
+- Virtualized, editable task table: WBS, name, duration, start, end, progress, predecessors.
+- Canvas timeline: two-level time scale, hour, day, week and month zooms, shaded non-working periods, today line, split blocks, milestone diamonds, summary bars, progress, dependency arrows, tag colors and patterns, conflict outlines.
+- Creating, editing, moving, linking, indenting and reordering tasks with the mouse and the keyboard.
+- Only visible rows are drawn, for 60 frames per second on 10,000 tasks.
+
+### 5e. Project settings and advanced options
+
+- Project name and start date, working calendar editor, tag management.
+- Advanced options, disabled by default: critical path, date constraints, baseline plan with ghost bars, always showing patterns.
+- Lists of tag conflicts, repairs, import warnings and located errors.
