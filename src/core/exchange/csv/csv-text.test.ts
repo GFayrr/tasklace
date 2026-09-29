@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { failure } from '../../result';
-import { PROPERTY_TEST_TIMEOUT_MS } from '../../testing/arbitraries';
-import { CSV_SEPARATORS, parseCsv, writeCsv, type CsvSeparator } from './csv-text';
+import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../../testing/arbitraries';
+import { CSV_SEPARATORS, keepAllColumns, parseCsv, writeCsv, type CsvSeparator } from './csv-text';
 
 const LIMITS = { maxColumns: 8, maxRows: 16 };
 
 /** Parses CSV text with the default limits and returns its header and row cells, failing the test on a syntax error. */
 function cellsOf(text: string, fallback: CsvSeparator = ','): string[][] {
-  const table = parseCsv(text, fallback, LIMITS);
+  const table = parseCsv(text, fallback, LIMITS, keepAllColumns);
   if (!table.ok) {
     throw new Error(JSON.stringify(table.error));
   }
@@ -25,9 +25,9 @@ describe('parseCsv', () => {
 
   it('decodes a quoted cell holding more doubled quotes than one decoding slice, across slice boundaries', () => {
     const pairs = 200_000;
-    const table = parseCsv(`a\n"${'x""'.repeat(pairs)}y"\n`, ',', LIMITS);
+    const table = parseCsv(`a\n"${'x""'.repeat(pairs)}y"\n`, ',', LIMITS, keepAllColumns);
     expect(table.ok && table.value.rows[0]?.cells[0]).toBe(`${'x"'.repeat(pairs)}y`);
-    const onlyQuotes = parseCsv(`a\n"${'""'.repeat(pairs)}"`, ',', LIMITS);
+    const onlyQuotes = parseCsv(`a\n"${'""'.repeat(pairs)}"`, ',', LIMITS, keepAllColumns);
     expect(onlyQuotes.ok && onlyQuotes.value.rows[0]?.cells[0]).toBe('"'.repeat(pairs));
   });
 
@@ -38,17 +38,17 @@ describe('parseCsv', () => {
   });
 
   it('numbers rows as a spreadsheet does, skipping blank and separator-only lines', () => {
-    const table = parseCsv('a;b\n\n;\n1;2\n "x" ; \n', ';', LIMITS);
+    const table = parseCsv('a;b\n\n;\n1;2\n "x" ; \n', ';', LIMITS, keepAllColumns);
     expect(table.ok && table.value.rows.map((row) => row.rowNumber)).toEqual([4, 5]);
   });
 
   it('counts a multi-line quoted cell as a single row', () => {
-    const table = parseCsv('a\n"1\n2"\n3', ',', LIMITS);
+    const table = parseCsv('a\n"1\n2"\n3', ',', LIMITS, keepAllColumns);
     expect(table.ok && table.value.rows.map((row) => row.rowNumber)).toEqual([2, 3]);
   });
 
   it('keeps one cell per header column, filling short rows and flagging dropped non-empty cells', () => {
-    const table = parseCsv('a,b\n1\n1,2,,\n1,2,3', ',', LIMITS);
+    const table = parseCsv('a,b\n1\n1,2,,\n1,2,3', ',', LIMITS, keepAllColumns);
     expect(table.ok && table.value.rows).toEqual([
       { rowNumber: 2, cells: ['1'], hasExtraCells: false },
       { rowNumber: 3, cells: ['1', '2'], hasExtraCells: false },
@@ -65,7 +65,7 @@ describe('parseCsv', () => {
     ['"a;b",c', ';', ','],
     ['single', '\t', '\t'],
   ])('detects the separator of %j with %j as the regional one', (text, fallback, expected) => {
-    const table = parseCsv(text, fallback, LIMITS);
+    const table = parseCsv(text, fallback, LIMITS, keepAllColumns);
     expect(table.ok && table.value.separator).toBe(expected);
   });
 
@@ -78,18 +78,20 @@ describe('parseCsv', () => {
     ['"a"b\n1', 1],
     ['a\n1\n"x"y', 3],
   ])('refuses the badly quoted text %j at its row', (text, rowNumber) => {
-    expect(parseCsv(text, ',', LIMITS)).toEqual(failure({ code: 'INVALID_CSV', rowNumber }));
+    expect(parseCsv(text, ',', LIMITS, keepAllColumns)).toEqual(
+      failure({ code: 'INVALID_CSV', rowNumber }),
+    );
   });
 
   it('refuses more columns or rows than the limits, and accepts them exactly', () => {
     const columns = (count: number) => Array.from({ length: count }, () => 'h').join(',');
     const rows = (count: number) => `h${'\nx'.repeat(count)}`;
-    expect(parseCsv(columns(LIMITS.maxColumns), ',', LIMITS).ok).toBe(true);
-    expect(parseCsv(columns(LIMITS.maxColumns + 1), ',', LIMITS)).toEqual(
+    expect(parseCsv(columns(LIMITS.maxColumns), ',', LIMITS, keepAllColumns).ok).toBe(true);
+    expect(parseCsv(columns(LIMITS.maxColumns + 1), ',', LIMITS, keepAllColumns)).toEqual(
       failure({ code: 'TOO_MANY_COLUMNS' }),
     );
-    expect(parseCsv(rows(LIMITS.maxRows), ',', LIMITS).ok).toBe(true);
-    expect(parseCsv(rows(LIMITS.maxRows + 1), ',', LIMITS)).toEqual(
+    expect(parseCsv(rows(LIMITS.maxRows), ',', LIMITS, keepAllColumns).ok).toBe(true);
+    expect(parseCsv(rows(LIMITS.maxRows + 1), ',', LIMITS, keepAllColumns)).toEqual(
       failure({ code: 'TOO_MANY_ROWS' }),
     );
   });
@@ -99,11 +101,109 @@ describe('parseCsv', () => {
       fc.property(
         fc.string({ unit: fc.constantFrom('a', ',', ';', '"', '\n', '\r', '\t', ' ') }),
         (text) => {
-          expect(() => parseCsv(text, ';', LIMITS)).not.toThrow();
+          expect(() => parseCsv(text, ';', LIMITS, keepAllColumns)).not.toThrow();
         },
       ),
     );
   });
+});
+
+/** Reads quote-free CSV text line by line, keeping the rows holding a non-blank cell, as a plain reference for the reader. */
+function readPlainly(text: string, separator: CsvSeparator) {
+  const [header = '', ...lines] = text.split(/\r\n|\n|\r/);
+  const width = header.split(separator).length;
+  return lines.flatMap((line, index) => {
+    const cells = line.split(separator);
+    const hasExtraCells = cells.slice(width).some((cell) => cell.trim() !== '');
+    const kept = cells.slice(0, width);
+    const isEmpty = !hasExtraCells && kept.every((cell) => cell.trim() === '');
+    return isEmpty ? [] : [{ rowNumber: index + 2, cells: kept, hasExtraCells }];
+  });
+}
+
+describe('parseCsv skipping blank lines', () => {
+  it(
+    'reads rows exactly as a plain line-by-line reading does, whatever the separator and line ends',
+    { timeout: PROPERTY_TEST_TIMEOUT_MS },
+    () => {
+      const character = fc.constantFrom(',', ';', '\t', ' ', ' ', 'x');
+      const lineEnd = fc.constantFrom('\n', '\r\n', '\r');
+      const line = fc.tuple(fc.string({ unit: character, maxLength: 6 }), lineEnd);
+      fc.assert(
+        fc.property(
+          fc.constantFrom(...CSV_SEPARATORS),
+          fc.array(line, { maxLength: LIMITS.maxRows }),
+          fc.string({ unit: character, maxLength: 6 }),
+          (separator, lines, lastLine) => {
+            const header = ['a', 'b'].join(separator);
+            const text = `${header}\n${lines.map(([content, end]) => content + end).join('')}${lastLine}`;
+            const table = unwrap(parseCsv(text, separator, LIMITS, keepAllColumns));
+            expect(table.separator).toBe(separator);
+            expect(table.rows).toEqual(readPlainly(text, separator));
+          },
+        ),
+      );
+    },
+  );
+
+  it.each([
+    ['a\tb\n,,\n', '\t', [{ rowNumber: 2, cells: [',,'], hasExtraCells: false }]],
+    ['a,b\n;;', ',', [{ rowNumber: 2, cells: [';;'], hasExtraCells: false }]],
+    ['a;b\n;;;\r\n; ;\r\r\n1;2', ';', [{ rowNumber: 5, cells: ['1', '2'], hasExtraCells: false }]],
+  ] as const)('reads %j with only the rows holding a value', (text, separator, rows) => {
+    expect(unwrap(parseCsv(text, separator, LIMITS, keepAllColumns)).rows).toEqual(rows);
+  });
+});
+
+describe('parseCsv keeping selected columns', () => {
+  it(
+    'reads exactly what a full read keeps of those columns, and notes the columns without header holding a value',
+    { timeout: PROPERTY_TEST_TIMEOUT_MS },
+    () => {
+      const cell = fc.string({ unit: fc.constantFrom('a', ';', '"', '\n', ' ', '') });
+      const column = fc.record({ kept: fc.boolean(), blank: fc.boolean() });
+      fc.assert(
+        fc.property(
+          fc.array(column, { minLength: 1, maxLength: LIMITS.maxColumns }),
+          fc.array(fc.array(cell, { maxLength: LIMITS.maxColumns + 2 }), {
+            maxLength: LIMITS.maxRows,
+          }),
+          (columns, rows) => {
+            const header = columns.map(({ blank }, index) => (blank ? '' : `h${String(index)}`));
+            const text = writeCsv([header, ...rows], ';');
+            const full = unwrap(parseCsv(text, ';', LIMITS, keepAllColumns));
+            const selected = unwrap(
+              parseCsv(text, ';', LIMITS, (_header, index) => columns[index]?.kept === true),
+            );
+            const kept = columns.map((entry) => entry.kept);
+            const lastKept = kept.lastIndexOf(true);
+            expect(selected.rows.map((row) => row.rowNumber)).toEqual(
+              full.rows.map((row) => row.rowNumber),
+            );
+            expect(selected.rows.map((row) => row.hasExtraCells)).toEqual(
+              full.rows.map((row) => row.hasExtraCells),
+            );
+            expect(selected.rows.map((row) => row.cells)).toEqual(
+              full.rows.map((row) =>
+                row.cells
+                  .slice(0, lastKept + 1)
+                  .map((value, index) => (kept[index] === true ? value : '')),
+              ),
+            );
+            const filled = columns.flatMap(({ blank }, index) =>
+              blank && full.rows.some((row) => (row.cells[index] ?? '').trim() !== '')
+                ? [index]
+                : [],
+            );
+            const sorted = (values: ReadonlySet<number>) =>
+              [...values].sort((left, right) => left - right);
+            expect(sorted(selected.filledBlankColumns)).toEqual(filled);
+            expect(sorted(full.filledBlankColumns)).toEqual(filled);
+          },
+        ),
+      );
+    },
+  );
 });
 
 describe('writeCsv', () => {
@@ -136,7 +236,7 @@ describe('writeCsv', () => {
               .map((_seed, row) => texts.slice(row * width, (row + 1) * width))
               .filter((cells) => cells.some((text) => text.trim() !== ''));
             const records = [header, ...rows];
-            const table = parseCsv(writeCsv(records, separator), separator, LIMITS);
+            const table = parseCsv(writeCsv(records, separator), separator, LIMITS, keepAllColumns);
             expect(
               table.ok && [table.value.header, ...table.value.rows.map((row) => row.cells)],
             ).toEqual(records);

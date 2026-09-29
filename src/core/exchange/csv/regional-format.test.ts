@@ -3,7 +3,13 @@ import fc from 'fast-check';
 import { failure, success } from '../../result';
 import { at, dayOf } from '../../testing/civil-time';
 import { END_PROJECT_HOUR, MIN_PROJECT_HOUR } from '../../time';
-import { formatRegionalDateTime, parseCsvDate, type RegionalFormat } from './regional-format';
+import {
+  createDateParser,
+  createDateTimeFormatter,
+  formatRegionalDateTime,
+  parseCsvDate,
+  type RegionalFormat,
+} from './regional-format';
 
 const FRENCH: RegionalFormat = {
   listSeparator: ';',
@@ -128,6 +134,39 @@ describe('parseCsvDate', () => {
   it('refuses a text too long to be a date before running any pattern', () => {
     expect(parseCsvDate(`2026-10-05${' '.repeat(1_000_000)}x`, FRENCH)).toEqual(
       failure('INVALID_DATE'),
+    );
+  });
+});
+
+describe('cached date reading and writing', () => {
+  it('writes and reads exactly as the direct functions, repeated values included', () => {
+    const hourArbitrary = fc.integer({ min: MIN_PROJECT_HOUR, max: END_PROJECT_HOUR - 1 });
+    const writtenDate = fc
+      .tuple(hourArbitrary, fc.constantFrom(...FORMATS), fc.boolean())
+      .map(([hour, format, withHour]) => {
+        const text = formatRegionalDateTime(hour, format);
+        return withHour ? text : text.slice(0, text.indexOf(' '));
+      });
+    const text = fc.oneof(
+      writtenDate,
+      fc.constantFrom('2026-10-05', '2026-10-05 14:00', 'x', '31/02/2026', ' '.repeat(80)),
+    );
+    fc.assert(
+      fc.property(
+        fc.array(hourArbitrary, { maxLength: 20 }),
+        fc.array(text, { maxLength: 20 }),
+        fc.constantFrom(...FORMATS),
+        (hours, texts, format) => {
+          const formatDateTime = createDateTimeFormatter(format);
+          const parseDate = createDateParser(format);
+          [...hours, ...hours].forEach((hour) => {
+            expect(formatDateTime(hour)).toBe(formatRegionalDateTime(hour, format));
+          });
+          [...texts, ...texts].forEach((written) => {
+            expect(parseDate(written)).toEqual(parseCsvDate(written, format));
+          });
+        },
+      ),
     );
   });
 });

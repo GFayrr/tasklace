@@ -1,7 +1,7 @@
 import { compileCalendar, type CalendarError } from '../calendar/compile-calendar';
 import type { Project, Task, TaskId } from '../model/project';
 import { failure, success, type Result } from '../result';
-import { isProjectHour } from '../time';
+import { isProjectHour, type ProjectHour } from '../time';
 import { runBackwardPass, type TaskFloat } from './backward-pass';
 import {
   runForwardPass,
@@ -24,6 +24,11 @@ export interface Schedule {
   readonly tagConflicts: TagConflictReport;
 }
 
+export interface RequestedStartsSchedule {
+  readonly schedule: Schedule;
+  readonly keptStarts: ReadonlyMap<TaskId, ProjectHour>;
+}
+
 export type SchedulingFailure =
   | { readonly kind: 'calendar'; readonly errors: readonly CalendarError[] }
   | { readonly kind: 'startDate' }
@@ -32,6 +37,15 @@ export type SchedulingFailure =
 
 /** Computes the full schedule of a project: dates, summaries, numbering, floats and conflicts. */
 export function scheduleProject(project: Project): Result<Schedule, SchedulingFailure> {
+  const scheduled = scheduleWithRequestedStarts(project, new Map());
+  return scheduled.ok ? success(scheduled.value.schedule) : scheduled;
+}
+
+/** Computes the full schedule of a project in which each requested start replaces the start date of its task and is kept only where the task, placed after its predecessors, would otherwise start earlier, and lists the kept starts, the schedule being exactly that of the project whose requested tasks carry only their kept start. */
+export function scheduleWithRequestedStarts(
+  project: Project,
+  requestedStarts: ReadonlyMap<TaskId, ProjectHour>,
+): Result<RequestedStartsSchedule, SchedulingFailure> {
   const calendar = compileCalendar(project.calendar);
   if (!calendar.ok) {
     return failure({ kind: 'calendar', errors: calendar.error });
@@ -49,7 +63,7 @@ export function scheduleProject(project: Project): Result<Schedule, SchedulingFa
     dateConstraintsEnabled: project.options.dateConstraintsEnabled,
   };
   const { tasks, graph, childrenByParent } = structure.value;
-  const forward = runForwardPass(context, graph);
+  const forward = runForwardPass(context, graph, requestedStarts);
   if (!forward.ok) {
     return failure({ kind: 'task', error: forward.error });
   }
@@ -60,14 +74,15 @@ export function scheduleProject(project: Project): Result<Schedule, SchedulingFa
     return failure({ kind: 'task', error: floats.error });
   }
   const placements = keyByTaskId(tasks, forward.value.placements);
-  return success({
+  const schedule = {
     placements,
     summaries: computeSummaries(tasks, childrenByParent, placements),
     wbsNumbers: computeWbsNumbers(childrenByParent),
     floats: floats.value === null ? null : keyByTaskId(tasks, floats.value),
     conflicts: forward.value.conflicts,
     tagConflicts: detectTagConflicts(tasks, project.tags, placements, calendar.value),
-  });
+  };
+  return success({ schedule, keptStarts: forward.value.keptStarts });
 }
 
 /** Turns values stored by task index into a map keyed by task identifier, skipping missing ones. */
