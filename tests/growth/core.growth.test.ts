@@ -24,6 +24,7 @@ import {
 } from './measure-growth';
 
 const SHORT_TASK_HOURS = 2_000;
+const BLANK_LINES_PER_TASK = 40;
 const CSV_FORMAT: RegionalFormat = {
   listSeparator: ';',
   dateOrder: 'dayMonthYear',
@@ -94,6 +95,21 @@ describe('growth of whole-project operations (n tasks, 2n dependencies)', () => 
       () => importProjectCsv(largeText, options),
     );
     console.info(`CSV import: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
+  });
+
+  it('skips blank CSV lines in linear time', () => {
+    /** Builds a CSV table holding one task after a number of separator-only lines. */
+    const blankLines = (count: number) => `Name;Duration${'\n;'.repeat(count)}\nA;7`;
+    const smallText = blankLines(SMALL_TASK_COUNT * BLANK_LINES_PER_TASK);
+    const largeText = blankLines(LARGE_TASK_COUNT * BLANK_LINES_PER_TASK);
+    const options = { format: CSV_FORMAT, projectName: 'Growth', fallbackStart: small.startDate };
+    expect(importProjectCsv(largeText, options).ok).toBe(true);
+    const ratio = growthRatio(
+      () => importProjectCsv(smallText, options),
+      () => importProjectCsv(largeText, options),
+    );
+    console.info(`CSV blank lines: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
   });
 

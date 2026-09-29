@@ -5,7 +5,11 @@ import type { ProjectHour } from '../../time';
 import { neutralizeFormula } from './csv-cells';
 import { CSV_COLUMN_ORDER, CSV_HEADERS } from './csv-columns';
 import { writeCsv } from './csv-text';
-import { formatRegionalDateTime, type RegionalFormat } from './regional-format';
+import {
+  createDateTimeFormatter,
+  type DateTimeFormatter,
+  type RegionalFormat,
+} from './regional-format';
 import {
   compareWbsNumbers,
   formatBlocks,
@@ -17,7 +21,7 @@ export const CSV_BYTE_ORDER_MARK = '﻿';
 
 interface ExportContext {
   readonly schedule: Schedule;
-  readonly format: RegionalFormat;
+  readonly formatDateTime: DateTimeFormatter;
   readonly tagNames: ReadonlyMap<string, string>;
   readonly predecessors: ReadonlyMap<TaskId, readonly PredecessorReference[]>;
 }
@@ -33,7 +37,7 @@ export function exportProjectCsv(
   }
   const context: ExportContext = {
     schedule,
-    format,
+    formatDateTime: createDateTimeFormatter(format),
     tagNames: new Map(project.tags.map((tag) => [tag.id, tag.name])),
     predecessors: groupPredecessors(project.dependencies, schedule.wbsNumbers),
   };
@@ -94,8 +98,8 @@ function taskCells(task: Task, context: ExportContext): string[] {
 function summaryCells(id: TaskId, context: ExportContext) {
   const summary = context.schedule.summaries.get(id);
   return {
-    start: formatDate(summary?.start ?? null, context.format),
-    end: formatDate(summary?.end ?? null, context.format),
+    start: formatDate(summary?.start ?? null, context),
+    end: formatDate(summary?.end ?? null, context),
     duration: '',
     progress: formatProgress(summary?.progressPercent ?? null),
     tag: '',
@@ -108,8 +112,8 @@ function datedTaskCells(task: Exclude<Task, { kind: 'summary' }>, context: Expor
   const placement = context.schedule.placements.get(task.id);
   const segments = task.kind === 'task' ? task.segments : [];
   return {
-    start: formatDate(placement?.start ?? null, context.format),
-    end: formatDate(placement?.end ?? null, context.format),
+    start: formatDate(placement?.start ?? null, context),
+    end: formatDate(placement?.end ?? null, context),
     duration: String(segments.reduce((total, segment) => total + segment.durationHours, 0)),
     progress: String(task.progressPercent),
     tag: task.tagId === null ? '' : (context.tagNames.get(task.tagId) ?? ''),
@@ -123,8 +127,8 @@ function formatProgress(percent: number | null): string {
 }
 
 /** Writes a date in the regional format, an unknown date staying empty. */
-function formatDate(hour: ProjectHour | null, format: RegionalFormat): string {
-  return hour === null ? '' : formatRegionalDateTime(hour, format);
+function formatDate(hour: ProjectHour | null, context: ExportContext): string {
+  return hour === null ? '' : context.formatDateTime(hour);
 }
 
 /** Returns the WBS number of a task. */

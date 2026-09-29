@@ -35,29 +35,39 @@ export type PlacementsByIndex = readonly (Placement | undefined)[];
 export interface ForwardPassResult {
   readonly placements: PlacementsByIndex;
   readonly conflicts: readonly SchedulingConflict[];
+  readonly keptStarts: ReadonlyMap<TaskId, ProjectHour>;
 }
+
+const NO_REQUESTED_STARTS: ReadonlyMap<TaskId, ProjectHour> = new Map();
 
 interface Bounds {
   readonly earliestStart: ProjectHour;
   readonly earliestEnd: ProjectHour | null;
 }
 
-/** Computes the earliest placement of every task, following the dependency order. */
+/** Computes the earliest placement of every task, following the dependency order, a requested start replacing the start date of its task and being kept only where the task would otherwise start earlier. */
 export function runForwardPass(
   context: SchedulingContext,
   graph: DependencyGraph,
+  requestedStarts: ReadonlyMap<TaskId, ProjectHour> = NO_REQUESTED_STARTS,
 ): Result<ForwardPassResult, TaskPlacementError> {
   const placements = new Array<Placement | undefined>(graph.incoming.length);
   const conflicts: SchedulingConflict[] = [];
+  const keptStarts = new Map<TaskId, ProjectHour>();
   for (const { index, task } of graph.order) {
-    const placed = scheduleTask(context, task, graph.incoming[index] ?? [], placements);
+    const incoming = graph.incoming[index] ?? [];
+    const requested = requestedStarts.get(task.id);
+    const placed =
+      requested === undefined
+        ? scheduleTask(context, task, incoming, placements)
+        : scheduleRequestedStart(context, task, incoming, placements, requested, keptStarts);
     if (!placed.ok) {
       return failure({ code: placed.error, taskId: task.id });
     }
     placements[index] = placed.value;
     conflicts.push(...findConflicts(context, task, placed.value));
   }
-  return success({ placements, conflicts: sortConflicts(conflicts) });
+  return success({ placements, conflicts: sortConflicts(conflicts), keptStarts });
 }
 
 /** Tells whether a dependency starts from the start of its predecessor rather than its end. */
@@ -73,6 +83,23 @@ export function dependencyAnchor(dependency: Dependency, predecessor: Placement)
 /** Tells whether a dependency constrains the start of its successor rather than its end. */
 export function constrainsSuccessorStart(dependency: Dependency): boolean {
   return dependency.type === 'finishToStart' || dependency.type === 'startToStart';
+}
+
+/** Places a task without any start date, then again with the requested start as its start date when it would otherwise start earlier, recording that start as kept. */
+function scheduleRequestedStart(
+  context: SchedulingContext,
+  task: SchedulableTask,
+  incoming: readonly ResolvedDependency[],
+  placements: PlacementsByIndex,
+  requested: ProjectHour,
+  keptStarts: Map<TaskId, ProjectHour>,
+): Result<Placement, PlacementErrorCode> {
+  const free = scheduleTask(context, { ...task, startNoEarlierThan: null }, incoming, placements);
+  if (!free.ok || free.value.start >= requested) {
+    return free;
+  }
+  keptStarts.set(task.id, requested);
+  return scheduleTask(context, { ...task, startNoEarlierThan: requested }, incoming, placements);
 }
 
 /** Places one task at its earliest position, then applies its "must finish on" constraint. */

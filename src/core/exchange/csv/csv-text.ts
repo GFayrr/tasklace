@@ -14,7 +14,10 @@ export interface CsvTable {
   readonly separator: CsvSeparator;
   readonly header: readonly string[];
   readonly rows: readonly CsvRow[];
+  readonly filledBlankColumns: ReadonlySet<number>;
 }
+
+export type ColumnSelector = (header: string, index: number) => boolean;
 
 export interface CsvLimits {
   readonly maxColumns: number;
@@ -37,8 +40,16 @@ interface ReadCell {
 interface ReadRecord {
   readonly cells: readonly string[];
   readonly hasExtraCells: boolean;
+  readonly hasSkippedValues: boolean;
   readonly next: number;
   readonly isLast: boolean;
+}
+
+interface RecordShape {
+  readonly maxCells: number;
+  readonly kept: readonly boolean[];
+  readonly lastKept: number;
+  readonly blank: readonly boolean[];
 }
 
 const QUOTE = '"';
@@ -51,28 +62,62 @@ const QUOTES_PER_SLICE = 65_536;
 const HEADER_SCAN_LENGTH = 65_536;
 const QUOTED_SECTION = /"[^"]*"/g;
 const LINE_BREAK = /[\r\n]/;
+const BLANK_LINE: Readonly<Record<CsvSeparator, RegExp>> = {
+  ',': /[, ]*(?:\r\n|\n|\r)/y,
+  ';': /[; ]*(?:\r\n|\n|\r)/y,
+  '\t': /[\t ]*(?:\r\n|\n|\r)/y,
+};
+const SPECIAL_CHARACTERS: Readonly<Record<CsvSeparator, RegExp>> = {
+  ',': /[,"\r\n]/,
+  ';': /[;"\r\n]/,
+  '\t': /[\t"\r\n]/,
+};
 const UNQUOTED_CELL: Readonly<Record<CsvSeparator, RegExp>> = {
   ',': /[^,\r\n]*/y,
   ';': /[^;\r\n]*/y,
   '\t': /[^\t\r\n]*/y,
 };
 
-/** Reads CSV text into a header and its non-empty rows, numbered as in a spreadsheet, keeping at most one cell per header column. */
+/** Keeps every column of a table. */
+export const keepAllColumns: ColumnSelector = () => true;
+
+/** Reads CSV text into a header and its non-empty rows, numbered as in a spreadsheet, keeping the cells of the selected columns, empty for skipped columns before the last selected one, and noting which columns without header hold a value in some row. */
 export function parseCsv(
   text: string,
   fallbackSeparator: CsvSeparator,
   limits: CsvLimits,
+  selectColumn: ColumnSelector,
 ): Result<CsvTable, CsvSyntaxError> {
   const separator = detectSeparator(text, fallbackSeparator);
-  const header = readRecord(text, 0, separator, limits.maxColumns + 1, HEADER_ROW_NUMBER);
+  const headerShape = shapeOf(
+    Array.from({ length: limits.maxColumns + 1 }, () => ''),
+    keepAllColumns,
+  );
+  const header = readRecord(text, 0, separator, headerShape, new Set());
   if (!header.ok) {
     return header;
   }
   if (header.value.cells.length > limits.maxColumns) {
     return failure({ code: 'TOO_MANY_COLUMNS' });
   }
-  const rows = readRows(text, header.value, separator, limits.maxRows);
-  return rows.ok ? success({ separator, header: header.value.cells, rows: rows.value }) : rows;
+  const filledBlankColumns = new Set<number>();
+  const shape = shapeOf(header.value.cells, selectColumn);
+  const rows = readRows(text, header.value, separator, shape, limits.maxRows, filledBlankColumns);
+  if (!rows.ok) {
+    return rows;
+  }
+  return success({ separator, header: header.value.cells, rows: rows.value, filledBlankColumns });
+}
+
+/** Describes which cells of the records under a header to keep and which columns have no header, a record keeping no cell beyond the header. */
+function shapeOf(header: readonly string[], selectColumn: ColumnSelector): RecordShape {
+  const kept = header.map(selectColumn);
+  return {
+    maxCells: header.length,
+    kept,
+    lastKept: kept.lastIndexOf(true),
+    blank: header.map((cell) => cell.trim() === ''),
+  };
 }
 
 /** Writes records as CSV text with Windows line ends, quoting only the cells that need it. */
@@ -94,18 +139,26 @@ function detectSeparator(text: string, fallbackSeparator: CsvSeparator): CsvSepa
   return CSV_SEPARATORS[counts.indexOf(highest)] ?? fallbackSeparator;
 }
 
-/** Reads the data rows after the header, skipping empty ones and failing as soon as there are more rows than the limit. */
+/** Reads the data rows after the header, skipping empty ones, those made only of separators and spaces without even reading their cells, and failing as soon as there are more rows than the limit. */
 function readRows(
   text: string,
   header: ReadRecord,
   separator: CsvSeparator,
+  shape: RecordShape,
   maxRows: number,
+  filledBlankColumns: Set<number>,
 ): Result<CsvRow[], CsvSyntaxError> {
   const rows: CsvRow[] = [];
   let position = header.next;
   let isLast = header.isLast;
   for (let rowNumber = HEADER_ROW_NUMBER + 1; !isLast; rowNumber += 1) {
-    const record = readRecord(text, position, separator, header.cells.length, rowNumber);
+    const blankLineEnd = endOfBlankLine(text, position, separator);
+    if (blankLineEnd !== null) {
+      position = blankLineEnd;
+      isLast = position >= text.length;
+      continue;
+    }
+    const record = readRecord(text, position, separator, shape, filledBlankColumns, rowNumber);
     if (!record.ok) {
       return record;
     }
@@ -124,34 +177,55 @@ function readRows(
   return success(rows);
 }
 
-/** Tells whether a record holds only blank cells, as the separator-only lines spreadsheets leave behind. */
-function isEmptyRecord(record: ReadRecord): boolean {
-  return !record.hasExtraCells && record.cells.every((cell) => cell.trim() === '');
+/** Returns where a line made only of separators and spaces ends, just after its line break, or null for any other line, including such a line that ends the text without line break. */
+function endOfBlankLine(text: string, start: number, separator: CsvSeparator): number | null {
+  const pattern = BLANK_LINE[separator];
+  pattern.lastIndex = start;
+  return pattern.test(text) ? pattern.lastIndex : null;
 }
 
-/** Reads one record from a position, keeping at most a number of cells and noting whether non-empty cells were dropped. */
+/** Tells whether a record holds only blank cells, as the separator-only lines spreadsheets leave behind. */
+function isEmptyRecord(record: ReadRecord): boolean {
+  return (
+    !record.hasExtraCells &&
+    !record.hasSkippedValues &&
+    record.cells.every((cell) => cell.trim() === '')
+  );
+}
+
+/** Reads one record from a position, keeping the cells its shape selects, noting whether non-blank cells were skipped or lie beyond the header, and adding to a set the columns without header that hold a value. */
 function readRecord(
   text: string,
   start: number,
   separator: CsvSeparator,
-  maxCells: number,
-  rowNumber: number,
+  shape: RecordShape,
+  filledBlankColumns: Set<number>,
+  rowNumber = HEADER_ROW_NUMBER,
 ): Result<ReadRecord, CsvSyntaxError> {
   const cells: string[] = [];
   let hasExtraCells = false;
+  let hasSkippedValues = false;
   let position = start;
-  for (;;) {
+  for (let index = 0; ; index += 1) {
     const cell = readCell(text, position, separator);
     if (cell === null) {
       return failure({ code: 'INVALID_CSV', rowNumber });
     }
-    hasExtraCells ||= cells.length >= maxCells && cell.value.trim() !== '';
-    if (cells.length < maxCells) {
-      cells.push(cell.value);
+    const kept = shape.kept[index] === true;
+    const isBlankColumn = shape.blank[index] === true;
+    const holdsValue = (!kept || isBlankColumn) && cell.value.trim() !== '';
+    hasExtraCells ||= index >= shape.maxCells && holdsValue;
+    hasSkippedValues ||= !kept && index < shape.maxCells && holdsValue;
+    if (holdsValue && isBlankColumn) {
+      filledBlankColumns.add(index);
+    }
+    if (index <= shape.lastKept) {
+      cells.push(kept ? cell.value : '');
     }
     position = cell.next;
     if (cell.end !== 'cell') {
-      return success({ cells, hasExtraCells, next: position, isLast: cell.end === 'text' });
+      const isLast = cell.end === 'text';
+      return success({ cells, hasExtraCells, hasSkippedValues, next: position, isLast });
     }
   }
 }
@@ -227,8 +301,7 @@ function isCellEnd(character: string, separator: CsvSeparator): boolean {
 
 /** Quotes a cell holding a separator, a quote or a line break, doubling its quotes. */
 function quoteCell(cell: string, separator: CsvSeparator): string {
-  const needsQuotes = [separator, QUOTE, CARRIAGE_RETURN, LINE_FEED].some((special) =>
-    cell.includes(special),
-  );
-  return needsQuotes ? QUOTE + cell.replaceAll(QUOTE, ESCAPED_QUOTE) + QUOTE : cell;
+  return SPECIAL_CHARACTERS[separator].test(cell)
+    ? QUOTE + cell.replaceAll(QUOTE, ESCAPED_QUOTE) + QUOTE
+    : cell;
 }
