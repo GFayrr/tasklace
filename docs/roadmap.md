@@ -2,17 +2,17 @@
 
 Tasklace is built in nine steps. Each step, or sub-step, is developed on its own branch, tested, reviewed and merged into `main` through a pull request.
 
-| Step | Content                                                    | Status      |
-| ---- | ---------------------------------------------------------- | ----------- |
-| 1    | Foundations and working-time calendar                      | Done        |
-| 2    | Scheduling engine                                          | Done        |
-| 3    | Tags and person or team conflicts                          | Done        |
-| 4    | Shared model, project file, validation, JSON and CSV       | In progress |
-| 5    | Secure Electron shell and Svelte user interface            | Planned     |
-| 6    | PDF export and comparison of the page splitting strategies | Planned     |
-| 7    | Real-time collaboration on the local network               | Planned     |
-| 8    | End-to-end encrypted relay                                 | Planned     |
-| 9    | Distribution                                               | Planned     |
+| Step | Content                                                    | Status  |
+| ---- | ---------------------------------------------------------- | ------- |
+| 1    | Foundations and working-time calendar                      | Done    |
+| 2    | Scheduling engine                                          | Done    |
+| 3    | Tags and person or team conflicts                          | Done    |
+| 4    | Shared model, project file, validation, JSON and CSV       | Done    |
+| 5    | Secure Electron shell and Svelte user interface            | Planned |
+| 6    | PDF export and comparison of the page splitting strategies | Planned |
+| 7    | Real-time collaboration on the local network               | Planned |
+| 8    | End-to-end encrypted relay                                 | Planned |
+| 9    | Distribution                                               | Planned |
 
 ## Step 4: shared model, project file, validation, JSON and CSV
 
@@ -21,7 +21,7 @@ Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit
 ### 4a. Project validation and JSON exchange (done)
 
 - Hand-written validator that turns unknown data into a safe `Project`, or returns every problem with its location (for example `tasks[12].segments[0].durationHours`): types and required fields, value ranges, text lengths and valid Unicode, references between objects, calendar, daily working pattern and structure (cycles).
-- Readable, versioned JSON export and import, with dates in clear text (`2026-09-28T09:00`).
+- Versioned JSON export and import, with dates in clear text (`2026-09-28T09:00`); the export is compact since 4c.
 - A single UTF-8 byte order mark is removed at the very start of imported text; JSON export never writes one.
 
 ### 4b. Shared Yjs model and baseline plan (done)
@@ -49,9 +49,13 @@ Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit
 - JSON export is compact, so that the largest possible project stays within the 256 Mi-unit import limit.
 - Test files generated in memory: random, truncated, altered, wrong version or flags, lying declared size, decompression bomb, hidden content.
 
-### 4d. CSV import and export
+### 4d. CSV import and export (done)
 
-- Export of the task table for Excel or LibreOffice: WBS, name, start, end, duration in hours, progress, predecessors, tag. UTF-8 with a byte order mark so that Excel reads accents correctly; separator chosen from the system's regional settings.
-- Import of a task list with line-by-line validation; errors give the row and cell. The separator is detected automatically, and a single leading byte order mark is removed.
+- Export of the task table for Excel or LibreOffice, in WBS order: WBS, name, start, end, duration in hours, progress, predecessors, tag and blocks (filled only for split tasks, such as `4h; +2d 3h`). UTF-8 with a byte order mark so that Excel reads accents correctly; separator, date order and clock taken from the regional settings.
+- Import creates a new project with the default calendar, starting at the earliest start of the table. Only the name column is required; columns may come in any order, and a row holding only a name is a section heading.
+- A start date becomes a "not before" constraint only where the schedule would otherwise start the task earlier; end dates are recomputed, and each start, end or summary progress the schedule does not follow gets its own warning.
+- Unknown tags are created with the next palette color. Dates are read in the regional date order or in ISO form. A duration or progress column counted in another unit (days, minutes…) is refused rather than misread.
+- Line-by-line validation with the same complete checks as JSON; each error gives its row, and its column when a single cell is at fault. Limits on rows, predecessors and blocks are checked before anything is built, so that an oversized file is refused without exhausting memory. The separator is detected automatically, and a single leading byte order mark is removed.
 - Predecessors are imported and exported as `1.2FS+2h`: WBS number, dependency type (FS, SS, FF, SF) and lag.
-- Protection against formula injection: a cell starting with `=`, `+`, `-` or `@` is neutralised on export.
+- Protection against formula injection: a cell starting with `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed with an apostrophe on export, which the import removes.
+- Import limited to 128 Mi UTF-16 units, above the export of the largest allowed project.
