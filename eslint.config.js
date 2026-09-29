@@ -11,7 +11,13 @@ export default defineConfig(
   {
     languageOptions: {
       parserOptions: {
-        projectService: { allowDefaultProject: ['eslint.config.js'] },
+        projectService: {
+          allowDefaultProject: [
+            'eslint.config.js',
+            'electron.vite.config.ts',
+            'playwright.config.ts',
+          ],
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -45,6 +51,38 @@ export default defineConfig(
             {
               regex: String.raw`^(node:.*|electron|${builtinModules.join('|')})(/.*)?$`,
               message: 'src/core must stay pure: no Node.js or Electron module.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/renderer/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: String.raw`^(node:.*|electron|${builtinModules.join('|')})(/.*)?$`,
+              message: 'The page talks to the main process only through the preload bridge.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/preload/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: String.raw`^(node:.*|${builtinModules.join('|')})(/.*)?$`,
+              message: 'The sandboxed preload script may only use the electron module.',
             },
           ],
         },
