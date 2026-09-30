@@ -21,11 +21,13 @@ import { fitDailyPattern } from './repair-project';
 import {
   DEPENDENCIES_ROOT,
   deleteEntry,
+  DOCUMENT_ID_KEY,
   findEntryIssues,
   findRootIssues,
   isCalendarField,
   LOCAL_ORIGIN,
   PROJECT_ROOT,
+  readDocumentId,
   readEntry,
   readHeaderData,
   REMOTE_ORIGIN,
@@ -36,6 +38,7 @@ import {
   viewTaskUnion,
   writeEntry,
   writeProjectHeader,
+  type DocumentId,
   type EntryRoot,
 } from './shared-document';
 import {
@@ -48,6 +51,7 @@ import {
   type TouchedItems,
 } from './shared-operations';
 import {
+  DOCUMENT_ID_CHANGED,
   readSharedProject,
   repairDocumentProject,
   roundedProgress,
@@ -58,6 +62,7 @@ import {
 
 export interface SharedSession {
   readonly document: Y.Doc;
+  readonly documentId: DocumentId;
   readonly openingRepairs: readonly SharedRepair[];
   readonly project: () => Project;
   readonly apply: (operation: SharedOperation) => Result<void, readonly ValidationIssue[]>;
@@ -65,6 +70,7 @@ export interface SharedSession {
 }
 
 interface SessionState {
+  readonly documentId: DocumentId;
   state: ProjectState;
   shadow: Y.Doc;
   project: Project | null;
@@ -107,12 +113,20 @@ type SharedType = Y.Transaction['changed'] extends Map<infer Type, unknown> ? Ty
 export function openSharedSession(
   document: Y.Doc,
 ): Result<SharedSession, readonly ValidationIssue[]> {
+  const documentId = readDocumentId(document);
+  if (documentId === null) {
+    return failure([{ path: DOCUMENT_ID_KEY, code: 'MISSING_FIELD' }]);
+  }
   const read = readSharedProject(document);
-  return read.ok ? success(openValidatedSession(document, read.value)) : read;
+  return read.ok ? success(openValidatedSession(document, read.value, documentId)) : read;
 }
 
 /** Opens a session on a shared document whose project was already read and validated, so that it is not validated twice. */
-export function openValidatedSession(document: Y.Doc, project: Project): SharedSession {
+export function openValidatedSession(
+  document: Y.Doc,
+  project: Project,
+  documentId: DocumentId,
+): SharedSession {
   const tagIds = new Set(project.tags.map((tag) => tag.id));
   const tasks = project.tasks.map((task) => withKnownTag(task, (id) => tagIds.has(id)));
   const cleared = tasks.filter((task, index) => task !== project.tasks[index]);
@@ -123,6 +137,7 @@ export function openValidatedSession(document: Y.Doc, project: Project): SharedS
   }, REPAIR_ORIGIN);
   const opened = { ...project, tasks };
   const session: SessionState = {
+    documentId,
     state: createProjectState(opened),
     shadow: copyDocument(document, newRepairClientId(document)),
     project: opened,
@@ -135,6 +150,7 @@ export function openValidatedSession(document: Y.Doc, project: Project): SharedS
   });
   return {
     document,
+    documentId,
     openingRepairs: cleared
       .map((task): SharedRepair => ({ code: 'TAG_CLEARED', id: task.id }))
       .sort((left, right) => compareStrings(left.id, right.id)),
@@ -224,6 +240,9 @@ function tryMerge(
     const change = applyToShadow(shadow, update);
     if (shadow.store.pendingStructs !== null || shadow.store.pendingDs !== null) {
       return failure({ kind: 'incompleteUpdate' });
+    }
+    if (readDocumentId(shadow) !== session.documentId) {
+      return failure({ kind: 'invalidProject', issues: [DOCUMENT_ID_CHANGED] });
     }
     const collect = (repairUpdate: Uint8Array): void => {
       repairUpdates.push(repairUpdate);

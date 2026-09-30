@@ -16,10 +16,18 @@ import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { at } from '../testing/civil-time';
 import { hideListContent } from '../testing/hidden-list-content';
 import { projectArbitrary } from '../testing/project-arbitrary';
-import { link, milestone, project, summary, workTask } from '../testing/project-builder';
+import {
+  link,
+  milestone,
+  project,
+  summary,
+  workTask,
+  TEST_DOCUMENT_ID,
+} from '../testing/project-builder';
 import { crc32 } from './crc32';
 import {
   encodeTasklaceFile,
+  encodeTasklaceState,
   HEADER_BYTES,
   openTasklaceFile,
   readTasklaceFile,
@@ -69,7 +77,7 @@ const SAMPLE: Project = project(
 
 /** Writes a project as a .tasklace file with the stand-in compressor. */
 function fileOf(input: Project): Uint8Array {
-  return encodeTasklaceFile(createSharedDocument(input), storingCompressor);
+  return encodeTasklaceFile(createSharedDocument(input, TEST_DOCUMENT_ID), storingCompressor);
 }
 
 /** Returns a copy of a file with some header fields or its payload replaced, and a recomputed checksum, as an attacker would. */
@@ -129,7 +137,7 @@ function taskEntry(document: Y.Doc, id: string): Y.Map<unknown> {
 
 /** Writes the sample project as a file after changing its shared document. */
 function tampered(change: (document: Y.Doc) => void): Uint8Array {
-  const document = createSharedDocument(SAMPLE);
+  const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
   change(document);
   return encodeTasklaceFile(document, storingCompressor);
 }
@@ -148,7 +156,7 @@ function sorted(input: Project): Project {
 
 describe('tasklace file', () => {
   it('reads back what it wrote, as a shared document and as a session', () => {
-    const document = createSharedDocument(SAMPLE);
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const file = encodeTasklaceFile(document, storingCompressor);
     const read = readTasklaceFile(file, storingCompressor);
     expect(read.ok && readSharedData(read.value)).toEqual(readSharedData(document));
@@ -166,7 +174,7 @@ describe('tasklace file', () => {
   });
 
   it('keeps the Yjs history, so that copies made before still merge after reading', () => {
-    const document = createSharedDocument(SAMPLE);
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const peer = new Y.Doc();
     Y.applyUpdate(peer, Y.encodeStateAsUpdate(document));
     const read = readTasklaceFile(
@@ -188,7 +196,7 @@ describe('tasklace file', () => {
 
   it('leaves the text of deleted content out of the file', () => {
     const secret = 'SECRET-FORMER-NAME';
-    const document = createSharedDocument(SAMPLE);
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     taskEntry(document, 'b').set('name', secret);
     expect(containsText(encodeTasklaceFile(document, storingCompressor), secret)).toBe(true);
     taskEntry(document, 'b').set('name', 'Public name');
@@ -217,6 +225,18 @@ describe('tasklace file', () => {
     });
     const clean = openTasklaceFile(fileOf(SAMPLE), storingCompressor);
     expect(clean.ok && clean.value.openingRepairs).toEqual([]);
+  });
+
+  it('opens a session knowing the identifier of the document', () => {
+    const opened = openTasklaceFile(fileOf(SAMPLE), storingCompressor);
+    expect(opened.ok && opened.value.documentId).toBe(TEST_DOCUMENT_ID);
+  });
+
+  it('writes the same file from a document and from its encoded state', () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    expect(encodeTasklaceState(Y.encodeStateAsUpdate(document), storingCompressor)).toEqual(
+      encodeTasklaceFile(document, storingCompressor),
+    );
   });
 
   it('starts with the signature, the version and no flags', () => {
@@ -297,7 +317,7 @@ describe('reading an untrusted tasklace file', () => {
     expect(readCode(rewritten(file, { payload: garbage, declaredSize: garbage.length - 1 }))).toBe(
       'INVALID_CONTENT',
     );
-    const document = createSharedDocument(SAMPLE);
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const before = Y.encodeStateVector(document);
     document.getMap('project').set('name', 'First');
     const between = Y.encodeStateVector(document);
@@ -334,6 +354,12 @@ describe('reading an untrusted tasklace file', () => {
     const hiddenList = tampered((document) => {
       hideListContent(document.getMap(TASKS_ROOT));
     });
+    const withoutIdentifier = tampered((document) => {
+      document.getMap('project').delete('documentId');
+    });
+    const malformedIdentifier = tampered((document) => {
+      document.getMap('project').set('documentId', '../escape');
+    });
     const unknownRoot = tampered((document) => {
       document.getMap('other').set('x', 1);
     });
@@ -354,6 +380,8 @@ describe('reading an untrusted tasklace file', () => {
       unknownField,
       badHiddenField,
       hiddenList,
+      withoutIdentifier,
+      malformedIdentifier,
       unknownRoot,
       plainEntry,
       tooManyTags,

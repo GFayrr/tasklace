@@ -11,6 +11,8 @@ import type {
 import { scheduleProject, type Schedule } from '../scheduling/schedule-project';
 import { at } from './civil-time';
 
+export const TEST_DOCUMENT_ID = '00000000-0000-4000-8000-000000000001';
+
 export const PROJECT_START = at(2026, 9, 28, 9);
 
 /** Builds a one-block work task of 7 hours with no constraint, then applies overrides. */

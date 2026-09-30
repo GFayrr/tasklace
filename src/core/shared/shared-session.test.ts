@@ -6,7 +6,14 @@ import { MAX_HIERARCHY_DEPTH, MAX_TAGS } from '../limits';
 import type { DependencyType, Project, Tag, Task } from '../model/project';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { hideListContent } from '../testing/hidden-list-content';
-import { link, milestone, project, summary, workTask } from '../testing/project-builder';
+import {
+  link,
+  milestone,
+  project,
+  summary,
+  workTask,
+  TEST_DOCUMENT_ID,
+} from '../testing/project-builder';
 import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
 import { applyOperation, type SharedOperation } from './shared-operations';
 import { applySharedChange, mergeSharedUpdate, readSharedProject } from './shared-project';
@@ -37,7 +44,7 @@ const BASE_PROJECT: Project = project(
 
 /** Opens sessions on participants sharing the same project, each with a fixed client identifier. */
 function openSessions(base: Project, count: number): SharedSession[] {
-  const origin = createSharedDocument(base);
+  const origin = createSharedDocument(base, TEST_DOCUMENT_ID);
   return Array.from({ length: count }, (_unused, index) => {
     const document = new Y.Doc();
     document.clientID = index + 1;
@@ -119,16 +126,19 @@ describe('shared session', () => {
     expect(session?.project()).toEqual(
       readSharedProject(session?.document ?? new Y.Doc()).ok && session?.project(),
     );
-    const broken = createSharedDocument(BASE_PROJECT);
+    const broken = createSharedDocument(BASE_PROJECT, TEST_DOCUMENT_ID);
     broken.getMap(TASKS_ROOT).set('z', 'not a task');
     expect(openSharedSession(broken).ok).toBe(false);
   });
 
   it('never keeps a reference to a missing tag, from the opening on', () => {
-    const imported = createSharedDocument({
-      ...BASE_PROJECT,
-      tasks: [...BASE_PROJECT.tasks, workTask('lost', { tagId: 'deleted' })],
-    });
+    const imported = createSharedDocument(
+      {
+        ...BASE_PROJECT,
+        tasks: [...BASE_PROJECT.tasks, workTask('lost', { tagId: 'deleted' })],
+      },
+      TEST_DOCUMENT_ID,
+    );
     const session = openSharedSession(imported);
     expect(session.ok && session.value.openingRepairs).toEqual([
       { code: 'TAG_CLEARED', id: 'lost' },
@@ -313,6 +323,32 @@ describe('shared session edge cases', () => {
     expect(
       mergeBoth(victim, Y.encodeStateAsUpdate(malicious, Y.encodeStateVector(victim.document))),
     ).toBe(false);
+  });
+
+  it('knows its document identifier and refuses an update that changes it, through the fast path', () => {
+    const [source, victim] = openSessions(BASE_PROJECT, 2);
+    if (source === undefined || victim === undefined) {
+      throw new Error('Missing session');
+    }
+    expect(victim.documentId).toBe(TEST_DOCUMENT_ID);
+    const malicious = copyOf(source.document);
+    malicious.clientID = 77;
+    malicious.getMap('project').set('documentId', '00000000-0000-4000-8000-000000000002');
+    const update = Y.encodeStateAsUpdate(malicious, Y.encodeStateVector(victim.document));
+    expect(victim.merge(update)).toEqual({
+      ok: false,
+      error: { kind: 'invalidProject', issues: [{ path: 'documentId', code: 'READ_ONLY_FIELD' }] },
+    });
+    expect(victim.document.getMap('project').get('documentId')).toBe(TEST_DOCUMENT_ID);
+  });
+
+  it('refuses to open a document without identifier', () => {
+    const document = copyOf(createSharedDocument(BASE_PROJECT, TEST_DOCUMENT_ID));
+    document.getMap('project').delete('documentId');
+    expect(openSharedSession(document)).toEqual({
+      ok: false,
+      error: [{ path: 'documentId', code: 'MISSING_FIELD' }],
+    });
   });
 
   it.each<[string, (malicious: Y.Doc) => Y.Map<unknown>]>([

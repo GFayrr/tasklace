@@ -13,6 +13,7 @@ import {
   MEASURED_RUNS,
   SMALL_TASK_COUNT,
 } from './measure-growth';
+import { TEST_DOCUMENT_ID } from '../../src/core/testing/project-builder';
 
 const WARM_UP_RUNS = 1;
 const EDITS_NEEDED = (MEASURED_RUNS + WARM_UP_RUNS) * BATCH_SIZE;
@@ -56,7 +57,7 @@ function recordRemoteEdits(document: Y.Doc): Uint8Array[] {
 /** Builds a shared document holding the large project with a given number of tasks. */
 function sharedProject(taskCount: number): Y.Doc {
   const project: Project = buildLargeProject(LARGE_PROJECT_SEED, taskCount);
-  return createSharedDocument(project);
+  return createSharedDocument(project, TEST_DOCUMENT_ID);
 }
 
 describe('growth of shared session operations with the size of the project', () => {

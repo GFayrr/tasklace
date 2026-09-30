@@ -65,7 +65,7 @@ Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit
 
 Step 5 turns the core into a desktop application. It is developed on a single branch, one sub-step after the other, each ending with its own commit. The sub-steps that do not shape the look of the application come first.
 
-### 5a. Tooling and secure shell
+### 5a. Tooling and secure shell (done)
 
 - Electron, electron-vite and Playwright; development, build and end-to-end test commands.
 - Main process: a single window with context isolation, sandbox, no Node.js in the page and web security; a strict content security policy; no remote content; navigation, new windows and permission requests refused; a single running instance; external links opened only for an allowlist of `https` addresses.
@@ -73,12 +73,15 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 - Lint rules keep the page away from Node.js and Electron, and the core pure.
 - End-to-end tests check the security settings in the running application; continuous integration runs them on Linux and Windows.
 
-### 5b. Files and isolated decoding
+### 5b. Files and isolated decoding (done)
 
 - The real zlib compressor, with a capped output size, in the main process; file sizes checked in bytes before reading.
-- Opening a `.tasklace` file and importing JSON or CSV run in a worker thread with a capped memory, so that a forged file can only stop that worker.
-- Automatic saving after a short pause, written to a temporary file then renamed; a hidden local copy for offline work; recent files; open, save, import and export dialogs.
-- The regional format of the system (list separator, date order, clock) is read by the main process for CSV exchange; every error code of the core maps to a translated message.
+- Opening a `.tasklace` file and importing JSON or CSV run in a worker thread whose memory is capped, so that a forged file can only stop that worker; the application then shows a clear error.
+- The shared project stays in the page; the main process alone chooses paths through dialogs, and knows the file and the document of each window.
+- Automatic saving two seconds after the last change and before a window closes, written to a temporary file then renamed. A project without a file yet is kept in its local copy only, so that saving automatically never opens a dialog.
+- Every document has a stable, hidden identifier; its local copy, kept for offline work and future collaboration, is written at each save with an index of where its file lives.
+- The three most recent projects; open, save, save as, import and export dialogs.
+- The regional format of the system (list separator, date order, clock) is read by the main process for CSV exchange; every file error has an English message in the translation file.
 
 ### 5c. Interface foundations
 
