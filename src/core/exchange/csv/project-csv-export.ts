@@ -7,6 +7,7 @@ import { CSV_COLUMN_ORDER, CSV_HEADERS } from './csv-columns';
 import { writeCsv } from './csv-text';
 import {
   createDateTimeFormatter,
+  decimalMarkOf,
   type DateTimeFormatter,
   type RegionalFormat,
 } from './regional-format';
@@ -24,6 +25,7 @@ interface ExportContext {
   readonly formatDateTime: DateTimeFormatter;
   readonly tagNames: ReadonlyMap<string, string>;
   readonly predecessors: ReadonlyMap<TaskId, readonly PredecessorReference[]>;
+  readonly decimalMark: string;
 }
 
 /** Writes the task table of a scheduled project as CSV for spreadsheets, in WBS order, with a byte order mark so that Excel reads accents correctly, refusing a schedule that does not cover every task of the project. */
@@ -40,6 +42,7 @@ export function exportProjectCsv(
     formatDateTime: createDateTimeFormatter(format),
     tagNames: new Map(project.tags.map((tag) => [tag.id, tag.name])),
     predecessors: groupPredecessors(project.dependencies, schedule.wbsNumbers),
+    decimalMark: decimalMarkOf(format),
   };
   const tasks = [...project.tasks].sort((left, right) =>
     compareWbsNumbers(wbsOf(left.id, schedule), wbsOf(right.id, schedule)),
@@ -114,11 +117,19 @@ function datedTaskCells(task: Exclude<Task, { kind: 'summary' }>, context: Expor
   return {
     start: formatDate(placement?.start ?? null, context),
     end: formatDate(placement?.end ?? null, context),
-    duration: String(segments.reduce((total, segment) => total + segment.durationHours, 0)),
+    duration: formatHours(
+      segments.reduce((total, segment) => total + segment.durationHours, 0),
+      context.decimalMark,
+    ),
     progress: String(task.progressPercent),
     tag: task.tagId === null ? '' : (context.tagNames.get(task.tagId) ?? ''),
     blocks: segments.length > 1 ? formatBlocks(segments) : '',
   };
+}
+
+/** Writes a number of hours with the decimal mark of the region, so that spreadsheets read it as a number. */
+function formatHours(hours: number, decimalMark: string): string {
+  return String(hours).replace('.', decimalMark);
 }
 
 /** Writes a progress as a whole percentage, an unknown progress staying empty. */

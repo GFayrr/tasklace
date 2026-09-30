@@ -1,3 +1,4 @@
+import { isQuarterHours } from '../time';
 import { MAX_IDENTIFIER_LENGTH } from '../limits';
 import type { IssueList } from './validation-issues';
 
@@ -94,6 +95,27 @@ export function readInteger(
     return undefined;
   }
   if (typeof field.value !== 'number' || !Number.isInteger(field.value)) {
+    issues.add(field.path, 'WRONG_TYPE');
+    return undefined;
+  }
+  if (field.value < min || field.value > max) {
+    issues.add(field.path, 'OUT_OF_RANGE');
+    return undefined;
+  }
+  return field.value;
+}
+
+/** Reads a number of hours made of whole quarter hours, between two bounds, both included. */
+export function readQuarterHours(
+  field: Field,
+  issues: IssueList,
+  min: number,
+  max: number,
+): number | undefined {
+  if (!isPresent(field, issues)) {
+    return undefined;
+  }
+  if (typeof field.value !== 'number' || !isQuarterHours(field.value)) {
     issues.add(field.path, 'WRONG_TYPE');
     return undefined;
   }

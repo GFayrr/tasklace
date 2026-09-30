@@ -10,6 +10,7 @@ export interface CivilDateTime {
   readonly month: number;
   readonly day: number;
   readonly hour: number;
+  readonly minute?: number;
 }
 
 export const SUNDAY: Weekday = 0;
@@ -31,6 +32,11 @@ export const WEEKDAYS: readonly Weekday[] = [
 
 export const HOURS_PER_DAY = 24;
 export const DAYS_PER_WEEK = 7;
+export const QUARTERS_PER_HOUR = 4;
+export const QUARTER_HOUR = 1 / QUARTERS_PER_HOUR;
+export const QUARTERS_PER_DAY = HOURS_PER_DAY * QUARTERS_PER_HOUR;
+export const MINUTES_PER_HOUR = 60;
+export const MINUTES_PER_QUARTER = MINUTES_PER_HOUR / QUARTERS_PER_HOUR;
 
 const MILLISECONDS_PER_HOUR = 3_600_000;
 const EPOCH_WEEKDAY = THURSDAY;
@@ -46,9 +52,24 @@ export const END_PROJECT_HOUR: ProjectHour =
 export const MIN_DAY_INDEX: DayIndex = MIN_PROJECT_HOUR / HOURS_PER_DAY;
 export const MAX_DAY_INDEX: DayIndex = END_PROJECT_HOUR / HOURS_PER_DAY - 1;
 
-/** Tells whether a value is a whole hour inside the supported project period. */
+/** Tells whether a number of hours is a whole number of quarter hours, the precision of every time and duration. */
+export function isQuarterHours(value: number): boolean {
+  return Number.isInteger(value * QUARTERS_PER_HOUR);
+}
+
+/** Counts the quarter hours in a number of hours made of whole quarter hours. */
+export function toQuarters(hours: number): number {
+  return Math.round(hours * QUARTERS_PER_HOUR);
+}
+
+/** Converts a count of quarter hours into hours. */
+export function fromQuarters(quarters: number): number {
+  return quarters / QUARTERS_PER_HOUR;
+}
+
+/** Tells whether a value is a quarter hour inside the supported project period. */
 export function isProjectHour(value: number): boolean {
-  return Number.isInteger(value) && value >= MIN_PROJECT_HOUR && value < END_PROJECT_HOUR;
+  return isQuarterHours(value) && value >= MIN_PROJECT_HOUR && value < END_PROJECT_HOUR;
 }
 
 /** Converts a wall-clock date and hour, without time zone, into a project hour. */
@@ -56,19 +77,22 @@ export function toProjectHour(dateTime: CivilDateTime): Result<ProjectHour, 'INV
   if (!hasValidDateTimeFields(dateTime)) {
     return failure('INVALID_DATE_TIME');
   }
-  const { year, month, day, hour } = dateTime;
-  const date = new Date(Date.UTC(year, month - FIRST_MONTH, day, hour));
+  const { year, month, day, hour, minute = 0 } = dateTime;
+  const date = new Date(Date.UTC(year, month - FIRST_MONTH, day, hour, minute));
   if (date.getUTCMonth() !== month - FIRST_MONTH || date.getUTCDate() !== day) {
     return failure('INVALID_DATE_TIME');
   }
   return success(date.getTime() / MILLISECONDS_PER_HOUR);
 }
 
-/** Checks the ranges of each date and hour field before any conversion. */
-function hasValidDateTimeFields({ year, month, day, hour }: CivilDateTime): boolean {
-  const allIntegers = [year, month, day, hour].every((field) => Number.isInteger(field));
+/** Checks the ranges of each date, hour and minute field before any conversion, minutes being a whole quarter hour. */
+function hasValidDateTimeFields({ year, month, day, hour, minute = 0 }: CivilDateTime): boolean {
+  const allIntegers = [year, month, day, hour, minute].every((field) => Number.isInteger(field));
   return (
     allIntegers &&
+    minute >= 0 &&
+    minute < MINUTES_PER_HOUR &&
+    minute % MINUTES_PER_QUARTER === 0 &&
     year >= MIN_PROJECT_YEAR &&
     year <= MAX_PROJECT_YEAR &&
     month >= FIRST_MONTH &&
@@ -79,14 +103,15 @@ function hasValidDateTimeFields({ year, month, day, hour }: CivilDateTime): bool
   );
 }
 
-/** Converts a project hour back into a wall-clock date and hour. */
-export function fromProjectHour(hour: ProjectHour): CivilDateTime {
+/** Converts a project hour back into a wall-clock date, hour and minute. */
+export function fromProjectHour(hour: ProjectHour): Required<CivilDateTime> {
   const date = new Date(hour * MILLISECONDS_PER_HOUR);
   return {
     year: date.getUTCFullYear(),
     month: date.getUTCMonth() + FIRST_MONTH,
     day: date.getUTCDate(),
     hour: date.getUTCHours(),
+    minute: date.getUTCMinutes(),
   };
 }
 
@@ -95,7 +120,7 @@ export function dayIndexOf(hour: ProjectHour): DayIndex {
   return Math.floor(hour / HOURS_PER_DAY);
 }
 
-/** Returns the hour of the day (0 to 23) of a project hour. */
+/** Returns the time of day of a project hour, in hours from 0 up to 24 excluded. */
 export function hourOfDay(hour: ProjectHour): number {
   return hour - dayIndexOf(hour) * HOURS_PER_DAY;
 }

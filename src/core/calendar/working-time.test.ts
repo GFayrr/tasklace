@@ -9,7 +9,7 @@ import {
   MONDAY,
   WEDNESDAY,
 } from '../time';
-import { DEFAULT_CALENDAR } from './default-calendar';
+import { TEST_CALENDAR } from '../testing/test-calendar';
 import {
   addWorkingHours,
   countWorkingHours,
@@ -19,10 +19,10 @@ import {
   subtractWorkingHours,
 } from './working-time';
 
-const calendar = compileOrThrow(DEFAULT_CALENDAR);
+const calendar = compileOrThrow(TEST_CALENDAR);
 
 const calendarWithHolidays = compileOrThrow({
-  ...DEFAULT_CALENDAR,
+  ...TEST_CALENDAR,
   nonWorkingPeriods: [
     { firstDay: dayOf(2026, 10, 1), lastDay: dayOf(2026, 10, 2) },
     { firstDay: dayOf(2026, 10, 5), lastDay: dayOf(2026, 10, 9) },
@@ -53,7 +53,7 @@ describe('nextWorkingDay and previousWorkingDay', () => {
 
   it('return null when no working day exists before the horizon', () => {
     const blocked = compileOrThrow({
-      ...DEFAULT_CALENDAR,
+      ...TEST_CALENDAR,
       nonWorkingPeriods: [{ firstDay: MIN_DAY_INDEX, lastDay: MAX_DAY_INDEX }],
     });
     expect(nextWorkingDay(blocked, dayOf(2026, 1, 1))).toBeNull();
@@ -88,7 +88,7 @@ describe('nextWorkingHour', () => {
     );
   });
 
-  it.each([Number.NaN, 1.5, MIN_PROJECT_HOUR - 1, END_PROJECT_HOUR, Number.POSITIVE_INFINITY])(
+  it.each([Number.NaN, 1.3, MIN_PROJECT_HOUR - 1, END_PROJECT_HOUR, Number.POSITIVE_INFINITY])(
     'rejects the invalid instant %d',
     (instant) => {
       expect(nextWorkingHour(calendar, instant)).toEqual({ ok: false, error: 'INVALID_INSTANT' });
@@ -128,7 +128,7 @@ describe('addWorkingHours', () => {
     expect(result.ok).toBe(true);
   });
 
-  it.each([-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, MAX_TASK_DURATION_HOURS + 1])(
+  it.each([-1, 0.3, Number.NaN, Number.POSITIVE_INFINITY, MAX_TASK_DURATION_HOURS + 1])(
     'rejects the invalid hour count %d',
     (hours) => {
       expect(addWorkingHours(calendar, at(2026, 1, 1), hours)).toEqual({

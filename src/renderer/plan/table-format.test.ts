@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CALENDAR } from '../../core/calendar/default-calendar';
+import { TEST_CALENDAR } from '../../core/testing/test-calendar';
 import { compileOrThrow } from '../../core/testing/civil-time';
 import {
   link,
@@ -14,7 +14,7 @@ import { createTableFormatters, taskCells } from './table-format';
 
 const messages = await loadMessages('en');
 const FORMATTERS = createTableFormatters('en-US');
-const CALENDAR = compileOrThrow(DEFAULT_CALENDAR);
+const CALENDAR = compileOrThrow(TEST_CALENDAR);
 const PLAN = project(
   [
     summary('s'),

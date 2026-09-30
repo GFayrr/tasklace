@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
-import { DEFAULT_CALENDAR } from '../../core/calendar/default-calendar';
+import { TEST_CALENDAR } from '../../core/testing/test-calendar';
 import type { RegionalFormat } from '../../core/exchange/csv/regional-format';
 import type { Project, Task } from '../../core/model/project';
 import { createSharedDocument } from '../../core/shared/shared-document';
@@ -42,7 +42,7 @@ const FRENCH: RegionalFormat = {
   dateSeparator: '/',
   twelveHourClock: false,
 };
-const CALENDAR = compileOrThrow(DEFAULT_CALENDAR);
+const CALENDAR = compileOrThrow(TEST_CALENDAR);
 const PLAN = project(
   [
     summary('s', { sortKey: 'a' }),

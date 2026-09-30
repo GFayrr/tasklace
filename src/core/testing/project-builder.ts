@@ -1,4 +1,4 @@
-import { DEFAULT_CALENDAR } from '../calendar/default-calendar';
+import { TEST_CALENDAR } from './test-calendar';
 import type {
   Dependency,
   DependencyType,
@@ -89,7 +89,7 @@ export function project(
   return {
     name: 'Test project',
     startDate: PROJECT_START,
-    calendar: DEFAULT_CALENDAR,
+    calendar: TEST_CALENDAR,
     options: {
       criticalPathEnabled: false,
       dateConstraintsEnabled: false,

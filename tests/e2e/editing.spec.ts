@@ -71,7 +71,7 @@ test('plans tasks from the keyboard and the table, and undoes each change', asyn
   await addTask('Build');
   await expect(row('Research')).toContainText('1');
   await typeInCell('Research', 2, '2d');
-  await expect(row('Research')).toContainText('14 h');
+  await expect(row('Research')).toContainText('18 h');
   await typeInCell('Design', 6, '1');
   await typeInCell('Build', 6, '2FS+3h');
   await expect(row('Build')).toContainText('2FS+3h');
@@ -164,7 +164,7 @@ test('moves, stretches and links bars on the timeline', async () => {
   await page.mouse.down();
   await page.mouse.move(box.x + first.end + 64, y(0), { steps: 5 });
   await page.mouse.up();
-  await expect(row('First')).toContainText('21 h');
+  await expect(row('First')).toContainText('27 h');
   await expect.poll(async () => (await barCentre(0)).end).toBeGreaterThan(first.end + 40);
 
   const stretched = await barCentre(0);

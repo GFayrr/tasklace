@@ -376,7 +376,7 @@ export function fitDailyPattern(
   task: WorkTask,
   calendar: CompiledCalendar,
 ): { readonly task: Task; readonly repairs: readonly Repair[] } {
-  const hoursPerWorkingDay = calendar.workingHoursOfDay.length;
+  const hoursPerWorkingDay = calendar.workingHoursPerDay;
   const tooManyHours = task.hoursPerDay !== null && task.hoursPerDay > hoursPerWorkingDay;
   const reduced = tooManyHours ? { ...task, hoursPerDay: hoursPerWorkingDay } : task;
   const window = computeDailyWindow(calendar, reduced);

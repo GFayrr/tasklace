@@ -15,6 +15,9 @@ import {
   MIN_DAY_INDEX,
   dayIndexOf,
   weekdayOf,
+  QUARTER_HOUR,
+  fromQuarters,
+  toQuarters,
 } from '../time';
 import type { CompiledCalendar } from './compile-calendar';
 import { computeSegmentBounds, computeTaskSlots } from './task-slots';
@@ -26,10 +29,10 @@ import {
   subtractWorkingHours,
 } from './working-time';
 
-/** Tells whether the hour starting at an instant is a working hour of the calendar. */
+/** Tells whether the quarter hour starting at an instant is worked in the calendar. */
 function isWorkingHour(calendar: CompiledCalendar, instant: number): boolean {
-  const result = countWorkingHours(calendar, instant, instant + 1);
-  return result.ok && result.value === 1;
+  const result = countWorkingHours(calendar, instant, instant + QUARTER_HOUR);
+  return result.ok && result.value === QUARTER_HOUR;
 }
 
 describe('calendar properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
@@ -83,7 +86,7 @@ describe('calendar properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
           const calendar = compileOrThrow(calendarInput);
           const end = unwrap(addWorkingHours(calendar, from, hours));
           expect(unwrap(countWorkingHours(calendar, from, end))).toBe(hours);
-          expect(isWorkingHour(calendar, end - 1)).toBe(true);
+          expect(isWorkingHour(calendar, end - QUARTER_HOUR)).toBe(true);
         },
       ),
     );
@@ -114,14 +117,20 @@ describe('calendar properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
         fc.integer({ min: 1, max: HOURS_PER_DAY }),
         (calendarInput, start, durationHours, requestedHoursPerDay) => {
           const calendar = compileOrThrow(calendarInput);
-          const hoursPerDay = Math.min(requestedHoursPerDay, calendar.workingHoursOfDay.length);
+          const hoursPerDay =
+            calendar.workingHoursPerDay < 1
+              ? null
+              : Math.min(requestedHoursPerDay, calendar.workingHoursPerDay);
           const slots = unwrap(
             computeTaskSlots(calendar, { start, durationHours, hoursPerDay, dailyStartHour: null }),
           );
           const hours = slots.flatMap((slot) =>
-            Array.from({ length: slot.end - slot.start }, (_value, offset) => slot.start + offset),
+            Array.from(
+              { length: toQuarters(slot.end - slot.start) },
+              (_value, offset) => slot.start + fromQuarters(offset),
+            ),
           );
-          expect(hours).toHaveLength(durationHours);
+          expect(hours).toHaveLength(toQuarters(durationHours));
           expect(hours.every((hour) => isWorkingHour(calendar, hour))).toBe(true);
           expect(
             hours.every((hour, index) => index === 0 || hour > (hours[index - 1] ?? hour)),
@@ -130,7 +139,8 @@ describe('calendar properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
           hours.forEach((hour) =>
             hoursByDay.set(dayIndexOf(hour), (hoursByDay.get(dayIndexOf(hour)) ?? 0) + 1),
           );
-          expect([...hoursByDay.values()].every((count) => count <= hoursPerDay)).toBe(true);
+          const dailyLimit = toQuarters(hoursPerDay ?? calendar.workingHoursPerDay);
+          expect([...hoursByDay.values()].every((count) => count <= dailyLimit)).toBe(true);
         },
       ),
     );

@@ -237,7 +237,8 @@ describe('exportProjectCsv', () => {
 
 describe('importProjectCsv round trip', () => {
   it('rebuilds the sample project and places every task at the same hours', () => {
-    const text = unwrap(exportProjectCsv(SAMPLE, scheduleOrThrow(SAMPLE), FRENCH));
+    const sample = { ...SAMPLE, calendar: DEFAULT_CALENDAR };
+    const text = unwrap(exportProjectCsv(sample, scheduleOrThrow(sample), FRENCH));
     const imported = importFrench(text);
     if (!imported.ok) {
       throw new Error(JSON.stringify(imported.error));
@@ -245,7 +246,7 @@ describe('importProjectCsv round trip', () => {
     const { project: rebuilt, warnings } = imported.value;
     expect(warnings).toEqual([]);
     expect(describeByWbs(rebuilt, scheduleOrThrow(rebuilt))).toEqual(
-      describeByWbs(SAMPLE, scheduleOrThrow(SAMPLE)),
+      describeByWbs(sample, scheduleOrThrow(sample)),
     );
     expect(rebuilt.name).toBe('Imported');
     expect(rebuilt.tags).toEqual([
@@ -255,14 +256,14 @@ describe('importProjectCsv round trip', () => {
 
   it('keeps a start date only where the schedule needs it', () => {
     const { project: rebuilt } = importLines(
-      '1;first;28/09/2026 09:00;;7',
-      '2;second;29/09/2026 09:00;;7;;1',
-      '3;later;05/10/2026 09:00;;7',
+      '1;first;28/09/2026 08:00;;9',
+      '2;second;29/09/2026 08:00;;9;;1',
+      '3;later;05/10/2026 08:00;;9',
     );
-    expect(rebuilt.startDate).toBe(at(2026, 9, 28, 9));
+    expect(rebuilt.startDate).toBe(at(2026, 9, 28, 8));
     expect(
       rebuilt.tasks.map((task) => (task.kind === 'summary' ? null : task.startNoEarlierThan)),
-    ).toEqual([null, null, at(2026, 10, 5, 9)]);
+    ).toEqual([null, null, at(2026, 10, 5, 8)]);
   });
 
   it(
@@ -381,7 +382,7 @@ describe('importProjectCsv reading a table written by hand', () => {
   it('warns about values a summary does not use and about dates the schedule does not follow', () => {
     const imported = importLines(
       '1;Phase;;;9;;;Dev;',
-      '1.1;A;28/09/2026 09:00;28/09/2026 12:00;7',
+      '1.1;A;28/09/2026 09:00;28/09/2026 12:00;9',
       '1.2;B;28/09/2026;30/09/2026;7;;1.1',
     );
     expect(imported.warnings).toEqual([
@@ -436,7 +437,7 @@ describe('importProjectCsv choices made for the user', () => {
     const imported = importLines('1;A;28/09/2026;;7', '2;B;05/10/2026;05/10/2026;7');
     expect(imported.warnings).toEqual([]);
     expect(imported.project.tasks[1]).toMatchObject({ startNoEarlierThan: at(2026, 10, 5, 0) });
-    expect(imported.schedule.placements.get('task-2')?.start).toBe(at(2026, 10, 5, 9));
+    expect(imported.schedule.placements.get('task-2')?.start).toBe(at(2026, 10, 5, 8));
   });
 
   it('warns about the start of a summary that has no dated task below it', () => {
@@ -614,8 +615,14 @@ describe('importProjectCsv refusing a table', () => {
   });
 
   it('refuses a table whose schedule runs past the last supported year, before or after keeping start dates', () => {
-    const chain = ['1;A;;;100000', '2;B;;;100000;;1', '3;C;;;100000;;2', '4;D;;;100000;;3'];
-    expect(issuesOf(...chain)).toEqual([{ path: 'rows[5]', code: 'BEYOND_PLANNING_HORIZON' }]);
+    const chain = [
+      '1;A;;;100000',
+      '2;B;;;100000;;1',
+      '3;C;;;100000;;2',
+      '4;D;;;100000;;3',
+      '5;E;;;100000;;4',
+    ];
+    expect(issuesOf(...chain)).toEqual([{ path: 'rows[6]', code: 'BEYOND_PLANNING_HORIZON' }]);
     expect(issuesOf('1;A;01/01/2026;;7', '2;B;01/01/2190;;100000')).toEqual([
       { path: 'rows[3]', code: 'BEYOND_PLANNING_HORIZON' },
     ]);

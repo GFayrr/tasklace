@@ -40,7 +40,7 @@ export interface EditRequest {
   readonly column: EditableColumn;
 }
 
-const DEFAULT_DAY_HOURS = 8;
+const DEFAULT_DAY_HOURS = 9;
 const DEFAULT_TABLE_FORMAT: RegionalFormat = {
   listSeparator: ',',
   dateOrder: 'yearMonthDay',
@@ -326,7 +326,7 @@ export class AppState {
           ? this.outline
           : buildPlanOutline(project.tasks, NOTHING_COLLAPSED),
       createId: this.#context.createId,
-      dayHours: this.calendar?.workingHoursOfDay.length ?? DEFAULT_DAY_HOURS,
+      dayHours: this.calendar?.workingHoursPerDay ?? DEFAULT_DAY_HOURS,
     };
   }
 

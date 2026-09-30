@@ -4,18 +4,26 @@ import type { DayRange, TimeRange, WorkingCalendar } from '../model/calendar';
 import { MAX_DAY_INDEX, MIN_DAY_INDEX, MONDAY, SATURDAY, SUNDAY, type Weekday } from '../time';
 import { compileOrThrow, dayOf } from '../testing/civil-time';
 import { compileCalendar } from './compile-calendar';
+import { TEST_CALENDAR } from '../testing/test-calendar';
 import { DEFAULT_CALENDAR } from './default-calendar';
 import { isWorkingDay } from './working-time';
 
 /** Builds a calendar from the default one with some fields replaced. */
 function calendarWith(overrides: Partial<WorkingCalendar>): WorkingCalendar {
-  return { ...DEFAULT_CALENDAR, ...overrides };
+  return { ...TEST_CALENDAR, ...overrides };
+}
+
+/** Returns the whole hours among the starts of the working quarter hours of a day. */
+function wholeHours(calendar: { readonly workingQuartersOfDay: readonly number[] }): number[] {
+  return calendar.workingQuartersOfDay.filter((quarter) => Number.isInteger(quarter));
 }
 
 describe('compileCalendar', () => {
-  it('compiles the default calendar into Monday–Friday, 09:00–12:00 and 13:00–17:00', () => {
-    const calendar = compileOrThrow(DEFAULT_CALENDAR);
-    expect(calendar.workingHoursOfDay).toEqual([9, 10, 11, 13, 14, 15, 16]);
+  it('compiles the test calendar into Monday–Friday, 09:00–12:00 and 13:00–17:00', () => {
+    const calendar = compileOrThrow(TEST_CALENDAR);
+    expect(wholeHours(calendar)).toEqual([9, 10, 11, 13, 14, 15, 16]);
+    expect(calendar.workingQuartersOfDay.slice(0, 5)).toEqual([9, 9.25, 9.5, 9.75, 10]);
+    expect(calendar.workingHoursPerDay).toBe(7);
     const week = Array.from({ length: 7 }, (_value, offset) => dayOf(2026, 9, 27) + offset);
     expect(week.map((day) => isWorkingDay(calendar, day))).toEqual([
       false,
@@ -35,7 +43,7 @@ describe('compileCalendar', () => {
         workingTimeRanges: [{ startHour: 23, endHour: 24 }],
       }),
     );
-    expect(result.ok && result.value.workingHoursOfDay).toEqual([23]);
+    expect(result.ok && result.value.workingQuartersOfDay).toEqual([23, 23.25, 23.5, 23.75]);
   });
 
   it('accepts every day of the week and the whole day', () => {
@@ -46,7 +54,7 @@ describe('compileCalendar', () => {
         workingTimeRanges: [{ startHour: 0, endHour: 24 }],
       }),
     );
-    expect(result.ok && result.value.workingHoursOfDay).toHaveLength(24);
+    expect(result.ok && result.value.workingHoursPerDay).toBe(24);
   });
 
   it('sorts working hours given as unsorted, adjacent ranges', () => {
@@ -59,7 +67,21 @@ describe('compileCalendar', () => {
         ],
       }),
     );
-    expect(result.ok && result.value.workingHoursOfDay).toEqual([8, 9, 10, 14, 15]);
+    expect(result.ok && wholeHours(result.value)).toEqual([8, 9, 10, 14, 15]);
+  });
+
+  it('works to the quarter hour, and compiles the calendar of new projects into 9 hours a day', () => {
+    const quarter = compileCalendar(
+      calendarWith({ workingTimeRanges: [{ startHour: 8.25, endHour: 9 }] }),
+    );
+    expect(quarter.ok && quarter.value.workingQuartersOfDay).toEqual([8.25, 8.5, 8.75]);
+    expect(quarter.ok && quarter.value.workingHoursPerDay).toBe(0.75);
+    expect(
+      compileCalendar(calendarWith({ workingTimeRanges: [{ startHour: 8.1, endHour: 9 }] })).ok,
+    ).toBe(false);
+    const standard = compileOrThrow(DEFAULT_CALENDAR);
+    expect(standard.workingHoursPerDay).toBe(9);
+    expect(wholeHours(standard)).toEqual([8, 9, 10, 11, 12, 13, 14, 15, 16]);
   });
 
   it('handles overlapping, touching, nested and unsorted non-working periods', () => {
@@ -115,7 +137,11 @@ describe('compileCalendar', () => {
         'INVALID_WORKING_TIME_RANGE',
       ],
       ['a negative range', [{ startHour: -2, endHour: 3 }], 'INVALID_WORKING_TIME_RANGE'],
-      ['a fractional range', [{ startHour: 9.5, endHour: 12 }], 'INVALID_WORKING_TIME_RANGE'],
+      [
+        'a range that is not made of quarter hours',
+        [{ startHour: 9.1, endHour: 12 }],
+        'INVALID_WORKING_TIME_RANGE',
+      ],
       ['a NaN range', [{ startHour: Number.NaN, endHour: 12 }], 'INVALID_WORKING_TIME_RANGE'],
       ['a huge range', [{ startHour: 0, endHour: 1e12 }], 'INVALID_WORKING_TIME_RANGE'],
       [
