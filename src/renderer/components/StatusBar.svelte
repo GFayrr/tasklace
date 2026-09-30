@@ -51,7 +51,7 @@
     min-height: 40px;
     padding: var(--space-2) var(--space-4);
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     gap: var(--space-4);
     font-size: var(--font-size-small);
@@ -69,7 +69,11 @@
 
   .legend {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    min-width: 0;
+    flex-shrink: 1;
+    overflow-x: auto;
+    scrollbar-width: thin;
     gap: var(--space-4);
     margin: 0;
     padding: 0;
@@ -77,6 +81,8 @@
   }
 
   .tag {
+    flex-shrink: 0;
+    white-space: nowrap;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -94,6 +100,8 @@
   }
 
   .summary {
+    flex-shrink: 0;
+    white-space: nowrap;
     display: flex;
     gap: var(--space-2);
   }

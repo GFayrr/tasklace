@@ -13,6 +13,9 @@ export interface Theme {
   readonly success: string;
   readonly warning: string;
   readonly error: string;
+  readonly bar: string;
+  readonly nonWorking: string;
+  readonly gridLine: string;
 }
 
 export type ThemeColor = keyof Theme;
@@ -32,6 +35,9 @@ export const THEME_COLORS: readonly ThemeColor[] = [
   'success',
   'warning',
   'error',
+  'bar',
+  'nonWorking',
+  'gridLine',
 ];
 
 /** Returns the name of the style variable holding a colour of the theme. */

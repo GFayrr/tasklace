@@ -10,6 +10,7 @@ const SHOWN_ATTRIBUTES: ReadonlySet<string> = new Set([
   'placeholder',
   'alt',
 ]);
+const STYLE_NODE_TYPES: ReadonlySet<string> = new Set(['StyleDirective']);
 const SKIPPED_ROOT_KEYS: ReadonlySet<string> = new Set(['instance', 'module', 'css', 'options']);
 
 /** Lists the Svelte components of the interface. */
@@ -37,6 +38,9 @@ function writtenTexts(node: unknown, shown: boolean, found: string[]): void {
   const isText = record['type'] === 'Text' && typeof record['data'] === 'string';
   if (isText && LETTER_PATTERN.test(String(record['data'])) && shown) {
     found.push(String(record['data']).trim());
+  }
+  if (STYLE_NODE_TYPES.has(String(record['type']))) {
+    return;
   }
   const isAttribute = record['type'] === 'Attribute' && typeof record['name'] === 'string';
   Object.entries(record).forEach(([key, value]) => {
