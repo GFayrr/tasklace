@@ -12,7 +12,15 @@ import {
 import { at, compileOrThrow } from '../../core/testing/civil-time';
 import { TEST_CALENDAR } from '../../core/testing/test-calendar';
 import { buildPlanOutline, groupIncoming } from './plan-outline';
-import { cellEdit, editorText, isEditable, nextColumn, type CellSource } from './cell-editing';
+import {
+  cellEdit,
+  editorText,
+  hourFromPicker,
+  isEditable,
+  nextColumn,
+  pickerValue,
+  type CellSource,
+} from './cell-editing';
 
 const ISO: RegionalFormat = {
   listSeparator: ',',
@@ -96,5 +104,25 @@ describe('editable columns', () => {
     expect(nextColumn('name', -1)).toBe('name');
     expect(nextColumn('predecessors', 1)).toBe('predecessors');
     expect(nextColumn('progress', -1)).toBe('end');
+  });
+});
+
+describe('date and time picker values', () => {
+  it('writes an instant as a picker value and reads it back', () => {
+    const hour = at(2026, 10, 5, 14) + 0.75;
+    expect(pickerValue(hour)).toBe('2026-10-05T14:45');
+    expect(hourFromPicker(pickerValue(hour))).toBe(hour);
+  });
+
+  it('rounds a picked time to the nearest quarter hour, even past the hour', () => {
+    expect(hourFromPicker('2026-10-05T14:07')).toBe(at(2026, 10, 5, 14));
+    expect(hourFromPicker('2026-10-05T14:08')).toBe(at(2026, 10, 5, 14) + 0.25);
+    expect(hourFromPicker('2026-10-05T14:53:10')).toBe(at(2026, 10, 5, 15));
+  });
+
+  it('refuses an empty or impossible value', () => {
+    expect(hourFromPicker('')).toBeNull();
+    expect(hourFromPicker('2026-02-31T10:00')).toBeNull();
+    expect(hourFromPicker('tomorrow')).toBeNull();
   });
 });

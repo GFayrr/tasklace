@@ -100,7 +100,8 @@
     "collapse": "Collapse {name}",
     "addTask": "Add a task",
     "newTask": "New task",
-    "editCell": "Edit {column} of {name}"
+    "editCell": "Edit {column} of {name}",
+    "pickDate": "Choose the {column} of {name} on a calendar"
   },
   "timeline": {
     "label": "Timeline"

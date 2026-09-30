@@ -12,7 +12,8 @@
     | 'up'
     | 'down'
     | 'diamond'
-    | 'trash';
+    | 'trash'
+    | 'calendar';
 
   let { name }: { name: IconName } = $props();
 </script>
@@ -49,6 +50,8 @@
     <path d="M12 3 21 12 12 21 3 12z" />
   {:else if name === 'trash'}
     <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
+  {:else if name === 'calendar'}
+    <rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" />
   {:else if name === 'close'}
     <path d="M18 6 6 18M6 6l12 12" />
   {:else}

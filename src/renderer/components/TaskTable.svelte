@@ -7,8 +7,10 @@
     cellEdit,
     EDITABLE_COLUMNS,
     editorText,
+    hourFromPicker,
     isEditable,
     nextColumn,
+    pickerValue,
     type CellSource,
     type EditableColumn,
   } from '../plan/cell-editing';
@@ -66,6 +68,8 @@
     app.selectedTaskId === null ? -1 : (app.outline.rowIndexById.get(app.selectedTaskId) ?? -1),
   );
   let activeColumn = $state<EditableColumn>('name');
+  let picker: HTMLInputElement | undefined = $state();
+  let picking: { readonly taskId: TaskId; readonly column: EditableColumn } | null = null;
   let editing = $state<Editing | null>(null);
   let grid: HTMLDivElement | undefined = $state();
 
@@ -163,6 +167,43 @@
     }
   }
 
+  /** Opens the calendar of the system under a start or end cell, starting at the date the cell shows. */
+  function openPicker(taskId: TaskId, column: EditableColumn, anchor: Element): void {
+    const task = app.project?.tasks.find((candidate) => candidate.id === taskId);
+    const placement = app.schedule?.placements.get(taskId);
+    if (picker === undefined || task === undefined || task.kind === 'summary') {
+      return;
+    }
+    const cell = anchor.getBoundingClientRect();
+    const table = grid?.getBoundingClientRect();
+    picker.style.left = `${String(cell.left - (table?.left ?? 0))}px`;
+    picker.style.top = `${String(cell.bottom - (table?.top ?? 0))}px`;
+    const shown = column === 'end' ? placement?.end : (task.startNoEarlierThan ?? placement?.start);
+    picker.value = shown === undefined ? '' : pickerValue(shown);
+    picking = { taskId, column };
+    app.selectedTaskId = taskId;
+    activeColumn = column;
+    try {
+      picker.showPicker();
+    } catch (error) {
+      picking = null;
+      console.error(error);
+    }
+  }
+
+  /** Applies the date and time chosen on the calendar. */
+  function applyPicked(): void {
+    const target = picking;
+    const hour = picker === undefined ? null : hourFromPicker(picker.value);
+    picking = null;
+    if (target === null || hour === null) {
+      return;
+    }
+    const text = pickerValue(hour);
+    app.edit((context) => cellEdit(context, target.taskId, target.column, text, source));
+    grid?.focus();
+  }
+
   /** Selects the row at an index, when it exists, and brings it into view. */
   function selectRow(index: number): void {
     const row = rows[index];
@@ -192,6 +233,13 @@
       (event.key === 'ArrowRight' || event.key === 'ArrowLeft')
     ) {
       app.editSelected(event.key === 'ArrowRight' ? indentTask : outdentTask);
+      return true;
+    }
+    if (event.altKey && event.key === 'ArrowDown' && id !== null && isDateColumn(activeColumn)) {
+      const cell = document.getElementById(cellId(id, activeColumn));
+      if (cell !== null) {
+        openPicker(id, activeColumn, cell);
+      }
       return true;
     }
     if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
@@ -268,6 +316,11 @@
     }
   }
 
+  /** Tells whether a column holds a date that the calendar can choose. */
+  function isDateColumn(column: EditableColumn): boolean {
+    return column === 'start' || column === 'end';
+  }
+
   /** Returns the name of a column for assistive technologies. */
   function columnLabel(column: EditableColumn): string {
     return text[column];
@@ -298,6 +351,15 @@
       <span class="cell predecessors" role="columnheader">{text.predecessors}</span>
     </div>
   </div>
+  <input
+    class="picker"
+    type="datetime-local"
+    step="900"
+    tabindex="-1"
+    aria-hidden="true"
+    bind:this={picker}
+    onchange={applyPicked}
+  />
   <div class="body" role="rowgroup">
     <div class="rows" style:transform="translateY({-scrollTop}px)">
       {#each shown as { row, index, values } (row.task.id)}
@@ -375,6 +437,22 @@
                 />
               {:else}
                 <span class="label">{values[column]}</span>
+                {#if isDateColumn(column) && row.task.kind !== 'summary'}
+                  <button
+                    type="button"
+                    class="pick"
+                    tabindex="-1"
+                    aria-label={fillMessage(text.pickDate, {
+                      column: columnLabel(column).toLowerCase(),
+                      name: row.task.name,
+                    })}
+                    onclick={(event) => {
+                      openPicker(row.task.id, column, event.currentTarget);
+                    }}
+                  >
+                    <Icon name="calendar" />
+                  </button>
+                {/if}
               {/if}
             </span>
           {/each}
@@ -406,6 +484,7 @@
 
 <style>
   .table {
+    position: relative;
     height: 100%;
     display: flex;
     flex-direction: column;
@@ -556,6 +635,52 @@
     border-radius: 4px;
     background: var(--color-surface);
     outline: none;
+  }
+
+  .picker {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .date {
+    gap: 4px;
+  }
+
+  .pick {
+    width: 22px;
+    height: 22px;
+    margin-left: auto;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    visibility: hidden;
+  }
+
+  .row:hover .pick,
+  .row.selected .pick {
+    visibility: visible;
+  }
+
+  .pick:hover {
+    color: var(--color-text);
+    background: var(--color-panel);
+  }
+
+  .pick :global(.icon) {
+    width: 15px;
+    height: 15px;
   }
 
   .toggle-space {

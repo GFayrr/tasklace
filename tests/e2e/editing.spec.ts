@@ -207,3 +207,23 @@ test('works to the quarter hour and moves the project start for an earlier task'
   await page.keyboard.press('Control+z');
   await expect(row('Meeting').getByRole('gridcell').nth(3)).toContainText(/10:15/);
 });
+
+test('chooses a start on the calendar of the system, to the quarter hour', async () => {
+  await addTask('Review');
+  const button = row('Review').getByRole('button', {
+    name: 'Choose the start of Review on a calendar',
+  });
+  await row('Review').hover();
+  await button.click();
+  await page.evaluate(
+    (value) => {
+      const picker = document.querySelector<HTMLInputElement>('input.picker');
+      if (picker !== null) {
+        picker.value = value;
+        picker.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    },
+    isoDaysFromToday(2, '14:05').replace(' ', 'T'),
+  );
+  await expect(row('Review').getByRole('gridcell').nth(3)).toContainText(/2:00 PM|14:00/);
+});

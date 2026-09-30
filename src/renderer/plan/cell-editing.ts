@@ -4,7 +4,9 @@ import type { Dependency, Task, TaskId } from '../../core/model/project';
 import type { Schedule } from '../../core/scheduling/schedule-project';
 import { predecessorText } from './plan-outline';
 import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
+import { formatDateTime, parseDateTime } from '../../core/civil-format';
 import { failure } from '../../core/result';
+import { MINUTES_PER_QUARTER, QUARTER_HOUR, type ProjectHour } from '../../core/time';
 import { durationEditorText } from './durations';
 import {
   renameTask,
@@ -16,6 +18,8 @@ import {
   type Edit,
   type EditContext,
 } from './task-commands';
+
+const PICKER_PATTERN = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/;
 
 export type EditableColumn = 'name' | 'duration' | 'start' | 'end' | 'progress' | 'predecessors';
 
@@ -110,4 +114,21 @@ function endEdit(context: EditContext, id: TaskId, text: string, source: CellSou
     lastBlockStart: lastBlock.start,
     calendar: source.calendar,
   });
+}
+
+/** Writes an instant as the value of a date and time picker. */
+export function pickerValue(hour: ProjectHour): string {
+  return formatDateTime(hour);
+}
+
+/** Reads the value of a date and time picker, rounded to the nearest quarter hour, or null when it is empty or not a date. */
+export function hourFromPicker(value: string): ProjectHour | null {
+  const match = PICKER_PATTERN.exec(value);
+  if (match === null) {
+    return null;
+  }
+  const [, date = '', hour = '', minute = ''] = match;
+  const quarters = Math.round(Number(minute) / MINUTES_PER_QUARTER);
+  const whole = parseDateTime(`${date}T${hour}:00`);
+  return whole.ok ? whole.value + quarters * QUARTER_HOUR : null;
 }
