@@ -84,7 +84,8 @@
       "one": "{count} change was adjusted to keep the project valid.",
       "other": "{count} changes were adjusted to keep the project valid."
     },
-    "scheduleFailed": "The schedule could not be computed. Check the calendar and the start date of the project."
+    "scheduleFailed": "The schedule could not be computed. Check the calendar and the start date of the project.",
+    "projectStartMoved": "The project now starts on {date}, so that this task can start earlier."
   },
   "table": {
     "label": "Tasks",
@@ -97,7 +98,6 @@
     "predecessors": "Predecessors",
     "expand": "Expand {name}",
     "collapse": "Collapse {name}",
-    "hours": "{count} h",
     "addTask": "Add a task",
     "newTask": "New task",
     "editCell": "Edit {column} of {name}"
@@ -128,8 +128,8 @@
   "editErrors": {
     "NOT_POSSIBLE": "This change is not possible here.",
     "INVALID_NAME": "A task needs a name.",
-    "INVALID_DURATION": "Write the duration in hours, such as 14, or in working days, such as 2d.",
-    "INVALID_DATE": "This date could not be read. Write it as your computer shows dates, or as 2026-10-05 14:00.",
+    "INVALID_DURATION": "Write the duration in hours, such as 14 or 1 h 30, in minutes, such as 45 min, or in working days, such as 2d.",
+    "INVALID_DATE": "This date could not be read. Write it as your computer shows dates, or as 2026-10-05 14:30. Times go by quarter hours.",
     "INVALID_PROGRESS": "Write the progress as a whole number from 0 to 100.",
     "INVALID_PREDECESSORS": "Write the predecessors by task number, such as 1.2, 3SS+2h, each task once.",
     "UNKNOWN_TASK_NUMBER": "There is no task with this number.",
@@ -140,6 +140,12 @@
     "HIERARCHY_TOO_DEEP": "Tasks cannot be nested this deeply.",
     "TOO_MANY_ITEMS": "The project has reached its maximum size.",
     "TOO_LONG": "This text is too long.",
-    "OUT_OF_RANGE": "This value is outside the allowed range."
+    "OUT_OF_RANGE": "This value is outside the allowed range.",
+    "INVALID_END": "A task has to end after it starts."
+  },
+  "durations": {
+    "hours": "{hours} h",
+    "hoursMinutes": "{hours} h {minutes}",
+    "minutes": "{minutes} min"
   }
 }

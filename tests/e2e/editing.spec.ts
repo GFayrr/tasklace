@@ -177,3 +177,33 @@ test('moves, stretches and links bars on the timeline', async () => {
   await expect(grid.getByRole('row').nth(2).getByRole('gridcell').nth(6)).toHaveText('1');
   await picture('editing-timeline');
 });
+
+/** Writes a local working day, about some days away from today and moved forward past a weekend, as an ISO date and time. */
+function isoDaysFromToday(days: number, time: string): string {
+  const moment = new Date();
+  moment.setDate(moment.getDate() + days);
+  while (moment.getDay() === 0 || moment.getDay() === 6) {
+    moment.setDate(moment.getDate() + 1);
+  }
+  const month = String(moment.getMonth() + 1).padStart(2, '0');
+  const day = String(moment.getDate()).padStart(2, '0');
+  return `${String(moment.getFullYear())}-${month}-${day} ${time}`;
+}
+
+test('works to the quarter hour and moves the project start for an earlier task', async () => {
+  await addTask('Meeting');
+  await typeInCell('Meeting', 2, '1h30');
+  await expect(row('Meeting')).toContainText('1 h 30');
+  await typeInCell('Meeting', 3, isoDaysFromToday(1, '10:15'));
+  await expect(row('Meeting').getByRole('gridcell').nth(3)).toContainText(/10:15/);
+  await expect(row('Meeting').getByRole('gridcell').nth(4)).toContainText(/11:45/);
+  await typeInCell('Meeting', 4, isoDaysFromToday(1, '12:00'));
+  await expect(row('Meeting')).toContainText('1 h 45');
+  await typeInCell('Meeting', 3, isoDaysFromToday(-10, '09:00'));
+  await expect(
+    page.getByRole('status').filter({ hasText: 'The project now starts on' }),
+  ).toBeVisible();
+  await expect(row('Meeting').getByRole('gridcell').nth(3)).toContainText(/9:00/);
+  await page.keyboard.press('Control+z');
+  await expect(row('Meeting').getByRole('gridcell').nth(3)).toContainText(/10:15/);
+});

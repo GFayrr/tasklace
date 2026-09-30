@@ -5,13 +5,14 @@
   import { fillMessage } from '../i18n/messages';
   import {
     cellEdit,
+    EDITABLE_COLUMNS,
     editorText,
     isEditable,
     nextColumn,
     type CellSource,
     type EditableColumn,
   } from '../plan/cell-editing';
-  import { groupIncoming, predecessorText } from '../plan/plan-outline';
+  import { groupIncoming, predecessorText, type PlanRow } from '../plan/plan-outline';
   import { taskCells, type TableFormatters } from '../plan/table-format';
   import { indentTask, moveTask, outdentTask } from '../plan/task-commands';
   import { ROW_HEIGHT } from '../plan/timeline-geometry';
@@ -44,6 +45,7 @@
   const incoming = $derived(groupIncoming(app.project?.dependencies ?? []));
   const source: CellSource = $derived({
     schedule: app.schedule,
+    calendar: app.calendar,
     incoming,
     wbsById: app.outline.wbsById,
     format: app.regionalFormat,
@@ -57,8 +59,7 @@
     return rows.slice(first, last + 1).map((row, offset) => ({
       row,
       index: first + offset,
-      cells: taskCells(row.task, app.schedule, app.calendar, formatters, app.messages),
-      predecessors: predecessorText(incoming.get(row.task.id), app.outline.wbsById),
+      values: cellValues(row),
     }));
   });
   const selectedIndex = $derived(
@@ -75,6 +76,19 @@
       startEditing(request.taskId, request.column, null);
     }
   });
+
+  /** Returns the texts a row shows in each editable column. */
+  function cellValues(row: PlanRow): Readonly<Record<EditableColumn, string>> {
+    const cells = taskCells(row.task, app.schedule, app.calendar, formatters, app.messages);
+    return {
+      name: row.task.name,
+      duration: cells.duration,
+      start: cells.start,
+      end: cells.end,
+      progress: cells.progress,
+      predecessors: predecessorText(incoming.get(row.task.id), app.outline.wbsById),
+    };
+  }
 
   /** Returns the identifier of the element showing a cell. */
   function cellId(taskId: TaskId, column: EditableColumn): string {
@@ -113,9 +127,7 @@
     }
     editing = null;
     if (input.value !== current.initial) {
-      app.edit((context) =>
-        cellEdit(context, current.taskId, current.column, input.value, app.regionalFormat),
-      );
+      app.edit((context) => cellEdit(context, current.taskId, current.column, input.value, source));
     }
     grid?.focus();
   }
@@ -288,7 +300,7 @@
   </div>
   <div class="body" role="rowgroup">
     <div class="rows" style:transform="translateY({-scrollTop}px)">
-      {#each shown as { row, index, cells, predecessors } (row.task.id)}
+      {#each shown as { row, index, values } (row.task.id)}
         {@const selected = row.task.id === app.selectedTaskId}
         <div
           class="row"
@@ -307,32 +319,28 @@
               clickCell(event, row.task.id, null);
             }}>{row.wbs}</span
           >
-          {#each [{ column: 'name', value: row.task.name }, { column: 'duration', value: cells.duration }, { column: 'start', value: cells.start }, { column: 'end', value: cells.end }, { column: 'progress', value: cells.progress }, { column: 'predecessors', value: predecessors }] as cell (cell.column)}
-            {@const column = cell.column === 'end' ? null : (cell.column as EditableColumn)}
-            {@const isEditing =
-              column !== null && editing?.taskId === row.task.id && editing.column === column}
+          {#each EDITABLE_COLUMNS as column (column)}
+            {@const isEditing = editing?.taskId === row.task.id && editing.column === column}
             <span
-              class="cell {cell.column}"
-              class:number={cell.column === 'duration' || cell.column === 'progress'}
-              class:date={cell.column === 'start' || cell.column === 'end'}
+              class="cell {column}"
+              class:number={column === 'duration' || column === 'progress'}
+              class:date={column === 'start' || column === 'end'}
               class:active={selected && column === activeColumn}
-              id={column === null ? undefined : cellId(row.task.id, column)}
+              id={cellId(row.task.id, column)}
               role="gridcell"
               tabindex="-1"
-              aria-readonly={column === null || !isEditable(row.task, column)}
-              style:padding-left={cell.column === 'name'
+              aria-readonly={!isEditable(row.task, column)}
+              style:padding-left={column === 'name'
                 ? `${String(NAME_PADDING + row.depth * INDENT_PIXELS)}px`
                 : undefined}
               onpointerdown={(event) => {
                 clickCell(event, row.task.id, column);
               }}
               ondblclick={() => {
-                if (column !== null) {
-                  startEditing(row.task.id, column, null);
-                }
+                startEditing(row.task.id, column, null);
               }}
             >
-              {#if cell.column === 'name'}
+              {#if column === 'name'}
                 {#if row.hasChildren}
                   <button
                     type="button"
@@ -366,7 +374,7 @@
                   }}
                 />
               {:else}
-                <span class="label">{cell.value}</span>
+                <span class="label">{values[column]}</span>
               {/if}
             </span>
           {/each}

@@ -24,9 +24,9 @@ import {
   moveStart,
   moveTask,
   outdentTask,
-  parseDuration,
   renameTask,
   setDuration,
+  setEnd,
   setPredecessors,
   setProgress,
   setStart,
@@ -204,6 +204,8 @@ describe('editing cells', () => {
     const { session, context } = openPlan();
     applied(session, setDuration(context(), 'a', '2d'));
     expect(taskOf(session, 'a')).toMatchObject({ segments: [{ durationHours: 14 }] });
+    applied(session, setDuration(context(), 'a', '1 h 30'));
+    expect(taskOf(session, 'a')).toMatchObject({ segments: [{ durationHours: 1.5 }] });
     applied(session, setDuration(context(), 'a', '0'));
     expect(taskOf(session, 'a')?.kind).toBe('milestone');
     applied(session, setDuration(context(), 'a', '5 h'));
@@ -215,22 +217,6 @@ describe('editing cells', () => {
     expect(setDuration(context(), 'd', '7')).toEqual({ ok: false, error: 'INVALID_DURATION' });
     expect(setDuration(context(), 'a', 'soon')).toEqual({ ok: false, error: 'INVALID_DURATION' });
     expect(setDuration(context(), 's', '3')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
-  });
-
-  it.each([
-    ['14', 14],
-    ['14h', 14],
-    ['14 H', 14],
-    ['2d', 14],
-    ['1,5d', 11],
-    ['0.5 d', 4],
-    ['0', 0],
-    ['-3', null],
-    ['1e3', null],
-    ['', null],
-    ['1'.repeat(80), null],
-  ])('reads the duration %j as %s hours', (text, expected) => {
-    expect(parseDuration(text, 7)).toBe(expected);
   });
 
   it('reads a start date in the regional format or as ISO, an empty text removing it', () => {
@@ -245,6 +231,36 @@ describe('editing cells', () => {
       ok: false,
       error: 'INVALID_DATE',
     });
+  });
+
+  it('sets the end of a task through the duration of its last block, or moves a milestone', () => {
+    const { session, context } = openPlan();
+    const placed = { lastBlockStart: at(2026, 9, 28, 9), calendar: CALENDAR };
+    applied(session, setEnd(context(), 'c', '28/09/2026 11:30', FRENCH, placed));
+    expect(taskOf(session, 'c')).toMatchObject({ segments: [{ durationHours: 2.5 }] });
+    applied(session, setEnd(context(), 'c', '29/09/2026', FRENCH, placed));
+    expect(taskOf(session, 'c')).toMatchObject({ segments: [{ durationHours: 14 }] });
+    expect(setEnd(context(), 'c', '28/09/2026 08:00', FRENCH, placed)).toEqual({
+      ok: false,
+      error: 'INVALID_END',
+    });
+    expect(setEnd(context(), 'c', 'soon', FRENCH, placed)).toEqual({
+      ok: false,
+      error: 'INVALID_DATE',
+    });
+    applied(session, setEnd(context(), 'm', '02/10/2026 15:00', FRENCH, placed));
+    expect(taskOf(session, 'm')).toMatchObject({ startNoEarlierThan: at(2026, 10, 2, 15) });
+  });
+
+  it('moves the project start to the day of a task placed before it', () => {
+    const { session, context } = openPlan();
+    applied(session, setStart(context(), 'c', '21/09/2026 10:15', FRENCH));
+    expect(session.project().startDate).toBe(at(2026, 9, 21));
+    expect(taskOf(session, 'c')).toMatchObject({ startNoEarlierThan: at(2026, 9, 21, 10) + 0.25 });
+    applied(session, moveStart(context(), 'm', at(2026, 9, 14, 9)));
+    expect(session.project().startDate).toBe(at(2026, 9, 14));
+    session.history.undo();
+    expect(session.project().startDate).toBe(at(2026, 9, 21));
   });
 
   it('reads a whole progress from 0 to 100', () => {
@@ -319,7 +335,7 @@ describe('dragging on the timeline', () => {
     applied(session, stretchEnd(context(), 'c', at(2026, 9, 28, 9), at(2026, 9, 29, 17), CALENDAR));
     expect(taskOf(session, 'c')).toMatchObject({ segments: [{ durationHours: 14 }] });
     applied(session, stretchEnd(context(), 'c', at(2026, 9, 28, 9), at(2026, 9, 27), CALENDAR));
-    expect(taskOf(session, 'c')).toMatchObject({ segments: [{ durationHours: 1 }] });
+    expect(taskOf(session, 'c')).toMatchObject({ segments: [{ durationHours: 0.25 }] });
     expect(stretchEnd(context(), 'm', 0, 1, CALENDAR)).toEqual({
       ok: false,
       error: 'NOT_POSSIBLE',

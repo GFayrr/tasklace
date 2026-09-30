@@ -9,7 +9,8 @@ import {
   summary,
   workTask,
 } from '../../core/testing/project-builder';
-import { at } from '../../core/testing/civil-time';
+import { at, compileOrThrow } from '../../core/testing/civil-time';
+import { TEST_CALENDAR } from '../../core/testing/test-calendar';
 import { buildPlanOutline, groupIncoming } from './plan-outline';
 import { cellEdit, editorText, isEditable, nextColumn, type CellSource } from './cell-editing';
 
@@ -38,6 +39,7 @@ const PLAN = project(
 const OUTLINE = buildPlanOutline(PLAN.tasks, new Set());
 const SOURCE: CellSource = {
   schedule: scheduleOrThrow(PLAN),
+  calendar: compileOrThrow(TEST_CALENDAR),
   incoming: groupIncoming(PLAN.dependencies),
   wbsById: OUTLINE.wbsById,
   format: ISO,
@@ -54,23 +56,31 @@ function taskOf(id: string) {
 
 describe('editorText', () => {
   it('starts each editor with text that reads back to the same value', () => {
-    expect(editorText(taskOf('b'), 'duration', SOURCE)).toBe('12');
+    expect(editorText(taskOf('b'), 'duration', SOURCE)).toBe('12 h');
+    expect(editorText(taskOf('b'), 'end', SOURCE)).toBe('2026-10-06 15:00');
     expect(editorText(taskOf('b'), 'start', SOURCE)).toBe('2026-10-05 09:00');
     expect(editorText(taskOf('a'), 'start', SOURCE)).toBe('2026-09-28 09:00');
     expect(editorText(taskOf('a'), 'progress', SOURCE)).toBe('30');
     expect(editorText(taskOf('m'), 'predecessors', SOURCE)).toBe('2SS+3h');
-    expect(editorText(taskOf('m'), 'duration', SOURCE)).toBe('0');
+    expect(editorText(taskOf('m'), 'duration', SOURCE)).toBe('0 h');
     expect(editorText(taskOf('s'), 'duration', SOURCE)).toBe('s');
   });
 
   it('builds the change that the same text asks for, without any difference', () => {
     const context = { project: PLAN, outline: OUTLINE, createId: () => 'new', dayHours: 7 };
     for (const column of ['name', 'duration', 'progress', 'predecessors'] as const) {
-      const edit = cellEdit(context, 'm', column, editorText(taskOf('m'), column, SOURCE), ISO);
+      const edit = cellEdit(context, 'm', column, editorText(taskOf('m'), column, SOURCE), SOURCE);
       expect(edit.ok).toBe(true);
     }
-    const start = cellEdit(context, 'b', 'start', editorText(taskOf('b'), 'start', SOURCE), ISO);
-    expect(start.ok && start.value).toEqual([{ type: 'putTask', task: taskOf('b') }]);
+    for (const column of ['start', 'end', 'duration'] as const) {
+      const edit = cellEdit(context, 'b', column, editorText(taskOf('b'), column, SOURCE), SOURCE);
+      expect(edit.ok && edit.value).toEqual([{ type: 'putTask', task: taskOf('b') }]);
+    }
+    const noSchedule = { ...SOURCE, schedule: null };
+    expect(cellEdit(context, 'b', 'end', 'x', noSchedule)).toEqual({
+      ok: false,
+      error: 'NOT_POSSIBLE',
+    });
   });
 });
 
@@ -85,6 +95,6 @@ describe('editable columns', () => {
     expect(nextColumn('name', 1)).toBe('duration');
     expect(nextColumn('name', -1)).toBe('name');
     expect(nextColumn('predecessors', 1)).toBe('predecessors');
-    expect(nextColumn('progress', -1)).toBe('start');
+    expect(nextColumn('progress', -1)).toBe('end');
   });
 });

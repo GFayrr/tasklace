@@ -16,7 +16,14 @@ import type {
   RecentProject,
   TasklaceBridge,
 } from '../../preload/bridge-contract';
-import { countMessage, editErrorMessage, fileErrorMessage, type Messages } from '../i18n/messages';
+import { createDayFormatter } from '../i18n/format';
+import {
+  countMessage,
+  editErrorMessage,
+  fileErrorMessage,
+  fillMessage,
+  type Messages,
+} from '../i18n/messages';
 import type { EditableColumn } from '../plan/cell-editing';
 import { buildPlanOutline, NOTHING_COLLAPSED, toggledSummary } from '../plan/plan-outline';
 import { deleteTasks, insertTask, type Edit, type EditContext } from '../plan/task-commands';
@@ -33,7 +40,7 @@ import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
 import type { Theme } from '../theme/theme';
 import type { Command } from './shortcuts';
 
-export type NoticeKind = 'error' | 'warning';
+export type NoticeKind = 'error' | 'warning' | 'info';
 
 export interface EditRequest {
   readonly taskId: TaskId;
@@ -230,6 +237,7 @@ export class AppState {
       return false;
     }
     this.#refresh();
+    this.#notifyStartMove(project.startDate);
     return true;
   }
 
@@ -407,6 +415,15 @@ export class AppState {
     const text = fileErrorMessage(this.messages, result.error.code);
     if (text !== null) {
       this.#notify('error', text);
+    }
+  }
+
+  /** Tells the user that the project now starts earlier, so that a task placed before it fits. */
+  #notifyStartMove(previousStart: number): void {
+    const start = this.project?.startDate;
+    if (start !== undefined && start < previousStart) {
+      const date = createDayFormatter(this.locale)(start);
+      this.#notify('info', fillMessage(this.messages.notices.projectStartMoved, { date }));
     }
   }
 

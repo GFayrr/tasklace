@@ -15,7 +15,8 @@ import type {
 import { failure, success, type Result } from '../../core/result';
 import { keyBetween, spreadKeys } from '../../core/shared/fractional-index';
 import type { SharedOperation } from '../../core/shared/shared-operations';
-import { startOfDay, type ProjectHour } from '../../core/time';
+import { dayIndexOf, QUARTER_HOUR, startOfDay, type ProjectHour } from '../../core/time';
+import { parseDuration } from './durations';
 import type { PlanOutline } from './plan-outline';
 
 export type EditError =
@@ -23,6 +24,7 @@ export type EditError =
   | 'INVALID_NAME'
   | 'INVALID_DURATION'
   | 'INVALID_DATE'
+  | 'INVALID_END'
   | 'INVALID_PROGRESS'
   | 'INVALID_PREDECESSORS'
   | 'UNKNOWN_TASK_NUMBER';
@@ -41,12 +43,10 @@ export interface InsertedTask {
   readonly operations: readonly SharedOperation[];
 }
 
-const DURATION_PATTERN = /^(\d{1,9}(?:[.,]\d{1,4})?)\s*([hd])?$/i;
 const PROGRESS_PATTERN = /^(\d{1,3})\s*%?$/;
 const MAX_FIELD_LENGTH = 64;
 const MAX_PROGRESS = 100;
 const DECIMAL_RADIX = 10;
-const DAY_UNIT = 'd';
 
 /** Adds a work task of one working day after a task, as its next sibling, or at the end of the plan. */
 export function insertTask(
@@ -153,7 +153,7 @@ export function renameTask(context: EditContext, id: TaskId, text: string): Edit
   return name === '' ? failure('INVALID_NAME') : success([putTask({ ...task, name })]);
 }
 
-/** Sets the duration written as hours ("14", "14h") or working days ("2d"), a work task becoming a milestone at zero and a milestone a work task above zero; for a split task, the last block takes the difference. */
+/** Sets the duration written in hours, minutes or working days, rounded to the quarter hour, a work task becoming a milestone at zero and a milestone a work task above zero; for a split task, the last block takes the difference. */
 export function setDuration(context: EditContext, id: TaskId, text: string): Edit {
   const task = findTask(context, id);
   if (task === undefined || task.kind === 'summary') {
@@ -172,7 +172,7 @@ export function setDuration(context: EditContext, id: TaskId, text: string): Edi
   const earlier = task.segments.slice(0, -1);
   const last = hours - earlier.reduce((sum, segment) => sum + segment.durationHours, 0);
   const lastSegment = task.segments.at(-1);
-  if (last < 1 || lastSegment === undefined) {
+  if (last < QUARTER_HOUR || lastSegment === undefined) {
     return failure('INVALID_DURATION');
   }
   return success([
@@ -199,7 +199,33 @@ export function setStart(
     return failure('INVALID_DATE');
   }
   const hour = date.value.kind === 'dateTime' ? date.value.hour : startOfDay(date.value.day);
-  return success([putTask({ ...task, startNoEarlierThan: hour })]);
+  return success(startingAt(context, hour, [putTask({ ...task, startNoEarlierThan: hour })]));
+}
+
+/** Sets the end of a work task, changing the duration of its last block, or moves a milestone to that instant; a date without time ends the task at the end of that day. */
+export function setEnd(
+  context: EditContext,
+  id: TaskId,
+  text: string,
+  format: RegionalFormat,
+  placed: { readonly lastBlockStart: ProjectHour; readonly calendar: CompiledCalendar },
+): Edit {
+  const task = findTask(context, id);
+  const date = parseCsvDate(text, format);
+  if (task === undefined || task.kind === 'summary') {
+    return failure('NOT_POSSIBLE');
+  }
+  if (!date.ok) {
+    return failure('INVALID_DATE');
+  }
+  const end = date.value.kind === 'dateTime' ? date.value.hour : startOfDay(date.value.day + 1);
+  if (task.kind === 'milestone') {
+    return moveStart(context, id, end);
+  }
+  if (end <= placed.lastBlockStart) {
+    return failure('INVALID_END');
+  }
+  return stretchEnd(context, id, placed.lastBlockStart, end, placed.calendar);
 }
 
 /** Sets the progress of a work task or milestone, a whole percentage from 0 to 100. */
@@ -274,10 +300,10 @@ export function moveStart(context: EditContext, id: TaskId, hour: ProjectHour): 
   if (task === undefined || task.kind === 'summary') {
     return failure('NOT_POSSIBLE');
   }
-  return success([putTask({ ...task, startNoEarlierThan: hour })]);
+  return success(startingAt(context, hour, [putTask({ ...task, startNoEarlierThan: hour })]));
 }
 
-/** Changes the last block of a task so that it ends at an instant, as when its bar is stretched, keeping at least one hour. */
+/** Changes the last block of a task so that it ends at an instant, as when its bar is stretched, keeping at least a quarter hour. */
 export function stretchEnd(
   context: EditContext,
   id: TaskId,
@@ -291,7 +317,7 @@ export function stretchEnd(
     return failure('NOT_POSSIBLE');
   }
   const hours = countWorkingHours(calendar, lastBlockStart, Math.max(end, lastBlockStart));
-  const durationHours = Math.max(1, hours.ok ? hours.value : 1);
+  const durationHours = Math.max(QUARTER_HOUR, hours.ok ? hours.value : QUARTER_HOUR);
   const segments = [...task.segments.slice(0, -1), { ...lastSegment, durationHours }];
   return success([putTask({ ...task, segments })]);
 }
@@ -311,15 +337,17 @@ export function linkTasks(context: EditContext, predecessorId: TaskId, successor
   return success([{ type: 'putDependency', dependency }]);
 }
 
-/** Reads a duration as whole hours, working days being converted with the hours of a working day, or null when it is not one. */
-export function parseDuration(text: string, dayHours: number): number | null {
-  const match = text.length > MAX_FIELD_LENGTH ? null : DURATION_PATTERN.exec(text.trim());
-  if (match?.[1] === undefined) {
-    return null;
+/** Adds, before the operations placing a task at an instant, the move of the project start to the day of that instant when the project starts later. */
+function startingAt(
+  context: EditContext,
+  hour: ProjectHour,
+  operations: readonly SharedOperation[],
+): SharedOperation[] {
+  const dayStart = startOfDay(dayIndexOf(hour));
+  if (dayStart >= context.project.startDate) {
+    return [...operations];
   }
-  const value = Number(match[1].replace(',', '.'));
-  const hours = match[2]?.toLowerCase() === DAY_UNIT ? value * dayHours : value;
-  return Number.isFinite(hours) ? Math.round(hours) : null;
+  return [{ type: 'updateProject', fields: { startDate: dayStart } }, ...operations];
 }
 
 /** Places a task among sorted siblings at a position, giving it a sort key between its neighbours, or spreading the keys of all of them again when none fits. */
