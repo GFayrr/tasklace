@@ -29,6 +29,7 @@
     readonly moved: (shape: RowShape, offset: number) => void;
     readonly stretched: (shape: RowShape, offset: number) => void;
     readonly linked: (fromId: TaskId, toRow: number) => void;
+    readonly opened: (id: TaskId) => void;
   }
 
   interface Drag {
@@ -55,6 +56,7 @@
     moved,
     stretched,
     linked,
+    opened,
   }: Props = $props();
 
   const HEADER_HEIGHT = 48;
@@ -142,7 +144,9 @@
     target?.addEventListener('pointermove', pointerMove);
     target?.addEventListener('pointerup', pointerUp);
     target?.addEventListener('pointercancel', pointerCancel);
+    target?.addEventListener('dblclick', openAt);
     return () => {
+      target?.removeEventListener('dblclick', openAt);
       target?.removeEventListener('pointerdown', pointerDown);
       target?.removeEventListener('pointermove', pointerMove);
       target?.removeEventListener('pointerup', pointerUp);
@@ -273,6 +277,19 @@
       stretched(target.shape, offset);
     } else if (shown?.kind === 'link' && shown.targetRow !== null) {
       linked(target.taskId, shown.targetRow);
+    }
+  }
+
+  /** Opens the details of the task whose bar is double-clicked. */
+  function openAt(event: MouseEvent): void {
+    if (scroller === undefined) {
+      return;
+    }
+    const bounds = scroller.getBoundingClientRect();
+    const row = Math.floor((event.clientY - bounds.top + scrollTop) / ROW_HEIGHT);
+    const task = scene.rows[row]?.task;
+    if (task !== undefined) {
+      opened(task.id);
     }
   }
 

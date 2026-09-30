@@ -14,6 +14,7 @@ import {
   setEnd,
   setPredecessors,
   setProgress,
+  setTag,
   setStart,
   type Edit,
   type EditContext,
@@ -21,7 +22,8 @@ import {
 
 const PICKER_PATTERN = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/;
 
-export type EditableColumn = 'name' | 'duration' | 'start' | 'end' | 'progress' | 'predecessors';
+export type EditableColumn =
+  'name' | 'duration' | 'start' | 'end' | 'progress' | 'predecessors' | 'tag';
 
 export const EDITABLE_COLUMNS: readonly EditableColumn[] = [
   'name',
@@ -30,6 +32,7 @@ export const EDITABLE_COLUMNS: readonly EditableColumn[] = [
   'end',
   'progress',
   'predecessors',
+  'tag',
 ];
 
 export interface CellSource {
@@ -70,6 +73,8 @@ export function editorText(task: Task, column: EditableColumn, source: CellSourc
       return String(task.progressPercent);
     case 'predecessors':
       return predecessorText(source.incoming.get(task.id), source.wbsById);
+    case 'tag':
+      return task.tagId ?? '';
   }
 }
 
@@ -95,6 +100,8 @@ export function cellEdit(
       return setProgress(context, id, text);
     case 'predecessors':
       return setPredecessors(context, id, text);
+    case 'tag':
+      return setTag(context, id, text === '' ? null : text);
   }
 }
 

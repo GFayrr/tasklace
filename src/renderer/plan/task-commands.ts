@@ -8,6 +8,7 @@ import type {
   Milestone,
   Project,
   SummaryTask,
+  TagId,
   Task,
   TaskId,
   WorkTask,
@@ -281,6 +282,26 @@ export function setPredecessors(context: EditContext, id: TaskId, text: string):
     ...removed.map(removeLink),
     ...changed.map((dependency): SharedOperation => ({ type: 'putDependency', dependency })),
   ]);
+}
+
+/** Gives a work task or milestone a tag, or none. */
+export function setTag(context: EditContext, id: TaskId, tagId: TagId | null): Edit {
+  const task = findTask(context, id);
+  const known = tagId === null || context.project.tags.some((tag) => tag.id === tagId);
+  if (task === undefined || task.kind === 'summary' || !known) {
+    return failure('NOT_POSSIBLE');
+  }
+  return success([putTask({ ...task, tagId })]);
+}
+
+/** Replaces a task by its version edited in the details panel, moving the project start when the task now starts before it. */
+export function replaceTask(context: EditContext, task: Task): Edit {
+  if (findTask(context, task.id) === undefined) {
+    return failure('NOT_POSSIBLE');
+  }
+  const start = task.kind === 'summary' ? null : task.startNoEarlierThan;
+  const operations = [putTask(task)];
+  return success(start === null ? operations : startingAt(context, start, operations));
 }
 
 /** Turns a work task into a milestone or a milestone into a work task of one working day. */

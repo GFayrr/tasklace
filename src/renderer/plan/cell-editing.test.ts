@@ -102,7 +102,8 @@ describe('editable columns', () => {
   it('moves between editable columns, staying at the edges', () => {
     expect(nextColumn('name', 1)).toBe('duration');
     expect(nextColumn('name', -1)).toBe('name');
-    expect(nextColumn('predecessors', 1)).toBe('predecessors');
+    expect(nextColumn('predecessors', 1)).toBe('tag');
+    expect(nextColumn('tag', 1)).toBe('tag');
     expect(nextColumn('progress', -1)).toBe('end');
   });
 });

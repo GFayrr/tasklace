@@ -227,3 +227,34 @@ test('chooses a start on the calendar of the system, to the quarter hour', async
   );
   await expect(row('Review').getByRole('gridcell').nth(3)).toContainText(/2:00 PM|14:00/);
 });
+
+test('tags a task from the table and splits it into blocks in its details', async () => {
+  await addTask('Write');
+  await row('Write').getByRole('gridcell').nth(7).dblclick();
+  await grid.getByRole('combobox').selectOption({ label: 'Design' });
+  await expect(row('Write')).toContainText('Design');
+
+  await row('Write').getByRole('gridcell').nth(1).click();
+  await page.getByRole('button', { name: 'Details of the task' }).click();
+  const details = page.getByRole('dialog', { name: 'Task details' });
+  await expect(details).toBeVisible();
+  await details.getByRole('textbox', { name: 'Duration of block 1' }).fill('4 h');
+  await details.getByRole('button', { name: 'Add a block' }).click();
+  await details.getByRole('textbox', { name: 'Days after block 1' }).fill('0');
+  await details.getByRole('button', { name: 'Save' }).click();
+  await expect(details.getByRole('alert')).toContainText('at least one whole day');
+  await details.getByRole('textbox', { name: 'Days after block 1' }).fill('2');
+  await details.getByRole('textbox', { name: 'Duration of block 2' }).fill('1 h 30');
+  await picture('details');
+  await details.getByRole('button', { name: 'Save' }).click();
+  await expect(details).toBeHidden();
+  await expect(row('Write')).toContainText('5 h 30');
+  await page.keyboard.press('Control+z');
+  await expect(row('Write')).toContainText('9 h');
+
+  await row('Write').getByRole('gridcell').nth(1).click();
+  await page.keyboard.press('Alt+Enter');
+  await expect(details).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(details).toBeHidden();
+});

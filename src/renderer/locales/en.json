@@ -101,7 +101,9 @@
     "addTask": "Add a task",
     "newTask": "New task",
     "editCell": "Edit {column} of {name}",
-    "pickDate": "Choose the {column} of {name} on a calendar"
+    "pickDate": "Choose the {column} of {name} on a calendar",
+    "tag": "Tag",
+    "noTag": "No tag"
   },
   "timeline": {
     "label": "Timeline"
@@ -124,7 +126,8 @@
     "moveUp": "Move up",
     "moveDown": "Move down",
     "milestone": "Turn into a milestone or back into a task",
-    "delete": "Delete"
+    "delete": "Delete",
+    "details": "Details of the task"
   },
   "editErrors": {
     "NOT_POSSIBLE": "This change is not possible here.",
@@ -142,11 +145,37 @@
     "TOO_MANY_ITEMS": "The project has reached its maximum size.",
     "TOO_LONG": "This text is too long.",
     "OUT_OF_RANGE": "This value is outside the allowed range.",
-    "INVALID_END": "A task has to end after it starts."
+    "INVALID_END": "A task has to end after it starts.",
+    "INVALID_BLOCK": "Write the duration of each block, such as 4 h or 1 h 30.",
+    "INVALID_GAP": "A block resumes at least one whole day after the previous one.",
+    "INVALID_HOURS_PER_DAY": "Hours per day go from 1 hour to the length of a working day, by quarter hours.",
+    "INVALID_DAILY_START": "Write the daily start time as 13:30, on a quarter hour, leaving enough working hours after it.",
+    "DAILY_START_HOUR_CLEARED": "Write the daily start time as 13:30, on a quarter hour, leaving enough working hours after it."
   },
   "durations": {
     "hours": "{hours} h",
     "hoursMinutes": "{hours} h {minutes}",
     "minutes": "{minutes} min"
+  },
+  "details": {
+    "title": "Task details",
+    "name": "Name",
+    "tag": "Tag",
+    "noTag": "No tag",
+    "progress": "Progress (%)",
+    "start": "Do not start before",
+    "startHint": "Leave empty to start as soon as possible.",
+    "hoursPerDay": "Hours per day",
+    "hoursPerDayHint": "Leave empty to work the whole working day.",
+    "dailyStart": "Daily start time",
+    "dailyStartHint": "Leave empty to start at the first working hour of each day.",
+    "blocks": "Work blocks",
+    "blocksHint": "Split the task into several blocks to pause it and resume it later.",
+    "blockDuration": "Duration of block {number}",
+    "blockGap": "Days after block {previous}",
+    "addBlock": "Add a block",
+    "removeBlock": "Remove block {number}",
+    "cancel": "Cancel",
+    "save": "Save"
   }
 }

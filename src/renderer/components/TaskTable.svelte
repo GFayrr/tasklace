@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import type { TaskId } from '../../core/model/project';
+  import type { Tag, Task, TaskId } from '../../core/model/project';
   import type { AppState } from '../app/app-state.svelte';
   import { fillMessage } from '../i18n/messages';
   import {
@@ -45,6 +45,12 @@
   const text = $derived(app.messages.table);
   const rows = $derived(app.outline.rows);
   const incoming = $derived(groupIncoming(app.project?.dependencies ?? []));
+  const tagsById = $derived(new Map((app.project?.tags ?? []).map((tag) => [tag.id, tag])));
+  const tagChoices = $derived(
+    [...(app.project?.tags ?? [])].sort((left, right) =>
+      left.name.localeCompare(right.name, app.locale),
+    ),
+  );
   const source: CellSource = $derived({
     schedule: app.schedule,
     calendar: app.calendar,
@@ -91,7 +97,13 @@
       end: cells.end,
       progress: cells.progress,
       predecessors: predecessorText(incoming.get(row.task.id), app.outline.wbsById),
+      tag: tagOf(row.task)?.name ?? '',
     };
+  }
+
+  /** Returns the tag of a task, if it has one. */
+  function tagOf(task: Task): Tag | undefined {
+    return task.kind === 'summary' || task.tagId === null ? undefined : tagsById.get(task.tagId);
   }
 
   /** Returns the identifier of the element showing a cell. */
@@ -112,11 +124,11 @@
     const initial = editorText(task, column, source);
     editing = { taskId, column, initial };
     void tick().then(() => {
-      const input = grid?.querySelector<HTMLInputElement>('input.editor');
+      const input = grid?.querySelector<HTMLInputElement | HTMLSelectElement>('.editor');
       if (input !== undefined && input !== null) {
         input.value = typed ?? initial;
         input.focus();
-        if (typed === null) {
+        if (typed === null && input instanceof HTMLInputElement) {
           input.select();
         }
       }
@@ -124,7 +136,7 @@
   }
 
   /** Applies the text of the open editor when it changed, then closes it. */
-  function commit(input: HTMLInputElement): void {
+  function commit(input: HTMLInputElement | HTMLSelectElement): void {
     const current = editing;
     if (current === null) {
       return;
@@ -143,7 +155,9 @@
   }
 
   /** Handles the keys of the open editor: Enter applies and goes down, Escape cancels, Tab applies and goes across. */
-  function editorKey(event: KeyboardEvent & { currentTarget: HTMLInputElement }): void {
+  function editorKey(
+    event: KeyboardEvent & { currentTarget: HTMLInputElement | HTMLSelectElement },
+  ): void {
     const input = event.currentTarget;
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -215,7 +229,11 @@
 
   /** Handles the keys of the table while no cell is edited. */
   function gridKey(event: KeyboardEvent): void {
-    if (editing !== null || event.target instanceof HTMLInputElement) {
+    if (
+      editing !== null ||
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLSelectElement
+    ) {
       return;
     }
     const handled = handleGridKey(event);
@@ -233,6 +251,10 @@
       (event.key === 'ArrowRight' || event.key === 'ArrowLeft')
     ) {
       app.editSelected(event.key === 'ArrowRight' ? indentTask : outdentTask);
+      return true;
+    }
+    if (event.altKey && event.key === 'Enter' && id !== null) {
+      app.openDetails(id);
       return true;
     }
     if (event.altKey && event.key === 'ArrowDown' && id !== null && isDateColumn(activeColumn)) {
@@ -288,7 +310,7 @@
 
   /** Opens the editor of the active cell with a typed character, as in a spreadsheet. */
   function startTyping(event: KeyboardEvent, id: TaskId | null): boolean {
-    if (id === null || event.key.length !== 1) {
+    if (id === null || event.key.length !== 1 || activeColumn === 'tag') {
       return false;
     }
     startEditing(id, activeColumn, event.key);
@@ -349,6 +371,7 @@
       <span class="cell date" role="columnheader">{text.end}</span>
       <span class="cell progress number" role="columnheader">{text.progress}</span>
       <span class="cell predecessors" role="columnheader">{text.predecessors}</span>
+      <span class="cell tag" role="columnheader">{text.tag}</span>
     </div>
   </div>
   <input
@@ -423,7 +446,27 @@
                   <span class="toggle-space"></span>
                 {/if}
               {/if}
-              {#if isEditing}
+              {#if isEditing && column === 'tag'}
+                <select
+                  class="editor"
+                  aria-label={fillMessage(text.editCell, {
+                    column: columnLabel(column),
+                    name: row.task.name,
+                  })}
+                  onchange={(event) => {
+                    commit(event.currentTarget);
+                  }}
+                  onkeydown={editorKey}
+                  onblur={(event) => {
+                    commit(event.currentTarget);
+                  }}
+                >
+                  <option value="">{text.noTag}</option>
+                  {#each tagChoices as tag (tag.id)}
+                    <option value={tag.id}>{tag.name}</option>
+                  {/each}
+                </select>
+              {:else if isEditing}
                 <input
                   class="editor"
                   aria-label={fillMessage(text.editCell, {
@@ -436,6 +479,9 @@
                   }}
                 />
               {:else}
+                {#if column === 'tag' && tagOf(row.task) !== undefined}
+                  <span class="swatch" style:background={tagOf(row.task)?.color}></span>
+                {/if}
                 <span class="label">{values[column]}</span>
                 {#if isDateColumn(column) && row.task.kind !== 'summary'}
                   <button
@@ -496,7 +542,7 @@
 
   .header,
   .body {
-    width: max(100%, 860px);
+    width: max(100%, 1010px);
   }
 
   .header {
@@ -623,6 +669,18 @@
   .predecessors {
     width: 120px;
     color: var(--color-text-secondary);
+  }
+
+  .tag {
+    width: 150px;
+    gap: 6px;
+  }
+
+  .swatch {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    border-radius: 3px;
   }
 
   .editor {

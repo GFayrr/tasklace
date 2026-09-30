@@ -29,6 +29,8 @@ import {
   setEnd,
   setPredecessors,
   setProgress,
+  setTag,
+  replaceTask,
   setStart,
   stretchEnd,
   toggleMilestone,
@@ -310,6 +312,37 @@ describe('editing cells', () => {
     const edit = setPredecessors(context(), 'a', '1.2');
     expect(edit.ok && session.applyAll(edit.value).ok).toBe(false);
     expect(normalized(session.project())).toEqual(normalized(PLAN));
+  });
+
+  it('gives a task a known tag or none, never to a summary', () => {
+    const tagged = project(PLAN.tasks, PLAN.dependencies, {
+      tags: [{ id: 'design', name: 'Design', color: '#2a78d6', representsPersonOrTeam: false }],
+    });
+    const { session, context } = openPlan(tagged);
+    applied(session, setTag(context(), 'a', 'design'));
+    expect(taskOf(session, 'a')).toMatchObject({ tagId: 'design' });
+    applied(session, setTag(context(), 'a', null));
+    expect(taskOf(session, 'a')).toMatchObject({ tagId: null });
+    expect(setTag(context(), 'a', 'unknown')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    expect(setTag(context(), 's', 'design')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+  });
+
+  it('replaces a task by its edited version, moving the project start when needed', () => {
+    const { session, context } = openPlan();
+    const task = taskOf(session, 'c');
+    if (task?.kind !== 'task') {
+      throw new Error('c');
+    }
+    applied(
+      session,
+      replaceTask(context(), { ...task, name: 'C', startNoEarlierThan: at(2026, 9, 21, 10) }),
+    );
+    expect(taskOf(session, 'c')).toMatchObject({ name: 'C' });
+    expect(session.project().startDate).toBe(at(2026, 9, 21));
+    expect(replaceTask(context(), workTask('unknown'))).toEqual({
+      ok: false,
+      error: 'NOT_POSSIBLE',
+    });
   });
 
   it('turns a work task into a milestone and back', () => {
