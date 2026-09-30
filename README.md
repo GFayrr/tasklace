@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested, but there is no user interface or downloadable release yet.
+> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, but the task table and the timeline are still being built, and there is no downloadable release yet.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -58,6 +58,8 @@ What the core already supports:
 - JSON import and export: compact, versioned documents with dates in clear text.
 - CSV import and export of the task table for Excel or LibreOffice, with regional dates and separators, errors reported by row and, when a single cell is at fault, by column, and protection against formula injection.
 - A shared project model where concurrent edits always merge into the same valid project for everyone, and a frozen baseline plan.
+- A secure desktop shell: projects decoded in an isolated worker with capped memory, automatic saving to a temporary file then renamed, and a local copy of every project for offline work.
+- A sober, readable interface: light theme with WCAG AA contrasts checked by a test, undo and redo that never touch the changes of others, and scheduling in a background worker.
 
 ## Roadmap
 
@@ -98,7 +100,7 @@ The following commands are for development only.
 | `npm run test:watch`   | Run tests in watch mode                                 |
 | `npm run bench`        | Check performance on 10,000 tasks and 20,000 links      |
 | `npm run bench:growth` | Check that key operations grow as their complexity says |
-| `npm run lint`         | Type-check with TypeScript and lint with ESLint         |
+| `npm run lint`         | Type-check TypeScript and Svelte, lint with ESLint      |
 | `npm run format`       | Format the code with Prettier                           |
 | `npm run format:check` | Check formatting without changing files                 |
 
@@ -118,9 +120,9 @@ src/core/            pure logic, independent of any user interface
   tags/              tag colors, patterns and person or team conflicts
   testing/           test helpers and random data generators
   validation/        validation of untrusted project data
-src/main/            Electron main process: window, security, bridge requests
+src/main/            Electron main process: window, security, files, file worker
 src/preload/         minimal typed bridge between the page and the main process
-src/renderer/        user interface
+src/renderer/        Svelte user interface: theme, messages, schedule worker, components
 docs/                roadmap and user documentation
 tests/file/          .tasklace files with real compression, decompression bombs
 tests/fixtures/      large test projects generated from fixed seeds
@@ -140,3 +142,5 @@ The project is at an early stage and is not accepting pull requests yet. Bug rep
 ## License
 
 [AGPL-3.0-or-later](LICENSE) © Fayr
+
+The Jost font is embedded under the [SIL Open Font License 1.1](src/renderer/assets/fonts/OFL.txt).

@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "lint": "tsc --noEmit && tsc --noEmit -p src/main && tsc --noEmit -p src/preload && tsc --noEmit -p src/renderer && tsc --noEmit -p tests && tsc --noEmit -p tests/e2e && eslint .",
+    "lint": "tsc --noEmit && tsc --noEmit -p src/main && tsc --noEmit -p src/preload && svelte-check --tsconfig src/renderer/tsconfig.json --fail-on-warnings --output human && tsc --noEmit -p tests && tsc --noEmit -p tests/e2e && eslint .",
     "format": "prettier --write .",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
@@ -22,19 +22,24 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@types/node": "^24.19.0",
     "@vitest/coverage-v8": "^5.0.2",
     "electron": "^44.4.5",
     "electron-vite": "^5.0.0",
     "eslint": "^10.11.0",
+    "eslint-plugin-svelte": "^3.23.0",
     "fast-check": "^4.10.2",
     "prettier": "^3.9.9",
+    "prettier-plugin-svelte": "^4.1.1",
+    "svelte-check": "^4.7.6",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.1",
     "vite": "^7.3.6",
     "vitest": "^5.0.2"
   },
   "dependencies": {
+    "svelte": "5.57.1",
     "yjs": "13.6.33"
   },
   "main": "out/main/index.js"

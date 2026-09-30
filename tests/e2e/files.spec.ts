@@ -22,6 +22,7 @@ import {
 } from '../../src/core/testing/project-builder';
 import { parseLocalCopyIndex } from '../../src/main/local-copies';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
+import { answerDialogs } from './dialogs';
 
 const SAMPLE = project([workTask('a', { name: 'Écrire' }), workTask('b')], [link('a', 'b')]);
 
@@ -44,22 +45,6 @@ test.afterEach(async () => {
   await rm(userData, { recursive: true, force: true });
 });
 
-/** Makes the open and save dialogs of the main process answer with given paths, or be cancelled. */
-async function answerDialogs(paths: { open?: string | null; save?: string | null }): Promise<void> {
-  await application.evaluate(
-    ({ dialog }, chosen) => {
-      dialog.showOpenDialog = () =>
-        Promise.resolve({
-          canceled: chosen.open === null,
-          filePaths: chosen.open === null ? [] : [chosen.open],
-        });
-      dialog.showSaveDialog = () =>
-        Promise.resolve({ canceled: chosen.save === null, filePath: chosen.save ?? '' });
-    },
-    { open: paths.open ?? null, save: paths.save ?? null },
-  );
-}
-
 /** Writes the sample project as a .tasklace file. */
 async function writeSampleProject(path: string): Promise<Uint8Array> {
   const file = encodeTasklaceFile(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID), zlibCompressor);
@@ -70,7 +55,7 @@ async function writeSampleProject(path: string): Promise<Uint8Array> {
 test('opens a project, saves it back to its file and lists it as recent', async () => {
   const path = join(folder, 'Plan.tasklace');
   await writeSampleProject(path);
-  await answerDialogs({ open: path });
+  await answerDialogs(application, { open: path });
   const outcome = await page.evaluate(async () => {
     const api = window.tasklace;
     const opened = await api?.openProject();
@@ -100,7 +85,7 @@ test('imports a CSV table into a project kept in its local copy until saved as a
     throw new Error('Missing bridge');
   }
   await writeFile(csv, unwrap(exportProjectCsv(SAMPLE, scheduleOrThrow(SAMPLE), format)));
-  await answerDialogs({ open: csv, save: target });
+  await answerDialogs(application, { open: csv, save: target });
   const outcome = await page.evaluate(async () => {
     const api = window.tasklace;
     const imported = await api?.importProject('csv');
@@ -131,7 +116,7 @@ test('refuses forged and oversized files without loading anything, and a cancell
   await writeFile(huge, '');
   await truncate(huge, MAX_FILE_BYTES + 1);
   const open = async (path: string | null) => {
-    await answerDialogs({ open: path });
+    await answerDialogs(application, { open: path });
     return page.evaluate(async () => window.tasklace?.openProject());
   };
   expect(await open(forged)).toEqual({ ok: false, error: { code: 'NOT_A_TASKLACE_FILE' } });

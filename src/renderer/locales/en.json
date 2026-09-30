@@ -25,5 +25,65 @@
     "INVALID_IMPORT": "This file contains errors and cannot be imported.",
     "NO_PROJECT": "There is no open project to save.",
     "TASK_FAILED": "Something went wrong with this file. Please try again."
+  },
+  "app": {
+    "name": "Tasklace",
+    "tagline": "Plan a project on a Gantt chart, alone or together.",
+    "workspace": "Project"
+  },
+  "welcome": {
+    "newProject": "New project",
+    "newProjectHint": "Start from an empty plan",
+    "open": "Open…",
+    "openHint": "A Tasklace project",
+    "import": "Import…",
+    "importHint": "A CSV or JSON file",
+    "recent": "Recent projects"
+  },
+  "toolbar": {
+    "fileActions": "File",
+    "new": "New",
+    "open": "Open",
+    "openFile": "Open a file…",
+    "import": "Import",
+    "importCsv": "CSV table…",
+    "importJson": "JSON file…",
+    "export": "Export",
+    "exportCsv": "CSV table…",
+    "exportJson": "JSON file…",
+    "save": "Save",
+    "history": "History",
+    "undo": "Undo",
+    "redo": "Redo",
+    "projectName": "Project name"
+  },
+  "saveStatus": {
+    "saved": "All changes saved",
+    "saving": "Saving…",
+    "unsaved": "Unsaved changes",
+    "failed": "Not saved",
+    "localOnly": "Kept on this computer only"
+  },
+  "status": {
+    "tags": "Tags",
+    "noTags": "No tags",
+    "tasks": {
+      "one": "{count} task",
+      "other": "{count} tasks"
+    },
+    "span": "{start} – {end}"
+  },
+  "notices": {
+    "dismiss": "Dismiss",
+    "label": "Messages",
+    "importWarnings": {
+      "one": "Imported with {count} warning.",
+      "other": "Imported with {count} warnings."
+    },
+    "repairs": {
+      "one": "{count} change was adjusted to keep the project valid.",
+      "other": "{count} changes were adjusted to keep the project valid."
+    },
+    "scheduleFailed": "The schedule could not be computed. Check the calendar and the start date of the project."
   }
 }

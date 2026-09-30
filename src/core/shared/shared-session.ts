@@ -67,6 +67,14 @@ export interface SharedSession {
   readonly project: () => Project;
   readonly apply: (operation: SharedOperation) => Result<void, readonly ValidationIssue[]>;
   readonly merge: (update: Uint8Array) => Result<readonly SharedRepair[], MergeFailure>;
+  readonly history: SessionHistory;
+}
+
+export interface SessionHistory {
+  readonly canUndo: () => boolean;
+  readonly canRedo: () => boolean;
+  readonly undo: () => Result<readonly SharedRepair[], MergeFailure>;
+  readonly redo: () => Result<readonly SharedRepair[], MergeFailure>;
 }
 
 interface SessionState {
@@ -106,6 +114,9 @@ const FAST_REPAIR_ORDER: readonly SharedRepairCode[] = [
   'HOURS_PER_DAY_REDUCED',
   'DAILY_START_HOUR_CLEARED',
 ];
+
+const UNDO_CAPTURE_TIMEOUT_MS = 0;
+const HISTORY_ROOTS = [PROJECT_ROOT, TASKS_ROOT, DEPENDENCIES_ROOT, TAGS_ROOT] as const;
 
 type SharedType = Y.Transaction['changed'] extends Map<infer Type, unknown> ? Type : never;
 
@@ -157,7 +168,68 @@ export function openValidatedSession(
     project: () => currentProject(session),
     apply: (operation) => applyOperationToSession(session, document, operation),
     merge: (update) => mergeIntoSession(session, document, update),
+    history: createHistory(session, document),
   };
+}
+
+/** Keeps the local changes of a session in an undo history that ignores the changes of others, each undone or redone step being checked and repaired like a received update. */
+function createHistory(session: SessionState, document: Y.Doc): SessionHistory {
+  const roots = HISTORY_ROOTS.map((root) => document.getMap(root));
+  const manager = new Y.UndoManager(roots, {
+    trackedOrigins: new Set([LOCAL_ORIGIN]),
+    captureTimeout: UNDO_CAPTURE_TIMEOUT_MS,
+  });
+  return {
+    canUndo: () => manager.canUndo(),
+    canRedo: () => manager.canRedo(),
+    undo: () =>
+      replayStep(session, document, manager, {
+        step: () => manager.undo(),
+        revert: () => manager.redo(),
+      }),
+    redo: () =>
+      replayStep(session, document, manager, {
+        step: () => manager.redo(),
+        revert: () => manager.undo(),
+      }),
+  };
+}
+
+/** Runs one step of the history on the document, then checks and repairs what it changed, reverting it when the project cannot be repaired. */
+function replayStep(
+  session: SessionState,
+  document: Y.Doc,
+  manager: Y.UndoManager,
+  moves: { readonly step: () => unknown; readonly revert: () => unknown },
+): Result<readonly SharedRepair[], MergeFailure> {
+  const updates: Uint8Array[] = [];
+  const collect = (update: Uint8Array, origin: unknown): void => {
+    if (origin === manager) {
+      updates.push(update);
+    }
+  };
+  document.on('update', collect);
+  moves.step();
+  document.off('update', collect);
+  if (updates.length === 0) {
+    return success([]);
+  }
+  const repairUpdates: Uint8Array[] = [];
+  const replayed = tryMerge(session, Y.mergeUpdates(updates), repairUpdates);
+  if (!replayed.ok) {
+    moves.revert();
+    session.shadow = copyDocument(document, session.shadow.clientID);
+    session.stateChanged = true;
+    restoreState(session, document);
+    session.project = null;
+    return replayed;
+  }
+  session.stateChanged = false;
+  if (repairUpdates.length > 0) {
+    Y.applyUpdate(document, Y.mergeUpdates(repairUpdates), REPAIR_ORIGIN);
+  }
+  session.project = null;
+  return replayed;
 }
 
 /** Returns the project of a session, rebuilt from the indexed state only after it changed. */

@@ -89,4 +89,20 @@ describe('growth of shared session operations with the size of the project', () 
     console.info(`Received edit: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(CONSTANT_MAX_RATIO);
   });
+
+  it('undoes a local edit in a time that does not depend on the size of the project', () => {
+    const undoer = (document: Y.Doc) => {
+      const session = openCopy(document);
+      const rename = taskRenamer(session);
+      for (let index = 0; index < EDITS_NEEDED; index += 1) {
+        rename(index);
+      }
+      return batched(BATCH_SIZE, () => {
+        expect(session.history.undo().ok).toBe(true);
+      });
+    };
+    const ratio = growthRatio(undoer(smallDocument), undoer(largeDocument));
+    console.info(`Undo: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(CONSTANT_MAX_RATIO);
+  });
 });
