@@ -12,8 +12,10 @@ import {
 import type { ValidationIssue } from '../validation/validation-issues';
 import { repairProject, type RepairCode } from './repair-project';
 import {
+  DOCUMENT_ID_KEY,
   findSchemaIssues,
   LOCAL_ORIGIN,
+  readDocumentId,
   readSharedData,
   readSharedTaskUnions,
   REMOTE_ORIGIN,
@@ -47,6 +49,11 @@ const MERGE_LIST_LIMITS: ListLimits = {
   tags: NOMINAL_LIST_LIMITS.tags * MERGE_LIST_LIMIT_FACTOR,
 };
 const FULL_PROGRESS = 100;
+
+export const DOCUMENT_ID_CHANGED: ValidationIssue = {
+  path: DOCUMENT_ID_KEY,
+  code: 'READ_ONLY_FIELD',
+};
 const HALF_PROGRESS = 50;
 
 /** Checks a shared document exactly as it is, without any repair: schema, hidden task fields and the complete project. */
@@ -154,6 +161,9 @@ function tryUpdate(document: Y.Doc, update: Uint8Array): Result<TrialMerge, Merg
     Y.applyUpdate(trial, update);
     if (trial.store.pendingStructs !== null || trial.store.pendingDs !== null) {
       return failure({ kind: 'incompleteUpdate' });
+    }
+    if (readDocumentId(trial) !== readDocumentId(document)) {
+      return failure({ kind: 'invalidProject', issues: [DOCUMENT_ID_CHANGED] });
     }
     trial.clientID = repairClientId(document);
     const repairs = repairSharedDocument(trial);

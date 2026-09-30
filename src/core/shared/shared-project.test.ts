@@ -7,7 +7,14 @@ import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { at } from '../testing/civil-time';
 import { hideListContent } from '../testing/hidden-list-content';
 import { projectArbitrary } from '../testing/project-arbitrary';
-import { link, milestone, project, summary, workTask } from '../testing/project-builder';
+import {
+  link,
+  milestone,
+  project,
+  summary,
+  workTask,
+  TEST_DOCUMENT_ID,
+} from '../testing/project-builder';
 import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
 import {
   applySharedChange,
@@ -42,7 +49,7 @@ const BASE_PROJECT: Project = project(
 
 /** Creates participants sharing the same project, each with a fixed client identifier. */
 function createPeers(base: Project, count: number): Y.Doc[] {
-  const origin = createSharedDocument(base);
+  const origin = createSharedDocument(base, TEST_DOCUMENT_ID);
   return Array.from({ length: count }, (_unused, index) => {
     const peer = new Y.Doc();
     peer.clientID = index + 1;
@@ -127,7 +134,7 @@ describe('shared document', () => {
       ],
     };
     const input = { ...BASE_PROJECT, baseline };
-    const read = projectOf(createSharedDocument(input));
+    const read = projectOf(createSharedDocument(input, TEST_DOCUMENT_ID));
     expect({
       ...read,
       tasks: byId(read.tasks),
@@ -144,7 +151,7 @@ describe('shared document', () => {
   it('gives back every generated project', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
     fc.assert(
       fc.property(projectArbitrary, ({ project: input }) => {
-        const read = projectOf(createSharedDocument(input));
+        const read = projectOf(createSharedDocument(input, TEST_DOCUMENT_ID));
         expect(byId(read.tasks)).toEqual(byId(input.tasks));
         expect(byId(read.dependencies)).toEqual(byId(input.dependencies));
         expect(read.calendar).toEqual(input.calendar);
@@ -331,7 +338,7 @@ describe('merging untrusted updates', () => {
   });
 
   it('repairs nothing on a valid document', () => {
-    expect(repairSharedDocument(createSharedDocument(BASE_PROJECT))).toEqual({
+    expect(repairSharedDocument(createSharedDocument(BASE_PROJECT, TEST_DOCUMENT_ID))).toEqual({
       ok: true,
       value: [],
     });
@@ -361,6 +368,8 @@ function mergeTampered(from: Y.Doc, to: Y.Doc, tamper: (malicious: Y.Doc) => voi
   };
 }
 
+const OTHER_DOCUMENT_ID = '00000000-0000-4000-8000-000000000002';
+
 describe('merging updates that break the shared schema', () => {
   it.each<[string, (malicious: Y.Doc) => void]>([
     ['an unknown field on a task', (malicious) => taskEntry(malicious, 'a').set('junk', 'x')],
@@ -382,6 +391,20 @@ describe('merging updates that break the shared schema', () => {
       (malicious) => malicious.getMap(TASKS_ROOT).set('z', { kind: 'task' }),
     ],
     ['a nested shared type', (malicious) => taskEntry(malicious, 'a').set('name', new Y.Text('a'))],
+    [
+      'another document identifier',
+      (malicious) => malicious.getMap('project').set('documentId', OTHER_DOCUMENT_ID),
+    ],
+    [
+      'a removed document identifier',
+      (malicious) => {
+        malicious.getMap('project').delete('documentId');
+      },
+    ],
+    [
+      'a malformed document identifier',
+      (malicious) => malicious.getMap('project').set('documentId', 'Not-A-UUID'),
+    ],
     [
       'list content in a root',
       (malicious) => {

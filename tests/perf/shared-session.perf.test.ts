@@ -3,6 +3,7 @@ import * as Y from 'yjs';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
 import { openSharedSession, type SharedSession } from '../../src/core/shared/shared-session';
 import { buildLargeProject } from '../fixtures/large-project';
+import { TEST_DOCUMENT_ID } from '../../src/core/testing/project-builder';
 
 const FRAME_MILLISECONDS = 16;
 const MEASURED_RUNS = 9;
@@ -30,7 +31,7 @@ function openCopy(document: Y.Doc): SharedSession {
 }
 
 describe('shared session performance (10,000 tasks, 20,000 dependencies)', () => {
-  const origin = createSharedDocument(buildLargeProject());
+  const origin = createSharedDocument(buildLargeProject(), TEST_DOCUMENT_ID);
   const local = openCopy(origin);
   const remote = openCopy(origin);
 

@@ -1,0 +1,29 @@
+{
+  "dialogs": {
+    "projectFiles": "Tasklace projects",
+    "jsonFiles": "JSON files",
+    "csvFiles": "CSV files"
+  },
+  "projects": {
+    "untitled": "Untitled project"
+  },
+  "fileErrors": {
+    "TOO_LARGE": "This file is too large to be opened.",
+    "TRUNCATED": "This file is incomplete. It may have been cut off while being copied.",
+    "NOT_A_TASKLACE_FILE": "This file is not a Tasklace project.",
+    "UNSUPPORTED_VERSION": "This project was saved in a format this version of Tasklace cannot read.",
+    "NEWER_FORMAT": "This project was saved by a newer version of Tasklace. Update Tasklace to open it.",
+    "CORRUPTED": "This file is damaged and cannot be opened.",
+    "DECOMPRESSION_BOMB": "This file is damaged: its content is larger than it claims to be.",
+    "DECOMPRESSION_FAILED": "This file is damaged and cannot be opened.",
+    "INVALID_CONTENT": "This file is damaged and cannot be opened.",
+    "INVALID_PROJECT": "This project contains errors and cannot be opened.",
+    "READ_FAILED": "This file could not be read. Check that it still exists and that you are allowed to open it.",
+    "WRITE_FAILED": "The project could not be saved. Check that the folder still exists and that you are allowed to write in it.",
+    "TOO_COMPLEX": "This file is too complex to be opened safely.",
+    "INVALID_ENCODING": "This file is not UTF-8 text. Save it again as UTF-8, then import it.",
+    "INVALID_IMPORT": "This file contains errors and cannot be imported.",
+    "NO_PROJECT": "There is no open project to save.",
+    "TASK_FAILED": "Something went wrong with this file. Please try again."
+  }
+}

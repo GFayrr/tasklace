@@ -2,6 +2,7 @@ import * as Y from 'yjs';
 import { MAX_FILE_BYTES, MAX_UNCOMPRESSED_BYTES } from '../limits';
 import { failure, success, type Result } from '../result';
 import { openValidatedSession, type SharedSession } from '../shared/shared-session';
+import { DOCUMENT_ID_KEY, readDocumentId, type DocumentId } from '../shared/shared-document';
 import { validateSharedDocument } from '../shared/shared-project';
 import type { Project } from '../model/project';
 import type { ValidationIssue } from '../validation/validation-issues';
@@ -43,11 +44,16 @@ export type FileError =
 interface ValidatedFile {
   readonly document: Y.Doc;
   readonly project: Project;
+  readonly documentId: DocumentId;
 }
 
 /** Writes a shared document as a .tasklace file: a header holding the uncompressed size and a checksum of everything after it, then the compressed Yjs state. */
 export function encodeTasklaceFile(document: Y.Doc, compressor: Compressor): Uint8Array {
-  const state = Y.encodeStateAsUpdate(document);
+  return encodeTasklaceState(Y.encodeStateAsUpdate(document), compressor);
+}
+
+/** Writes an encoded Yjs state as a .tasklace file: a header holding its size and a checksum of everything after it, then the compressed state. */
+export function encodeTasklaceState(state: Uint8Array, compressor: Compressor): Uint8Array {
   const payload = compressor.compress(state);
   const file = new Uint8Array(HEADER_BYTES + payload.length);
   const view = new DataView(file.buffer);
@@ -66,7 +72,11 @@ export function openTasklaceFile(
   compressor: Compressor,
 ): Result<SharedSession, FileError> {
   const read = readValidatedFile(file, compressor);
-  return read.ok ? success(openValidatedSession(read.value.document, read.value.project)) : read;
+  if (!read.ok) {
+    return read;
+  }
+  const { document, project, documentId } = read.value;
+  return success(openValidatedSession(document, project, documentId));
 }
 
 /** Reads an untrusted .tasklace file into a shared document holding a valid project, checking size, header, checksum, decompression, content and project in this order. */
@@ -96,9 +106,16 @@ function readValidatedFile(
     return document;
   }
   const project = validateSharedDocument(document.value);
-  return project.ok
-    ? success({ document: document.value, project: project.value })
-    : failure({ code: 'INVALID_PROJECT', issues: project.error });
+  if (!project.ok) {
+    return failure({ code: 'INVALID_PROJECT', issues: project.error });
+  }
+  const documentId = readDocumentId(document.value);
+  return documentId === null
+    ? failure({
+        code: 'INVALID_PROJECT',
+        issues: [{ path: DOCUMENT_ID_KEY, code: 'MISSING_FIELD' }],
+      })
+    : success({ document: document.value, project: project.value, documentId });
 }
 
 /** Checks the size, signature, version, flags and checksum of a file and returns the uncompressed size it declares. */

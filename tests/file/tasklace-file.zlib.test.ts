@@ -10,7 +10,9 @@ import {
 import { createSharedDocument, readSharedData } from '../../src/core/shared/shared-document';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../../src/core/testing/arbitraries';
 import { buildLargeProject } from '../fixtures/large-project';
-import { forgeFile, zlibCompressor } from './zlib-compressor';
+import { zlibCompressor } from '../../src/main/zlib-compressor';
+import { forgeFile } from './forge-file';
+import { TEST_DOCUMENT_ID } from '../../src/core/testing/project-builder';
 
 const MEBIBYTE = 1_024 * 1_024;
 const BOMB_MEBIBYTES = 64;
@@ -23,7 +25,7 @@ function readCode(file: Uint8Array): string {
 }
 
 describe('tasklace file with real compression', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
-  const document = createSharedDocument(buildLargeProject());
+  const document = createSharedDocument(buildLargeProject(), TEST_DOCUMENT_ID);
   const file = encodeTasklaceFile(document, zlibCompressor);
 
   it('reads back the large project unchanged and opens a session on it', () => {

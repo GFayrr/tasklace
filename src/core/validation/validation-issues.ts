@@ -23,7 +23,8 @@ export type ValueIssueCode =
   | 'EMPTY_LIST'
   | 'TOO_MANY_ISSUES'
   | 'DUPLICATE_ENTRY'
-  | 'TOO_MANY_REPAIRS';
+  | 'TOO_MANY_REPAIRS'
+  | 'READ_ONLY_FIELD';
 
 export type ImportIssueCode =
   | 'INVALID_CSV'

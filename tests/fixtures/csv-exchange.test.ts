@@ -148,9 +148,9 @@ describe(
       );
       expect(kept).toHaveLength(CONSTRAINED_KEPT_STARTS);
       expect(imported.schedule.summaries.size).toBe(PHASE_COUNT);
-      expect
-        .soft(fingerprint({ project: imported.project, warnings: imported.warnings }))
-        .toBe(CONSTRAINED_IMPORT_FINGERPRINT);
+      expect(fingerprint({ project: imported.project, warnings: imported.warnings })).toBe(
+        CONSTRAINED_IMPORT_FINGERPRINT,
+      );
     });
   },
 );
