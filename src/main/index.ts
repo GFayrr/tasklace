@@ -11,6 +11,7 @@ import { registerIpcHandlers } from './ipc-handlers';
 import { createTrustCheck } from './ipc-trust';
 import { registerProjectFileHandlers } from './project-files';
 import { CONTENT_SECURITY_POLICY_HEADER, hardenContents, hardenSession } from './security';
+import { installApplicationMenu } from './platform/application-menu';
 import { createMainWindow } from './window';
 
 const NOT_FOUND = 404;
@@ -51,6 +52,7 @@ function start(): void {
     runTask: (task) => runInFileWorker(createFileWorker, task),
     userDataFolder: app.getPath('userData'),
   });
+  installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath);
   flushBeforeClosing(window);
   window.loadURL(developmentUrl ?? APP_ENTRY_URL).catch(stop);
