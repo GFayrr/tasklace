@@ -85,5 +85,31 @@
       "other": "{count} changes were adjusted to keep the project valid."
     },
     "scheduleFailed": "The schedule could not be computed. Check the calendar and the start date of the project."
+  },
+  "table": {
+    "label": "Tasks",
+    "wbs": "WBS",
+    "name": "Name",
+    "duration": "Duration",
+    "start": "Start",
+    "end": "End",
+    "progress": "%",
+    "predecessors": "Predecessors",
+    "expand": "Expand {name}",
+    "collapse": "Collapse {name}",
+    "hours": "{count} h"
+  },
+  "timeline": {
+    "label": "Timeline"
+  },
+  "zoom": {
+    "label": "Zoom",
+    "hour": "Hour",
+    "day": "Day",
+    "week": "Week",
+    "month": "Month"
+  },
+  "splitter": {
+    "label": "Width of the task table"
   }
 }

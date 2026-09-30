@@ -1,6 +1,6 @@
 import { exportProjectCsv } from '../../core/exchange/csv/project-csv-export';
 import { exportProjectJson } from '../../core/exchange/project-json';
-import type { Project } from '../../core/model/project';
+import type { Project, TaskId } from '../../core/model/project';
 import type { Result } from '../../core/result';
 import {
   scheduleProject,
@@ -23,7 +23,9 @@ import {
   type ProjectFiles,
   type SaveStatus,
 } from '../project/project-files';
+import type { ZoomLevel } from '../plan/time-scale';
 import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
+import type { Theme } from '../theme/theme';
 import type { Command } from './shortcuts';
 
 export type NoticeKind = 'error' | 'warning';
@@ -41,6 +43,7 @@ export interface AppContext {
   readonly createScheduler: (listener: ScheduleListener) => Scheduler;
   readonly createId: () => string;
   readonly now: () => Date;
+  readonly theme: Theme;
 }
 
 /** Holds what the interface shows: the open project, its schedule, whether it is saved, what can be undone and the messages for the user. */
@@ -53,9 +56,13 @@ export class AppState {
   canRedo = $state(false);
   recentProjects = $state.raw<readonly RecentProject[]>([]);
   notices = $state.raw<readonly Notice[]>([]);
+  zoom = $state<ZoomLevel>('day');
+  selectedTaskId = $state<TaskId | null>(null);
+  openedCount = $state(0);
 
   readonly messages: Messages;
   readonly locale: string;
+  readonly theme: Theme;
   readonly #context: AppContext;
   readonly #files: ProjectFiles;
   readonly #scheduler: Scheduler;
@@ -68,6 +75,7 @@ export class AppState {
     this.#context = context;
     this.messages = context.messages;
     this.locale = context.locale;
+    this.theme = context.theme;
     this.#files = createProjectFiles(context.bridge, {
       failed: (error) => {
         this.#reportError(error);
@@ -218,6 +226,8 @@ export class AppState {
     this.#session?.document.off('update', this.#queueRefresh);
     this.#session = session;
     this.schedule = null;
+    this.selectedTaskId = null;
+    this.openedCount += 1;
     session.document.on('update', this.#queueRefresh);
     this.#refresh();
   }

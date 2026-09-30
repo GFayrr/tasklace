@@ -1,0 +1,475 @@
+import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
+import { isWorkingDay } from '../../core/calendar/working-time';
+import type { DayRange } from '../../core/model/calendar';
+import type { Dependency, TagId, TaskId } from '../../core/model/project';
+import type { Schedule } from '../../core/scheduling/schedule-project';
+import type { TagPattern } from '../../core/tags/tag-appearance';
+import { dayIndexOf, HOURS_PER_DAY, startOfDay, type ProjectHour } from '../../core/time';
+import type { Theme } from '../theme/theme';
+import type { PlanRow } from './plan-outline';
+import { paleColor, type TagStyle } from './tag-styles';
+import type { ScaleTicks, ZoomLevel } from './time-scale';
+import {
+  BAR_HEIGHT,
+  dependencyArrow,
+  hourAt,
+  MILESTONE_SIZE,
+  ROW_HEIGHT,
+  rowShape,
+  SUMMARY_HEIGHT,
+  xOf,
+  type Point,
+  type RowShape,
+  type TimelineFrame,
+} from './timeline-geometry';
+
+export interface Viewport {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface TimelineScene {
+  readonly frame: TimelineFrame;
+  readonly zoom: ZoomLevel;
+  readonly rows: readonly PlanRow[];
+  readonly rowIndexById: ReadonlyMap<TaskId, number>;
+  readonly schedule: Schedule | null;
+  readonly dependencies: readonly Dependency[];
+  readonly calendar: CompiledCalendar | null;
+  readonly nonWorkingPeriods: readonly DayRange[];
+  readonly theme: Theme;
+  readonly tagStyles: ReadonlyMap<TagId, TagStyle>;
+  readonly conflictTaskIds: ReadonlySet<TaskId>;
+  readonly selectedTaskId: TaskId | null;
+  readonly today: ProjectHour;
+  readonly patternFor: (pattern: TagPattern) => CanvasPattern | null;
+}
+
+export interface RowRange {
+  readonly first: number;
+  readonly last: number;
+}
+
+export interface HourInterval {
+  readonly start: ProjectHour;
+  readonly end: ProjectHour;
+}
+
+const HALF = 2;
+const BAR_RADIUS = 5;
+const SUMMARY_TIP = 6;
+const ARROW_HEAD = 5;
+const ARROW_WIDTH = 1.5;
+const OUTLINE_WIDTH = 2;
+const TODAY_WIDTH = 2;
+const SEGMENT_LINK_HEIGHT = 2;
+const SCALE_ROW_HEIGHT = 24;
+const LABEL_PADDING = 6;
+const UPPER_FONT = '600 12px Jost, "Segoe UI", sans-serif';
+const LOWER_FONT = '11px Jost, "Segoe UI", sans-serif';
+
+/** Returns the rows that a viewport shows, at least partly. */
+export function visibleRows(viewport: Viewport, rowCount: number): RowRange {
+  const first = Math.max(0, Math.floor(viewport.top / ROW_HEIGHT));
+  const last = Math.min(rowCount - 1, Math.floor((viewport.top + viewport.height) / ROW_HEIGHT));
+  return { first, last };
+}
+
+/** Lists the non-working periods between two instants: whole days off and, at the hour zoom, the hours outside the working hours; at the month zoom, where a day is only a few pixels wide, only the periods off entered by the user. */
+export function nonWorkingIntervals(
+  calendar: CompiledCalendar,
+  periods: readonly DayRange[],
+  from: ProjectHour,
+  to: ProjectHour,
+  zoom: ZoomLevel,
+): HourInterval[] {
+  if (zoom === 'month') {
+    return mergeIntervals(
+      [...periods]
+        .sort((left, right) => left.firstDay - right.firstDay)
+        .map((period) => ({
+          start: startOfDay(period.firstDay),
+          end: startOfDay(period.lastDay + 1),
+        }))
+        .filter((interval) => interval.end > from && interval.start < to),
+    );
+  }
+  const intervals: HourInterval[] = [];
+  for (let day = dayIndexOf(from); startOfDay(day) < to; day += 1) {
+    const dayStart = startOfDay(day);
+    if (!isWorkingDay(calendar, day)) {
+      intervals.push({ start: dayStart, end: dayStart + HOURS_PER_DAY });
+    } else if (zoom === 'hour') {
+      intervals.push(...offHours(calendar.workingHoursOfDay, dayStart));
+    }
+  }
+  return mergeIntervals(intervals);
+}
+
+/** Draws the rows of the timeline that a viewport shows: non-working periods, selection, bars, links and the today line. */
+export function paintTimelineBody(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  viewport: Viewport,
+): void {
+  context.save();
+  context.fillStyle = scene.theme.surface;
+  context.fillRect(0, 0, viewport.width, viewport.height);
+  context.translate(-viewport.left, -viewport.top);
+  paintNonWorking(context, scene, viewport);
+  const range = visibleRows(viewport, scene.rows.length);
+  paintRowLines(context, scene, viewport, range);
+  const shapes = visibleShapes(scene, range);
+  paintSelection(context, scene, viewport);
+  paintArrows(context, scene, range);
+  shapes.forEach((shape) => {
+    paintShape(context, scene, shape);
+  });
+  paintToday(context, scene, viewport);
+  context.restore();
+}
+
+/** Draws the two rows of labels of the time scale, the labels of long periods staying in view. */
+export function paintTimelineHeader(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  viewport: Viewport,
+  ticks: ScaleTicks,
+): void {
+  const { theme, frame } = scene;
+  context.save();
+  context.fillStyle = theme.background;
+  context.fillRect(0, 0, viewport.width, viewport.height);
+  context.translate(-viewport.left, 0);
+  context.strokeStyle = theme.border;
+  context.lineWidth = 1;
+  context.textBaseline = 'middle';
+  context.font = UPPER_FONT;
+  context.fillStyle = theme.text;
+  for (const tick of ticks.upper) {
+    const start = xOf(frame, tick.start);
+    const end = xOf(frame, tick.end);
+    verticalLine(context, end, 0, SCALE_ROW_HEIGHT);
+    const labelX = Math.max(start, viewport.left) + LABEL_PADDING;
+    if (labelX + context.measureText(tick.label).width < end - LABEL_PADDING) {
+      context.fillText(tick.label, labelX, SCALE_ROW_HEIGHT / HALF);
+    }
+  }
+  context.font = LOWER_FONT;
+  context.fillStyle = theme.textSecondary;
+  context.textAlign = 'center';
+  for (const tick of ticks.lower) {
+    const start = xOf(frame, tick.start);
+    const end = xOf(frame, tick.end);
+    verticalLine(context, start, SCALE_ROW_HEIGHT, SCALE_ROW_HEIGHT * HALF);
+    if (context.measureText(tick.label).width + LABEL_PADDING < end - start) {
+      context.fillText(tick.label, (start + end) / HALF, SCALE_ROW_HEIGHT * 1.5);
+    }
+  }
+  context.beginPath();
+  context.moveTo(viewport.left, SCALE_ROW_HEIGHT + 0.5);
+  context.lineTo(viewport.left + viewport.width, SCALE_ROW_HEIGHT + 0.5);
+  context.moveTo(viewport.left, viewport.height - 0.5);
+  context.lineTo(viewport.left + viewport.width, viewport.height - 0.5);
+  context.stroke();
+  context.restore();
+}
+
+/** Shades the days off and, at the hour zoom, the hours outside the working hours. */
+function paintNonWorking(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  viewport: Viewport,
+): void {
+  if (scene.calendar === null) {
+    return;
+  }
+  const from = hourAt(scene.frame, viewport.left);
+  const to = hourAt(scene.frame, viewport.left + viewport.width);
+  context.fillStyle = scene.theme.nonWorking;
+  const intervals = nonWorkingIntervals(
+    scene.calendar,
+    scene.nonWorkingPeriods,
+    from,
+    to,
+    scene.zoom,
+  );
+  for (const interval of intervals) {
+    const start = xOf(scene.frame, interval.start);
+    context.fillRect(start, viewport.top, xOf(scene.frame, interval.end) - start, viewport.height);
+  }
+}
+
+/** Draws a thin line under each visible row. */
+function paintRowLines(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  viewport: Viewport,
+  range: RowRange,
+): void {
+  context.strokeStyle = scene.theme.gridLine;
+  context.lineWidth = 1;
+  context.beginPath();
+  for (let row = range.first; row <= range.last; row += 1) {
+    const y = (row + 1) * ROW_HEIGHT - 0.5;
+    context.moveTo(viewport.left, y);
+    context.lineTo(viewport.left + viewport.width, y);
+  }
+  context.stroke();
+}
+
+/** Highlights the row of the selected task. */
+function paintSelection(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  viewport: Viewport,
+): void {
+  const row =
+    scene.selectedTaskId === null ? undefined : scene.rowIndexById.get(scene.selectedTaskId);
+  if (row === undefined) {
+    return;
+  }
+  context.fillStyle = scene.theme.selection;
+  context.fillRect(viewport.left, row * ROW_HEIGHT, viewport.width, ROW_HEIGHT - 1);
+}
+
+/** Computes the shapes of the visible rows. */
+function visibleShapes(scene: TimelineScene, range: RowRange): RowShape[] {
+  const shapes: RowShape[] = [];
+  for (let index = range.first; index <= range.last; index += 1) {
+    const shape = shapeAt(scene, index);
+    if (shape !== null) {
+      shapes.push(shape);
+    }
+  }
+  return shapes;
+}
+
+/** Computes the shape of one row, or null when the row has no dates yet. */
+function shapeAt(scene: TimelineScene, index: number): RowShape | null {
+  const row = scene.rows[index];
+  return row === undefined || scene.schedule === null
+    ? null
+    : rowShape(row, index, scene.schedule, scene.frame);
+}
+
+/** Draws one bar, milestone or summary, outlined when its task is in a person or team conflict. */
+function paintShape(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  shape: RowShape,
+): void {
+  const top = shape.row * ROW_HEIGHT;
+  if (shape.kind === 'summary') {
+    paintSummary(context, scene.theme.text, shape.start, shape.end, top);
+    return;
+  }
+  const task = scene.rows[shape.row]?.task;
+  const tagId = task !== undefined && task.kind !== 'summary' ? task.tagId : null;
+  const style = tagId === null ? undefined : scene.tagStyles.get(tagId);
+  const outlined = scene.conflictTaskIds.has(shape.taskId);
+  if (shape.kind === 'milestone') {
+    paintMilestone(context, style?.color ?? scene.theme.text, shape.x, top);
+    return;
+  }
+  const color = style?.color ?? scene.theme.bar;
+  const pale = style?.pale ?? paleColor(scene.theme.bar);
+  const pattern = style?.pattern == null ? null : scene.patternFor(style.pattern);
+  const barTop = top + (ROW_HEIGHT - BAR_HEIGHT) / HALF;
+  shape.segments.slice(1).forEach((segment, index) => {
+    const previous = shape.segments[index];
+    const gapStart = previous === undefined ? segment.x : previous.x + previous.width;
+    context.fillStyle = pale;
+    context.fillRect(
+      gapStart,
+      top + ROW_HEIGHT / HALF - 1,
+      segment.x - gapStart,
+      SEGMENT_LINK_HEIGHT,
+    );
+  });
+  for (const segment of shape.segments) {
+    context.save();
+    roundedRectangle(context, segment.x, barTop, Math.max(segment.width, 1), BAR_HEIGHT);
+    context.clip();
+    context.fillStyle = pale;
+    context.fillRect(segment.x, barTop, segment.width, BAR_HEIGHT);
+    context.fillStyle = color;
+    context.fillRect(segment.x, barTop, segment.filled, BAR_HEIGHT);
+    if (pattern !== null) {
+      context.fillStyle = pattern;
+      context.fillRect(segment.x, barTop, segment.width, BAR_HEIGHT);
+    }
+    context.restore();
+    if (outlined) {
+      context.strokeStyle = scene.theme.error;
+      context.lineWidth = OUTLINE_WIDTH;
+      roundedRectangle(
+        context,
+        segment.x - 1,
+        barTop - 1,
+        segment.width + OUTLINE_WIDTH,
+        BAR_HEIGHT + OUTLINE_WIDTH,
+      );
+      context.stroke();
+    }
+  }
+}
+
+/** Draws a summary as a thin bar with a tip at each end. */
+function paintSummary(
+  context: CanvasRenderingContext2D,
+  color: string,
+  start: number,
+  end: number,
+  top: number,
+): void {
+  const barTop = top + (ROW_HEIGHT - SUMMARY_HEIGHT) / HALF - SUMMARY_TIP / HALF;
+  context.fillStyle = color;
+  context.fillRect(start, barTop, Math.max(end - start, 1), SUMMARY_HEIGHT);
+  context.beginPath();
+  context.moveTo(start, barTop + SUMMARY_HEIGHT);
+  context.lineTo(start + SUMMARY_TIP, barTop + SUMMARY_HEIGHT);
+  context.lineTo(start, barTop + SUMMARY_HEIGHT + SUMMARY_TIP);
+  context.moveTo(end, barTop + SUMMARY_HEIGHT);
+  context.lineTo(end - SUMMARY_TIP, barTop + SUMMARY_HEIGHT);
+  context.lineTo(end, barTop + SUMMARY_HEIGHT + SUMMARY_TIP);
+  context.fill();
+}
+
+/** Draws a milestone as a diamond centred on its date. */
+function paintMilestone(
+  context: CanvasRenderingContext2D,
+  color: string,
+  x: number,
+  top: number,
+): void {
+  const middle = top + ROW_HEIGHT / HALF;
+  const half = MILESTONE_SIZE / HALF;
+  context.fillStyle = color;
+  context.beginPath();
+  context.moveTo(x, middle - half);
+  context.lineTo(x + half, middle);
+  context.lineTo(x, middle + half);
+  context.lineTo(x - half, middle);
+  context.closePath();
+  context.fill();
+}
+
+/** Draws the arrows of the dependencies that cross the visible rows. */
+function paintArrows(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  range: RowRange,
+): void {
+  context.strokeStyle = scene.theme.textSecondary;
+  context.fillStyle = scene.theme.textSecondary;
+  context.lineWidth = ARROW_WIDTH;
+  for (const dependency of scene.dependencies) {
+    const from = scene.rowIndexById.get(dependency.predecessorId);
+    const to = scene.rowIndexById.get(dependency.successorId);
+    if (
+      from === undefined ||
+      to === undefined ||
+      Math.max(from, to) < range.first ||
+      Math.min(from, to) > range.last
+    ) {
+      continue;
+    }
+    const fromShape = shapeAt(scene, from);
+    const toShape = shapeAt(scene, to);
+    if (fromShape !== null && toShape !== null) {
+      paintArrow(context, dependencyArrow(dependency, fromShape, toShape));
+    }
+  }
+}
+
+/** Draws a polyline ending with an arrow head. */
+function paintArrow(context: CanvasRenderingContext2D, points: readonly Point[]): void {
+  const [first, ...rest] = points;
+  const last = points.at(-1);
+  const beforeLast = points.at(-2);
+  if (first === undefined || last === undefined || beforeLast === undefined) {
+    return;
+  }
+  context.beginPath();
+  context.moveTo(first.x, first.y);
+  rest.forEach((point) => {
+    context.lineTo(point.x, point.y);
+  });
+  context.stroke();
+  const direction = Math.sign(last.x - beforeLast.x) || 1;
+  context.beginPath();
+  context.moveTo(last.x, last.y);
+  context.lineTo(last.x - direction * ARROW_HEAD, last.y - ARROW_HEAD);
+  context.lineTo(last.x - direction * ARROW_HEAD, last.y + ARROW_HEAD);
+  context.closePath();
+  context.fill();
+}
+
+/** Draws the vertical line of the current time. */
+function paintToday(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  viewport: Viewport,
+): void {
+  context.fillStyle = scene.theme.error;
+  context.fillRect(
+    xOf(scene.frame, scene.today) - TODAY_WIDTH / HALF,
+    viewport.top,
+    TODAY_WIDTH,
+    viewport.height,
+  );
+}
+
+/** Traces a rectangle with rounded corners. */
+function roundedRectangle(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  context.beginPath();
+  context.roundRect(x, y, width, height, Math.min(BAR_RADIUS, width / HALF));
+}
+
+/** Draws a crisp vertical line of one pixel. */
+function verticalLine(
+  context: CanvasRenderingContext2D,
+  x: number,
+  top: number,
+  bottom: number,
+): void {
+  context.beginPath();
+  context.moveTo(Math.round(x) + 0.5, top);
+  context.lineTo(Math.round(x) + 0.5, bottom);
+  context.stroke();
+}
+
+/** Lists the hours of a working day that are not working hours, as intervals. */
+function offHours(workingHours: readonly number[], dayStart: ProjectHour): HourInterval[] {
+  const working = new Set(workingHours);
+  const intervals: HourInterval[] = [];
+  for (let hour = 0; hour < HOURS_PER_DAY; hour += 1) {
+    if (!working.has(hour)) {
+      intervals.push({ start: dayStart + hour, end: dayStart + hour + 1 });
+    }
+  }
+  return intervals;
+}
+
+/** Joins intervals that follow one another. */
+function mergeIntervals(intervals: readonly HourInterval[]): HourInterval[] {
+  const merged: HourInterval[] = [];
+  for (const interval of intervals) {
+    const last = merged.at(-1);
+    if (last?.end === interval.start) {
+      merged[merged.length - 1] = { start: last.start, end: interval.end };
+    } else {
+      merged.push(interval);
+    }
+  }
+  return merged;
+}

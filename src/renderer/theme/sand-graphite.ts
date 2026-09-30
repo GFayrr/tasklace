@@ -15,4 +15,7 @@ export const SAND_GRAPHITE: Theme = {
   success: '#2B6E4B',
   warning: '#855A15',
   error: '#A93333',
+  bar: '#857F76',
+  nonWorking: '#F1EFEA',
+  gridLine: '#EEEBE5',
 };

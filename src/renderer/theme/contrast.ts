@@ -45,6 +45,10 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = [
   { foreground: 'action', background: 'background', minimum: INTERFACE_MINIMUM_RATIO },
   { foreground: 'focus', background: 'background', minimum: INTERFACE_MINIMUM_RATIO },
   { foreground: 'focus', background: 'surface', minimum: INTERFACE_MINIMUM_RATIO },
+  { foreground: 'bar', background: 'surface', minimum: INTERFACE_MINIMUM_RATIO },
+  { foreground: 'bar', background: 'nonWorking', minimum: INTERFACE_MINIMUM_RATIO },
+  { foreground: 'text', background: 'nonWorking', minimum: TEXT_MINIMUM_RATIO },
+  { foreground: 'error', background: 'nonWorking', minimum: INTERFACE_MINIMUM_RATIO },
 ];
 
 /** Tells whether a value is a colour written as six hexadecimal digits after a hash. */

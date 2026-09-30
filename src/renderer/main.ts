@@ -23,6 +23,7 @@ const app = new AppState({
     ),
   createId: () => crypto.randomUUID(),
   now: () => new Date(),
+  theme: SAND_GRAPHITE,
 });
 window.tasklace.onFlushRequested(() => app.flush());
 mount(App, { target, props: { app } });

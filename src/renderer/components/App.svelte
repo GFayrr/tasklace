@@ -5,6 +5,7 @@
   import StatusBar from './StatusBar.svelte';
   import Toolbar from './Toolbar.svelte';
   import Welcome from './Welcome.svelte';
+  import Workspace from './Workspace.svelte';
 
   let { app }: { app: AppState } = $props();
 
@@ -31,7 +32,7 @@
 {:else}
   <div class="shell">
     <Toolbar {app} />
-    <main class="workspace" aria-label={app.messages.app.workspace}></main>
+    <Workspace {app} />
     <StatusBar {app} />
   </div>
 {/if}
@@ -42,11 +43,5 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-  }
-
-  .workspace {
-    flex-grow: 1;
-    min-height: 0;
-    background: var(--color-surface);
   }
 </style>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { AppState } from '../app/app-state.svelte';
+  import { ZOOM_LEVELS } from '../plan/time-scale';
   import Icon from './Icon.svelte';
   import MenuButton, { type MenuItem } from './MenuButton.svelte';
 
@@ -98,6 +99,18 @@
     </button>
   </div>
   <div class="spacer"></div>
+  <div class="zoom" role="group" aria-label={text.zoom.label}>
+    {#each ZOOM_LEVELS as level (level)}
+      <button
+        type="button"
+        class="zoom-level"
+        aria-pressed={app.zoom === level}
+        onclick={() => (app.zoom = level)}
+      >
+        {text.zoom[level]}
+      </button>
+    {/each}
+  </div>
   <button type="button" class="button" class:primary={!app.hasFile} onclick={() => app.save()}>
     {text.toolbar.save}
   </button>
@@ -168,6 +181,31 @@
 
   .spacer {
     flex-grow: 1;
+  }
+
+  .zoom {
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: var(--radius);
+    background: var(--color-panel);
+  }
+
+  .zoom-level {
+    height: 28px;
+    padding: 0 var(--space-3);
+    border: 0;
+    border-radius: calc(var(--radius) - 2px);
+    font-size: var(--font-size-small);
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .zoom-level[aria-pressed='true'] {
+    color: var(--color-text);
+    background: var(--color-surface);
   }
 
   .button {
