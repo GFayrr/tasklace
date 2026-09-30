@@ -97,7 +97,10 @@
     "predecessors": "Predecessors",
     "expand": "Expand {name}",
     "collapse": "Collapse {name}",
-    "hours": "{count} h"
+    "hours": "{count} h",
+    "addTask": "Add a task",
+    "newTask": "New task",
+    "editCell": "Edit {column} of {name}"
   },
   "timeline": {
     "label": "Timeline"
@@ -111,5 +114,32 @@
   },
   "splitter": {
     "label": "Width of the task table"
+  },
+  "tasks": {
+    "label": "Task",
+    "add": "Add task",
+    "indent": "Indent: put under the task above",
+    "outdent": "Outdent: move out of its summary",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "milestone": "Turn into a milestone or back into a task",
+    "delete": "Delete"
+  },
+  "editErrors": {
+    "NOT_POSSIBLE": "This change is not possible here.",
+    "INVALID_NAME": "A task needs a name.",
+    "INVALID_DURATION": "Write the duration in hours, such as 14, or in working days, such as 2d.",
+    "INVALID_DATE": "This date could not be read. Write it as your computer shows dates, or as 2026-10-05 14:00.",
+    "INVALID_PROGRESS": "Write the progress as a whole number from 0 to 100.",
+    "INVALID_PREDECESSORS": "Write the predecessors by task number, such as 1.2, 3SS+2h, each task once.",
+    "UNKNOWN_TASK_NUMBER": "There is no task with this number.",
+    "DEPENDENCY_CYCLE": "This link would make tasks wait for each other in a loop.",
+    "SUMMARY_DEPENDENCY": "Summary tasks cannot be linked. Link the tasks inside them.",
+    "SELF_DEPENDENCY": "A task cannot be linked to itself.",
+    "DUPLICATE_DEPENDENCY": "These tasks are already linked.",
+    "HIERARCHY_TOO_DEEP": "Tasks cannot be nested this deeply.",
+    "TOO_MANY_ITEMS": "The project has reached its maximum size.",
+    "TOO_LONG": "This text is too long.",
+    "OUT_OF_RANGE": "This value is outside the allowed range."
   }
 }

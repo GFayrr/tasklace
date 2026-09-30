@@ -1,9 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { compileCalendar } from '../../core/calendar/compile-calendar';
   import type { TaskId } from '../../core/model/project';
   import type { AppState } from '../app/app-state.svelte';
-  import { buildPlanOutline, groupIncoming, toggledSummary } from '../plan/plan-outline';
   import { createTableFormatters } from '../plan/table-format';
   import {
     clampTableWidth,
@@ -15,10 +13,13 @@
   import {
     createScaleLabels,
     pixelsPerHour,
+    snapHours,
     zoomedScrollLeft,
     type ZoomLevel,
   } from '../plan/time-scale';
-  import { timelineFrame, xOf } from '../plan/timeline-geometry';
+  import { linkTasks, moveStart, stretchEnd } from '../plan/task-commands';
+  import { movedStart, stretchedEnd } from '../plan/timeline-gestures';
+  import { ROW_HEIGHT, timelineFrame, xOf, type RowShape } from '../plan/timeline-geometry';
   import { tagStylesOf } from '../plan/tag-styles';
   import { localHourOf } from '../project/new-project';
   import TaskTable from './TaskTable.svelte';
@@ -37,7 +38,6 @@
     }
   })();
 
-  let collapsed = $state.raw<ReadonlySet<TaskId>>(new Set());
   let tableWidth = $state(readTableWidth(storage));
   let containerWidth = $state(0);
   let scrollTop = $state(0);
@@ -47,12 +47,8 @@
   let today = $state(localHourOf(new Date()));
 
   const project = $derived(app.project);
-  const outline = $derived(buildPlanOutline(project?.tasks ?? [], collapsed));
-  const incoming = $derived(groupIncoming(project?.dependencies ?? []));
-  const calendar = $derived.by(() => {
-    const compiled = project === null ? null : compileCalendar(project.calendar);
-    return compiled?.ok === true ? compiled.value : null;
-  });
+  const outline = $derived(app.outline);
+  const calendar = $derived(app.calendar);
   const tagStyles = $derived(tagStylesOf(project));
   const conflictTaskIds = $derived(
     new Set(app.schedule?.tagConflicts.conflicts.flatMap((conflict) => conflict.taskIds) ?? []),
@@ -115,14 +111,19 @@
     scrollLeft = untrack(() => zoomedScrollLeft(scrollLeft, timelineWidth, from, zoom));
   });
 
-  /** Opens or closes a summary task. */
-  function toggle(id: TaskId): void {
-    collapsed = toggledSummary(collapsed, id);
-  }
-
   /** Selects a task. */
   function selectTask(id: TaskId): void {
     app.selectedTaskId = id;
+  }
+
+  /** Scrolls the least needed to show a row. */
+  function reveal(row: number): void {
+    const top = row * ROW_HEIGHT;
+    if (top < scrollTop) {
+      scrollTop = top;
+    } else if (top + ROW_HEIGHT > scrollTop + viewportHeight) {
+      scrollTop = top + ROW_HEIGHT - viewportHeight;
+    }
   }
 
   /** Scrolls both panes vertically. */
@@ -140,6 +141,34 @@
   function followSize(width: number, height: number): void {
     timelineWidth = width;
     viewportHeight = height;
+  }
+
+  /** Asks a dragged bar to start where it was dropped, aligned to the hour or the day. */
+  function moveBar(shape: RowShape, offset: number): void {
+    const placement = app.schedule?.placements.get(shape.taskId);
+    if (placement !== undefined) {
+      const start = movedStart(frame, placement.start, offset, snapHours(app.zoom));
+      app.edit((context) => moveStart(context, shape.taskId, start));
+    }
+  }
+
+  /** Changes the duration of a stretched bar so that it ends where it was dropped. */
+  function stretchBar(shape: RowShape, offset: number): void {
+    const placement = app.schedule?.placements.get(shape.taskId);
+    const lastBlock = placement?.segments.at(-1);
+    const compiled = app.calendar;
+    if (placement !== undefined && lastBlock !== undefined && compiled !== null) {
+      const end = stretchedEnd(frame, placement.end, offset, snapHours(app.zoom));
+      app.edit((context) => stretchEnd(context, shape.taskId, lastBlock.start, end, compiled));
+    }
+  }
+
+  /** Links a task to the task of the row a link was dropped on. */
+  function linkBar(fromId: TaskId, toRow: number): void {
+    const target = outline.rows[toRow]?.task;
+    if (target !== undefined) {
+      app.edit((context) => linkTasks(context, fromId, target.id));
+    }
   }
 
   /** Changes the width of the table and remembers it. */
@@ -180,21 +209,7 @@
 
 <main class="workspace" aria-label={app.messages.app.workspace} bind:clientWidth={containerWidth}>
   <div class="table-pane" style:width="{shownWidth}px">
-    <TaskTable
-      rows={outline.rows}
-      {incoming}
-      wbsById={outline.wbsById}
-      schedule={app.schedule}
-      {calendar}
-      {formatters}
-      messages={app.messages}
-      {scrollTop}
-      {viewportHeight}
-      selectedTaskId={app.selectedTaskId}
-      select={selectTask}
-      {toggle}
-      scrollBy={scrollRowsBy}
-    />
+    <TaskTable {app} {formatters} {scrollTop} {viewportHeight} scrollBy={scrollRowsBy} {reveal} />
   </div>
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <div
@@ -219,6 +234,9 @@
       scrolled={followScroll}
       resized={followSize}
       select={selectTask}
+      moved={moveBar}
+      stretched={stretchBar}
+      linked={linkBar}
     />
   </div>
 </main>

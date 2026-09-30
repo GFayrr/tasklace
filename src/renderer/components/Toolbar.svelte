@@ -1,7 +1,13 @@
 <script lang="ts">
   import type { AppState } from '../app/app-state.svelte';
-  import { ZOOM_LEVELS } from '../plan/time-scale';
-  import Icon from './Icon.svelte';
+  import { indentTask, moveTask, outdentTask, toggleMilestone } from '../plan/task-commands';
+  import Icon, { type IconName } from './Icon.svelte';
+
+  interface TaskAction {
+    readonly icon: IconName;
+    readonly label: string;
+    readonly run: () => void;
+  }
   import MenuButton, { type MenuItem } from './MenuButton.svelte';
 
   let { app }: { app: AppState } = $props();
@@ -26,6 +32,51 @@
   const exportItems: readonly MenuItem[] = $derived([
     { label: text.toolbar.exportCsv, select: () => void app.exportFile('csv') },
     { label: text.toolbar.exportJson, select: () => void app.exportFile('json') },
+  ]);
+
+  const taskActions: readonly TaskAction[] = $derived([
+    {
+      icon: 'outdent',
+      label: text.tasks.outdent,
+      run: () => {
+        app.editSelected(outdentTask);
+      },
+    },
+    {
+      icon: 'indent',
+      label: text.tasks.indent,
+      run: () => {
+        app.editSelected(indentTask);
+      },
+    },
+    {
+      icon: 'up',
+      label: text.tasks.moveUp,
+      run: () => {
+        app.editSelected((context, id) => moveTask(context, id, -1));
+      },
+    },
+    {
+      icon: 'down',
+      label: text.tasks.moveDown,
+      run: () => {
+        app.editSelected((context, id) => moveTask(context, id, 1));
+      },
+    },
+    {
+      icon: 'diamond',
+      label: text.tasks.milestone,
+      run: () => {
+        app.editSelected(toggleMilestone);
+      },
+    },
+    {
+      icon: 'trash',
+      label: text.tasks.delete,
+      run: () => {
+        app.deleteSelected();
+      },
+    },
   ]);
 
   /** Renames the project when the name field is left, restoring the name if it was refused. */
@@ -74,6 +125,30 @@
     <MenuButton label={text.toolbar.import} items={importItems} />
     <MenuButton label={text.toolbar.export} items={exportItems} />
   </nav>
+  <div class="group" role="group" aria-label={text.tasks.label}>
+    <button
+      type="button"
+      class="button"
+      onclick={() => {
+        app.addTask();
+      }}
+    >
+      <Icon name="plus" />
+      <span>{text.tasks.add}</span>
+    </button>
+    {#each taskActions as action (action.icon)}
+      <button
+        type="button"
+        class="icon-button"
+        aria-label={action.label}
+        title={action.label}
+        disabled={app.selectedTaskId === null}
+        onclick={action.run}
+      >
+        <Icon name={action.icon} />
+      </button>
+    {/each}
+  </div>
   <div class="group" role="group" aria-label={text.toolbar.history}>
     <button
       type="button"
@@ -99,18 +174,6 @@
     </button>
   </div>
   <div class="spacer"></div>
-  <div class="zoom" role="group" aria-label={text.zoom.label}>
-    {#each ZOOM_LEVELS as level (level)}
-      <button
-        type="button"
-        class="zoom-level"
-        aria-pressed={app.zoom === level}
-        onclick={() => (app.zoom = level)}
-      >
-        {text.zoom[level]}
-      </button>
-    {/each}
-  </div>
   <button type="button" class="button" class:primary={!app.hasFile} onclick={() => app.save()}>
     {text.toolbar.save}
   </button>
@@ -181,31 +244,6 @@
 
   .spacer {
     flex-grow: 1;
-  }
-
-  .zoom {
-    display: flex;
-    gap: 2px;
-    padding: 3px;
-    border-radius: var(--radius);
-    background: var(--color-panel);
-  }
-
-  .zoom-level {
-    height: 28px;
-    padding: 0 var(--space-3);
-    border: 0;
-    border-radius: calc(var(--radius) - 2px);
-    font-size: var(--font-size-small);
-    font-weight: 500;
-    color: var(--color-text-secondary);
-    background: transparent;
-    cursor: pointer;
-  }
-
-  .zoom-level[aria-pressed='true'] {
-    color: var(--color-text);
-    background: var(--color-surface);
   }
 
   .button {

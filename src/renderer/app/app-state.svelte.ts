@@ -1,4 +1,6 @@
+import { compileCalendar } from '../../core/calendar/compile-calendar';
 import { exportProjectCsv } from '../../core/exchange/csv/project-csv-export';
+import type { RegionalFormat } from '../../core/exchange/csv/regional-format';
 import { exportProjectJson } from '../../core/exchange/project-json';
 import type { Project, TaskId } from '../../core/model/project';
 import type { Result } from '../../core/result';
@@ -14,7 +16,10 @@ import type {
   RecentProject,
   TasklaceBridge,
 } from '../../preload/bridge-contract';
-import { countMessage, fileErrorMessage, type Messages } from '../i18n/messages';
+import { countMessage, editErrorMessage, fileErrorMessage, type Messages } from '../i18n/messages';
+import type { EditableColumn } from '../plan/cell-editing';
+import { buildPlanOutline, NOTHING_COLLAPSED, toggledSummary } from '../plan/plan-outline';
+import { deleteTasks, insertTask, type Edit, type EditContext } from '../plan/task-commands';
 import { buildNewProject } from '../project/new-project';
 import {
   createProjectFiles,
@@ -29,6 +34,19 @@ import type { Theme } from '../theme/theme';
 import type { Command } from './shortcuts';
 
 export type NoticeKind = 'error' | 'warning';
+
+export interface EditRequest {
+  readonly taskId: TaskId;
+  readonly column: EditableColumn;
+}
+
+const DEFAULT_DAY_HOURS = 8;
+const DEFAULT_TABLE_FORMAT: RegionalFormat = {
+  listSeparator: ',',
+  dateOrder: 'yearMonthDay',
+  dateSeparator: '-',
+  twelveHourClock: false,
+};
 
 export interface Notice {
   readonly id: number;
@@ -58,7 +76,15 @@ export class AppState {
   notices = $state.raw<readonly Notice[]>([]);
   zoom = $state<ZoomLevel>('day');
   selectedTaskId = $state<TaskId | null>(null);
+  editRequest = $state<EditRequest | null>(null);
+  collapsed = $state.raw<ReadonlySet<TaskId>>(NOTHING_COLLAPSED);
   openedCount = $state(0);
+  regionalFormat = $state.raw<RegionalFormat>(DEFAULT_TABLE_FORMAT);
+  readonly outline = $derived(buildPlanOutline(this.project?.tasks ?? [], this.collapsed));
+  readonly calendar = $derived.by(() => {
+    const compiled = this.project === null ? null : compileCalendar(this.project.calendar);
+    return compiled?.ok === true ? compiled.value : null;
+  });
 
   readonly messages: Messages;
   readonly locale: string;
@@ -92,6 +118,11 @@ export class AppState {
         this.#notify('error', this.messages.notices.scheduleFailed);
       },
     });
+  }
+
+  /** Reads the regional format of the system, used to read the dates typed in the table. */
+  async loadRegionalFormat(): Promise<void> {
+    this.regionalFormat = await this.#context.bridge.regionalFormat();
   }
 
   /** Loads the list of recent projects. */
@@ -176,6 +207,71 @@ export class AppState {
     return session.apply({ type: 'updateProject', fields: { name: trimmed } }).ok;
   }
 
+  /** Opens or closes a summary task. */
+  toggleSummary(id: TaskId): void {
+    this.collapsed = toggledSummary(this.collapsed, id);
+  }
+
+  /** Applies a change built from the current project, telling the user why when it is refused. */
+  edit(build: (context: EditContext) => Edit): boolean {
+    const session = this.#session;
+    const project = this.project;
+    if (session === null || project === null) {
+      return false;
+    }
+    const edit = build(this.#editContext(project));
+    if (!edit.ok) {
+      this.#notify('error', editErrorMessage(this.messages, edit.error));
+      return false;
+    }
+    const applied = session.applyAll(edit.value);
+    if (!applied.ok) {
+      this.#notify('error', editErrorMessage(this.messages, applied.error[0]?.code ?? ''));
+      return false;
+    }
+    this.#refresh();
+    return true;
+  }
+
+  /** Adds a task after the selected one, selects it and asks the table to edit its name. */
+  addTask(): void {
+    const session = this.#session;
+    const project = this.project;
+    if (session === null || project === null) {
+      return;
+    }
+    const inserted = insertTask(
+      this.#editContext(project),
+      this.selectedTaskId,
+      this.messages.table.newTask,
+    );
+    if (inserted.ok && this.edit(() => ({ ok: true, value: inserted.value.operations }))) {
+      this.selectedTaskId = inserted.value.taskId;
+      this.editRequest = { taskId: inserted.value.taskId, column: 'name' };
+    }
+  }
+
+  /** Applies a change to the selected task, doing nothing when no task is selected. */
+  editSelected(build: (context: EditContext, id: TaskId) => Edit): void {
+    const id = this.selectedTaskId;
+    if (id !== null) {
+      this.edit((context) => build(context, id));
+    }
+  }
+
+  /** Deletes the selected task and everything under it, then selects the row that takes its place. */
+  deleteSelected(): void {
+    const id = this.selectedTaskId;
+    if (id === null) {
+      return;
+    }
+    const index = this.outline.rowIndexById.get(id) ?? 0;
+    if (this.edit((context) => deleteTasks(context, [id]))) {
+      const rows = this.outline.rows;
+      this.selectedTaskId = rows[Math.min(index, rows.length - 1)]?.task.id ?? null;
+    }
+  }
+
   /** Undoes the latest local change. */
   undo(): void {
     const undone = this.#session?.history.undo();
@@ -221,12 +317,27 @@ export class AppState {
     await this.loadRecentProjects();
   }
 
+  /** Returns what the editing commands need to know about the project. */
+  #editContext(project: Project): EditContext {
+    return {
+      project,
+      outline:
+        project === this.project
+          ? this.outline
+          : buildPlanOutline(project.tasks, NOTHING_COLLAPSED),
+      createId: this.#context.createId,
+      dayHours: this.calendar?.workingHoursOfDay.length ?? DEFAULT_DAY_HOURS,
+    };
+  }
+
   /** Follows the changes of a newly opened project. */
   #attach(session: SharedSession): void {
     this.#session?.document.off('update', this.#queueRefresh);
     this.#session = session;
     this.schedule = null;
     this.selectedTaskId = null;
+    this.editRequest = null;
+    this.collapsed = NOTHING_COLLAPSED;
     this.openedCount += 1;
     session.document.on('update', this.#queueRefresh);
     this.#refresh();
@@ -249,11 +360,18 @@ export class AppState {
     if (session === null) {
       return;
     }
-    this.project = session.project();
+    const project = session.project();
+    if (project === this.project) {
+      return;
+    }
+    this.project = project;
     this.hasFile = this.#files.hasFile();
     this.canUndo = session.history.canUndo();
     this.canRedo = session.history.canRedo();
-    this.#scheduler.request(this.project);
+    this.#scheduler.request(project);
+    if (this.selectedTaskId !== null && !this.outline.wbsById.has(this.selectedTaskId)) {
+      this.selectedTaskId = null;
+    }
   }
 
   /** Shows a computed schedule if it still belongs to the open project. */

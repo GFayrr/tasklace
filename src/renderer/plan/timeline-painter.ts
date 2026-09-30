@@ -9,6 +9,7 @@ import type { Theme } from '../theme/theme';
 import type { PlanRow } from './plan-outline';
 import { paleColor, type TagStyle } from './tag-styles';
 import type { ScaleTicks, ZoomLevel } from './time-scale';
+import { LINK_HANDLE_RADIUS, linkHandleCenter, type DragPreview } from './timeline-gestures';
 import {
   BAR_HEIGHT,
   dependencyArrow,
@@ -44,6 +45,7 @@ export interface TimelineScene {
   readonly conflictTaskIds: ReadonlySet<TaskId>;
   readonly selectedTaskId: TaskId | null;
   readonly today: ProjectHour;
+  readonly preview: DragPreview | null;
   readonly patternFor: (pattern: TagPattern) => CanvasPattern | null;
 }
 
@@ -64,6 +66,8 @@ const ARROW_HEAD = 5;
 const ARROW_WIDTH = 1.5;
 const OUTLINE_WIDTH = 2;
 const TODAY_WIDTH = 2;
+const PREVIEW_DASH = [4, 3];
+const HALF_PIXEL = 0.5;
 const SEGMENT_LINK_HEIGHT = 2;
 const SCALE_ROW_HEIGHT = 24;
 const LABEL_PADDING = 6;
@@ -127,6 +131,8 @@ export function paintTimelineBody(
   shapes.forEach((shape) => {
     paintShape(context, scene, shape);
   });
+  paintLinkHandle(context, scene, shapes);
+  paintPreview(context, scene);
   paintToday(context, scene, viewport);
   context.restore();
 }
@@ -302,6 +308,16 @@ function paintShape(
       context.fillRect(segment.x, barTop, segment.width, BAR_HEIGHT);
     }
     context.restore();
+    context.strokeStyle = color;
+    context.lineWidth = 1;
+    roundedRectangle(
+      context,
+      segment.x + HALF_PIXEL,
+      barTop + HALF_PIXEL,
+      Math.max(segment.width - 1, 1),
+      BAR_HEIGHT - 1,
+    );
+    context.stroke();
     if (outlined) {
       context.strokeStyle = scene.theme.error;
       context.lineWidth = OUTLINE_WIDTH;
@@ -406,6 +422,73 @@ function paintArrow(context: CanvasRenderingContext2D, points: readonly Point[])
   context.lineTo(last.x - direction * ARROW_HEAD, last.y + ARROW_HEAD);
   context.closePath();
   context.fill();
+}
+
+/** Draws the handle after the bar of the selected task, from which a link is dragged. */
+function paintLinkHandle(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  shapes: readonly RowShape[],
+): void {
+  const shape = shapes.find((candidate) => candidate.taskId === scene.selectedTaskId);
+  if (shape === undefined || shape.kind === 'summary') {
+    return;
+  }
+  const center = linkHandleCenter(shape);
+  context.beginPath();
+  context.arc(center.x, center.y, LINK_HANDLE_RADIUS, 0, Math.PI * HALF);
+  context.fillStyle = scene.theme.surface;
+  context.fill();
+  context.strokeStyle = scene.theme.action;
+  context.lineWidth = OUTLINE_WIDTH;
+  context.stroke();
+}
+
+/** Draws where a dragged bar or link would go, as a dashed outline. */
+function paintPreview(context: CanvasRenderingContext2D, scene: TimelineScene): void {
+  const preview = scene.preview;
+  if (preview === null) {
+    return;
+  }
+  context.save();
+  context.setLineDash(PREVIEW_DASH);
+  context.strokeStyle = scene.theme.action;
+  context.lineWidth = OUTLINE_WIDTH;
+  const top = preview.shape.row * ROW_HEIGHT;
+  if (preview.kind === 'link') {
+    const from = linkHandleCenter(preview.shape);
+    context.beginPath();
+    context.moveTo(from.x, from.y);
+    context.lineTo(preview.pointer.x, preview.pointer.y);
+    context.stroke();
+    if (preview.targetRow !== null) {
+      context.strokeRect(
+        0,
+        preview.targetRow * ROW_HEIGHT + 1,
+        xOf(scene.frame, scene.frame.end),
+        ROW_HEIGHT - 2,
+      );
+    }
+  } else if (preview.shape.kind === 'milestone') {
+    const half = MILESTONE_SIZE / HALF;
+    const x = preview.shape.x + preview.offset;
+    const middle = top + ROW_HEIGHT / HALF;
+    context.beginPath();
+    context.moveTo(x, middle - half);
+    context.lineTo(x + half, middle);
+    context.lineTo(x, middle + half);
+    context.lineTo(x - half, middle);
+    context.closePath();
+    context.stroke();
+  } else if (preview.shape.kind === 'task') {
+    const moving = preview.kind === 'move';
+    const start = preview.shape.start + (moving ? preview.offset : 0);
+    const end = Math.max(preview.shape.end + preview.offset, preview.shape.start + 1);
+    const width = moving ? preview.shape.end - preview.shape.start : end - start;
+    roundedRectangle(context, start, top + (ROW_HEIGHT - BAR_HEIGHT) / HALF, width, BAR_HEIGHT);
+    context.stroke();
+  }
+  context.restore();
 }
 
 /** Draws the vertical line of the current time. */

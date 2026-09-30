@@ -2,6 +2,7 @@
   import type { AppState } from '../app/app-state.svelte';
   import { createDayFormatter, projectSpan } from '../i18n/format';
   import { countMessage, fillMessage } from '../i18n/messages';
+  import { ZOOM_LEVELS } from '../plan/time-scale';
 
   let { app }: { app: AppState } = $props();
   const text = $derived(app.messages);
@@ -44,12 +45,24 @@
       <span>{span}</span>
     {/if}
   </span>
+  <div class="zoom" role="group" aria-label={text.zoom.label}>
+    {#each ZOOM_LEVELS as level (level)}
+      <button
+        type="button"
+        class="zoom-level"
+        aria-pressed={app.zoom === level}
+        onclick={() => (app.zoom = level)}
+      >
+        {text.zoom[level]}
+      </button>
+    {/each}
+  </div>
 </footer>
 
 <style>
   .status-bar {
     min-height: 40px;
-    padding: var(--space-2) var(--space-4);
+    padding: var(--space-1) var(--space-4);
     display: flex;
     flex-wrap: nowrap;
     align-items: center;
@@ -108,5 +121,30 @@
 
   .spacer {
     flex-grow: 1;
+  }
+  .zoom {
+    flex-shrink: 0;
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: var(--radius);
+    background: var(--color-panel);
+  }
+
+  .zoom-level {
+    height: 24px;
+    padding: 0 var(--space-3);
+    border: 0;
+    border-radius: calc(var(--radius) - 2px);
+    font-size: var(--font-size-small);
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .zoom-level[aria-pressed='true'] {
+    color: var(--color-text);
+    background: var(--color-surface);
   }
 </style>
