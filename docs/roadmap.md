@@ -2,17 +2,17 @@
 
 Tasklace is built in nine steps. Each step, or sub-step, is developed on its own branch, tested, reviewed and merged into `main` through a pull request.
 
-| Step | Content                                                    | Status  |
-| ---- | ---------------------------------------------------------- | ------- |
-| 1    | Foundations and working-time calendar                      | Done    |
-| 2    | Scheduling engine                                          | Done    |
-| 3    | Tags and person or team conflicts                          | Done    |
-| 4    | Shared model, project file, validation, JSON and CSV       | Done    |
-| 5    | Secure Electron shell and Svelte user interface            | Planned |
-| 6    | PDF export and comparison of the page splitting strategies | Planned |
-| 7    | Real-time collaboration on the local network               | Planned |
-| 8    | End-to-end encrypted relay                                 | Planned |
-| 9    | Distribution                                               | Planned |
+| Step | Content                                                    | Status      |
+| ---- | ---------------------------------------------------------- | ----------- |
+| 1    | Foundations and working-time calendar                      | Done        |
+| 2    | Scheduling engine                                          | Done        |
+| 3    | Tags and person or team conflicts                          | Done        |
+| 4    | Shared model, project file, validation, JSON and CSV       | Done        |
+| 5    | Secure Electron shell and Svelte user interface            | In progress |
+| 6    | PDF export and comparison of the page splitting strategies | Planned     |
+| 7    | Real-time collaboration on the local network               | Planned     |
+| 8    | End-to-end encrypted relay                                 | Planned     |
+| 9    | Distribution                                               | Planned     |
 
 ## Step 4: shared model, project file, validation, JSON and CSV
 
@@ -83,11 +83,14 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 - The three most recent projects; open, save, save as, import and export dialogs.
 - The regional format of the system (list separator, date order, clock) is read by the main process for CSV exchange; every file error has an English message in the translation file.
 
-### 5c. Interface foundations
+### 5c. Interface foundations (done)
 
-- Svelte 5 application with the Fayr design tokens, light and dark themes and the Jost font embedded with its licence.
-- Translation structure (`en.json`, typed keys, no text in code, languages loaded on demand); dates and numbers in the regional format.
-- Scheduling in a Web Worker; the page holds the shared project and applies local edits and received updates; undo and redo are local to each user.
+- Svelte 5 interface, with its compiler, type checker, formatter and linter; no inline style or script, so the strict content security policy is kept.
+- Sober light theme "Sand & Graphite" (warm neutrals, graphite actions, so that the task bars carry the colour): every colour is a style variable, ready for custom themes, and a test checks the WCAG AA contrasts. Jost font embedded with its licence (Latin and Latin Extended).
+- Translation structure: typed keys in `en.json`, loaded on demand; a test refuses any visible text written directly in a component. Dates and numbers follow the regional format.
+- Scheduling in a Web Worker, one computation at a time, the latest change only, so that no older result is ever shown.
+- Undo and redo local to each user, never undoing the changes of others; an undone step made invalid by them is repaired like a received update.
+- Welcome screen with the recent projects, toolbar (new, open, import, export as CSV or JSON, save, undo, redo, editable project name, save status), tag legend with the task count and dates of the project, messages that explain errors without blocking anything; keyboard shortcuts.
 
 ### 5d. Task table and timeline
 
@@ -101,3 +104,10 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 - Project name and start date, working calendar editor, tag management.
 - Advanced options, disabled by default: critical path, date constraints, baseline plan with ghost bars, always showing patterns.
 - Lists of tag conflicts, repairs, import warnings and located errors.
+
+## After version 1
+
+- Custom themes: a documented theme template, so that a school or a company can apply its own visual identity to the application. To be considered only once the project is finished.
+  - A `themes` folder, easy to open from the application, where a theme file is simply dropped.
+  - A theme is a plain data file (colours only, never code or style sheets), validated like any untrusted file.
+  - Official themes must pass WCAG AA contrasts. A custom theme whose contrasts fail is still accepted, with a warning: its authors remain responsible for their colours.

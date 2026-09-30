@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FileFailureCode } from '../../preload/bridge-contract';
-import { fileErrorMessage } from './messages';
+import { countMessage, fileErrorMessage, fillMessage, loadMessages } from './messages';
 
 const CODES: readonly FileFailureCode[] = [
   'TOO_LARGE',
@@ -21,13 +21,33 @@ const CODES: readonly FileFailureCode[] = [
   'NO_PROJECT',
   'TASK_FAILED',
 ];
+const messages = await loadMessages('en');
 
 describe('fileErrorMessage', () => {
   it.each(CODES)('has a sentence for %s', (code) => {
-    expect(fileErrorMessage(code)).toMatch(/^[A-Z].+\.$/);
+    expect(fileErrorMessage(messages, code)).toMatch(/^[A-Z].+\.$/);
   });
 
   it('shows nothing for a cancelled action', () => {
-    expect(fileErrorMessage('CANCELLED')).toBeNull();
+    expect(fileErrorMessage(messages, 'CANCELLED')).toBeNull();
+  });
+});
+
+describe('fillMessage', () => {
+  it('replaces known placeholders only', () => {
+    expect(fillMessage('{start} – {end} {other}', { start: 'a', end: 'b' })).toBe('a – b {other}');
+  });
+
+  it('never reads inherited properties as values', () => {
+    expect(fillMessage('{toString}', {})).toBe('{toString}');
+  });
+});
+
+describe('countMessage', () => {
+  it('chooses the form for the count and writes it in the regional format', () => {
+    expect(countMessage(messages.status.tasks, 1, 'en-US')).toBe('1 task');
+    expect(countMessage(messages.status.tasks, 0, 'en-US')).toBe('0 tasks');
+    expect(countMessage(messages.status.tasks, 12_345, 'en-US')).toBe('12,345 tasks');
+    expect(countMessage(messages.status.tasks, 12_345, 'fr-FR')).toBe('12\u202F345 tasks');
   });
 });

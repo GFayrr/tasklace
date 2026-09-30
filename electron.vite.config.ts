@@ -1,3 +1,4 @@
+import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'electron-vite';
 
 export default defineConfig({
@@ -15,5 +16,7 @@ export default defineConfig({
       },
     },
   },
-  renderer: {},
+  renderer: {
+    plugins: [svelte()],
+  },
 });

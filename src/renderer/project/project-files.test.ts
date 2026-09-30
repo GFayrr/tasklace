@@ -4,11 +4,18 @@ import { createSharedDocument, readDocumentId } from '../../core/shared/shared-d
 import { project, TEST_DOCUMENT_ID, workTask } from '../../core/testing/project-builder';
 import type { BridgeResult, OpenedProject } from '../../preload/bridge-contract';
 import type { Timer } from './autosave';
-import { createProjectFiles, FileActionError, type ProjectBridge } from './project-files';
+import {
+  createProjectFiles,
+  FileActionError,
+  type ProjectBridge,
+  type ProjectFilesListener,
+  type SaveStatus,
+} from './project-files';
 
 const OTHER_ID = '00000000-0000-4000-8000-000000000002';
 const SAMPLE = project([workTask('a')]);
 const SAVED: BridgeResult<null> = { ok: true, value: null };
+const QUIET: ProjectFilesListener = { failed: () => undefined, saveStatus: () => undefined };
 
 /** A timer driven by hand. */
 function manualTimer(): Timer & { readonly fire: () => void } {
@@ -64,7 +71,7 @@ describe('createProjectFiles', () => {
   it('creates a project under the identifier the main process gives, and saves it a little after a change', async () => {
     const timer = manualTimer();
     const { bridge, saves } = fakeBridge(openedOf(OTHER_ID));
-    const files = createProjectFiles(bridge, () => undefined, timer);
+    const files = createProjectFiles(bridge, QUIET, timer);
     const session = await files.create(SAMPLE);
     expect(session.documentId).toBe(TEST_DOCUMENT_ID);
     session.apply({ type: 'updateProject', fields: { name: 'Renamed' } });
@@ -77,7 +84,7 @@ describe('createProjectFiles', () => {
   it('saves the current project before opening another, then follows only the new one', async () => {
     const timer = manualTimer();
     const { bridge, saves } = fakeBridge(openedOf(OTHER_ID));
-    const files = createProjectFiles(bridge, () => undefined, timer);
+    const files = createProjectFiles(bridge, QUIET, timer);
     const first = await files.create(SAMPLE);
     first.apply({ type: 'updateProject', fields: { name: 'Unsaved' } });
     const opened = await files.open();
@@ -91,7 +98,7 @@ describe('createProjectFiles', () => {
 
   it('asks where to save a project without file, then saves it to its file', async () => {
     const { bridge, saves } = fakeBridge(openedOf(OTHER_ID));
-    const files = createProjectFiles(bridge, () => undefined, manualTimer());
+    const files = createProjectFiles(bridge, QUIET, manualTimer());
     await files.create(SAMPLE);
     await files.save();
     await files.save();
@@ -106,7 +113,11 @@ describe('createProjectFiles', () => {
     const failures: unknown[] = [];
     const failed: BridgeResult<never> = { ok: false, error: { code: 'WRITE_FAILED' } };
     const { bridge } = fakeBridge(failed, failed);
-    const files = createProjectFiles(bridge, (error) => failures.push(error), timer);
+    const files = createProjectFiles(
+      bridge,
+      { failed: (error) => failures.push(error), saveStatus: () => undefined },
+      timer,
+    );
     const session = await files.create(SAMPLE);
     session.apply({ type: 'updateProject', fields: { name: 'Renamed' } });
     timer.fire();
@@ -120,11 +131,38 @@ describe('createProjectFiles', () => {
     document.getMap('project').delete('documentId');
     const state = Y.encodeStateAsUpdate(document);
     const { bridge } = fakeBridge({ ok: true, value: { state, name: 'Plan', warnings: [] } });
-    const files = createProjectFiles(bridge, () => undefined, manualTimer());
+    const files = createProjectFiles(bridge, QUIET, manualTimer());
     expect(await files.open()).toEqual({
       ok: false,
       error: { code: 'INVALID_PROJECT', issues: [{ path: 'documentId', code: 'MISSING_FIELD' }] },
     });
     expect(files.session()).toBeNull();
+  });
+
+  it('tells whether the latest changes are saved, a failed save keeping them marked', async () => {
+    const timer = manualTimer();
+    const statuses: SaveStatus[] = [];
+    const listener = {
+      failed: () => undefined,
+      saveStatus: (status: SaveStatus) => statuses.push(status),
+    };
+    const { bridge } = fakeBridge(openedOf(OTHER_ID));
+    const files = createProjectFiles(bridge, listener, timer);
+    const session = await files.create(SAMPLE);
+    expect(files.hasFile()).toBe(false);
+    session.apply({ type: 'updateProject', fields: { name: 'Renamed' } });
+    timer.fire();
+    await settle();
+    expect(statuses).toEqual(['saved', 'unsaved', 'saving', 'saved']);
+    const failing = fakeBridge(openedOf(OTHER_ID), { ok: false, error: { code: 'WRITE_FAILED' } });
+    const failedStatuses: SaveStatus[] = [];
+    const other = createProjectFiles(
+      failing.bridge,
+      { failed: () => undefined, saveStatus: (status) => failedStatuses.push(status) },
+      manualTimer(),
+    );
+    await other.create(SAMPLE);
+    expect(await other.save()).toEqual({ ok: false, error: { code: 'WRITE_FAILED' } });
+    expect(failedStatuses.at(-1)).toBe('failed');
   });
 });
