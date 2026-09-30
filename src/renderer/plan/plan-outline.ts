@@ -2,6 +2,8 @@ import { compareStrings } from '../../core/compare-strings';
 import { compareWbsNumbers, formatPredecessors } from '../../core/exchange/csv/task-notations';
 import type { Dependency, Task, TaskId } from '../../core/model/project';
 
+export const NOTHING_COLLAPSED: ReadonlySet<TaskId> = new Set();
+
 export interface PlanRow {
   readonly task: Task;
   readonly depth: number;

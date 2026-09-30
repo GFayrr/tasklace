@@ -66,6 +66,9 @@ export interface SharedSession {
   readonly openingRepairs: readonly SharedRepair[];
   readonly project: () => Project;
   readonly apply: (operation: SharedOperation) => Result<void, readonly ValidationIssue[]>;
+  readonly applyAll: (
+    operations: readonly SharedOperation[],
+  ) => Result<void, readonly ValidationIssue[]>;
   readonly merge: (update: Uint8Array) => Result<readonly SharedRepair[], MergeFailure>;
   readonly history: SessionHistory;
 }
@@ -167,6 +170,7 @@ export function openValidatedSession(
       .sort((left, right) => compareStrings(left.id, right.id)),
     project: () => currentProject(session),
     apply: (operation) => applyOperationToSession(session, document, operation),
+    applyAll: (operations) => applyOperationsToSession(session, document, operations),
     merge: (update) => mergeIntoSession(session, document, update),
     history: createHistory(session, document),
   };
@@ -253,6 +257,43 @@ function applyOperationToSession(
     writeTouched(document, session.state, checked.value);
   }, LOCAL_ORIGIN);
   return success(undefined);
+}
+
+/** Checks operations one after another on the indexed state and writes all they touched in one change, or nothing at all when one of them is refused. */
+function applyOperationsToSession(
+  session: SessionState,
+  document: Y.Doc,
+  operations: readonly SharedOperation[],
+): Result<void, readonly ValidationIssue[]> {
+  const all: TouchedItems = {
+    tasks: new Set(),
+    dependencies: new Set(),
+    tags: new Set(),
+    header: false,
+  };
+  for (const operation of operations) {
+    const checked = applyToState(session.state, operation);
+    if (!checked.ok) {
+      session.stateChanged = true;
+      restoreState(session, document);
+      session.project = null;
+      return checked;
+    }
+    addTouched(all, checked.value);
+  }
+  session.project = null;
+  document.transact(() => {
+    writeTouched(document, session.state, all);
+  }, LOCAL_ORIGIN);
+  return success(undefined);
+}
+
+/** Adds the items one operation touched to those of the previous ones. */
+function addTouched(all: TouchedItems, more: TouchedItems): void {
+  more.tasks.forEach((id) => all.tasks.add(id));
+  more.dependencies.forEach((id) => all.dependencies.add(id));
+  more.tags.forEach((id) => all.tags.add(id));
+  all.header ||= more.header;
 }
 
 /** Writes the touched project fields, tasks, dependencies and tags of the state to a document, deleting those that no longer exist. */

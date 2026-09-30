@@ -92,12 +92,14 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 - Undo and redo local to each user, never undoing the changes of others; an undone step made invalid by them is repaired like a received update.
 - Welcome screen with the recent projects, toolbar (new, open, import, export as CSV or JSON, save, undo, redo, editable project name, save status), tag legend with the task count and dates of the project, messages that explain errors without blocking anything; keyboard shortcuts.
 
-### 5d. Task table and timeline
+### 5d. Task table and timeline (done)
 
-- Virtualized, editable task table: WBS, name, duration, start, end, progress, predecessors.
-- Canvas timeline: two-level time scale, hour, day, week and month zooms, shaded non-working periods, today line, split blocks, milestone diamonds, summary bars, progress, dependency arrows, tag colors and patterns, conflict outlines.
-- Creating, editing, moving, linking, indenting and reordering tasks with the mouse and the keyboard.
-- Only visible rows are drawn, for 60 frames per second on 10,000 tasks.
+- Task table in WBS order (WBS, name, duration, start, end, progress, predecessors), drawing only the visible rows, with the WBS and name columns kept in view; summaries can be collapsed.
+- Canvas timeline: two-level time scale, hour, day, week and month zooms keeping the middle instant, shaded non-working periods, today line, split blocks, progress, milestone diamonds, summary bars, dependency arrows, tag colours and patterns, conflict outlines.
+- Editing from the toolbar, the keyboard and the table: add, delete, rename, indent (Alt+Shift+→) and outdent (Alt+Shift+←), reorder (Alt+↑ and Alt+↓), turn into a milestone, type a duration in hours or working days, a start date, a progress or predecessors in the notation of the CSV table.
+- On the timeline: move a bar to set its start date, stretch its end to change its duration, drag from the handle of the selected bar to another bar to link them; bars align to the hour at the hour zoom, to the day otherwise.
+- Every change is checked by the shared session as one step, undone in one step, and explained when refused; the zoom sits in the status bar.
+- 60 frames per second while scrolling 10,000 tasks; a change refreshes what the interface shows within a frame.
 
 ### 5e. Project settings and advanced options
 

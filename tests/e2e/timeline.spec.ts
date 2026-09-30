@@ -164,8 +164,8 @@ async function paintedPixels(): Promise<number> {
 
 test('shows the task table and draws the timeline of a project', async () => {
   await openProject(SAMPLE);
-  const table = page.getByRole('table', { name: 'Tasks' });
-  await expect(table.getByRole('row')).toHaveCount(10);
+  const table = page.getByRole('grid', { name: 'Tasks' });
+  await expect(table.getByRole('row')).toHaveCount(11);
   await expect(table.getByRole('row').nth(3)).toContainText('1.2');
   await expect(table.getByRole('row').nth(3)).toContainText('Wireframes');
   await expect(table.getByRole('row').nth(3)).toContainText('28 h');
@@ -185,11 +185,11 @@ test('shows the task table and draws the timeline of a project', async () => {
 
 test('collapses a summary and selects a task in both panes', async () => {
   await openProject(SAMPLE);
-  const table = page.getByRole('table', { name: 'Tasks' });
+  const table = page.getByRole('grid', { name: 'Tasks' });
   await page.getByRole('button', { name: 'Collapse Design' }).click();
-  await expect(table.getByRole('row')).toHaveCount(7);
+  await expect(table.getByRole('row')).toHaveCount(8);
   await page.getByRole('button', { name: 'Expand Design' }).click();
-  await expect(table.getByRole('row')).toHaveCount(10);
+  await expect(table.getByRole('row')).toHaveCount(11);
   await table.getByRole('row', { name: /Front-end/ }).click();
   await expect(table.getByRole('row', { name: /Front-end/ })).toHaveAttribute(
     'aria-selected',
@@ -212,8 +212,8 @@ test('remembers the width of the task table', async () => {
 test('draws only the visible rows of a project of 10,000 tasks', async () => {
   const large = { ...buildLargeProject(), name: 'Large plan' };
   await openProject(large);
-  const table = page.getByRole('table', { name: 'Tasks' });
-  await expect(table).toHaveAttribute('aria-rowcount', '10001');
+  const table = page.getByRole('grid', { name: 'Tasks' });
+  await expect(table).toHaveAttribute('aria-rowcount', '10002');
   const shown = await table.getByRole('row').count();
   expect(shown).toBeLessThan(60);
   await expect.poll(paintedPixels).toBeGreaterThan(1_000);

@@ -1,5 +1,18 @@
 <script lang="ts">
-  export type IconName = 'plus' | 'chevron' | 'undo' | 'redo' | 'check' | 'close' | 'alert';
+  export type IconName =
+    | 'plus'
+    | 'chevron'
+    | 'undo'
+    | 'redo'
+    | 'check'
+    | 'close'
+    | 'alert'
+    | 'indent'
+    | 'outdent'
+    | 'up'
+    | 'down'
+    | 'diamond'
+    | 'trash';
 
   let { name }: { name: IconName } = $props();
 </script>
@@ -24,6 +37,18 @@
     <path d="m15 14 5-5-5-5" /><path d="M20 9H9a5 5 0 0 0 0 10h3" />
   {:else if name === 'check'}
     <path d="M20 6 9 17l-5-5" />
+  {:else if name === 'indent'}
+    <path d="M4 6h16M10 12h10M10 18h10" /><path d="m4 10 3 2-3 2" />
+  {:else if name === 'outdent'}
+    <path d="M4 6h16M10 12h10M10 18h10" /><path d="M7 10 4 12l3 2" />
+  {:else if name === 'up'}
+    <path d="M12 19V5M6 11l6-6 6 6" />
+  {:else if name === 'down'}
+    <path d="M12 5v14M6 13l6 6 6-6" />
+  {:else if name === 'diamond'}
+    <path d="M12 3 21 12 12 21 3 12z" />
+  {:else if name === 'trash'}
+    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
   {:else if name === 'close'}
     <path d="M18 6 6 18M6 6l12 12" />
   {:else}

@@ -42,3 +42,11 @@ export function countMessage(message: PluralMessage, count: number, locale: stri
   const form = new Intl.PluralRules(locale).select(count) === 'one' ? message.one : message.other;
   return fillMessage(form, { count: new Intl.NumberFormat(locale).format(count) });
 }
+
+/** Returns the message telling the user why a change was refused, a general one for a reason without its own message. */
+export function editErrorMessage(messages: Messages, code: string): string {
+  const known: Readonly<Record<string, string>> = messages.editErrors;
+  return Object.hasOwn(known, code)
+    ? (known[code] ?? messages.editErrors.NOT_POSSIBLE)
+    : messages.editErrors.NOT_POSSIBLE;
+}

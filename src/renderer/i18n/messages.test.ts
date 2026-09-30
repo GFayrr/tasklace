@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { FileFailureCode } from '../../preload/bridge-contract';
-import { countMessage, fileErrorMessage, fillMessage, loadMessages } from './messages';
+import {
+  countMessage,
+  editErrorMessage,
+  fileErrorMessage,
+  fillMessage,
+  loadMessages,
+} from './messages';
 
 const CODES: readonly FileFailureCode[] = [
   'TOO_LARGE',
@@ -49,5 +55,13 @@ describe('countMessage', () => {
     expect(countMessage(messages.status.tasks, 0, 'en-US')).toBe('0 tasks');
     expect(countMessage(messages.status.tasks, 12_345, 'en-US')).toBe('12,345 tasks');
     expect(countMessage(messages.status.tasks, 12_345, 'fr-FR')).toBe('12\u202F345 tasks');
+  });
+});
+
+describe('editErrorMessage', () => {
+  it('explains a known reason, and falls back to a general sentence', () => {
+    expect(editErrorMessage(messages, 'DEPENDENCY_CYCLE')).toMatch(/loop/);
+    expect(editErrorMessage(messages, 'SOMETHING_ELSE')).toBe(messages.editErrors.NOT_POSSIBLE);
+    expect(editErrorMessage(messages, 'toString')).toBe(messages.editErrors.NOT_POSSIBLE);
   });
 });
