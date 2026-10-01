@@ -16,10 +16,25 @@ import type {
   RecentProject,
   TasklaceBridge,
 } from '../../preload/bridge-contract';
-import { countMessage, editErrorMessage, fileErrorMessage, type Messages } from '../i18n/messages';
+import { createDayFormatter } from '../i18n/format';
+import {
+  countMessage,
+  editErrorMessage,
+  fileErrorMessage,
+  fillMessage,
+  type Messages,
+} from '../i18n/messages';
 import type { EditableColumn } from '../plan/cell-editing';
 import { buildPlanOutline, NOTHING_COLLAPSED, toggledSummary } from '../plan/plan-outline';
-import { deleteTasks, insertTask, type Edit, type EditContext } from '../plan/task-commands';
+import { taskFromDraft, type TaskDraft } from '../plan/task-details';
+import {
+  deleteTasks,
+  insertTask,
+  replaceTask,
+  type Edit,
+  type EditContext,
+} from '../plan/task-commands';
+import type { SharedOperation } from '../../core/shared/shared-operations';
 import { buildNewProject } from '../project/new-project';
 import {
   createProjectFiles,
@@ -33,14 +48,14 @@ import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
 import type { Theme } from '../theme/theme';
 import type { Command } from './shortcuts';
 
-export type NoticeKind = 'error' | 'warning';
+export type NoticeKind = 'error' | 'warning' | 'info';
 
 export interface EditRequest {
   readonly taskId: TaskId;
   readonly column: EditableColumn;
 }
 
-const DEFAULT_DAY_HOURS = 8;
+const DEFAULT_DAY_HOURS = 9;
 const DEFAULT_TABLE_FORMAT: RegionalFormat = {
   listSeparator: ',',
   dateOrder: 'yearMonthDay',
@@ -77,6 +92,7 @@ export class AppState {
   zoom = $state<ZoomLevel>('day');
   selectedTaskId = $state<TaskId | null>(null);
   editRequest = $state<EditRequest | null>(null);
+  detailsTaskId = $state<TaskId | null>(null);
   collapsed = $state.raw<ReadonlySet<TaskId>>(NOTHING_COLLAPSED);
   openedCount = $state(0);
   regionalFormat = $state.raw<RegionalFormat>(DEFAULT_TABLE_FORMAT);
@@ -214,23 +230,58 @@ export class AppState {
 
   /** Applies a change built from the current project, telling the user why when it is refused. */
   edit(build: (context: EditContext) => Edit): boolean {
+    const refusal = this.tryEdit(build);
+    if (refusal !== null) {
+      this.#notify('error', refusal);
+    }
+    return refusal === null;
+  }
+
+  /** Applies a change built from the current project, returning why it was refused, or null once applied. */
+  tryEdit(
+    build: (context: EditContext) => Result<readonly SharedOperation[], string>,
+  ): string | null {
     const session = this.#session;
     const project = this.project;
     if (session === null || project === null) {
-      return false;
+      return editErrorMessage(this.messages, 'NOT_POSSIBLE');
     }
     const edit = build(this.#editContext(project));
     if (!edit.ok) {
-      this.#notify('error', editErrorMessage(this.messages, edit.error));
-      return false;
+      return editErrorMessage(this.messages, edit.error);
     }
     const applied = session.applyAll(edit.value);
     if (!applied.ok) {
-      this.#notify('error', editErrorMessage(this.messages, applied.error[0]?.code ?? ''));
-      return false;
+      return editErrorMessage(this.messages, applied.error[0]?.code ?? '');
     }
     this.#refresh();
-    return true;
+    this.#notifyStartMove(project.startDate);
+    return null;
+  }
+
+  /** Opens the details panel of a task, or of the selected task. */
+  openDetails(id: TaskId | null = this.selectedTaskId): void {
+    if (id !== null) {
+      this.selectedTaskId = id;
+      this.detailsTaskId = id;
+    }
+  }
+
+  /** Applies the details panel to its task, returning why it was refused, or null once applied. */
+  saveDetails(draft: TaskDraft): string | null {
+    const id = this.detailsTaskId;
+    const task = this.project?.tasks.find((candidate) => candidate.id === id);
+    if (task === undefined) {
+      return editErrorMessage(this.messages, 'NOT_POSSIBLE');
+    }
+    const refusal = this.tryEdit((context) => {
+      const built = taskFromDraft(task, draft, context.dayHours);
+      return built.ok ? replaceTask(context, built.value) : built;
+    });
+    if (refusal === null) {
+      this.detailsTaskId = null;
+    }
+    return refusal;
   }
 
   /** Adds a task after the selected one, selects it and asks the table to edit its name. */
@@ -326,7 +377,7 @@ export class AppState {
           ? this.outline
           : buildPlanOutline(project.tasks, NOTHING_COLLAPSED),
       createId: this.#context.createId,
-      dayHours: this.calendar?.workingHoursOfDay.length ?? DEFAULT_DAY_HOURS,
+      dayHours: this.calendar?.workingHoursPerDay ?? DEFAULT_DAY_HOURS,
     };
   }
 
@@ -337,6 +388,7 @@ export class AppState {
     this.schedule = null;
     this.selectedTaskId = null;
     this.editRequest = null;
+    this.detailsTaskId = null;
     this.collapsed = NOTHING_COLLAPSED;
     this.openedCount += 1;
     session.document.on('update', this.#queueRefresh);
@@ -407,6 +459,15 @@ export class AppState {
     const text = fileErrorMessage(this.messages, result.error.code);
     if (text !== null) {
       this.#notify('error', text);
+    }
+  }
+
+  /** Tells the user that the project now starts earlier, so that a task placed before it fits. */
+  #notifyStartMove(previousStart: number): void {
+    const start = this.project?.startDate;
+    if (start !== undefined && start < previousStart) {
+      const date = createDayFormatter(this.locale)(start);
+      this.#notify('info', fillMessage(this.messages.notices.projectStartMoved, { date }));
     }
   }
 

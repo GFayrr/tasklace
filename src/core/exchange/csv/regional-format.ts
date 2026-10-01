@@ -55,6 +55,11 @@ const AFTERNOON_MARK = 'p';
 const MORNING = 'AM';
 const AFTERNOON = 'PM';
 
+/** Returns the decimal mark of a region: a comma where the list separator is a semicolon, a dot otherwise. */
+export function decimalMarkOf(format: RegionalFormat): string {
+  return format.listSeparator === ';' ? ',' : '.';
+}
+
 /** Writes a project hour as a date and an hour in the regional format, which spreadsheets read as a real date. */
 export function formatRegionalDateTime(hour: ProjectHour, format: RegionalFormat): string {
   const civil = fromProjectHour(hour);
@@ -66,7 +71,8 @@ export function formatRegionalDateTime(hour: ProjectHour, format: RegionalFormat
     monthDayYear: [month, day, year],
     yearMonthDay: [year, month, day],
   }[format.dateOrder];
-  return `${parts.join(format.dateSeparator)} ${formatHour(civil.hour, format.twelveHourClock)}`;
+  const time = formatTime(civil.hour, civil.minute, format.twelveHourClock);
+  return `${parts.join(format.dateSeparator)} ${time}`;
 }
 
 /** Returns a function writing project hours in the regional format, each distinct hour being formatted only once. */
@@ -99,7 +105,7 @@ export function createDateParser(format: RegionalFormat): DateParser {
   };
 }
 
-/** Reads a date, with or without an hour, in ISO form or in the regional date order with any of "/", "." or "-", refusing minutes or seconds other than zero. */
+/** Reads a date, with or without a time, in ISO form or in the regional date order with any of "/", "." or "-", refusing a time that is not a whole quarter hour. */
 export function parseCsvDate(
   text: string,
   format: RegionalFormat,
@@ -134,7 +140,7 @@ function orderDate(first: string, second: string, third: string, order: DateOrde
 
 /** Builds a date, or a date and hour when a time is given, from the texts of its parts. */
 function buildDate(date: DateTexts, time: TimeTexts): Result<CsvDate, 'INVALID_DATE'> {
-  if (toNumber(time.minute) !== 0 || toNumber(time.second) !== 0) {
+  if (toNumber(time.second) !== 0) {
     return failure('INVALID_DATE');
   }
   const hour = time.hour === undefined ? 0 : toDayHour(toNumber(time.hour), time.halfDay);
@@ -146,6 +152,7 @@ function buildDate(date: DateTexts, time: TimeTexts): Result<CsvDate, 'INVALID_D
     month: toNumber(date.month),
     day: toNumber(date.day),
     hour,
+    minute: toNumber(time.minute),
   });
   if (!converted.ok) {
     return failure('INVALID_DATE');
@@ -178,13 +185,14 @@ function toDayHour(hour: number, halfDay: string | undefined): number | null {
   return (hour % HALF_DAY_HOURS) + (isAfternoon ? HALF_DAY_HOURS : 0);
 }
 
-/** Writes an hour of the day on a 24-hour clock, or on a 12-hour clock with its half-day mark. */
-function formatHour(hour: number, twelveHourClock: boolean): string {
+/** Writes a time of day on a 24-hour clock, or on a 12-hour clock with its half-day mark. */
+function formatTime(hour: number, minute: number, twelveHourClock: boolean): string {
+  const minutes = pad(minute, TWO_DIGITS);
   if (!twelveHourClock) {
-    return `${pad(hour, TWO_DIGITS)}:00`;
+    return `${pad(hour, TWO_DIGITS)}:${minutes}`;
   }
   const clockHour = hour % HALF_DAY_HOURS === 0 ? HALF_DAY_HOURS : hour % HALF_DAY_HOURS;
-  return `${String(clockHour)}:00 ${hour < HALF_DAY_HOURS ? MORNING : AFTERNOON}`;
+  return `${String(clockHour)}:${minutes} ${hour < HALF_DAY_HOURS ? MORNING : AFTERNOON}`;
 }
 
 /** Converts decimal digits into a number, a missing part counting as zero. */

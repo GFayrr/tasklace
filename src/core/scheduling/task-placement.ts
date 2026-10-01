@@ -12,11 +12,17 @@ import { failure, success, type Result } from '../result';
 import {
   END_PROJECT_HOUR,
   MIN_PROJECT_HOUR,
+  QUARTER_HOUR,
   dayIndexOf,
+  fromQuarters,
   isProjectHour,
+  isQuarterHours,
   startOfDay,
+  toQuarters,
   type ProjectHour,
 } from '../time';
+
+const HALF = 2;
 
 export interface ScheduledSegment {
   readonly start: ProjectHour;
@@ -100,7 +106,7 @@ export function placeTaskLatest(
   if (direct !== null) {
     return placeTask(calendar, task, direct);
   }
-  const upperBound = Math.min(latestEnd, END_PROJECT_HOUR - 1);
+  const upperBound = Math.min(latestEnd, END_PROJECT_HOUR - QUARTER_HOUR);
   const firstLate = findFirstStartWhere(
     calendar,
     task,
@@ -111,7 +117,7 @@ export function placeTaskLatest(
   if (!firstLate.ok) {
     return firstLate;
   }
-  return placeTask(calendar, task, Math.max(firstLate.value - 1, MIN_PROJECT_HOUR));
+  return placeTask(calendar, task, Math.max(firstLate.value - QUARTER_HOUR, MIN_PROJECT_HOUR));
 }
 
 /** Computes on demand the exact working time slots of every block of a placed work task. */
@@ -138,9 +144,9 @@ export function computePlacementSlots(
 
 /** Tells whether a task works every working hour of its working days, so that each block covers all working time between its bounds. */
 export function worksFullDays(calendar: CompiledCalendar, task: WorkTask): boolean {
-  const [firstWorkingHour] = calendar.workingHoursOfDay;
+  const [firstWorkingHour] = calendar.workingQuartersOfDay;
   return (
-    (task.hoursPerDay === null || task.hoursPerDay === calendar.workingHoursOfDay.length) &&
+    (task.hoursPerDay === null || task.hoursPerDay === calendar.workingHoursPerDay) &&
     (task.dailyStartHour === null || task.dailyStartHour <= firstWorkingHour)
   );
 }
@@ -158,7 +164,7 @@ function latestContinuousStart(
   latestEnd: ProjectHour,
 ): ProjectHour | null {
   const byEnd = subtractWorkingHours(calendar, latestEnd, totalDurationHours(task));
-  const byStart = subtractWorkingHours(calendar, latestStart + 1, 1);
+  const byStart = subtractWorkingHours(calendar, latestStart + QUARTER_HOUR, QUARTER_HOUR);
   return byEnd.ok && byStart.ok ? Math.min(byEnd.value, byStart.value) : null;
 }
 
@@ -167,7 +173,7 @@ function totalDurationHours(task: WorkTask): number {
   return task.segments.reduce((total, segment) => total + segment.durationHours, 0);
 }
 
-/** Finds by binary search the first start in a range whose placement satisfies a monotonic predicate. */
+/** Finds by binary search, among the quarter hours of a range, the first start whose placement satisfies a monotonic predicate. */
 function findFirstStartWhere(
   calendar: CompiledCalendar,
   task: WorkTask,
@@ -175,11 +181,11 @@ function findFirstStartWhere(
   high: ProjectHour,
   predicate: (placement: Placement) => boolean,
 ): Result<ProjectHour, PlacementErrorCode> {
-  let lastFalse = low - 1;
-  let firstTrue = high;
+  let lastFalse = toQuarters(low) - 1;
+  let firstTrue = toQuarters(high);
   while (firstTrue - lastFalse > 1) {
-    const middle = (lastFalse + firstTrue) >> 1;
-    const placement = placeTask(calendar, task, middle);
+    const middle = Math.floor((lastFalse + firstTrue) / HALF);
+    const placement = placeTask(calendar, task, fromQuarters(middle));
     if (!placement.ok) {
       return placement;
     }
@@ -189,7 +195,7 @@ function findFirstStartWhere(
       lastFalse = middle;
     }
   }
-  return success(firstTrue);
+  return success(fromQuarters(firstTrue));
 }
 
 /** Tells whether a task has a supported number of blocks with valid durations and gaps. */
@@ -199,8 +205,8 @@ function hasValidSegments(segments: readonly TaskSegment[]): boolean {
   }
   return segments.every(
     (segment, index) =>
-      Number.isInteger(segment.durationHours) &&
-      segment.durationHours >= 1 &&
+      isQuarterHours(segment.durationHours) &&
+      segment.durationHours >= QUARTER_HOUR &&
       isValidGap(segment.gapDaysBefore, index === 0),
   );
 }
@@ -224,7 +230,7 @@ function placeSegments(
   for (const segment of task.segments) {
     const previous = segments.at(-1);
     if (previous !== undefined) {
-      resumeFrom = startOfDay(dayIndexOf(previous.end - 1) + segment.gapDaysBefore);
+      resumeFrom = startOfDay(dayIndexOf(previous.end - QUARTER_HOUR) + segment.gapDaysBefore);
     }
     const placed = placeSegment(calendar, task, segment, resumeFrom);
     if (!placed.ok) {

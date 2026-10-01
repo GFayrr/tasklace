@@ -5,7 +5,7 @@ import { compareStrings } from '../compare-strings';
 import { MAX_TASKS } from '../limits';
 import type { Tag, TagId, Task, TaskId } from '../model/project';
 import { computePlacementSlots, worksFullDays, type Placement } from '../scheduling/task-placement';
-import type { ProjectHour } from '../time';
+import { fromQuarters, toQuarters, type ProjectHour } from '../time';
 
 export interface TagConflict {
   readonly tagId: TagId;
@@ -120,14 +120,14 @@ function appendSlotEvents(
   eventsByTag.set(tagId, events);
 }
 
-/** Packs an event into one number whose natural order is by time, then ends before starts. */
+/** Packs an event into one number whose natural order is by time, counted in quarter hours, then ends before starts. */
 function encodeEvent(time: ProjectHour, kind: number, taskIndex: number): number {
-  return (time * EVENT_KINDS + kind) * TASK_INDEX_BASE + taskIndex;
+  return (toQuarters(time) * EVENT_KINDS + kind) * TASK_INDEX_BASE + taskIndex;
 }
 
 /** Returns the instant of an encoded event. */
 function eventTime(key: number): ProjectHour {
-  return Math.floor(key / TASK_INDEX_BASE / EVENT_KINDS);
+  return fromQuarters(Math.floor(key / TASK_INDEX_BASE / EVENT_KINDS));
 }
 
 /** Walks the events of one tag in time order and groups the periods where two tasks or more are active. */

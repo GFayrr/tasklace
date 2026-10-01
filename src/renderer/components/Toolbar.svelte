@@ -64,6 +64,13 @@
       },
     },
     {
+      icon: 'sliders',
+      label: text.tasks.details,
+      run: () => {
+        app.openDetails();
+      },
+    },
+    {
       icon: 'diamond',
       label: text.tasks.milestone,
       run: () => {

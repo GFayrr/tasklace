@@ -1,4 +1,4 @@
-import { HOURS_PER_DAY, type ProjectHour } from '../../core/time';
+import { HOURS_PER_DAY, QUARTER_HOUR, type ProjectHour } from '../../core/time';
 
 export type ZoomLevel = 'hour' | 'day' | 'week' | 'month';
 
@@ -69,9 +69,9 @@ export function zoomedScrollLeft(
   return Math.max(0, (scrollLeft + middle) * ratio - middle);
 }
 
-/** Returns the unit a moved or stretched bar aligns to: the hour at the hour zoom, the day otherwise. */
+/** Returns the unit a moved or stretched bar aligns to: the quarter hour at the hour zoom, the day otherwise. */
 export function snapHours(zoom: ZoomLevel): number {
-  return zoom === 'hour' ? 1 : HOURS_PER_DAY;
+  return zoom === 'hour' ? QUARTER_HOUR : HOURS_PER_DAY;
 }
 
 /** Lists the two rows of labels of the time scale between two instants, each label covering its whole period. */

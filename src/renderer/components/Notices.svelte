@@ -56,6 +56,10 @@
     color: var(--color-warning);
   }
 
+  .notice.info {
+    color: var(--color-text-secondary);
+  }
+
   p {
     flex-grow: 1;
     margin: 0;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
-import { DEFAULT_CALENDAR } from '../calendar/default-calendar';
+import { TEST_CALENDAR } from '../testing/test-calendar';
 import { countWorkingHours } from '../calendar/working-time';
 import type { Tag, Task, TaskId } from '../model/project';
 import type { Schedule } from '../scheduling/schedule-project';
@@ -18,7 +18,7 @@ const TAGS: Tag[] = [
 const PERSON_TAG_IDS = ['alice', 'bob'];
 const TAG_CHOICES = ['alice', 'bob', 'design', 'deleted', null] as const;
 const HOURS_IN_TWO_WEEKS = 14 * 24;
-const calendar = compileOrThrow(DEFAULT_CALENDAR);
+const calendar = compileOrThrow(TEST_CALENDAR);
 
 const LATEST_AFTERNOON_HOURS = 4;
 

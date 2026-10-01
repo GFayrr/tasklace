@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CALENDAR } from '../calendar/default-calendar';
+import { TEST_CALENDAR } from '../testing/test-calendar';
 import type { Dependency, Project, Task, WorkTask } from '../model/project';
 import { at, format } from '../testing/civil-time';
 import {
@@ -349,7 +349,7 @@ describe('scheduleProject: critical path', () => {
 describe('scheduleProject: failures', () => {
   it('reports an invalid calendar', () => {
     const result = scheduleProject(
-      project([], [], { calendar: { ...DEFAULT_CALENDAR, workingWeekdays: [] } }),
+      project([], [], { calendar: { ...TEST_CALENDAR, workingWeekdays: [] } }),
     );
     expect(result).toEqual({
       ok: false,

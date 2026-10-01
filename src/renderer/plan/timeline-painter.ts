@@ -4,7 +4,15 @@ import type { DayRange } from '../../core/model/calendar';
 import type { Dependency, TagId, TaskId } from '../../core/model/project';
 import type { Schedule } from '../../core/scheduling/schedule-project';
 import type { TagPattern } from '../../core/tags/tag-appearance';
-import { dayIndexOf, HOURS_PER_DAY, startOfDay, type ProjectHour } from '../../core/time';
+import {
+  dayIndexOf,
+  fromQuarters,
+  HOURS_PER_DAY,
+  QUARTER_HOUR,
+  QUARTERS_PER_DAY,
+  startOfDay,
+  type ProjectHour,
+} from '../../core/time';
 import type { Theme } from '../theme/theme';
 import type { PlanRow } from './plan-outline';
 import { paleColor, type TagStyle } from './tag-styles';
@@ -106,7 +114,7 @@ export function nonWorkingIntervals(
     if (!isWorkingDay(calendar, day)) {
       intervals.push({ start: dayStart, end: dayStart + HOURS_PER_DAY });
     } else if (zoom === 'hour') {
-      intervals.push(...offHours(calendar.workingHoursOfDay, dayStart));
+      intervals.push(...offHours(calendar.workingQuartersOfDay, dayStart));
     }
   }
   return mergeIntervals(intervals);
@@ -531,13 +539,14 @@ function verticalLine(
   context.stroke();
 }
 
-/** Lists the hours of a working day that are not working hours, as intervals. */
-function offHours(workingHours: readonly number[], dayStart: ProjectHour): HourInterval[] {
-  const working = new Set(workingHours);
+/** Lists the quarter hours of a working day that are not worked, as intervals. */
+function offHours(workingQuarters: readonly number[], dayStart: ProjectHour): HourInterval[] {
+  const working = new Set(workingQuarters);
   const intervals: HourInterval[] = [];
-  for (let hour = 0; hour < HOURS_PER_DAY; hour += 1) {
-    if (!working.has(hour)) {
-      intervals.push({ start: dayStart + hour, end: dayStart + hour + 1 });
+  for (let quarter = 0; quarter < QUARTERS_PER_DAY; quarter += 1) {
+    const start = fromQuarters(quarter);
+    if (!working.has(start)) {
+      intervals.push({ start: dayStart + start, end: dayStart + start + QUARTER_HOUR });
     }
   }
   return intervals;

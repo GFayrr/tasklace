@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CALENDAR } from '../../core/calendar/default-calendar';
+import { TEST_CALENDAR } from '../../core/testing/test-calendar';
 import { at, compileOrThrow, dayOf } from '../../core/testing/civil-time';
 import { paleColor } from './tag-styles';
 import { nonWorkingIntervals, visibleRows } from './timeline-painter';
 import { ROW_HEIGHT } from './timeline-geometry';
 
-const CALENDAR = compileOrThrow(DEFAULT_CALENDAR);
+const CALENDAR = compileOrThrow(TEST_CALENDAR);
 
 describe('visibleRows', () => {
   it('lists the rows a viewport shows, even partly, within the rows that exist', () => {

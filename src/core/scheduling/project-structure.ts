@@ -1,3 +1,4 @@
+import { isQuarterHours } from '../time';
 import {
   MAX_DEPENDENCIES,
   MAX_TAGS,
@@ -256,7 +257,7 @@ function findDependencyError(
     return 'SUMMARY_DEPENDENCY';
   }
   const { lagHours } = dependency;
-  return Number.isInteger(lagHours) && Math.abs(lagHours) <= MAX_LAG_HOURS ? null : 'INVALID_LAG';
+  return isQuarterHours(lagHours) && Math.abs(lagHours) <= MAX_LAG_HOURS ? null : 'INVALID_LAG';
 }
 
 /** Groups tasks by parent identifier, top-level tasks being grouped under null. */

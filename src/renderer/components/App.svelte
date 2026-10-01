@@ -3,6 +3,7 @@
   import { commandOf } from '../app/shortcuts';
   import Notices from './Notices.svelte';
   import StatusBar from './StatusBar.svelte';
+  import TaskDetails from './TaskDetails.svelte';
   import Toolbar from './Toolbar.svelte';
   import Welcome from './Welcome.svelte';
   import Workspace from './Workspace.svelte';
@@ -35,6 +36,7 @@
     <Workspace {app} />
     <StatusBar {app} />
   </div>
+  <TaskDetails {app} />
 {/if}
 <Notices {app} />
 

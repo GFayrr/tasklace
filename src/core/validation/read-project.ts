@@ -40,6 +40,7 @@ import {
   DAYS_PER_WEEK,
   END_PROJECT_HOUR,
   HOURS_PER_DAY,
+  QUARTER_HOUR,
   MAX_DAY_INDEX,
   MIN_DAY_INDEX,
   MIN_PROJECT_HOUR,
@@ -59,6 +60,7 @@ import {
   readEnum,
   readIdentifier,
   readInteger,
+  readQuarterHours,
   readNullable,
   readPatternString,
   readPlainObject,
@@ -78,7 +80,7 @@ export interface ValueCodec {
 
 export const STORED_VALUE_CODEC: ValueCodec = {
   readInstant: (field, issues) =>
-    readInteger(field, issues, MIN_PROJECT_HOUR, END_PROJECT_HOUR - 1),
+    readQuarterHours(field, issues, MIN_PROJECT_HOUR, END_PROJECT_HOUR - QUARTER_HOUR),
   readDay: (field, issues) => readInteger(field, issues, MIN_DAY_INDEX, MAX_DAY_INDEX),
   readWeekday: (field, issues) => {
     const day = readInteger(field, issues, SUNDAY, SATURDAY);
@@ -158,7 +160,8 @@ const CALENDAR_ERROR_LISTS: Readonly<Record<CalendarErrorCode, keyof WorkingCale
 };
 const SORT_KEY_PATTERN = /^[0-9A-Za-z]+$/;
 const FULL_PROGRESS = 100;
-const LAST_HOUR_OF_DAY = HOURS_PER_DAY - 1;
+const LAST_QUARTER_OF_DAY = HOURS_PER_DAY - QUARTER_HOUR;
+const MIN_HOURS_PER_DAY = 1;
 
 /** Validates untrusted data and turns it into a project, or lists the problems found with their locations. */
 export function readProject(
@@ -258,13 +261,18 @@ function readTimeRange(field: Field, issues: IssueList): TimeRange | undefined {
     return undefined;
   }
   const range = {
-    startHour: readInteger(
+    startHour: readQuarterHours(
       childField(record, 'startHour', field.path),
       issues,
       0,
-      LAST_HOUR_OF_DAY,
+      LAST_QUARTER_OF_DAY,
     ),
-    endHour: readInteger(childField(record, 'endHour', field.path), issues, 1, HOURS_PER_DAY),
+    endHour: readQuarterHours(
+      childField(record, 'endHour', field.path),
+      issues,
+      QUARTER_HOUR,
+      HOURS_PER_DAY,
+    ),
   };
   return allDefined(range) ? range : undefined;
 }
@@ -406,9 +414,9 @@ function readWorkTask(
   reportUnknownKeys(record, path, issues, WORK_TASK_KEYS);
   const child = (key: string): Field => childField(record, key, path);
   const readHoursPerDay = (item: Field, list: IssueList): number | undefined =>
-    readInteger(item, list, 1, HOURS_PER_DAY);
+    readQuarterHours(item, list, MIN_HOURS_PER_DAY, HOURS_PER_DAY);
   const readDailyStart = (item: Field, list: IssueList): number | undefined =>
-    readInteger(item, list, 0, LAST_HOUR_OF_DAY);
+    readQuarterHours(item, list, 0, LAST_QUARTER_OF_DAY);
   const task = {
     kind: 'task' as const,
     ...readDatedFields(record, path, issues, codec),
@@ -452,10 +460,10 @@ function readSegment(field: Field, issues: IssueList, isFirst: boolean): TaskSeg
   const minimumGap = isFirst ? 0 : 1;
   const maximumGap = isFirst ? 0 : MAX_SEGMENT_GAP_DAYS;
   const segment = {
-    durationHours: readInteger(
+    durationHours: readQuarterHours(
       childField(record, 'durationHours', field.path),
       issues,
-      1,
+      QUARTER_HOUR,
       MAX_TASK_DURATION_HOURS,
     ),
     gapDaysBefore: readInteger(
@@ -480,7 +488,7 @@ function readDependency(field: Field, issues: IssueList): Dependency | undefined
     predecessorId: readIdentifier(child('predecessorId'), issues),
     successorId: readIdentifier(child('successorId'), issues),
     type: readEnum(child('type'), issues, DEPENDENCY_TYPES),
-    lagHours: readInteger(child('lagHours'), issues, -MAX_LAG_HOURS, MAX_LAG_HOURS),
+    lagHours: readQuarterHours(child('lagHours'), issues, -MAX_LAG_HOURS, MAX_LAG_HOURS),
   };
   return allDefined(dependency) ? dependency : undefined;
 }
@@ -519,7 +527,7 @@ function readBaselineEntry(
     taskId: readIdentifier(child('taskId'), issues),
     start: codec.readInstant(child('start'), issues),
     end: codec.readInstant(child('end'), issues),
-    durationHours: readInteger(child('durationHours'), issues, 0, MAX_BASELINE_DURATION_HOURS),
+    durationHours: readQuarterHours(child('durationHours'), issues, 0, MAX_BASELINE_DURATION_HOURS),
   };
   if (entry.start !== undefined && entry.end !== undefined && entry.end < entry.start) {
     issues.add(`${field.path}.end`, 'OUT_OF_RANGE');
