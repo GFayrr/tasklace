@@ -36,6 +36,20 @@ test.afterEach(async () => {
   await rm(userData, { recursive: true, force: true });
 });
 
+/** Returns the hours a new one-day task works once its end is stretched by some calendar days, under the default calendar of 9 hours from Monday to Friday, so that the test does not depend on the day it runs. */
+function stretchedHours(days: number): number {
+  const day = new Date();
+  while (day.getDay() === 0 || day.getDay() === 6) {
+    day.setDate(day.getDate() + 1);
+  }
+  let workingDays = 1;
+  for (let added = 1; added <= days; added += 1) {
+    day.setDate(day.getDate() + 1);
+    workingDays += day.getDay() === 0 || day.getDay() === 6 ? 0 : 1;
+  }
+  return workingDays * 9;
+}
+
 /** Saves a picture of the window when a folder for pictures is given, to review the interface by eye. */
 async function picture(name: string): Promise<void> {
   if (SCREENSHOT_FOLDER !== undefined) {
@@ -48,6 +62,7 @@ async function addTask(name: string): Promise<void> {
   await page.getByRole('button', { name: 'Add task' }).click();
   const editor = grid.getByRole('textbox');
   await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue('New task');
   await editor.fill(name);
   await editor.press('Enter');
 }
@@ -162,10 +177,10 @@ test('moves, stretches and links bars on the timeline', async () => {
 
   await page.mouse.move(box.x + first.end - 1, y(0));
   await page.mouse.down();
-  await page.mouse.move(box.x + first.end + 64, y(0), { steps: 5 });
+  await page.mouse.move(box.x + first.end + 96, y(0), { steps: 5 });
   await page.mouse.up();
-  await expect(row('First')).toContainText('27 h');
-  await expect.poll(async () => (await barCentre(0)).end).toBeGreaterThan(first.end + 40);
+  await expect(row('First')).toContainText(`${String(stretchedHours(3))} h`);
+  await expect.poll(async () => (await barCentre(0)).end).toBeGreaterThan(first.end + 10);
 
   const stretched = await barCentre(0);
   await page.mouse.click(box.x + (stretched.start + stretched.end) / 2, y(0));

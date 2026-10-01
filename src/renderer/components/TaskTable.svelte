@@ -34,6 +34,7 @@
     readonly taskId: TaskId;
     readonly column: EditableColumn;
     readonly initial: string;
+    readonly text: string;
   }
 
   let { app, formatters, scrollTop, viewportHeight, scrollBy, reveal }: Props = $props();
@@ -122,15 +123,15 @@
     activeColumn = column;
     reveal(index);
     const initial = editorText(task, column, source);
-    editing = { taskId, column, initial };
+    editing = { taskId, column, initial, text: typed ?? initial };
     void tick().then(() => {
       const input = grid?.querySelector<HTMLInputElement | HTMLSelectElement>('.editor');
-      if (input !== undefined && input !== null) {
-        input.value = typed ?? initial;
-        input.focus();
-        if (typed === null && input instanceof HTMLInputElement) {
-          input.select();
-        }
+      if (input === undefined || input === null || document.activeElement === input) {
+        return;
+      }
+      input.focus();
+      if (typed === null && input instanceof HTMLInputElement) {
+        input.select();
       }
     });
   }
@@ -449,6 +450,7 @@
               {#if isEditing && column === 'tag'}
                 <select
                   class="editor"
+                  value={editing?.text}
                   aria-label={fillMessage(text.editCell, {
                     column: columnLabel(column),
                     name: row.task.name,
@@ -469,6 +471,7 @@
               {:else if isEditing}
                 <input
                   class="editor"
+                  value={editing?.text}
                   aria-label={fillMessage(text.editCell, {
                     column: columnLabel(column),
                     name: row.task.name,
