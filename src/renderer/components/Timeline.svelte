@@ -1,10 +1,12 @@
 <script lang="ts">
   import type { TaskId } from '../../core/model/project';
+  import type { LinkEnd } from '../plan/task-commands';
   import { createPatternCache } from '../plan/bar-patterns';
   import { buildScaleTicks, type ScaleLabels } from '../plan/time-scale';
   import {
     DRAG_THRESHOLD,
     gestureAt,
+    targetBlockAt,
     type DragPreview,
     type GestureKind,
     type GestureTarget,
@@ -28,7 +30,7 @@
     readonly select: (id: TaskId) => void;
     readonly moved: (shape: RowShape, offset: number) => void;
     readonly stretched: (shape: RowShape, offset: number) => void;
-    readonly linked: (fromId: TaskId, toRow: number) => void;
+    readonly linked: (from: LinkEnd, toRow: number, toBlock: number | null) => void;
     readonly opened: (id: TaskId) => void;
   }
 
@@ -253,7 +255,15 @@
         candidate === undefined || candidate.kind === 'summary' || candidate.id === target.taskId
           ? null
           : row;
-      preview = { kind: 'link', shape: target.shape, pointer: point, targetRow };
+      const targetShape = targetRow === null ? null : shapeAtY(point.y);
+      preview = {
+        kind: 'link',
+        shape: target.shape,
+        block: target.block,
+        pointer: point,
+        targetRow,
+        targetBlock: targetShape === null ? null : targetBlockAt(targetShape, point.x),
+      };
       return;
     }
     preview = { kind: target.kind, shape: target.shape, offset };
@@ -276,7 +286,7 @@
     } else if (target.kind === 'stretch') {
       stretched(target.shape, offset);
     } else if (shown?.kind === 'link' && shown.targetRow !== null) {
-      linked(target.taskId, shown.targetRow);
+      linked({ taskId: target.taskId, block: target.block }, shown.targetRow, shown.targetBlock);
     }
   }
 

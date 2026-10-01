@@ -25,7 +25,13 @@ const app = new AppState({
   now: () => new Date(),
   theme: SAND_GRAPHITE,
 });
-window.tasklace.onFlushRequested(() => app.flush());
+window.tasklace.onFlushRequested(async () => {
+  if (!(await app.readyToClose())) {
+    return false;
+  }
+  await app.flush();
+  return true;
+});
 mount(App, { target, props: { app } });
 target.dataset['started'] = 'true';
 void app.loadRecentProjects();

@@ -5,7 +5,7 @@ import { MAX_PROJECT_TEXT_UTF16_UNITS, MAX_TAG_NAME_LENGTH } from '../limits';
 import type { Project, Task, WorkTask } from '../model/project';
 import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { at, dayOf } from '../testing/civil-time';
-import { projectArbitrary } from '../testing/project-arbitrary';
+import { interleavedProjectArbitrary, projectArbitrary } from '../testing/project-arbitrary';
 import { link, milestone, project, splitTask, summary, workTask } from '../testing/project-builder';
 import { END_PROJECT_HOUR, MIN_PROJECT_HOUR } from '../time';
 import { createIssueList, type ValidationIssue } from '../validation/validation-issues';
@@ -152,13 +152,16 @@ describe('importProjectJson: round trip', () => {
     { timeout: PROPERTY_TEST_TIMEOUT_MS },
     () => {
       fc.assert(
-        fc.property(projectArbitrary, ({ project: input }) => {
-          const text = exportProjectJson(input);
-          const imported = importProjectJson(text);
-          expect(imported).toEqual({ ok: true, value: input });
-          const written = imported.ok ? exportProjectJson(imported.value) : '';
-          expect(JSON.parse(written)).toEqual(JSON.parse(text));
-        }),
+        fc.property(
+          fc.oneof(projectArbitrary, interleavedProjectArbitrary),
+          ({ project: input }) => {
+            const text = exportProjectJson(input);
+            const imported = importProjectJson(text);
+            expect(imported).toEqual({ ok: true, value: input });
+            const written = imported.ok ? exportProjectJson(imported.value) : '';
+            expect(JSON.parse(written)).toEqual(JSON.parse(text));
+          },
+        ),
       );
     },
   );

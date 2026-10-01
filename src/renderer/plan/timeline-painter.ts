@@ -17,7 +17,12 @@ import type { Theme } from '../theme/theme';
 import type { PlanRow } from './plan-outline';
 import { paleColor, type TagStyle } from './tag-styles';
 import type { ScaleTicks, ZoomLevel } from './time-scale';
-import { LINK_HANDLE_RADIUS, linkHandleCenter, type DragPreview } from './timeline-gestures';
+import {
+  LINK_HANDLE_RADIUS,
+  linkHandleCenter,
+  linkHandles,
+  type DragPreview,
+} from './timeline-gestures';
 import {
   BAR_HEIGHT,
   dependencyArrow,
@@ -91,6 +96,7 @@ const PREVIEW_DASH = [4, 3];
 const HALF_PIXEL = 0.5;
 const DAY_OFF_HEIGHT = 6;
 const SPLIT_GAP_DASH = [2, 3];
+const BLOCK_TARGET_MARGIN = 3;
 const SPLIT_GAP_WIDTH = 1.5;
 const SCALE_ROW_HEIGHT = 24;
 const LABEL_PADDING = 6;
@@ -181,7 +187,7 @@ export function paintTimelineBody(
   shapes.forEach((shape) => {
     paintShape(context, scene, shape);
   });
-  paintLinkHandle(context, scene, shapes);
+  paintLinkHandles(context, scene, shapes);
   paintPreview(context, scene);
   paintToday(context, scene, viewport);
   context.restore();
@@ -539,8 +545,8 @@ function paintArrow(context: CanvasRenderingContext2D, points: readonly Point[])
   context.fill();
 }
 
-/** Draws the handle after the bar of the selected task, from which a link is dragged. */
-function paintLinkHandle(
+/** Draws the handles of the selected task from which a link is dragged: one at the end of each block but the last, and one after the bar. */
+function paintLinkHandles(
   context: CanvasRenderingContext2D,
   scene: TimelineScene,
   shapes: readonly RowShape[],
@@ -549,14 +555,48 @@ function paintLinkHandle(
   if (shape === undefined || shape.kind === 'summary') {
     return;
   }
-  const center = linkHandleCenter(shape);
-  context.beginPath();
-  context.arc(center.x, center.y, LINK_HANDLE_RADIUS, 0, Math.PI * HALF);
   context.fillStyle = scene.theme.surface;
-  context.fill();
   context.strokeStyle = scene.theme.action;
   context.lineWidth = OUTLINE_WIDTH;
+  for (const { center } of linkHandles(shape)) {
+    context.beginPath();
+    context.arc(center.x, center.y, LINK_HANDLE_RADIUS, 0, Math.PI * HALF);
+    context.fill();
+    context.stroke();
+  }
+}
+
+/** Draws the line of a dragged link and the row, and the block, it would be dropped on. */
+function paintLinkPreview(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  preview: Extract<DragPreview, { kind: 'link' }>,
+): void {
+  const from = linkHandleCenter(preview.shape, preview.block);
+  context.beginPath();
+  context.moveTo(from.x, from.y);
+  context.lineTo(preview.pointer.x, preview.pointer.y);
   context.stroke();
+  if (preview.targetRow === null) {
+    return;
+  }
+  const top = preview.targetRow * ROW_HEIGHT;
+  context.strokeRect(0, top + 1, xOf(scene.frame, scene.frame.end), ROW_HEIGHT - 2);
+  const target = shapeAt(scene, preview.targetRow);
+  const block =
+    preview.targetBlock === null || target?.kind !== 'task'
+      ? undefined
+      : target.segments[preview.targetBlock];
+  if (block !== undefined) {
+    const barTop = top + (ROW_HEIGHT - BAR_HEIGHT) / HALF - BLOCK_TARGET_MARGIN;
+    const height = BAR_HEIGHT + BLOCK_TARGET_MARGIN * HALF;
+    context.strokeRect(
+      block.x - BLOCK_TARGET_MARGIN,
+      barTop,
+      block.width + BLOCK_TARGET_MARGIN * HALF,
+      height,
+    );
+  }
 }
 
 /** Draws where a dragged bar or link would go, as a dashed outline. */
@@ -571,19 +611,7 @@ function paintPreview(context: CanvasRenderingContext2D, scene: TimelineScene): 
   context.lineWidth = OUTLINE_WIDTH;
   const top = preview.shape.row * ROW_HEIGHT;
   if (preview.kind === 'link') {
-    const from = linkHandleCenter(preview.shape);
-    context.beginPath();
-    context.moveTo(from.x, from.y);
-    context.lineTo(preview.pointer.x, preview.pointer.y);
-    context.stroke();
-    if (preview.targetRow !== null) {
-      context.strokeRect(
-        0,
-        preview.targetRow * ROW_HEIGHT + 1,
-        xOf(scene.frame, scene.frame.end),
-        ROW_HEIGHT - 2,
-      );
-    }
+    paintLinkPreview(context, scene, preview);
   } else if (preview.shape.kind === 'milestone') {
     const half = MILESTONE_SIZE / HALF;
     const x = preview.shape.x + preview.offset;

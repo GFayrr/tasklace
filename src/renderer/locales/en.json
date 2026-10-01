@@ -85,6 +85,10 @@
       "other": "{count} changes were adjusted to keep the project valid."
     },
     "scheduleFailed": "The schedule could not be computed. Check the calendar and the start date of the project.",
+    "exportFailed": {
+      "SCHEDULE_MISMATCH": "The table could not be written while the schedule was being updated. Try again.",
+      "UNKNOWN_BLOCK": "The table could not be written: a link names a block its task does not have. Check the links of the split tasks."
+    },
     "projectStartMoved": "The project now starts on {date}, so that this task can start earlier."
   },
   "table": {
@@ -125,7 +129,7 @@
     "outdent": "Outdent: move out of its summary",
     "moveUp": "Move up",
     "moveDown": "Move down",
-    "milestone": "Turn into a milestone or back into a task",
+    "milestone": "Turn into a milestone, a key date with no duration, or back into a task",
     "delete": "Delete",
     "details": "Details of the task"
   },
@@ -135,7 +139,11 @@
     "INVALID_DURATION": "Write the duration in hours, such as 14 or 1 h 30, in minutes, such as 45 min, or in working days, such as 2d.",
     "INVALID_DATE": "This date could not be read. Write it as your computer shows dates, or as 2026-10-05 14:30. Times go by quarter hours.",
     "INVALID_PROGRESS": "Write the progress as a whole number from 0 to 100.",
-    "INVALID_PREDECESSORS": "Write the predecessors by task number, such as 1.2, 3SS+2h, each task once.",
+    "INVALID_PREDECESSORS": "Write the predecessors by task number, such as 1.2, 3SS+2h, or 3#2 for block 2 of task 3, each one once.",
+    "UNKNOWN_BLOCK": "The task you named has no block with this number. Blocks are counted from 1, on split tasks only.",
+    "LINKS_WOULD_MERGE": "Two different links of this task would become the same link. Remove one of them first.",
+    "WAITS_NEED_TWO_BLOCKS": "A task with a single block cannot wait apart from itself. Write what it waits for in Predecessors.",
+    "TASK_CHANGED": "This task changed while its details were open. Close them and open them again.",
     "UNKNOWN_TASK_NUMBER": "There is no task with this number.",
     "DEPENDENCY_CYCLE": "This link would make tasks wait for each other in a loop.",
     "SUMMARY_DEPENDENCY": "Summary tasks cannot be linked. Link the tasks inside them.",
@@ -147,7 +155,7 @@
     "OUT_OF_RANGE": "This value is outside the allowed range.",
     "INVALID_END": "A task has to end after it starts.",
     "INVALID_BLOCK": "Write the duration of each block, such as 4 h or 1 h 30.",
-    "INVALID_GAP": "A block resumes at least one whole day after the previous one.",
+    "INVALID_GAP": "Write the days between two blocks as a whole number, 0 for the same day.",
     "INVALID_HOURS_PER_DAY": "Hours per day go from 1 hour to the length of a working day, by quarter hours.",
     "INVALID_DAILY_START": "Write the daily start time as 13:30, on a quarter hour, leaving enough working hours after it.",
     "DAILY_START_HOUR_CLEARED": "Write the daily start time as 13:30, on a quarter hour, leaving enough working hours after it."
@@ -170,12 +178,23 @@
     "dailyStart": "Daily start time",
     "dailyStartHint": "Leave empty to start at the first working hour of each day.",
     "blocks": "Work blocks",
-    "blocksHint": "Split the task into several blocks to pause it and resume it later.",
+    "blocksHint": "Split the task into several blocks to pause it and resume it later. A block can wait for other tasks, or for a block of them written 3#2 (block 2 of task 3).",
     "blockDuration": "Duration of block {number}",
     "blockGap": "Days after block {previous}",
+    "blockWaitsFor": "Block {number} waits for",
+    "blockError": "Block {number}: {message}",
+    "blockWaitsForExample": "such as 2, 3#1SS",
     "addBlock": "Add a block",
     "removeBlock": "Remove block {number}",
     "cancel": "Cancel",
-    "save": "Save"
+    "save": "Save",
+    "milestoneHint": "A milestone marks a key date with no duration, such as a delivery or an approval. Link tasks to it to show what they lead to or wait for."
+  },
+  "closePrompt": {
+    "title": "Save this project?",
+    "body": "This project has not been saved to a file yet. Save it before closing it, or its changes will be lost.",
+    "save": "Save…",
+    "discard": "Don't save",
+    "cancel": "Cancel"
   }
 }

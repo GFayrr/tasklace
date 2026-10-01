@@ -20,6 +20,7 @@ import {
   parseBlocks,
   parsePredecessors,
   readWbsNumber,
+  type BlockWait,
   type PredecessorReference,
   type WbsNumber,
 } from './task-notations';
@@ -28,6 +29,7 @@ export type CsvWarningCode =
   | 'UNKNOWN_COLUMN'
   | 'EXTRA_CELLS'
   | 'IGNORED_VALUE'
+  | 'IGNORED_LINKS'
   | 'START_DIFFERS'
   | 'END_DIFFERS'
   | 'PROGRESS_DIFFERS';
@@ -48,6 +50,7 @@ export interface ParsedRow {
   readonly predecessors: readonly PredecessorReference[];
   readonly tagName: string | null;
   readonly blocks: readonly TaskSegment[] | null;
+  readonly blockWaits: readonly BlockWait[];
 }
 
 export interface ParsedTable {
@@ -125,7 +128,7 @@ function readColumns(
   return columns;
 }
 
-/** Reads the cells of one row into typed values, spending the predecessors it holds from the budget of the whole table. */
+/** Reads the cells of one row into typed values, spending the predecessors and block waits it holds from the budget of the whole table. */
 function readRow(row: CsvRow, context: RowContext): ParsedRow {
   if (row.hasExtraCells) {
     context.warnings.push({ path: rowPath(row.rowNumber), code: 'EXTRA_CELLS' });
@@ -140,6 +143,10 @@ function readRow(row: CsvRow, context: RowContext): ParsedRow {
   const predecessors =
     read('predecessors', (text) => parsePredecessors(text, budget.remainingPredecessors)) ?? [];
   budget.remainingPredecessors -= predecessors.length;
+  const blocks = read('blocks', (text) =>
+    parseBlocks(text, MAX_SEGMENTS_PER_TASK, budget.remainingPredecessors),
+  );
+  budget.remainingPredecessors -= blocks?.waits.length ?? 0;
   return {
     rowNumber: row.rowNumber,
     wbs: read('wbs', parseWbs),
@@ -150,7 +157,8 @@ function readRow(row: CsvRow, context: RowContext): ParsedRow {
     progressPercent: read('progress', (text) => parseNumber(text, PROGRESS_PATTERN)),
     predecessors,
     tagName: read('tag', success),
-    blocks: read('blocks', (text) => parseBlocks(text, MAX_SEGMENTS_PER_TASK)),
+    blocks: blocks?.segments ?? null,
+    blockWaits: blocks?.waits ?? [],
   };
 }
 

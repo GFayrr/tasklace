@@ -1,5 +1,6 @@
-import type { Dependency, DependencyType, Tag, Task, TaskSegment } from '../../model/project';
+import type { Dependency, Tag, Task, TaskSegment } from '../../model/project';
 import { failure, success, type Result } from '../../result';
+import { shortestLink } from '../../scheduling/block-links';
 import { spreadKeys } from '../../shared/fractional-index';
 import { nextPaletteColor } from '../../tags/tag-palette';
 import {
@@ -7,8 +8,14 @@ import {
   type IssueList,
   type ValidationIssue,
 } from '../../validation/validation-issues';
+import type { CsvColumn } from './csv-columns';
 import { rowPath, type CsvWarning, type ParsedRow } from './csv-rows';
-import { compareWbsNumbers, parentWbsNumber, type WbsNumber } from './task-notations';
+import {
+  compareWbsNumbers,
+  parentWbsNumber,
+  type PredecessorReference,
+  type WbsNumber,
+} from './task-notations';
 
 export interface PlannedTask {
   readonly row: ParsedRow;
@@ -18,6 +25,7 @@ export interface PlannedTask {
 export interface PlannedItem<T> {
   readonly item: T;
   readonly rowNumber: number;
+  readonly column: CsvColumn;
 }
 
 export interface TaskPlan {
@@ -49,6 +57,8 @@ type PlannedKind = Task['kind'];
 const TASK_ID_PREFIX = 'task-';
 const DEPENDENCY_ID_PREFIX = 'dependency-';
 const TAG_ID_PREFIX = 'tag-';
+const PREDECESSORS: CsvColumn = 'predecessors';
+const BLOCKS: CsvColumn = 'blocks';
 
 /** Turns parsed rows into the tasks, dependencies and tags of a new project, ordered by WBS number, or lists what cannot be resolved at its row. */
 export function planTasks(
@@ -72,7 +82,13 @@ export function planTasks(
     };
     return { row: numbered.row, task: taskOf(numbered, kind, links) };
   });
-  const dependencies = planDependencies(hierarchy.numbered, hierarchy.idByWbs, issues);
+  const summaryIds = new Set(
+    tasks.flatMap(({ task }) => (task.kind === 'summary' ? [task.id] : [])),
+  );
+  const taskById = new Map(tasks.map(({ task }) => [task.id, task]));
+  const dependencies = planDependencies(hierarchy, summaryIds, issues).map((planned) =>
+    shortened(planned, taskById),
+  );
   return issues.issues.length > 0 ? failure(issues.issues) : success({ tasks, dependencies, tags });
 }
 
@@ -140,7 +156,7 @@ function missingDuration(row: ParsedRow, issues: IssueList): PlannedKind {
   return 'task';
 }
 
-/** Warns about a duration, tag or blocks given to a summary, whose values all come from its children. */
+/** Warns about a duration, tag or blocks given to a summary, whose values all come from its children, and about the links its blocks would wait for. */
 function warnIgnoredSummaryValues(row: ParsedRow, warnings: CsvWarning[]): void {
   const ignored = [
     { column: 'duration', value: row.durationHours },
@@ -152,6 +168,9 @@ function warnIgnoredSummaryValues(row: ParsedRow, warnings: CsvWarning[]): void 
     .forEach(({ column }) => {
       warnings.push({ path: rowPath(row.rowNumber, column), code: 'IGNORED_VALUE' });
     });
+  if (row.blockWaits.length > 0) {
+    warnings.push({ path: rowPath(row.rowNumber, 'blocks'), code: 'IGNORED_LINKS' });
+  }
 }
 
 /** Refuses blocks whose total differs from the duration given beside them. */
@@ -201,7 +220,11 @@ function tagIdOf(
   const id = `${TAG_ID_PREFIX}${String(tags.length + 1)}`;
   const color = nextPaletteColor(tags.length);
   tagIdByName.set(name, id);
-  tags.push({ item: { id, name, color, representsPersonOrTeam: false }, rowNumber: row.rowNumber });
+  tags.push({
+    item: { id, name, color, representsPersonOrTeam: false },
+    rowNumber: row.rowNumber,
+    column: 'tag',
+  });
   return id;
 }
 
@@ -227,35 +250,68 @@ function taskOf(numbered: NumberedRow, kind: PlannedKind, links: TaskLinks): Tas
   return { ...dated, kind, segments, hoursPerDay: null, dailyStartHour: null };
 }
 
-/** Builds the dependencies of every row from its predecessors, reporting WBS numbers that name no row. */
+/** Builds the dependencies of every row from its predecessors and its block waits, ignoring those of summaries, and reports WBS numbers that name no row. */
 function planDependencies(
-  numbered: readonly NumberedRow[],
-  idByWbs: ReadonlyMap<WbsNumber, string>,
+  { numbered, idByWbs }: Hierarchy,
+  summaryIds: ReadonlySet<string>,
   issues: IssueList,
 ): PlannedItem<Dependency>[] {
   const dependencies: PlannedItem<Dependency>[] = [];
-  for (const { row, id } of numbered) {
-    for (const { predecessorId, type, lagHours } of resolvePredecessors(row, idByWbs, issues)) {
-      const dependencyId = `${DEPENDENCY_ID_PREFIX}${String(dependencies.length + 1)}`;
-      const item = { id: dependencyId, predecessorId, successorId: id, type, lagHours };
-      dependencies.push({ item, rowNumber: row.rowNumber });
+  const add = (row: ParsedRow, column: CsvColumn, link: Omit<Dependency, 'id'>): void => {
+    const id = `${DEPENDENCY_ID_PREFIX}${String(dependencies.length + 1)}`;
+    dependencies.push({ item: { id, ...link }, rowNumber: row.rowNumber, column });
+  };
+  const wanted = numbered.flatMap((numberedRow) =>
+    wantedLinksOf(numberedRow, summaryIds.has(numberedRow.id)),
+  );
+  for (const { row, id, reference, column, block } of wanted) {
+    const link = resolveReference(reference, idByWbs, rowPath(row.rowNumber, column), issues);
+    if (link !== null) {
+      add(row, column, { ...link, successorId: id, successorBlock: block });
     }
   }
   return dependencies;
 }
 
-/** Finds the task each predecessor of a row names, reporting the WBS numbers that name no row. */
-function resolvePredecessors(
-  row: ParsedRow,
+/** Writes a planned link in its shortest form, a block its task would stand for anyway becoming the whole task. */
+function shortened(
+  planned: PlannedItem<Dependency>,
+  taskById: ReadonlyMap<string, Task>,
+): PlannedItem<Dependency> {
+  const predecessor = taskById.get(planned.item.predecessorId);
+  const successor = taskById.get(planned.item.successorId);
+  if (predecessor === undefined || successor === undefined) {
+    return planned;
+  }
+  return { ...planned, item: shortestLink(planned.item, predecessor, successor) };
+}
+
+/** Lists the links a row asks for: its predecessors, then what its blocks wait for unless it is a summary. */
+function wantedLinksOf({ row, id }: NumberedRow, isSummary: boolean) {
+  const waits = isSummary ? [] : row.blockWaits;
+  return [
+    ...row.predecessors.map((reference) => ({
+      row,
+      id,
+      reference,
+      column: PREDECESSORS,
+      block: null,
+    })),
+    ...waits.map(({ reference, block }) => ({ row, id, reference, column: BLOCKS, block })),
+  ];
+}
+
+/** Finds the task a predecessor names, reporting a WBS number that names no row. */
+function resolveReference(
+  { wbs, block, type, lagHours }: PredecessorReference,
   idByWbs: ReadonlyMap<WbsNumber, string>,
+  path: string,
   issues: IssueList,
-): { predecessorId: string; type: DependencyType; lagHours: number }[] {
-  return row.predecessors.flatMap(({ wbs, type, lagHours }) => {
-    const predecessorId = idByWbs.get(wbs);
-    if (predecessorId === undefined) {
-      issues.add(rowPath(row.rowNumber, 'predecessors'), 'UNKNOWN_REFERENCE');
-      return [];
-    }
-    return [{ predecessorId, type, lagHours }];
-  });
+): Pick<Dependency, 'predecessorId' | 'predecessorBlock' | 'type' | 'lagHours'> | null {
+  const predecessorId = idByWbs.get(wbs);
+  if (predecessorId === undefined) {
+    issues.add(path, 'UNKNOWN_REFERENCE');
+    return null;
+  }
+  return { predecessorId, predecessorBlock: block, type, lagHours };
 }

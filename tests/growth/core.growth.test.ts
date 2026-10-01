@@ -10,7 +10,7 @@ import { placeTask } from '../../src/core/scheduling/task-placement';
 import { detectTagConflicts } from '../../src/core/tags/tag-conflicts';
 import { unwrap } from '../../src/core/testing/arbitraries';
 import { at } from '../../src/core/testing/civil-time';
-import { project, workTask } from '../../src/core/testing/project-builder';
+import { blockLink, project, splitTask, workTask } from '../../src/core/testing/project-builder';
 import { readProject, STORED_VALUE_CODEC } from '../../src/core/validation/read-project';
 import { buildLargeProject, LARGE_PROJECT_SEED } from '../fixtures/large-project';
 import {
@@ -32,6 +32,8 @@ const CSV_FORMAT: RegionalFormat = {
   twelveHourClock: false,
 };
 const PLACEMENTS_PER_RUN = 200;
+const SPLIT_BLOCK_HOURS = 2;
+const LAST_SPLIT_BLOCK = 2;
 
 /** Schedules a project, failing the test when scheduling fails. */
 function scheduleOf(input: Project): Schedule {
@@ -133,6 +135,46 @@ describe('growth of whole-project operations (n tasks, 2n dependencies)', () => 
       () => detectTagConflicts(large.tasks, large.tags, largeSchedule.placements, calendar),
     );
     console.info(`Person conflicts: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
+  });
+});
+
+/** Builds a project of split tasks in pairs, the second task of each pair running between the first and last blocks of the first one, as block links allow. */
+function interleavedProject(taskCount: number): Project {
+  const ids = Array.from({ length: taskCount }, (_unused, index) => `s${String(index)}`);
+  const tasks = ids.map((id) =>
+    splitTask(id, [
+      [SPLIT_BLOCK_HOURS, 0],
+      [SPLIT_BLOCK_HOURS, 0],
+      [SPLIT_BLOCK_HOURS, 0],
+    ]),
+  );
+  const links = ids.flatMap((id, index) => {
+    const inside = ids[index + 1];
+    if (index % 2 !== 0 || inside === undefined) {
+      return [];
+    }
+    return [blockLink(id, inside, { from: 0 }), blockLink(inside, id, { to: LAST_SPLIT_BLOCK })];
+  });
+  return project(tasks, links, {
+    options: {
+      criticalPathEnabled: true,
+      dateConstraintsEnabled: false,
+      alwaysShowPatterns: false,
+    },
+  });
+}
+
+describe('growth of scheduling split tasks linked block by block', () => {
+  it('schedules with the critical path in linear time', () => {
+    const small = interleavedProject(SMALL_TASK_COUNT);
+    const large = interleavedProject(LARGE_TASK_COUNT);
+    expect(scheduleProject(large).ok).toBe(true);
+    const ratio = growthRatio(
+      () => scheduleProject(small),
+      () => scheduleProject(large),
+    );
+    console.info(`Schedule split tasks linked by blocks: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
   });
 });

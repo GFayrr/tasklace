@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { TEST_CALENDAR } from '../../core/testing/test-calendar';
 import type { RegionalFormat } from '../../core/exchange/csv/regional-format';
-import type { Project, Task } from '../../core/model/project';
+import type { Project, Task, WorkTask } from '../../core/model/project';
 import { createSharedDocument } from '../../core/shared/shared-document';
 import { openSharedSession, type SharedSession } from '../../core/shared/shared-session';
 import { at, compileOrThrow } from '../../core/testing/civil-time';
 import {
+  blockLink,
   link,
   milestone,
   project,
@@ -15,7 +16,7 @@ import {
   TEST_DOCUMENT_ID,
   workTask,
 } from '../../core/testing/project-builder';
-import { buildPlanOutline } from './plan-outline';
+import { buildPlanOutline, predecessorText } from './plan-outline';
 import {
   deleteTasks,
   indentTask,
@@ -34,8 +35,10 @@ import {
   setStart,
   stretchEnd,
   toggleMilestone,
+  findBlockWaitProblem,
   type Edit,
   type EditContext,
+  type LinkEnd,
 } from './task-commands';
 
 const FRENCH: RegionalFormat = {
@@ -63,6 +66,11 @@ const PLAN = project(
   ],
   [link('a', 'b'), link('b', 'c'), link('c', 'd')],
 );
+
+/** Names a whole task as one end of a link. */
+function whole(taskId: string): LinkEnd {
+  return { taskId, block: null };
+}
 
 /** Opens a session on the sample plan and returns an edit context that follows it. */
 function openPlan(plan: Project = PLAN) {
@@ -285,7 +293,9 @@ describe('editing cells', () => {
     expect(incoming).toContainEqual({
       id: 'new1',
       predecessorId: 'a',
+      predecessorBlock: null,
       successorId: 'c',
+      successorBlock: null,
       type: 'startToStart',
       lagHours: 2,
     });
@@ -355,6 +365,231 @@ describe('editing cells', () => {
   });
 });
 
+const SPLIT_WITH_WAIT = project(
+  [
+    workTask('a', { sortKey: 'a' }),
+    splitTask(
+      'd',
+      [
+        [7, 0],
+        [7, 1],
+      ],
+      { sortKey: 'b' },
+    ),
+  ],
+  [blockLink('a', 'd', { to: 1 })],
+);
+
+/** Returns a work task of a session, failing the test when it is not one. */
+function workTaskOf(session: SharedSession, id: string): WorkTask {
+  const task = taskOf(session, id);
+  if (task?.kind !== 'task') {
+    throw new Error(`Missing work task ${id}`);
+  }
+  return task;
+}
+
+describe('block edits refused with a reason', () => {
+  it('refuses to merge two different links when a split task loses its blocks or becomes a milestone', () => {
+    const plan = project(SPLIT_WITH_WAIT.tasks, [
+      blockLink('a', 'd', { to: 1 }, 'startToStart', 4),
+      blockLink('a', 'd', {}),
+    ]);
+    const { session, context } = openPlan(plan);
+    const task = workTaskOf(session, 'd');
+    expect(toggleMilestone(context(), 'd')).toEqual({ ok: false, error: 'LINKS_WOULD_MERGE' });
+    const lastOnly = task.segments.slice(1).map((segment) => ({ ...segment, gapDaysBefore: 0 }));
+    expect(
+      replaceTask(context(), { ...task, segments: lastOnly }, [{ origin: 1, waitsFor: '1SS+4h' }]),
+    ).toEqual({ ok: false, error: 'LINKS_WOULD_MERGE' });
+  });
+
+  it('refuses blocks that do not match the task or change the order of its blocks', () => {
+    const { session, context } = openPlan(SPLIT_WITH_WAIT);
+    const task = workTaskOf(session, 'd');
+    const notPossible = { ok: false, error: 'NOT_POSSIBLE' };
+    expect(replaceTask(context(), task, [{ origin: 0, waitsFor: '' }])).toEqual(notPossible);
+    expect(
+      replaceTask(context(), task, [
+        { origin: 1, waitsFor: '' },
+        { origin: 0, waitsFor: '' },
+      ]),
+    ).toEqual(notPossible);
+    expect(
+      replaceTask(context(), task, [
+        { origin: null, waitsFor: '' },
+        { origin: 0, waitsFor: '' },
+      ]),
+    ).toEqual(notPossible);
+  });
+
+  it('keeps what the last block waited for once it is the only block, unless its waits were changed', () => {
+    const { session, context } = openPlan(SPLIT_WITH_WAIT);
+    const task = workTaskOf(session, 'd');
+    const single = {
+      ...task,
+      segments: task.segments.slice(1).map((segment) => ({ ...segment, gapDaysBefore: 0 })),
+    };
+    expect(replaceTask(context(), single, [{ origin: 1, waitsFor: '' }])).toEqual({
+      ok: false,
+      error: 'WAITS_NEED_TWO_BLOCKS',
+    });
+    applied(session, replaceTask(context(), single, [{ origin: 1, waitsFor: '1' }]));
+    expect(session.project().dependencies).toEqual([
+      { ...blockLink('a', 'd', { to: 1 }), successorBlock: null },
+    ]);
+  });
+
+  it('tells which block names a task or block that does not exist', () => {
+    const { context } = openPlan(SPLIT_WITH_WAIT);
+    const waits = (second: string) => [
+      { origin: 0, waitsFor: '' },
+      { origin: 1, waitsFor: second },
+    ];
+    expect(findBlockWaitProblem(context(), waits('1'))).toBeNull();
+    expect(findBlockWaitProblem(context(), waits('9'))).toEqual({
+      block: 1,
+      error: 'UNKNOWN_TASK_NUMBER',
+    });
+    expect(findBlockWaitProblem(context(), waits('soon'))).toEqual({
+      block: 1,
+      error: 'INVALID_PREDECESSORS',
+    });
+    expect(findBlockWaitProblem(context(), waits('2#3'))).toEqual({
+      block: 1,
+      error: 'UNKNOWN_BLOCK',
+    });
+  });
+
+  it('refuses a gesture on a block a split task does not have, and reads a block of a task that is not split as the whole task', () => {
+    const { session, context } = openPlan(SPLIT_WITH_WAIT);
+    expect(linkTasks(context(), { taskId: 'd', block: 5 }, { taskId: 'a', block: null })).toEqual({
+      ok: false,
+      error: 'UNKNOWN_BLOCK',
+    });
+    applied(session, linkTasks(context(), { taskId: 'a', block: 3 }, { taskId: 'd', block: 0 }));
+    expect(session.project().dependencies).toContainEqual(
+      expect.objectContaining({ id: 'new1', predecessorBlock: null, successorBlock: null }),
+    );
+  });
+
+  it('writes a block that the whole task stands for anyway as the whole task', () => {
+    const { session, context } = openPlan();
+    applied(session, setPredecessors(context(), 'm', '3#2'));
+    expect(session.project().dependencies).toContainEqual(
+      expect.objectContaining({ predecessorId: 'd', predecessorBlock: null, successorId: 'm' }),
+    );
+  });
+});
+
+describe('links to and from blocks', () => {
+  it('writes the predecessors of one block, with blocks of other tasks, apart from those of the task', () => {
+    const { session, context } = openPlan();
+    applied(session, setPredecessors(context(), 'd', '1.1SS+1h', 1));
+    applied(session, setPredecessors(context(), 'm', '3#1'));
+    const links = session.project().dependencies;
+    expect(links).toContainEqual(link('c', 'd'));
+    expect(links).toContainEqual(
+      expect.objectContaining({ predecessorId: 'a', successorId: 'd', successorBlock: 1 }),
+    );
+    expect(links).toContainEqual(
+      expect.objectContaining({ predecessorId: 'd', predecessorBlock: 0, successorId: 'm' }),
+    );
+    expect(setPredecessors(context(), 'm', '3#3')).toEqual({ ok: false, error: 'UNKNOWN_BLOCK' });
+    expect(setPredecessors(context(), 'm', '2#1')).toEqual({ ok: false, error: 'UNKNOWN_BLOCK' });
+    expect(setPredecessors(context(), 'c', '1.1', 0)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+  });
+
+  it('moves the links of the blocks that stay when a block is removed, and drops those of the removed block', () => {
+    const plan = project(
+      [
+        workTask('a', { sortKey: 'a' }),
+        splitTask(
+          'd',
+          [
+            [7, 0],
+            [7, 1],
+            [7, 1],
+          ],
+          { sortKey: 'b' },
+        ),
+        workTask('e', { sortKey: 'c' }),
+      ],
+      [blockLink('a', 'd', { to: 1 }), blockLink('d', 'e', { from: 2 })],
+    );
+    const { session, context } = openPlan(plan);
+    const task = taskOf(session, 'd');
+    if (task?.kind !== 'task') {
+      throw new Error('Missing task');
+    }
+    const kept = [task.segments[0], task.segments[2]].filter((segment) => segment !== undefined);
+    applied(
+      session,
+      replaceTask(context(), { ...task, segments: kept }, [
+        { origin: 0, waitsFor: '' },
+        { origin: 2, waitsFor: '1' },
+      ]),
+    );
+    const links = normalized(session.project()).dependencies;
+    expect(links.map((dependency) => dependency.id)).not.toContain('a-d_1');
+    expect(links).toEqual([
+      { ...blockLink('d', 'e', { from: 2 }), predecessorBlock: 1 },
+      expect.objectContaining({ predecessorId: 'a', successorId: 'd', successorBlock: 1 }),
+    ]);
+  });
+
+  it('points the links of the blocks at the whole task once one block is left, keeping one link per pair', () => {
+    const plan = project(
+      [
+        workTask('a', { sortKey: 'a' }),
+        splitTask(
+          'd',
+          [
+            [7, 0],
+            [7, 1],
+          ],
+          { sortKey: 'b' },
+        ),
+      ],
+      [blockLink('a', 'd', { to: 1 }), { ...blockLink('a', 'd', {}), id: 'z' }],
+    );
+    const { session, context } = openPlan(plan);
+    const task = taskOf(session, 'd');
+    if (task?.kind !== 'task') {
+      throw new Error('Missing task');
+    }
+    applied(
+      session,
+      replaceTask(context(), { ...task, segments: task.segments.slice(0, 1) }, [
+        { origin: 0, waitsFor: '' },
+      ]),
+    );
+    expect(session.project().dependencies.map((dependency) => dependency.id)).toEqual(['z']);
+  });
+
+  it('points the links of the blocks at the whole task when a split task becomes a milestone', () => {
+    const plan = project(
+      [
+        workTask('a', { sortKey: 'a' }),
+        splitTask(
+          'd',
+          [
+            [7, 0],
+            [7, 1],
+          ],
+          { sortKey: 'b' },
+        ),
+      ],
+      [blockLink('a', 'd', { to: 1 })],
+    );
+    const { session, context } = openPlan(plan);
+    applied(session, toggleMilestone(context(), 'd'));
+    expect(session.project().dependencies).toEqual([
+      { ...blockLink('a', 'd', { to: 1 }), successorBlock: null },
+    ]);
+  });
+});
+
 describe('dragging on the timeline', () => {
   it('asks a moved task not to start before its new place', () => {
     const { session, context } = openPlan();
@@ -377,23 +612,93 @@ describe('dragging on the timeline', () => {
 
   it('links two different tasks from the end of the first to the start of the second', () => {
     const { session, context } = openPlan();
-    applied(session, linkTasks(context(), 'a', 'm'));
+    applied(session, linkTasks(context(), whole('a'), whole('m')));
     expect(session.project().dependencies).toContainEqual({
       id: 'new1',
       predecessorId: 'a',
+      predecessorBlock: null,
       successorId: 'm',
+      successorBlock: null,
       type: 'finishToStart',
       lagHours: 0,
     });
-    expect(linkTasks(context(), 'a', 'a')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    expect(linkTasks(context(), whole('a'), whole('a'))).toEqual({
+      ok: false,
+      error: 'NOT_POSSIBLE',
+    });
+  });
+
+  it('links from a block or to a block of a split task, a block another task lacks meaning the whole task', () => {
+    const { session, context } = openPlan();
+    applied(session, linkTasks(context(), { taskId: 'd', block: 0 }, { taskId: 'm', block: 1 }));
+    applied(session, linkTasks(context(), whole('a'), { taskId: 'd', block: 1 }));
+    expect(session.project().dependencies).toContainEqual(
+      expect.objectContaining({ predecessorId: 'd', predecessorBlock: 0, successorBlock: null }),
+    );
+    expect(session.project().dependencies).toContainEqual(
+      expect.objectContaining({ predecessorId: 'a', successorId: 'd', successorBlock: 1 }),
+    );
   });
 });
+
+const REFUSABLE_EDITS: ReadonlySet<string> = new Set(['linkBlock', 'dropBlock']);
+const EXPECTED_BLOCK_REFUSALS: ReadonlySet<string> = new Set([
+  'NOT_POSSIBLE',
+  'UNKNOWN_BLOCK',
+  'LINKS_WOULD_MERGE',
+  'WAITS_NEED_TWO_BLOCKS',
+  'DEPENDENCY_CYCLE',
+  'SUMMARY_DEPENDENCY',
+  'DUPLICATE_DEPENDENCY',
+]);
+
+/** Builds an edit of the blocks of a task: a link from the first block of the split task to it, or the removal of its first block, or one more block waiting for nothing, every other block keeping what it waits for. */
+function blockEdit(context: EditContext, kind: string, id: string): Edit {
+  const task = context.project.tasks.find((candidate) => candidate.id === id);
+  if (kind === 'linkBlock') {
+    return linkTasks(context, { taskId: 'd', block: 0 }, { taskId: id, block: 1 });
+  }
+  if (task?.kind !== 'task') {
+    return { ok: false, error: 'NOT_POSSIBLE' };
+  }
+  const incoming = context.project.dependencies.filter((link) => link.successorId === id);
+  const blocks = task.segments.map((_segment, origin) => ({
+    origin,
+    waitsFor: predecessorText(incoming, context.outline.wbsById, origin),
+  }));
+  if (kind === 'addBlock') {
+    return replaceTask(
+      context,
+      { ...task, segments: [...task.segments, { durationHours: 2, gapDaysBefore: 0 }] },
+      [...blocks, { origin: null, waitsFor: '' }],
+    );
+  }
+  const [first, ...rest] = task.segments;
+  if (first === undefined || rest.length === 0) {
+    return { ok: false, error: 'NOT_POSSIBLE' };
+  }
+  const segments = rest.map((segment, index) =>
+    index === 0 ? { ...segment, gapDaysBefore: 0 } : segment,
+  );
+  return replaceTask(context, { ...task, segments }, blocks.slice(1));
+}
 
 describe('any sequence of structural edits', () => {
   it('keeps a valid project that the session accepts, or is refused without change', () => {
     const edits = fc.array(
       fc.tuple(
-        fc.constantFrom('insert', 'delete', 'indent', 'outdent', 'up', 'down', 'milestone'),
+        fc.constantFrom(
+          'insert',
+          'delete',
+          'indent',
+          'outdent',
+          'up',
+          'down',
+          'milestone',
+          'linkBlock',
+          'dropBlock',
+          'addBlock',
+        ),
         fc.constantFrom('s', 'a', 'b', 'c', 'd', 'm', 'new1', 'new2'),
       ),
       { maxLength: 12 },
@@ -417,9 +722,24 @@ describe('any sequence of structural edits', () => {
                     ? outdentTask(current, id)
                     : kind === 'milestone'
                       ? toggleMilestone(current, id)
-                      : moveTask(current, id, kind === 'up' ? -1 : 1);
-          if (edit.ok) {
-            expect(session.applyAll(edit.value).ok).toBe(true);
+                      : kind === 'up' || kind === 'down'
+                        ? moveTask(current, id, kind === 'up' ? -1 : 1)
+                        : blockEdit(current, kind, id);
+          const before = normalized(session.project());
+          const applied = edit.ok ? session.applyAll(edit.value) : null;
+          if (edit.ok && !REFUSABLE_EDITS.has(kind)) {
+            expect(applied?.ok).toBe(true);
+          }
+          const refusal = edit.ok
+            ? applied?.ok === false
+              ? applied.error[0]?.code
+              : null
+            : edit.error;
+          if (REFUSABLE_EDITS.has(kind) && refusal !== null) {
+            expect(EXPECTED_BLOCK_REFUSALS.has(refusal ?? '')).toBe(true);
+          }
+          if (applied?.ok !== true) {
+            expect(normalized(session.project())).toEqual(before);
           }
         }
         const outline = buildPlanOutline(session.project().tasks, new Set());

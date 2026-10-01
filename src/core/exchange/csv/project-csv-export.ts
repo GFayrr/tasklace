@@ -1,4 +1,5 @@
 import type { Dependency, Project, Task, TaskId } from '../../model/project';
+import { isKnownBlock } from '../../scheduling/block-links';
 import type { Schedule } from '../../scheduling/schedule-project';
 import { failure, success, type Result } from '../../result';
 import type { ProjectHour } from '../../time';
@@ -18,6 +19,8 @@ import {
   type PredecessorReference,
 } from './task-notations';
 
+export type CsvExportError = 'SCHEDULE_MISMATCH' | 'UNKNOWN_BLOCK';
+
 export const CSV_BYTE_ORDER_MARK = '﻿';
 
 interface ExportContext {
@@ -25,6 +28,7 @@ interface ExportContext {
   readonly formatDateTime: DateTimeFormatter;
   readonly tagNames: ReadonlyMap<string, string>;
   readonly predecessors: ReadonlyMap<TaskId, readonly PredecessorReference[]>;
+  readonly blockWaits: ReadonlyMap<TaskId, ReadonlyMap<number, readonly PredecessorReference[]>>;
   readonly decimalMark: string;
 }
 
@@ -33,15 +37,22 @@ export function exportProjectCsv(
   project: Project,
   schedule: Schedule,
   format: RegionalFormat,
-): Result<string, 'SCHEDULE_MISMATCH'> {
+): Result<string, CsvExportError> {
   if (!coversEveryTask(project, schedule)) {
     return failure('SCHEDULE_MISMATCH');
+  }
+  if (!writesEveryBlockLink(project)) {
+    return failure('UNKNOWN_BLOCK');
   }
   const context: ExportContext = {
     schedule,
     formatDateTime: createDateTimeFormatter(format),
     tagNames: new Map(project.tags.map((tag) => [tag.id, tag.name])),
-    predecessors: groupPredecessors(project.dependencies, schedule.wbsNumbers),
+    predecessors: groupPredecessors(
+      project.dependencies.filter((dependency) => dependency.successorBlock === null),
+      schedule.wbsNumbers,
+    ),
+    blockWaits: groupBlockWaits(project.dependencies, schedule.wbsNumbers),
     decimalMark: decimalMarkOf(format),
   };
   const tasks = [...project.tasks].sort((left, right) =>
@@ -55,11 +66,28 @@ export function exportProjectCsv(
   return success(CSV_BYTE_ORDER_MARK + writeCsv(cells, format.listSeparator));
 }
 
-/** Tells whether a schedule numbers and dates every task of a project, as a schedule computed from an older version of it may not. */
+/** Tells whether a schedule numbers and dates every task of a project and every task its links name, as a schedule computed from an older version of it may not. */
 function coversEveryTask(project: Project, schedule: Schedule): boolean {
-  return project.tasks.every((task) => {
+  const datesEveryTask = project.tasks.every((task) => {
     const dates = task.kind === 'summary' ? schedule.summaries : schedule.placements;
     return schedule.wbsNumbers.has(task.id) && dates.has(task.id);
+  });
+  return (
+    datesEveryTask &&
+    project.dependencies.every(
+      (dependency) =>
+        schedule.wbsNumbers.has(dependency.predecessorId) &&
+        schedule.wbsNumbers.has(dependency.successorId),
+    )
+  );
+}
+
+/** Tells whether every link to a block can be written in the blocks cell of its task, which only a project breaking the block rules prevents. */
+function writesEveryBlockLink(project: Project): boolean {
+  const taskById = new Map(project.tasks.map((task) => [task.id, task]));
+  return project.dependencies.every((dependency) => {
+    const successor = taskById.get(dependency.successorId);
+    return successor !== undefined && isKnownBlock(successor, dependency.successorBlock);
   });
 }
 
@@ -71,17 +99,55 @@ function groupPredecessors(
   const grouped = new Map<TaskId, PredecessorReference[]>();
   for (const dependency of dependencies) {
     const references = grouped.get(dependency.successorId) ?? [];
-    references.push({
-      wbs: wbsNumbers.get(dependency.predecessorId) ?? '',
-      type: dependency.type,
-      lagHours: dependency.lagHours,
-    });
+    references.push(referenceOf(dependency, wbsNumbers));
     grouped.set(dependency.successorId, references);
   }
-  grouped.forEach((references) => {
-    references.sort((left, right) => compareWbsNumbers(left.wbs, right.wbs));
+  grouped.forEach(sortReferences);
+  return grouped;
+}
+
+/** Lists, for each task, what each of its blocks waits for, in WBS order. */
+function groupBlockWaits(
+  dependencies: readonly Dependency[],
+  wbsNumbers: ReadonlyMap<TaskId, string>,
+): Map<TaskId, Map<number, PredecessorReference[]>> {
+  const grouped = new Map<TaskId, Map<number, PredecessorReference[]>>();
+  for (const dependency of dependencies) {
+    if (dependency.successorBlock === null) {
+      continue;
+    }
+    const byBlock =
+      grouped.get(dependency.successorId) ?? new Map<number, PredecessorReference[]>();
+    const references = byBlock.get(dependency.successorBlock) ?? [];
+    references.push(referenceOf(dependency, wbsNumbers));
+    byBlock.set(dependency.successorBlock, references);
+    grouped.set(dependency.successorId, byBlock);
+  }
+  grouped.forEach((byBlock) => {
+    byBlock.forEach(sortReferences);
   });
   return grouped;
+}
+
+/** Describes the task or block a dependency leaves by its WBS number. */
+function referenceOf(
+  dependency: Dependency,
+  wbsNumbers: ReadonlyMap<TaskId, string>,
+): PredecessorReference {
+  return {
+    wbs: wbsNumbers.get(dependency.predecessorId) ?? '',
+    block: dependency.predecessorBlock,
+    type: dependency.type,
+    lagHours: dependency.lagHours,
+  };
+}
+
+/** Orders references by WBS number, then by block, the whole task first. */
+function sortReferences(references: PredecessorReference[]): void {
+  references.sort(
+    (left, right) =>
+      compareWbsNumbers(left.wbs, right.wbs) || (left.block ?? -1) - (right.block ?? -1),
+  );
 }
 
 /** Writes the cells of one task in the order of the columns. */
@@ -123,7 +189,10 @@ function datedTaskCells(task: Exclude<Task, { kind: 'summary' }>, context: Expor
     ),
     progress: String(task.progressPercent),
     tag: task.tagId === null ? '' : (context.tagNames.get(task.tagId) ?? ''),
-    blocks: segments.length > 1 ? formatBlocks(segments) : '',
+    blocks:
+      segments.length > 1
+        ? formatBlocks(segments, context.blockWaits.get(task.id) ?? new Map())
+        : '',
   };
 }
 

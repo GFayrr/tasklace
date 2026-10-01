@@ -101,6 +101,14 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 - Every change is checked by the shared session as one step, undone in one step, and explained when refused; the zoom sits in the status bar.
 - 60 frames per second while scrolling 10,000 tasks; a change refreshes what the interface shows within a frame.
 
+### 5d, after testing: split tasks linked block by block (done)
+
+- A block of a split task can wait for another task or for a block of it, and a task can wait for a block, with the same link types and lags; the days before a block become a minimum, 0 meaning the same day.
+- Scheduling, critical path and collaborative repairs reason block by block, at the same cost.
+- Notation `3#2` (block 2 of task 3) in the predecessors, and `+0d 3h after 2.1` in the Blocks column of the CSV table.
+- "Block n waits for" in the task details; one link handle per block on the timeline, and a link dropped on a block makes that block wait.
+- After review: a link is always written in its shortest form; no link is ever lost silently (exports and edits that would lose one are refused with an explanation); the details panel refuses to overwrite a task changed meanwhile; changing the blocks of a much-linked task stays linear.
+
 ### 5e. Project settings and advanced options
 
 - Project name and start date, working calendar editor, tag management.

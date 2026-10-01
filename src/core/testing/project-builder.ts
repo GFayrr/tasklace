@@ -77,7 +77,33 @@ export function link(
   type: DependencyType = 'finishToStart',
   lagHours = 0,
 ): Dependency {
-  return { id: `${predecessorId}-${successorId}`, predecessorId, successorId, type, lagHours };
+  return {
+    id: `${predecessorId}-${successorId}`,
+    predecessorId,
+    successorId,
+    type,
+    lagHours,
+    predecessorBlock: null,
+    successorBlock: null,
+  };
+}
+
+/** Builds a dependency from or to blocks of split tasks, the block numbers counting from 0. */
+export function blockLink(
+  predecessorId: string,
+  successorId: string,
+  blocks: { readonly from?: number; readonly to?: number },
+  type: DependencyType = 'finishToStart',
+  lagHours = 0,
+): Dependency {
+  const from = blocks.from ?? null;
+  const to = blocks.to ?? null;
+  return {
+    ...link(predecessorId, successorId, type, lagHours),
+    id: `${predecessorId}${from === null ? '' : `_${String(from)}`}-${successorId}${to === null ? '' : `_${String(to)}`}`,
+    predecessorBlock: from,
+    successorBlock: to,
+  };
 }
 
 /** Builds a project starting on Monday 28 September 2026 at 09:00 with the default calendar. */
