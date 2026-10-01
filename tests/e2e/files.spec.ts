@@ -8,6 +8,7 @@ import {
   type ElectronApplication,
   type Page,
 } from '@playwright/test';
+import { DEFAULT_CALENDAR } from '../../src/core/calendar/default-calendar';
 import { exportProjectCsv } from '../../src/core/exchange/csv/project-csv-export';
 import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
 import { MAX_FILE_BYTES } from '../../src/core/limits';
@@ -84,7 +85,8 @@ test('imports a CSV table into a project kept in its local copy until saved as a
   if (format === undefined) {
     throw new Error('Missing bridge');
   }
-  await writeFile(csv, unwrap(exportProjectCsv(SAMPLE, scheduleOrThrow(SAMPLE), format)));
+  const table = { ...SAMPLE, calendar: DEFAULT_CALENDAR };
+  await writeFile(csv, unwrap(exportProjectCsv(table, scheduleOrThrow(table), format)));
   await answerDialogs(application, { open: csv, save: target });
   const outcome = await page.evaluate(async () => {
     const api = window.tasklace;

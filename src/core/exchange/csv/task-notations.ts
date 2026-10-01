@@ -1,6 +1,7 @@
 import { MAX_HIERARCHY_DEPTH } from '../../limits';
 import type { DependencyType, TaskSegment } from '../../model/project';
 import { failure, success, type Result } from '../../result';
+import { isQuarterHours } from '../../time';
 
 export type WbsNumber = string;
 
@@ -26,9 +27,9 @@ const TYPE_BY_CODE: ReadonlyMap<string, DependencyType> = new Map([
 ]);
 const WBS_PATTERN = /^\d{1,9}(?:\.\d{1,9})*$/;
 const PREDECESSOR_PATTERN =
-  /^(\d{1,9}(?:\.\d{1,9})*)\s*(FS|SS|FF|SF)?\s*(?:([+-])\s*(\d{1,9})\s*h?)?$/i;
-const FIRST_BLOCK_PATTERN = /^(\d{1,9})\s*h$/i;
-const NEXT_BLOCK_PATTERN = /^\+\s*(\d{1,9})\s*d\s+(\d{1,9})\s*h$/i;
+  /^(\d{1,9}(?:\.\d{1,9})*)\s*(FS|SS|FF|SF)?\s*(?:([+-])\s*(\d{1,9}(?:\.\d{1,2})?)\s*h?)?$/i;
+const FIRST_BLOCK_PATTERN = /^(\d{1,9}(?:\.\d{1,2})?)\s*h$/i;
+const NEXT_BLOCK_PATTERN = /^\+\s*(\d{1,9})\s*d\s+(\d{1,9}(?:\.\d{1,2})?)\s*h$/i;
 const LIST_ITEM = /[^;,]*/y;
 const MAX_ITEM_LENGTH = 256;
 const WBS_SEPARATOR = '.';
@@ -94,7 +95,7 @@ export function parsePredecessors(
   return success(references);
 }
 
-/** Writes the blocks of a split task as "4h; +2d 3h", each later block after its gap in calendar days. */
+/** Writes the blocks of a split task as "4h; +2d 3.5h", each later block after its gap in calendar days, hours with a dot as decimal mark. */
 export function formatBlocks(segments: readonly TaskSegment[]): string {
   return segments
     .map((segment, index) =>
@@ -163,7 +164,10 @@ function parsePredecessor(item: string): PredecessorReference | null {
   if (type === undefined) {
     return null;
   }
-  const magnitude = lag === undefined ? 0 : Number.parseInt(lag, DECIMAL_RADIX);
+  const magnitude = lag === undefined ? 0 : Number(lag);
+  if (!isQuarterHours(magnitude)) {
+    return null;
+  }
   return { wbs, type, lagHours: sign === '-' ? -magnitude : magnitude };
 }
 
@@ -174,12 +178,15 @@ function parseBlock(item: string, isFirst: boolean): TaskSegment | null {
   }
   if (isFirst) {
     const first = FIRST_BLOCK_PATTERN.exec(item);
-    return first === null ? null : { durationHours: toNumber(first[1]), gapDaysBefore: 0 };
+    return first === null ? null : quarterBlock(Number(first[1]), 0);
   }
   const next = NEXT_BLOCK_PATTERN.exec(item);
-  return next === null
-    ? null
-    : { durationHours: toNumber(next[2]), gapDaysBefore: toNumber(next[1]) };
+  return next === null ? null : quarterBlock(Number(next[2]), toNumber(next[1]));
+}
+
+/** Builds a block whose duration is a whole number of quarter hours, or returns null. */
+function quarterBlock(durationHours: number, gapDaysBefore: number): TaskSegment | null {
+  return isQuarterHours(durationHours) ? { durationHours, gapDaysBefore } : null;
 }
 
 /** Converts decimal digits into a number. */

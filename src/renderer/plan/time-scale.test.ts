@@ -80,10 +80,10 @@ describe('periods', () => {
 });
 
 describe('zoom levels', () => {
-  it('gets narrower from the hour to the month, and aligns bars to the hour only at the hour zoom', () => {
+  it('gets narrower from the hour to the month, and aligns bars to the quarter hour only at the hour zoom', () => {
     const widths = ZOOM_LEVELS.map(pixelsPerHour);
     expect([...widths].sort((left, right) => right - left)).toEqual(widths);
-    expect(ZOOM_LEVELS.map(snapHours)).toEqual([1, 24, 24, 24]);
+    expect(ZOOM_LEVELS.map(snapHours)).toEqual([0.25, 24, 24, 24]);
   });
 });
 

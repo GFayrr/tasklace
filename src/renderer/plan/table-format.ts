@@ -3,7 +3,8 @@ import { countWorkingHours } from '../../core/calendar/working-time';
 import type { Task } from '../../core/model/project';
 import type { Schedule } from '../../core/scheduling/schedule-project';
 import type { ProjectHour } from '../../core/time';
-import { fillMessage, type Messages } from '../i18n/messages';
+import type { Messages } from '../i18n/messages';
+import { formatDuration } from './durations';
 
 export interface TaskCells {
   readonly duration: string;
@@ -46,8 +47,7 @@ export function taskCells(
   formatters: TableFormatters,
   messages: Messages,
 ): TaskCells {
-  const hours = (count: number) =>
-    fillMessage(messages.table.hours, { count: formatters.number(count) });
+  const hours = (count: number) => formatDuration(count, messages, formatters.number);
   if (task.kind === 'summary') {
     const dates = schedule?.summaries.get(task.id);
     if (dates?.start == null || dates.end == null) {

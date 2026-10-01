@@ -1,17 +1,20 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import type { TaskId } from '../../core/model/project';
+  import type { Tag, Task, TaskId } from '../../core/model/project';
   import type { AppState } from '../app/app-state.svelte';
   import { fillMessage } from '../i18n/messages';
   import {
     cellEdit,
+    EDITABLE_COLUMNS,
     editorText,
+    hourFromPicker,
     isEditable,
     nextColumn,
+    pickerValue,
     type CellSource,
     type EditableColumn,
   } from '../plan/cell-editing';
-  import { groupIncoming, predecessorText } from '../plan/plan-outline';
+  import { groupIncoming, predecessorText, type PlanRow } from '../plan/plan-outline';
   import { taskCells, type TableFormatters } from '../plan/table-format';
   import { indentTask, moveTask, outdentTask } from '../plan/task-commands';
   import { ROW_HEIGHT } from '../plan/timeline-geometry';
@@ -31,6 +34,7 @@
     readonly taskId: TaskId;
     readonly column: EditableColumn;
     readonly initial: string;
+    readonly text: string;
   }
 
   let { app, formatters, scrollTop, viewportHeight, scrollBy, reveal }: Props = $props();
@@ -42,8 +46,15 @@
   const text = $derived(app.messages.table);
   const rows = $derived(app.outline.rows);
   const incoming = $derived(groupIncoming(app.project?.dependencies ?? []));
+  const tagsById = $derived(new Map((app.project?.tags ?? []).map((tag) => [tag.id, tag])));
+  const tagChoices = $derived(
+    [...(app.project?.tags ?? [])].sort((left, right) =>
+      left.name.localeCompare(right.name, app.locale),
+    ),
+  );
   const source: CellSource = $derived({
     schedule: app.schedule,
+    calendar: app.calendar,
     incoming,
     wbsById: app.outline.wbsById,
     format: app.regionalFormat,
@@ -57,14 +68,15 @@
     return rows.slice(first, last + 1).map((row, offset) => ({
       row,
       index: first + offset,
-      cells: taskCells(row.task, app.schedule, app.calendar, formatters, app.messages),
-      predecessors: predecessorText(incoming.get(row.task.id), app.outline.wbsById),
+      values: cellValues(row),
     }));
   });
   const selectedIndex = $derived(
     app.selectedTaskId === null ? -1 : (app.outline.rowIndexById.get(app.selectedTaskId) ?? -1),
   );
   let activeColumn = $state<EditableColumn>('name');
+  let picker: HTMLInputElement | undefined = $state();
+  let picking: { readonly taskId: TaskId; readonly column: EditableColumn } | null = null;
   let editing = $state<Editing | null>(null);
   let grid: HTMLDivElement | undefined = $state();
 
@@ -75,6 +87,25 @@
       startEditing(request.taskId, request.column, null);
     }
   });
+
+  /** Returns the texts a row shows in each editable column. */
+  function cellValues(row: PlanRow): Readonly<Record<EditableColumn, string>> {
+    const cells = taskCells(row.task, app.schedule, app.calendar, formatters, app.messages);
+    return {
+      name: row.task.name,
+      duration: cells.duration,
+      start: cells.start,
+      end: cells.end,
+      progress: cells.progress,
+      predecessors: predecessorText(incoming.get(row.task.id), app.outline.wbsById),
+      tag: tagOf(row.task)?.name ?? '',
+    };
+  }
+
+  /** Returns the tag of a task, if it has one. */
+  function tagOf(task: Task): Tag | undefined {
+    return task.kind === 'summary' || task.tagId === null ? undefined : tagsById.get(task.tagId);
+  }
 
   /** Returns the identifier of the element showing a cell. */
   function cellId(taskId: TaskId, column: EditableColumn): string {
@@ -92,30 +123,28 @@
     activeColumn = column;
     reveal(index);
     const initial = editorText(task, column, source);
-    editing = { taskId, column, initial };
+    editing = { taskId, column, initial, text: typed ?? initial };
     void tick().then(() => {
-      const input = grid?.querySelector<HTMLInputElement>('input.editor');
-      if (input !== undefined && input !== null) {
-        input.value = typed ?? initial;
-        input.focus();
-        if (typed === null) {
-          input.select();
-        }
+      const input = grid?.querySelector<HTMLInputElement | HTMLSelectElement>('.editor');
+      if (input === undefined || input === null || document.activeElement === input) {
+        return;
+      }
+      input.focus();
+      if (typed === null && input instanceof HTMLInputElement) {
+        input.select();
       }
     });
   }
 
   /** Applies the text of the open editor when it changed, then closes it. */
-  function commit(input: HTMLInputElement): void {
+  function commit(input: HTMLInputElement | HTMLSelectElement): void {
     const current = editing;
     if (current === null) {
       return;
     }
     editing = null;
     if (input.value !== current.initial) {
-      app.edit((context) =>
-        cellEdit(context, current.taskId, current.column, input.value, app.regionalFormat),
-      );
+      app.edit((context) => cellEdit(context, current.taskId, current.column, input.value, source));
     }
     grid?.focus();
   }
@@ -127,7 +156,9 @@
   }
 
   /** Handles the keys of the open editor: Enter applies and goes down, Escape cancels, Tab applies and goes across. */
-  function editorKey(event: KeyboardEvent & { currentTarget: HTMLInputElement }): void {
+  function editorKey(
+    event: KeyboardEvent & { currentTarget: HTMLInputElement | HTMLSelectElement },
+  ): void {
     const input = event.currentTarget;
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -151,6 +182,43 @@
     }
   }
 
+  /** Opens the calendar of the system under a start or end cell, starting at the date the cell shows. */
+  function openPicker(taskId: TaskId, column: EditableColumn, anchor: Element): void {
+    const task = app.project?.tasks.find((candidate) => candidate.id === taskId);
+    const placement = app.schedule?.placements.get(taskId);
+    if (picker === undefined || task === undefined || task.kind === 'summary') {
+      return;
+    }
+    const cell = anchor.getBoundingClientRect();
+    const table = grid?.getBoundingClientRect();
+    picker.style.left = `${String(cell.left - (table?.left ?? 0))}px`;
+    picker.style.top = `${String(cell.bottom - (table?.top ?? 0))}px`;
+    const shown = column === 'end' ? placement?.end : (task.startNoEarlierThan ?? placement?.start);
+    picker.value = shown === undefined ? '' : pickerValue(shown);
+    picking = { taskId, column };
+    app.selectedTaskId = taskId;
+    activeColumn = column;
+    try {
+      picker.showPicker();
+    } catch (error) {
+      picking = null;
+      console.error(error);
+    }
+  }
+
+  /** Applies the date and time chosen on the calendar. */
+  function applyPicked(): void {
+    const target = picking;
+    const hour = picker === undefined ? null : hourFromPicker(picker.value);
+    picking = null;
+    if (target === null || hour === null) {
+      return;
+    }
+    const text = pickerValue(hour);
+    app.edit((context) => cellEdit(context, target.taskId, target.column, text, source));
+    grid?.focus();
+  }
+
   /** Selects the row at an index, when it exists, and brings it into view. */
   function selectRow(index: number): void {
     const row = rows[index];
@@ -162,7 +230,11 @@
 
   /** Handles the keys of the table while no cell is edited. */
   function gridKey(event: KeyboardEvent): void {
-    if (editing !== null || event.target instanceof HTMLInputElement) {
+    if (
+      editing !== null ||
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLSelectElement
+    ) {
       return;
     }
     const handled = handleGridKey(event);
@@ -180,6 +252,17 @@
       (event.key === 'ArrowRight' || event.key === 'ArrowLeft')
     ) {
       app.editSelected(event.key === 'ArrowRight' ? indentTask : outdentTask);
+      return true;
+    }
+    if (event.altKey && event.key === 'Enter' && id !== null) {
+      app.openDetails(id);
+      return true;
+    }
+    if (event.altKey && event.key === 'ArrowDown' && id !== null && isDateColumn(activeColumn)) {
+      const cell = document.getElementById(cellId(id, activeColumn));
+      if (cell !== null) {
+        openPicker(id, activeColumn, cell);
+      }
       return true;
     }
     if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
@@ -228,7 +311,7 @@
 
   /** Opens the editor of the active cell with a typed character, as in a spreadsheet. */
   function startTyping(event: KeyboardEvent, id: TaskId | null): boolean {
-    if (id === null || event.key.length !== 1) {
+    if (id === null || event.key.length !== 1 || activeColumn === 'tag') {
       return false;
     }
     startEditing(id, activeColumn, event.key);
@@ -254,6 +337,11 @@
     if (column !== null) {
       activeColumn = column;
     }
+  }
+
+  /** Tells whether a column holds a date that the calendar can choose. */
+  function isDateColumn(column: EditableColumn): boolean {
+    return column === 'start' || column === 'end';
   }
 
   /** Returns the name of a column for assistive technologies. */
@@ -284,11 +372,21 @@
       <span class="cell date" role="columnheader">{text.end}</span>
       <span class="cell progress number" role="columnheader">{text.progress}</span>
       <span class="cell predecessors" role="columnheader">{text.predecessors}</span>
+      <span class="cell tag" role="columnheader">{text.tag}</span>
     </div>
   </div>
+  <input
+    class="picker"
+    type="datetime-local"
+    step="900"
+    tabindex="-1"
+    aria-hidden="true"
+    bind:this={picker}
+    onchange={applyPicked}
+  />
   <div class="body" role="rowgroup">
     <div class="rows" style:transform="translateY({-scrollTop}px)">
-      {#each shown as { row, index, cells, predecessors } (row.task.id)}
+      {#each shown as { row, index, values } (row.task.id)}
         {@const selected = row.task.id === app.selectedTaskId}
         <div
           class="row"
@@ -307,32 +405,28 @@
               clickCell(event, row.task.id, null);
             }}>{row.wbs}</span
           >
-          {#each [{ column: 'name', value: row.task.name }, { column: 'duration', value: cells.duration }, { column: 'start', value: cells.start }, { column: 'end', value: cells.end }, { column: 'progress', value: cells.progress }, { column: 'predecessors', value: predecessors }] as cell (cell.column)}
-            {@const column = cell.column === 'end' ? null : (cell.column as EditableColumn)}
-            {@const isEditing =
-              column !== null && editing?.taskId === row.task.id && editing.column === column}
+          {#each EDITABLE_COLUMNS as column (column)}
+            {@const isEditing = editing?.taskId === row.task.id && editing.column === column}
             <span
-              class="cell {cell.column}"
-              class:number={cell.column === 'duration' || cell.column === 'progress'}
-              class:date={cell.column === 'start' || cell.column === 'end'}
+              class="cell {column}"
+              class:number={column === 'duration' || column === 'progress'}
+              class:date={column === 'start' || column === 'end'}
               class:active={selected && column === activeColumn}
-              id={column === null ? undefined : cellId(row.task.id, column)}
+              id={cellId(row.task.id, column)}
               role="gridcell"
               tabindex="-1"
-              aria-readonly={column === null || !isEditable(row.task, column)}
-              style:padding-left={cell.column === 'name'
+              aria-readonly={!isEditable(row.task, column)}
+              style:padding-left={column === 'name'
                 ? `${String(NAME_PADDING + row.depth * INDENT_PIXELS)}px`
                 : undefined}
               onpointerdown={(event) => {
                 clickCell(event, row.task.id, column);
               }}
               ondblclick={() => {
-                if (column !== null) {
-                  startEditing(row.task.id, column, null);
-                }
+                startEditing(row.task.id, column, null);
               }}
             >
-              {#if cell.column === 'name'}
+              {#if column === 'name'}
                 {#if row.hasChildren}
                   <button
                     type="button"
@@ -353,9 +447,31 @@
                   <span class="toggle-space"></span>
                 {/if}
               {/if}
-              {#if isEditing}
+              {#if isEditing && column === 'tag'}
+                <select
+                  class="editor"
+                  value={editing?.text}
+                  aria-label={fillMessage(text.editCell, {
+                    column: columnLabel(column),
+                    name: row.task.name,
+                  })}
+                  onchange={(event) => {
+                    commit(event.currentTarget);
+                  }}
+                  onkeydown={editorKey}
+                  onblur={(event) => {
+                    commit(event.currentTarget);
+                  }}
+                >
+                  <option value="">{text.noTag}</option>
+                  {#each tagChoices as tag (tag.id)}
+                    <option value={tag.id}>{tag.name}</option>
+                  {/each}
+                </select>
+              {:else if isEditing}
                 <input
                   class="editor"
+                  value={editing?.text}
                   aria-label={fillMessage(text.editCell, {
                     column: columnLabel(column),
                     name: row.task.name,
@@ -366,7 +482,26 @@
                   }}
                 />
               {:else}
-                <span class="label">{cell.value}</span>
+                {#if column === 'tag' && tagOf(row.task) !== undefined}
+                  <span class="swatch" style:background={tagOf(row.task)?.color}></span>
+                {/if}
+                <span class="label">{values[column]}</span>
+                {#if isDateColumn(column) && row.task.kind !== 'summary'}
+                  <button
+                    type="button"
+                    class="pick"
+                    tabindex="-1"
+                    aria-label={fillMessage(text.pickDate, {
+                      column: columnLabel(column).toLowerCase(),
+                      name: row.task.name,
+                    })}
+                    onclick={(event) => {
+                      openPicker(row.task.id, column, event.currentTarget);
+                    }}
+                  >
+                    <Icon name="calendar" />
+                  </button>
+                {/if}
               {/if}
             </span>
           {/each}
@@ -398,6 +533,7 @@
 
 <style>
   .table {
+    position: relative;
     height: 100%;
     display: flex;
     flex-direction: column;
@@ -409,7 +545,7 @@
 
   .header,
   .body {
-    width: max(100%, 860px);
+    width: max(100%, 1010px);
   }
 
   .header {
@@ -538,6 +674,18 @@
     color: var(--color-text-secondary);
   }
 
+  .tag {
+    width: 150px;
+    gap: 6px;
+  }
+
+  .swatch {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    border-radius: 3px;
+  }
+
   .editor {
     width: 100%;
     min-width: 0;
@@ -548,6 +696,52 @@
     border-radius: 4px;
     background: var(--color-surface);
     outline: none;
+  }
+
+  .picker {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .date {
+    gap: 4px;
+  }
+
+  .pick {
+    width: 22px;
+    height: 22px;
+    margin-left: auto;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    visibility: hidden;
+  }
+
+  .row:hover .pick,
+  .row.selected .pick {
+    visibility: visible;
+  }
+
+  .pick:hover {
+    color: var(--color-text);
+    background: var(--color-panel);
+  }
+
+  .pick :global(.icon) {
+    width: 15px;
+    height: 15px;
   }
 
   .toggle-space {

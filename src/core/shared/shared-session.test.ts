@@ -244,7 +244,7 @@ describe('shared session edge cases', () => {
   it.each<[string, SharedOperation]>([
     [
       'a dependency with an invalid lag',
-      { type: 'putDependency', dependency: { ...link('c', 'm'), lagHours: 0.5 } },
+      { type: 'putDependency', dependency: { ...link('c', 'm'), lagHours: 0.3 } },
     ],
     [
       'a tag with an invalid color',

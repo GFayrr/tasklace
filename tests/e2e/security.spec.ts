@@ -115,3 +115,8 @@ test('exposes only the listed bridge functions, which check what they receive', 
     wrongType: false,
   });
 });
+
+test('shows no default menu, which would offer developer tools and reloading', async () => {
+  const menu = await application.evaluate(({ Menu }) => Menu.getApplicationMenu());
+  expect(menu).toBeNull();
+});

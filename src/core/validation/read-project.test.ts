@@ -295,7 +295,7 @@ describe('readProject: values', () => {
     [{ name: 'x'.repeat(101) }, 'name', 'TOO_LONG'],
     [{ startDate: MIN_PROJECT_HOUR - 1 }, 'startDate', 'OUT_OF_RANGE'],
     [{ startDate: END_PROJECT_HOUR }, 'startDate', 'OUT_OF_RANGE'],
-    [{ startDate: 1.5 }, 'startDate', 'WRONG_TYPE'],
+    [{ startDate: 1.3 }, 'startDate', 'WRONG_TYPE'],
     [{ startDate: '2026-09-28T09:00' }, 'startDate', 'WRONG_TYPE'],
     [
       { options: { ...RICH_PROJECT.options, criticalPathEnabled: 1 } },
@@ -371,7 +371,7 @@ describe('readProject: values', () => {
     [{ predecessorId: '' }, 'dependencies[0].predecessorId', 'INVALID_IDENTIFIER'],
     [{ type: 'FS' }, 'dependencies[0].type', 'OUT_OF_RANGE'],
     [{ lagHours: MAX_LAG_HOURS + 1 }, 'dependencies[0].lagHours', 'OUT_OF_RANGE'],
-    [{ lagHours: 0.5 }, 'dependencies[0].lagHours', 'WRONG_TYPE'],
+    [{ lagHours: 0.3 }, 'dependencies[0].lagHours', 'WRONG_TYPE'],
   ] as const)('rejects the dependency %j at %s', (overrides, path, code) => {
     expect(issuesOf(projectWith({ dependencies: [{ ...link('a', 'b'), ...overrides }] }))).toEqual(
       issue(path, code),

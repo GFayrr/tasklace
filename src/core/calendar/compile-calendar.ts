@@ -3,9 +3,13 @@ import type { DayRange, TimeRange, WorkingCalendar } from '../model/calendar';
 import { failure, success, type Result } from '../result';
 import {
   DAYS_PER_WEEK,
+  fromQuarters,
   HOURS_PER_DAY,
+  isQuarterHours,
   MAX_DAY_INDEX,
   MIN_DAY_INDEX,
+  QUARTERS_PER_DAY,
+  toQuarters,
   weekdayOf,
   type Weekday,
 } from '../time';
@@ -15,9 +19,10 @@ const MAX_CACHED_CALENDARS = 8;
 const compiledCalendars = new Map<string, CompiledCalendar>();
 
 export interface CompiledCalendar {
-  readonly workingHoursOfDay: readonly [number, ...number[]];
-  readonly workingHoursBeforeHourOfDay: readonly number[];
-  readonly workingHoursBeforeDay: Int32Array;
+  readonly workingHoursPerDay: number;
+  readonly workingQuartersOfDay: readonly [number, ...number[]];
+  readonly workingQuartersBeforeQuarterOfDay: readonly number[];
+  readonly workingQuartersBeforeDay: Int32Array;
   readonly nextWorkingDayOffsets: Int32Array;
   readonly previousWorkingDayOffsets: Int32Array;
   readonly workingDayOffsetsByRank: Int32Array;
@@ -85,23 +90,24 @@ function compileUncached(
   if (errors.length > 0) {
     return failure(errors);
   }
-  const [firstHour, ...otherHours] = listWorkingHours(calendar.workingTimeRanges);
-  if (firstHour === undefined) {
+  const [firstQuarter, ...otherQuarters] = listWorkingQuarters(calendar.workingTimeRanges);
+  if (firstQuarter === undefined) {
     return failure([{ code: 'NO_WORKING_TIME_RANGE' }]);
   }
-  const workingHoursOfDay: [number, ...number[]] = [firstHour, ...otherHours];
-  const workingHoursBeforeDay = accumulateWorkingHoursPerDay(
+  const workingQuartersOfDay: [number, ...number[]] = [firstQuarter, ...otherQuarters];
+  const workingQuartersBeforeDay = accumulateWorkingQuartersPerDay(
     buildWeekdayMask(calendar.workingWeekdays),
     calendar.nonWorkingPeriods,
-    workingHoursOfDay.length,
+    workingQuartersOfDay.length,
   );
   return success({
-    workingHoursOfDay,
-    workingHoursBeforeHourOfDay: countHoursBeforeEachHourOfDay(workingHoursOfDay),
-    workingHoursBeforeDay,
-    nextWorkingDayOffsets: linkWorkingDays(workingHoursBeforeDay, 'next'),
-    previousWorkingDayOffsets: linkWorkingDays(workingHoursBeforeDay, 'previous'),
-    workingDayOffsetsByRank: listWorkingDays(workingHoursBeforeDay, workingHoursOfDay.length),
+    workingHoursPerDay: fromQuarters(workingQuartersOfDay.length),
+    workingQuartersOfDay,
+    workingQuartersBeforeQuarterOfDay: countQuartersBeforeEachQuarterOfDay(workingQuartersOfDay),
+    workingQuartersBeforeDay,
+    nextWorkingDayOffsets: linkWorkingDays(workingQuartersBeforeDay, 'next'),
+    previousWorkingDayOffsets: linkWorkingDays(workingQuartersBeforeDay, 'previous'),
+    workingDayOffsetsByRank: listWorkingDays(workingQuartersBeforeDay, workingQuartersOfDay.length),
   });
 }
 
@@ -143,18 +149,18 @@ function validateTimeRanges(ranges: readonly TimeRange[]): CalendarError[] {
   return errors;
 }
 
-/** Tells whether a time range is made of whole hours inside one day, with a positive length. */
+/** Tells whether a time range is made of whole quarter hours inside one day, with a positive length. */
 function isValidTimeRange({ startHour, endHour }: TimeRange): boolean {
   return (
-    Number.isInteger(startHour) &&
-    Number.isInteger(endHour) &&
+    isQuarterHours(startHour) &&
+    isQuarterHours(endHour) &&
     startHour >= 0 &&
     startHour < endHour &&
     endHour <= HOURS_PER_DAY
   );
 }
 
-/** Tells whether any two valid time ranges share at least one hour. */
+/** Tells whether any two valid time ranges share at least one quarter hour. */
 function hasOverlappingRanges(ranges: readonly TimeRange[]): boolean {
   const sorted = [...ranges].sort((left, right) => left.startHour - right.startHour);
   return sorted.some((range, index) => {
@@ -190,10 +196,10 @@ function isValidDayRange({ firstDay, lastDay }: DayRange): boolean {
 
 /** Gives, for each day of the supported period, the offset of the nearest working day in one direction, that day included, or -1 when there is none. */
 function linkWorkingDays(
-  workingHoursBeforeDay: Int32Array,
+  workingQuartersBeforeDay: Int32Array,
   direction: 'next' | 'previous',
 ): Int32Array {
-  const dayCount = workingHoursBeforeDay.length - 1;
+  const dayCount = workingQuartersBeforeDay.length - 1;
   const links = new Int32Array(dayCount);
   const step = direction === 'next' ? -1 : 1;
   let nearest = -1;
@@ -202,23 +208,25 @@ function linkWorkingDays(
     offset >= 0 && offset < dayCount;
     offset += step
   ) {
-    const worked = (workingHoursBeforeDay[offset + 1] ?? 0) > (workingHoursBeforeDay[offset] ?? 0);
+    const worked =
+      (workingQuartersBeforeDay[offset + 1] ?? 0) > (workingQuartersBeforeDay[offset] ?? 0);
     nearest = worked ? offset : nearest;
     links[offset] = nearest;
   }
   return links;
 }
 
-/** Lists the offset of every working day of the supported period, in order, so that the day of a working hour is found by its rank. */
+/** Lists the offset of every working day of the supported period, in order, so that the day of a working quarter hour is found by its rank. */
 function listWorkingDays(
-  workingHoursBeforeDay: Int32Array,
-  hoursPerWorkingDay: number,
+  workingQuartersBeforeDay: Int32Array,
+  quartersPerWorkingDay: number,
 ): Int32Array {
-  const dayCount = workingHoursBeforeDay.length - 1;
-  const workingDays = new Int32Array((workingHoursBeforeDay[dayCount] ?? 0) / hoursPerWorkingDay);
+  const dayCount = workingQuartersBeforeDay.length - 1;
+  const total = workingQuartersBeforeDay[dayCount] ?? 0;
+  const workingDays = new Int32Array(total / quartersPerWorkingDay);
   let rank = 0;
   for (let offset = 0; offset < dayCount; offset += 1) {
-    if ((workingHoursBeforeDay[offset + 1] ?? 0) > (workingHoursBeforeDay[offset] ?? 0)) {
+    if ((workingQuartersBeforeDay[offset + 1] ?? 0) > (workingQuartersBeforeDay[offset] ?? 0)) {
       workingDays[rank] = offset;
       rank += 1;
     }
@@ -235,56 +243,63 @@ function buildWeekdayMask(weekdays: readonly Weekday[]): boolean[] {
   return mask;
 }
 
-/** Lists every worked hour of the day in ascending order. */
-function listWorkingHours(ranges: readonly TimeRange[]): number[] {
-  const hours: number[] = [];
+/** Lists the start of every worked quarter hour of the day, in hours and ascending order. */
+function listWorkingQuarters(ranges: readonly TimeRange[]): number[] {
+  const quarters: number[] = [];
   for (const range of ranges) {
-    for (let hour = range.startHour; hour < range.endHour; hour += 1) {
-      hours.push(hour);
+    for (
+      let quarter = toQuarters(range.startHour);
+      quarter < toQuarters(range.endHour);
+      quarter += 1
+    ) {
+      quarters.push(fromQuarters(quarter));
     }
   }
-  return hours.sort((left, right) => left - right);
+  return quarters.sort((left, right) => left - right);
 }
 
-/** Counts, for each hour of the day from 0 to 24, the working hours of a day that start before it. */
-function countHoursBeforeEachHourOfDay(workingHoursOfDay: readonly number[]): number[] {
-  return Array.from(
-    { length: HOURS_PER_DAY + 1 },
-    (_value, hour) => workingHoursOfDay.filter((workingHour) => workingHour < hour).length,
-  );
+/** Counts, for each quarter hour of the day from the first to the end of the day, the working quarter hours that start before it. */
+function countQuartersBeforeEachQuarterOfDay(workingQuartersOfDay: readonly number[]): number[] {
+  const counts: number[] = [];
+  let before = 0;
+  for (let quarter = 0; quarter <= QUARTERS_PER_DAY; quarter += 1) {
+    counts.push(before);
+    before += workingQuartersOfDay.includes(fromQuarters(quarter)) ? 1 : 0;
+  }
+  return counts;
 }
 
-/** Builds the running total of working hours before each day of the supported period. */
-function accumulateWorkingHoursPerDay(
+/** Builds the running total of working quarter hours before each day of the supported period. */
+function accumulateWorkingQuartersPerDay(
   weekdayMask: readonly boolean[],
   periods: readonly DayRange[],
-  hoursPerWorkingDay: number,
+  quartersPerWorkingDay: number,
 ): Int32Array {
   const dayCount = MAX_DAY_INDEX - MIN_DAY_INDEX + 1;
-  const dailyHours = new Int32Array(dayCount);
-  fillWeeklyPattern(dailyHours, weekdayMask, hoursPerWorkingDay);
+  const dailyQuarters = new Int32Array(dayCount);
+  fillWeeklyPattern(dailyQuarters, weekdayMask, quartersPerWorkingDay);
   for (const period of periods) {
-    dailyHours.fill(0, period.firstDay - MIN_DAY_INDEX, period.lastDay - MIN_DAY_INDEX + 1);
+    dailyQuarters.fill(0, period.firstDay - MIN_DAY_INDEX, period.lastDay - MIN_DAY_INDEX + 1);
   }
   const totals = new Int32Array(dayCount + 1);
   for (let offset = 0; offset < dayCount; offset += 1) {
-    totals[offset + 1] = (totals[offset] ?? 0) + (dailyHours[offset] ?? 0);
+    totals[offset + 1] = (totals[offset] ?? 0) + (dailyQuarters[offset] ?? 0);
   }
   return totals;
 }
 
-/** Fills the hours of every day by writing the first week, then copying it forward in doubling blocks. */
+/** Fills the working quarter hours of every day by writing the first week, then copying it forward in doubling blocks. */
 function fillWeeklyPattern(
-  dailyHours: Int32Array,
+  dailyQuarters: Int32Array,
   weekdayMask: readonly boolean[],
-  hoursPerWorkingDay: number,
+  quartersPerWorkingDay: number,
 ): void {
-  const firstWeekLength = Math.min(DAYS_PER_WEEK, dailyHours.length);
+  const firstWeekLength = Math.min(DAYS_PER_WEEK, dailyQuarters.length);
   for (let offset = 0; offset < firstWeekLength; offset += 1) {
     const worked = weekdayMask[weekdayOf(MIN_DAY_INDEX + offset)] === true;
-    dailyHours[offset] = worked ? hoursPerWorkingDay : 0;
+    dailyQuarters[offset] = worked ? quartersPerWorkingDay : 0;
   }
-  for (let filled = firstWeekLength; filled < dailyHours.length; filled *= COPY_GROWTH_FACTOR) {
-    dailyHours.copyWithin(filled, 0, filled);
+  for (let filled = firstWeekLength; filled < dailyQuarters.length; filled *= COPY_GROWTH_FACTOR) {
+    dailyQuarters.copyWithin(filled, 0, filled);
   }
 }

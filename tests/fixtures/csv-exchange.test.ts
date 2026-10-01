@@ -1,3 +1,4 @@
+import { DEFAULT_CALENDAR } from '../../src/core/calendar/default-calendar';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { exportProjectCsv } from '../../src/core/exchange/csv/project-csv-export';
@@ -30,21 +31,21 @@ const START_DATE_EVERY = 7;
 const START_DATE_DELAY_HOURS = 30;
 
 const FRENCH_EXPORT_FINGERPRINT =
-  '828360ccd3625f2d5bd8130aa6952cda1ecd4f8e43d981e98e0b0bf4ee02e2af';
+  '30d80f79b50c888df49907def2726a2fb20e20a6f12e14c2905982e60352f3d1';
 const AMERICAN_EXPORT_FINGERPRINT =
-  '55c66451fd9d58b8ee3e1e15d2dc72f8b17fc20191d58589d7ce39b976a3dd71';
-const IMPORT_DATES_FINGERPRINT = 'a12cb6b3e3e8b47b6d1442416b37a0dbefc4da8dbe4f708149218831c1ec44a3';
-const IMPORT_FINGERPRINT = 'fc40e054f85b00a5d911b7e668583723dc2904e804c835c74adac13b3d0d57ac';
+  '7a7a9d9c0ca828bb8040dd4469bca06ecf11ce3117049b37e12ceb0399eeef07';
+const IMPORT_DATES_FINGERPRINT = 'a31ab59bd6b29cf232aac19c630a6f47ee71c41205e8c87c6c348de268669972';
+const IMPORT_FINGERPRINT = 'aa898cbc0f446f93498751f944fb828669f513e44a3ad5c2f01ab52cfa69b985';
 const MESSY_IMPORT_DATES_FINGERPRINT =
-  'd2e6e58499077dd17f1bae01c27600ab0c5400401762e487efaa89f8041dc68a';
+  '3fdbee79e22e9ed9e3741672b592575f2248ba1d9c6974af5bc8aaae9adfc842';
 const CONSTRAINED_EXPORT_FINGERPRINT =
-  '6840ea54ca24828bc32046190294b121966664373c5fe046a0f3f6d3776c7dd4';
+  'd0212266c3ce8f7afd9f9d79361a50c29f7a04b7426ab5ef96dd006ec61182e0';
 const CONSTRAINED_IMPORT_DATES_FINGERPRINT =
-  '74330b137209469babf83e840b75748c1c16378c0eb4a00c82e18595afa75c76';
+  '951adfb1b0956f5ba7a513f03b067693f753b6780f32e7da06e1ee455da8d411';
 const CONSTRAINED_IMPORT_FINGERPRINT =
-  '79dc15c8daafaa24dde9712643dbb64f713c5b393b451fe29706c6666532c8a1';
-const CONSTRAINED_KEPT_STARTS = 277;
-const MESSY_IMPORT_FINGERPRINT = '81f42904df458df6c0a537ba5912803d27ee0d4b6bd69bae87b4492e199d7184';
+  '6996054ae34cbbc8ffa101b5591544eaffdfb64106ea745ab6ef075a709f7fc6';
+const CONSTRAINED_KEPT_STARTS = 266;
+const MESSY_IMPORT_FINGERPRINT = '3a7353008d691dfd9e1b9652f758181bb8ff7be724128cb0831083719515a692';
 
 /** Returns the SHA-256 fingerprint of a value serialized as JSON. */
 function fingerprint(value: unknown): string {
@@ -77,9 +78,14 @@ function messyTable(exported: string): string {
   return [`${header};Owner;`, ...lines].join('\n');
 }
 
+/** Builds the large project with the calendar of imported projects, since a table does not carry its calendar. */
+function csvProject(): Project {
+  return { ...buildLargeProject(), calendar: DEFAULT_CALENDAR };
+}
+
 /** Builds the large project with tasks grouped under summaries and one task in seven given a start date later than its computed start, spread over its dependency chains. */
 function constrainedProject(): Project {
-  const base = buildLargeProject();
+  const base = csvProject();
   const placements = unwrap(scheduleProject(base)).placements;
   const phases = Array.from({ length: PHASE_COUNT }, (_unused, index): Task => ({
     kind: 'summary',
@@ -100,7 +106,7 @@ function constrainedProject(): Project {
 }
 
 describe('CSV exchange of the large project', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
-  const project = buildLargeProject();
+  const project = csvProject();
   const schedule = unwrap(scheduleProject(project));
   const french = unwrap(exportProjectCsv(project, schedule, FRENCH));
   const options = { format: FRENCH, projectName: 'Imported', fallbackStart: project.startDate };

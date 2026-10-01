@@ -1,3 +1,4 @@
+import { isQuarterHours } from '../../time';
 import { MAX_DEPENDENCIES, MAX_SEGMENTS_PER_TASK } from '../../limits';
 import type { TaskSegment } from '../../model/project';
 import { failure, success, type Result } from '../../result';
@@ -66,7 +67,7 @@ interface RowContext {
   readonly budget: { remainingPredecessors: number };
 }
 
-const DURATION_PATTERN = /^(\d{1,9})\s*h?$/i;
+const DURATION_PATTERN = /^(\d{1,9}(?:[.,]\d{1,2})?)\s*h?$/i;
 const PROGRESS_PATTERN = /^(\d{1,9})\s*%?$/;
 const DECIMAL_RADIX = 10;
 
@@ -145,7 +146,7 @@ function readRow(row: CsvRow, context: RowContext): ParsedRow {
     name: cell('name'),
     start: read('start', parseDate),
     end: read('end', parseDate),
-    durationHours: read('duration', (text) => parseNumber(text, DURATION_PATTERN)),
+    durationHours: read('duration', parseDuration),
     progressPercent: read('progress', (text) => parseNumber(text, PROGRESS_PATTERN)),
     predecessors,
     tagName: read('tag', success),
@@ -197,6 +198,13 @@ function columnPath(index: number): string {
 function parseWbs(text: string): Result<WbsNumber, CellIssue> {
   const wbs = readWbsNumber(text);
   return wbs === null ? failure('INVALID_NOTATION') : success(wbs);
+}
+
+/** Reads a duration in hours made of whole quarter hours, with a comma or a dot as decimal mark and an optional unit. */
+function parseDuration(text: string): Result<number, CellIssue> {
+  const match = DURATION_PATTERN.exec(text);
+  const hours = match === null ? Number.NaN : Number((match[1] ?? '').replace(',', '.'));
+  return isQuarterHours(hours) ? success(hours) : failure('INVALID_NUMBER');
 }
 
 /** Reads a whole number written with digits and an optional unit. */

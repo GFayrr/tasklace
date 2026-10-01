@@ -357,7 +357,7 @@ describe('importProjectJson: values', () => {
     '2026-00-10T09:00',
     '2026-09-00T09:00',
     '2026-09-28T24:00',
-    '2026-09-28T09:30',
+    '2026-09-28T09:10',
     '2026-09-28T09:00:00',
     '2026-09-28T09:00Z',
     '2026-09-28 09:00',
@@ -459,14 +459,14 @@ const tagArbitrary = fc.record({
 const fullRangeInstant = fc.integer({ min: MIN_PROJECT_HOUR, max: END_PROJECT_HOUR - 1 });
 
 /** Picks a daily start hour that leaves a work task enough working hours in the day. */
-function dailyStartArbitrary(task: WorkTask, hoursOfDay: readonly number[]) {
-  const hoursPerDay = task.hoursPerDay ?? hoursOfDay.length;
-  return fc.option(fc.constantFrom(...hoursOfDay.slice(0, hoursOfDay.length - hoursPerDay + 1)));
+function dailyStartArbitrary(task: WorkTask, quartersOfDay: readonly number[]) {
+  const quarters = (task.hoursPerDay ?? quartersOfDay.length / 4) * 4;
+  return fc.option(fc.constantFrom(...quartersOfDay.slice(0, quartersOfDay.length - quarters + 1)));
 }
 
 /** Adds random tags, date constraints, daily start hours and options to a generated project. */
 function enrichProject(input: Project): fc.Arbitrary<Project> {
-  const hoursOfDay = unwrap(compileCalendar(input.calendar)).workingHoursOfDay;
+  const hoursOfDay = unwrap(compileCalendar(input.calendar)).workingQuartersOfDay;
   const tags = fc.uniqueArray(tagArbitrary, {
     maxLength: MAX_GENERATED_TAGS,
     selector: (tag) => tag.id,

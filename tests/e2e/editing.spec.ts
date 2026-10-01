@@ -36,6 +36,20 @@ test.afterEach(async () => {
   await rm(userData, { recursive: true, force: true });
 });
 
+/** Returns the hours a new one-day task works once its end is stretched by some calendar days, under the default calendar of 9 hours from Monday to Friday, so that the test does not depend on the day it runs. */
+function stretchedHours(days: number): number {
+  const day = new Date();
+  while (day.getDay() === 0 || day.getDay() === 6) {
+    day.setDate(day.getDate() + 1);
+  }
+  let workingDays = 1;
+  for (let added = 1; added <= days; added += 1) {
+    day.setDate(day.getDate() + 1);
+    workingDays += day.getDay() === 0 || day.getDay() === 6 ? 0 : 1;
+  }
+  return workingDays * 9;
+}
+
 /** Saves a picture of the window when a folder for pictures is given, to review the interface by eye. */
 async function picture(name: string): Promise<void> {
   if (SCREENSHOT_FOLDER !== undefined) {
@@ -48,6 +62,7 @@ async function addTask(name: string): Promise<void> {
   await page.getByRole('button', { name: 'Add task' }).click();
   const editor = grid.getByRole('textbox');
   await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue('New task');
   await editor.fill(name);
   await editor.press('Enter');
 }
@@ -71,7 +86,7 @@ test('plans tasks from the keyboard and the table, and undoes each change', asyn
   await addTask('Build');
   await expect(row('Research')).toContainText('1');
   await typeInCell('Research', 2, '2d');
-  await expect(row('Research')).toContainText('14 h');
+  await expect(row('Research')).toContainText('18 h');
   await typeInCell('Design', 6, '1');
   await typeInCell('Build', 6, '2FS+3h');
   await expect(row('Build')).toContainText('2FS+3h');
@@ -162,10 +177,10 @@ test('moves, stretches and links bars on the timeline', async () => {
 
   await page.mouse.move(box.x + first.end - 1, y(0));
   await page.mouse.down();
-  await page.mouse.move(box.x + first.end + 64, y(0), { steps: 5 });
+  await page.mouse.move(box.x + first.end + 96, y(0), { steps: 5 });
   await page.mouse.up();
-  await expect(row('First')).toContainText('21 h');
-  await expect.poll(async () => (await barCentre(0)).end).toBeGreaterThan(first.end + 40);
+  await expect(row('First')).toContainText(`${String(stretchedHours(3))} h`);
+  await expect.poll(async () => (await barCentre(0)).end).toBeGreaterThan(first.end + 10);
 
   const stretched = await barCentre(0);
   await page.mouse.click(box.x + (stretched.start + stretched.end) / 2, y(0));
@@ -176,4 +191,85 @@ test('moves, stretches and links bars on the timeline', async () => {
   await page.mouse.up();
   await expect(grid.getByRole('row').nth(2).getByRole('gridcell').nth(6)).toHaveText('1');
   await picture('editing-timeline');
+});
+
+/** Writes a local working day, about some days away from today and moved forward past a weekend, as an ISO date and time. */
+function isoDaysFromToday(days: number, time: string): string {
+  const moment = new Date();
+  moment.setDate(moment.getDate() + days);
+  while (moment.getDay() === 0 || moment.getDay() === 6) {
+    moment.setDate(moment.getDate() + 1);
+  }
+  const month = String(moment.getMonth() + 1).padStart(2, '0');
+  const day = String(moment.getDate()).padStart(2, '0');
+  return `${String(moment.getFullYear())}-${month}-${day} ${time}`;
+}
+
+test('works to the quarter hour and moves the project start for an earlier task', async () => {
+  await addTask('Meeting');
+  await typeInCell('Meeting', 2, '1h30');
+  await expect(row('Meeting')).toContainText('1 h 30');
+  await typeInCell('Meeting', 3, isoDaysFromToday(1, '10:15'));
+  await expect(row('Meeting').getByRole('gridcell').nth(3)).toContainText(/10:15/);
+  await expect(row('Meeting').getByRole('gridcell').nth(4)).toContainText(/11:45/);
+  await typeInCell('Meeting', 4, isoDaysFromToday(1, '12:00'));
+  await expect(row('Meeting')).toContainText('1 h 45');
+  await typeInCell('Meeting', 3, isoDaysFromToday(-10, '09:00'));
+  await expect(
+    page.getByRole('status').filter({ hasText: 'The project now starts on' }),
+  ).toBeVisible();
+  await expect(row('Meeting').getByRole('gridcell').nth(3)).toContainText(/9:00/);
+  await page.keyboard.press('Control+z');
+  await expect(row('Meeting').getByRole('gridcell').nth(3)).toContainText(/10:15/);
+});
+
+test('chooses a start on the calendar of the system, to the quarter hour', async () => {
+  await addTask('Review');
+  const button = row('Review').getByRole('button', {
+    name: 'Choose the start of Review on a calendar',
+  });
+  await row('Review').hover();
+  await button.click();
+  await page.evaluate(
+    (value) => {
+      const picker = document.querySelector<HTMLInputElement>('input.picker');
+      if (picker !== null) {
+        picker.value = value;
+        picker.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    },
+    isoDaysFromToday(2, '14:05').replace(' ', 'T'),
+  );
+  await expect(row('Review').getByRole('gridcell').nth(3)).toContainText(/2:00 PM|14:00/);
+});
+
+test('tags a task from the table and splits it into blocks in its details', async () => {
+  await addTask('Write');
+  await row('Write').getByRole('gridcell').nth(7).dblclick();
+  await grid.getByRole('combobox').selectOption({ label: 'Design' });
+  await expect(row('Write')).toContainText('Design');
+
+  await row('Write').getByRole('gridcell').nth(1).click();
+  await page.getByRole('button', { name: 'Details of the task' }).click();
+  const details = page.getByRole('dialog', { name: 'Task details' });
+  await expect(details).toBeVisible();
+  await details.getByRole('textbox', { name: 'Duration of block 1' }).fill('4 h');
+  await details.getByRole('button', { name: 'Add a block' }).click();
+  await details.getByRole('textbox', { name: 'Days after block 1' }).fill('0');
+  await details.getByRole('button', { name: 'Save' }).click();
+  await expect(details.getByRole('alert')).toContainText('at least one whole day');
+  await details.getByRole('textbox', { name: 'Days after block 1' }).fill('2');
+  await details.getByRole('textbox', { name: 'Duration of block 2' }).fill('1 h 30');
+  await picture('details');
+  await details.getByRole('button', { name: 'Save' }).click();
+  await expect(details).toBeHidden();
+  await expect(row('Write')).toContainText('5 h 30');
+  await page.keyboard.press('Control+z');
+  await expect(row('Write')).toContainText('9 h');
+
+  await row('Write').getByRole('gridcell').nth(1).click();
+  await page.keyboard.press('Alt+Enter');
+  await expect(details).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(details).toBeHidden();
 });

@@ -11,9 +11,9 @@ import { createRandom } from './random';
 const LARGE_PROJECT_FINGERPRINT =
   '6293639069451349d290768e94b6a820845c94e611e22092fd28a430baa4eb29';
 
-const SCHEDULE_FINGERPRINT = 'd9e0b7193d5ae304f964f64bb82993bc5d47e6af0ab1d403b0191befa720a576';
+const SCHEDULE_FINGERPRINT = 'b71829094294d71c788b9d903b0c23c845fc7e73e79a49a42bac98e461476bd6';
 const ADVANCED_SCHEDULE_FINGERPRINT =
-  'f1ba8fcd33f596a158c122dd27a51c3e629900b08c6f7cddec0d48477c72bd33';
+  'b6250c248af0492e06194741ea9a30db91968cbe019313ba7a41bf97e9563d8d';
 
 /** Returns the SHA-256 fingerprint of a value serialized as JSON. */
 function fingerprint(value: unknown): string {

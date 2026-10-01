@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CALENDAR } from '../calendar/default-calendar';
+import { TEST_CALENDAR } from '../testing/test-calendar';
 import { MAX_SEGMENTS_PER_TASK, MAX_SEGMENT_GAP_DAYS } from '../limits';
 import type { SchedulableTask } from '../model/project';
 import { at, compileOrThrow, format } from '../testing/civil-time';
@@ -15,7 +15,7 @@ import {
 } from './task-placement';
 import type { Result } from '../result';
 
-const calendar = compileOrThrow(DEFAULT_CALENDAR);
+const calendar = compileOrThrow(TEST_CALENDAR);
 const MONDAY_9 = at(2026, 9, 28, 9);
 
 /** Describes a placement as its blocks, each written "start → end", or returns its error code. */
@@ -150,7 +150,7 @@ describe('placeTask', () => {
     ],
     ['a zero-hour block', [[0, 0]]],
     ['a negative block', [[-4, 0]]],
-    ['a fractional block', [[1.5, 0]]],
+    ['a block that is not a whole quarter hour', [[1.3, 0]]],
     ['a NaN block', [[Number.NaN, 0]]],
     [
       'too many blocks',

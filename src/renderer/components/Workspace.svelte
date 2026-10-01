@@ -111,6 +111,11 @@
     scrollLeft = untrack(() => zoomedScrollLeft(scrollLeft, timelineWidth, from, zoom));
   });
 
+  /** Opens the details of a task. */
+  function openDetails(id: TaskId): void {
+    app.openDetails(id);
+  }
+
   /** Selects a task. */
   function selectTask(id: TaskId): void {
     app.selectedTaskId = id;
@@ -237,6 +242,7 @@
       moved={moveBar}
       stretched={stretchBar}
       linked={linkBar}
+      opened={openDetails}
     />
   </div>
 </main>

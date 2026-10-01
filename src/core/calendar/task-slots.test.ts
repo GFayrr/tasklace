@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { MAX_TASK_DURATION_HOURS } from '../limits';
 import { at, compileOrThrow, format } from '../testing/civil-time';
 import { END_PROJECT_HOUR } from '../time';
-import { DEFAULT_CALENDAR } from './default-calendar';
+import { TEST_CALENDAR } from '../testing/test-calendar';
 import { computeTaskSlots, type TaskPlacement, type TimeSlot } from './task-slots';
 
-const calendar = compileOrThrow(DEFAULT_CALENDAR);
+const calendar = compileOrThrow(TEST_CALENDAR);
 
 /** Builds a task placement with full working days unless told otherwise. */
 function placement(overrides: Partial<TaskPlacement>): TaskPlacement {
@@ -90,7 +90,7 @@ describe('computeTaskSlots', () => {
     expect(result.ok && result.value.length).toBeGreaterThan(0);
   });
 
-  it.each([-1, 0.5, Number.NaN, MAX_TASK_DURATION_HOURS + 1])(
+  it.each([-1, 0.3, Number.NaN, MAX_TASK_DURATION_HOURS + 1])(
     'rejects the invalid duration %d',
     (durationHours) => {
       expect(computeTaskSlots(calendar, placement({ durationHours }))).toEqual({
@@ -100,7 +100,7 @@ describe('computeTaskSlots', () => {
     },
   );
 
-  it.each([0, -2, 2.5, 8, Number.NaN])('rejects %d hours per day', (hoursPerDay) => {
+  it.each([0, -2, 2.3, 8, Number.NaN])('rejects %d hours per day', (hoursPerDay) => {
     expect(computeTaskSlots(calendar, placement({ hoursPerDay }))).toEqual({
       ok: false,
       error: 'INVALID_HOURS_PER_DAY',
@@ -110,7 +110,7 @@ describe('computeTaskSlots', () => {
   it.each([
     ['a negative hour', -1, 1],
     ['hour 24', 24, 1],
-    ['a fractional hour', 9.5, 1],
+    ['a time that is not a whole quarter hour', 9.1, 1],
     ['an hour leaving too few working hours', 16, 2],
     ['an hour after the working day', 18, 1],
     ['an hour past the first working hour for a full-day task', 10, null],

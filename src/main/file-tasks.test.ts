@@ -1,3 +1,4 @@
+import { DEFAULT_CALENDAR } from '../core/calendar/default-calendar';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -87,7 +88,8 @@ describe('file tasks', () => {
     const jsonPath = join(folder, 'plan.json');
     const csvPath = join(folder, 'plan.csv');
     await writeFile(jsonPath, `﻿${exportProjectJson(SAMPLE)}`);
-    await writeFile(csvPath, unwrap(exportProjectCsv(SAMPLE, scheduleOrThrow(SAMPLE), FRENCH)));
+    const table = { ...SAMPLE, calendar: DEFAULT_CALENDAR };
+    await writeFile(csvPath, unwrap(exportProjectCsv(table, scheduleOrThrow(table), FRENCH)));
     const json = loadedOf(
       await runFileTask({ kind: 'importJson', path: jsonPath, documentId: NEW_DOCUMENT_ID }),
     );

@@ -1,7 +1,8 @@
 import fc from 'fast-check';
 import { compileCalendar } from '../calendar/compile-calendar';
 import type { Dependency, DependencyType, Project, SchedulableTask, Task } from '../model/project';
-import { calendarArbitrary, instantArbitrary, unwrap } from './arbitraries';
+import { fromQuarters, QUARTER_HOUR, QUARTERS_PER_HOUR, toQuarters } from '../time';
+import { calendarArbitrary, instantArbitrary, quarterHoursArbitrary, unwrap } from './arbitraries';
 import { milestone, project, summary, workTask } from './project-builder';
 
 const MAX_TASKS = 20;
@@ -22,7 +23,7 @@ export interface GeneratedProject {
 }
 
 const blockArbitrary = fc.record({
-  durationHours: fc.integer({ min: 1, max: MAX_BLOCK_HOURS }),
+  durationHours: quarterHoursArbitrary(QUARTER_HOUR, MAX_BLOCK_HOURS),
   gapDaysBefore: fc.integer({ min: 1, max: MAX_GAP_DAYS }),
 });
 
@@ -39,7 +40,7 @@ const dependencyShapeArbitrary = fc.record({
   from: fc.nat(),
   to: fc.nat(),
   type: fc.constantFrom(...DEPENDENCY_TYPES),
-  lagHours: fc.integer({ min: -MAX_LAG, max: MAX_LAG }),
+  lagHours: quarterHoursArbitrary(-MAX_LAG, MAX_LAG),
 });
 
 type TaskShape = typeof taskShapeArbitrary extends fc.Arbitrary<infer Shape> ? Shape : never;
@@ -63,9 +64,14 @@ function buildTask(index: number, shape: TaskShape, hoursPerWorkingDay: number):
     gapDaysBefore: blockIndex === 0 ? 0 : block.gapDaysBefore,
   }));
   const hoursPerDay =
-    shape.hoursPerDayRatio === null
+    shape.hoursPerDayRatio === null || hoursPerWorkingDay < 1
       ? null
-      : Math.max(1, Math.round(shape.hoursPerDayRatio * hoursPerWorkingDay));
+      : fromQuarters(
+          Math.max(
+            QUARTERS_PER_HOUR,
+            Math.round(shape.hoursPerDayRatio * toQuarters(hoursPerWorkingDay)),
+          ),
+        );
   return workTask(id, { ...common, segments, hoursPerDay });
 }
 
@@ -101,7 +107,7 @@ export const projectArbitrary: fc.Arbitrary<GeneratedProject> = calendarArbitrar
         dependencyShapes: fc.array(dependencyShapeArbitrary, { maxLength: MAX_TASKS * 2 }),
       })
       .map(({ startDate, taskShapes, dependencyShapes }) => {
-        const hoursPerWorkingDay = calendar.workingHoursOfDay.length;
+        const hoursPerWorkingDay = calendar.workingHoursPerDay;
         const leaves = taskShapes.map((shape, index) =>
           buildTask(index, shape, hoursPerWorkingDay),
         );
