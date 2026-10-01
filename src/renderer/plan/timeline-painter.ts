@@ -67,6 +67,19 @@ export interface HourInterval {
   readonly end: ProjectHour;
 }
 
+interface PixelInterval {
+  readonly start: number;
+  readonly end: number;
+}
+
+interface BarLook {
+  readonly color: string;
+  readonly pale: string;
+  readonly pattern: CanvasPattern | null;
+  readonly top: number;
+  readonly outlined: boolean;
+}
+
 const HALF = 2;
 const BAR_RADIUS = 5;
 const SUMMARY_TIP = 6;
@@ -76,7 +89,9 @@ const OUTLINE_WIDTH = 2;
 const TODAY_WIDTH = 2;
 const PREVIEW_DASH = [4, 3];
 const HALF_PIXEL = 0.5;
-const SEGMENT_LINK_HEIGHT = 2;
+const DAY_OFF_HEIGHT = 6;
+const SPLIT_GAP_DASH = [2, 3];
+const SPLIT_GAP_WIDTH = 1.5;
 const SCALE_ROW_HEIGHT = 24;
 const LABEL_PADDING = 6;
 const UPPER_FONT = '600 12px Jost, "Segoe UI", sans-serif';
@@ -118,6 +133,33 @@ export function nonWorkingIntervals(
     }
   }
   return mergeIntervals(intervals);
+}
+
+/** Splits a time span into the parts on working days and the whole days off between them, such as a weekend inside a task. */
+export function splitAtDaysOff(
+  calendar: CompiledCalendar,
+  start: ProjectHour,
+  end: ProjectHour,
+): { readonly parts: HourInterval[]; readonly daysOff: HourInterval[] } {
+  const parts: HourInterval[] = [];
+  const daysOff: HourInterval[] = [];
+  let partStart = start;
+  for (let day = dayIndexOf(start); startOfDay(day) < end; day += 1) {
+    if (isWorkingDay(calendar, day)) {
+      continue;
+    }
+    const offStart = Math.max(start, startOfDay(day));
+    const offEnd = Math.min(end, startOfDay(day + 1));
+    if (offStart > partStart) {
+      parts.push({ start: partStart, end: offStart });
+    }
+    daysOff.push({ start: offStart, end: offEnd });
+    partStart = offEnd;
+  }
+  if (partStart < end) {
+    parts.push({ start: partStart, end });
+  }
+  return { parts, daysOff: mergeIntervals(daysOff) };
 }
 
 /** Draws the rows of the timeline that a viewport shows: non-working periods, selection, bars, links and the today line. */
@@ -295,50 +337,115 @@ function paintShape(
   shape.segments.slice(1).forEach((segment, index) => {
     const previous = shape.segments[index];
     const gapStart = previous === undefined ? segment.x : previous.x + previous.width;
-    context.fillStyle = pale;
-    context.fillRect(
-      gapStart,
-      top + ROW_HEIGHT / HALF - 1,
-      segment.x - gapStart,
-      SEGMENT_LINK_HEIGHT,
-    );
+    paintSplitGap(context, color, gapStart, segment.x, top + ROW_HEIGHT / HALF);
   });
+  const bar = { color, pale, pattern, top: barTop, outlined };
   for (const segment of shape.segments) {
-    context.save();
-    roundedRectangle(context, segment.x, barTop, Math.max(segment.width, 1), BAR_HEIGHT);
-    context.clip();
-    context.fillStyle = pale;
-    context.fillRect(segment.x, barTop, segment.width, BAR_HEIGHT);
-    context.fillStyle = color;
-    context.fillRect(segment.x, barTop, segment.filled, BAR_HEIGHT);
-    if (pattern !== null) {
-      context.fillStyle = pattern;
-      context.fillRect(segment.x, barTop, segment.width, BAR_HEIGHT);
-    }
-    context.restore();
-    context.strokeStyle = color;
-    context.lineWidth = 1;
+    const fillEnd = segment.x + segment.filled;
+    const pieces = piecesOf(scene, segment.x, segment.x + segment.width);
+    pieces.daysOff.forEach((dayOff) => {
+      context.fillStyle = pale;
+      context.fillRect(
+        dayOff.start,
+        top + (ROW_HEIGHT - DAY_OFF_HEIGHT) / HALF,
+        dayOff.end - dayOff.start,
+        DAY_OFF_HEIGHT,
+      );
+    });
+    pieces.parts.forEach((part) => {
+      paintBarPart(context, scene, bar, part, fillEnd);
+    });
+  }
+}
+
+/** Splits the horizontal extent of a block into the parts worked and the days off it spans, in pixels. */
+function piecesOf(
+  scene: TimelineScene,
+  left: number,
+  right: number,
+): { readonly parts: readonly PixelInterval[]; readonly daysOff: readonly PixelInterval[] } {
+  if (scene.calendar === null) {
+    return { parts: [{ start: left, end: right }], daysOff: [] };
+  }
+  const split = splitAtDaysOff(
+    scene.calendar,
+    hourAt(scene.frame, left),
+    hourAt(scene.frame, right),
+  );
+  const toPixels = (interval: HourInterval): PixelInterval => ({
+    start: xOf(scene.frame, interval.start),
+    end: xOf(scene.frame, interval.end),
+  });
+  return { parts: split.parts.map(toPixels), daysOff: split.daysOff.map(toPixels) };
+}
+
+/** Draws one worked part of a block: pale ground, progress up to its end, pattern, outline and conflict outline. */
+function paintBarPart(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  bar: BarLook,
+  part: PixelInterval,
+  fillEnd: number,
+): void {
+  const width = Math.max(part.end - part.start, 1);
+  context.save();
+  roundedRectangle(context, part.start, bar.top, width, BAR_HEIGHT);
+  context.clip();
+  context.fillStyle = bar.pale;
+  context.fillRect(part.start, bar.top, width, BAR_HEIGHT);
+  context.fillStyle = bar.color;
+  context.fillRect(
+    part.start,
+    bar.top,
+    Math.max(0, Math.min(fillEnd, part.end) - part.start),
+    BAR_HEIGHT,
+  );
+  if (bar.pattern !== null) {
+    context.fillStyle = bar.pattern;
+    context.fillRect(part.start, bar.top, width, BAR_HEIGHT);
+  }
+  context.restore();
+  context.strokeStyle = bar.color;
+  context.lineWidth = 1;
+  roundedRectangle(
+    context,
+    part.start + HALF_PIXEL,
+    bar.top + HALF_PIXEL,
+    Math.max(width - 1, 1),
+    BAR_HEIGHT - 1,
+  );
+  context.stroke();
+  if (bar.outlined) {
+    context.strokeStyle = scene.theme.error;
+    context.lineWidth = OUTLINE_WIDTH;
     roundedRectangle(
       context,
-      segment.x + HALF_PIXEL,
-      barTop + HALF_PIXEL,
-      Math.max(segment.width - 1, 1),
-      BAR_HEIGHT - 1,
+      part.start - 1,
+      bar.top - 1,
+      width + OUTLINE_WIDTH,
+      BAR_HEIGHT + OUTLINE_WIDTH,
     );
     context.stroke();
-    if (outlined) {
-      context.strokeStyle = scene.theme.error;
-      context.lineWidth = OUTLINE_WIDTH;
-      roundedRectangle(
-        context,
-        segment.x - 1,
-        barTop - 1,
-        segment.width + OUTLINE_WIDTH,
-        BAR_HEIGHT + OUTLINE_WIDTH,
-      );
-      context.stroke();
-    }
   }
+}
+
+/** Draws the pause between two blocks of a split task as a dotted line. */
+function paintSplitGap(
+  context: CanvasRenderingContext2D,
+  color: string,
+  start: number,
+  end: number,
+  middle: number,
+): void {
+  context.save();
+  context.setLineDash(SPLIT_GAP_DASH);
+  context.strokeStyle = color;
+  context.lineWidth = SPLIT_GAP_WIDTH;
+  context.beginPath();
+  context.moveTo(start, middle);
+  context.lineTo(end, middle);
+  context.stroke();
+  context.restore();
 }
 
 /** Draws a summary as a thin bar with a tip at each end. */

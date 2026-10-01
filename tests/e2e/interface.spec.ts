@@ -135,3 +135,17 @@ test('offers both kinds of import from the welcome screen, and cancelling shows 
   await expect(page.getByRole('heading', { name: 'Tasklace', level: 1 })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
+
+test('lets messages fade away on their own, but keeps them while the pointer rests on them', async () => {
+  const forged = join(folder, 'forged.tasklace');
+  await writeFile(forged, 'not a project at all');
+  await answerDialogs(application, { open: forged });
+  await page.getByRole('button', { name: /Open…/ }).click();
+  const alert = page.getByRole('alert');
+  await expect(alert).toBeVisible();
+  await alert.hover();
+  await page.waitForTimeout(11_000);
+  await expect(alert).toBeVisible();
+  await page.mouse.move(0, 0);
+  await expect(alert).toBeHidden({ timeout: 12_000 });
+});

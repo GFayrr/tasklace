@@ -8,7 +8,13 @@
 
 <section class="notices" aria-label={text.notices.label}>
   {#each app.notices as notice (notice.id)}
-    <div class="notice {notice.kind}" role={notice.kind === 'error' ? 'alert' : 'status'}>
+    <div
+      class="notice {notice.kind}"
+      role={notice.kind === 'error' ? 'alert' : 'status'}
+      onanimationend={() => {
+        app.dismiss(notice.id);
+      }}
+    >
       <Icon name="alert" />
       <p>{notice.text}</p>
       <button
@@ -48,8 +54,47 @@
     border-radius: var(--radius);
   }
 
+  .notice {
+    animation: notice-fade 6s ease-in forwards;
+  }
+
   .notice.error {
     color: var(--color-error);
+    animation-duration: 10s;
+  }
+
+  .notice:hover,
+  .notice:focus-within {
+    animation-play-state: paused;
+  }
+
+  @keyframes notice-fade {
+    0%,
+    90% {
+      opacity: 1;
+    }
+
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @keyframes notice-wait {
+    0%,
+    100% {
+      opacity: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .notice {
+      animation-name: notice-wait !important;
+      animation-duration: 6s !important;
+    }
+
+    .notice.error {
+      animation-duration: 10s !important;
+    }
   }
 
   .notice.warning {
