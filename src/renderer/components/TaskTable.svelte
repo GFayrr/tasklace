@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import type { Tag, Task, TaskId } from '../../core/model/project';
+  import type { Tag, TagId, Task, TaskId } from '../../core/model/project';
   import type { AppState } from '../app/app-state.svelte';
   import { fillMessage } from '../i18n/messages';
   import {
@@ -20,6 +20,7 @@
   import { ROW_HEIGHT } from '../plan/timeline-geometry';
   import { visibleRows } from '../plan/timeline-painter';
   import Icon from './Icon.svelte';
+  import TagPicker from './TagPicker.svelte';
 
   interface Props {
     readonly app: AppState;
@@ -35,6 +36,7 @@
     readonly column: EditableColumn;
     readonly initial: string;
     readonly text: string;
+    readonly anchor: DOMRect | null;
   }
 
   let { app, formatters, scrollTop, viewportHeight, scrollBy, reveal }: Props = $props();
@@ -78,6 +80,9 @@
   let picker: HTMLInputElement | undefined = $state();
   let picking: { readonly taskId: TaskId; readonly column: EditableColumn } | null = null;
   let editing = $state<Editing | null>(null);
+  const editingName = $derived(
+    app.project?.tasks.find((task) => task.id === editing?.taskId)?.name ?? '',
+  );
   let grid: HTMLDivElement | undefined = $state();
 
   $effect(() => {
@@ -123,21 +128,35 @@
     activeColumn = column;
     reveal(index);
     const initial = editorText(task, column, source);
-    editing = { taskId, column, initial, text: typed ?? initial };
+    const anchor =
+      column === 'tag'
+        ? (document.getElementById(cellId(taskId, column))?.getBoundingClientRect() ?? null)
+        : null;
+    editing = { taskId, column, initial, text: typed ?? initial, anchor };
     void tick().then(() => {
-      const input = grid?.querySelector<HTMLInputElement | HTMLSelectElement>('.editor');
+      const input = grid?.querySelector<HTMLInputElement>('input.editor');
       if (input === undefined || input === null || document.activeElement === input) {
         return;
       }
       input.focus();
-      if (typed === null && input instanceof HTMLInputElement) {
+      if (typed === null) {
         input.select();
       }
     });
   }
 
+  /** Gives the task being edited the tag chosen in the list, then closes the list. */
+  function chooseTag(tagId: TagId | null): void {
+    const current = editing;
+    editing = null;
+    if (current !== null && (tagId ?? '') !== current.initial) {
+      app.edit((context) => cellEdit(context, current.taskId, 'tag', tagId ?? '', source));
+    }
+    grid?.focus();
+  }
+
   /** Applies the text of the open editor when it changed, then closes it. */
-  function commit(input: HTMLInputElement | HTMLSelectElement): void {
+  function commit(input: HTMLInputElement): void {
     const current = editing;
     if (current === null) {
       return;
@@ -156,9 +175,7 @@
   }
 
   /** Handles the keys of the open editor: Enter applies and goes down, Escape cancels, Tab applies and goes across. */
-  function editorKey(
-    event: KeyboardEvent & { currentTarget: HTMLInputElement | HTMLSelectElement },
-  ): void {
+  function editorKey(event: KeyboardEvent & { currentTarget: HTMLInputElement }): void {
     const input = event.currentTarget;
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -375,6 +392,17 @@
       <span class="cell tag" role="columnheader">{text.tag}</span>
     </div>
   </div>
+  {#if editing?.column === 'tag' && editing.anchor !== null}
+    <TagPicker
+      tags={tagChoices}
+      value={editing.initial === '' ? null : editing.initial}
+      anchor={editing.anchor}
+      label={fillMessage(text.editCell, { column: text.tag, name: editingName })}
+      noTag={text.noTag}
+      choose={chooseTag}
+      {cancel}
+    />
+  {/if}
   <input
     class="picker"
     type="datetime-local"
@@ -447,28 +475,7 @@
                   <span class="toggle-space"></span>
                 {/if}
               {/if}
-              {#if isEditing && column === 'tag'}
-                <select
-                  class="editor"
-                  value={editing?.text}
-                  aria-label={fillMessage(text.editCell, {
-                    column: columnLabel(column),
-                    name: row.task.name,
-                  })}
-                  onchange={(event) => {
-                    commit(event.currentTarget);
-                  }}
-                  onkeydown={editorKey}
-                  onblur={(event) => {
-                    commit(event.currentTarget);
-                  }}
-                >
-                  <option value="">{text.noTag}</option>
-                  {#each tagChoices as tag (tag.id)}
-                    <option value={tag.id}>{tag.name}</option>
-                  {/each}
-                </select>
-              {:else if isEditing}
+              {#if isEditing && column !== 'tag'}
                 <input
                   class="editor"
                   value={editing?.text}

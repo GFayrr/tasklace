@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { computeWbsNumbers } from '../../core/scheduling/wbs';
-import { link, milestone, project, summary, workTask } from '../../core/testing/project-builder';
+import {
+  blockLink,
+  link,
+  milestone,
+  project,
+  splitTask,
+  summary,
+  workTask,
+} from '../../core/testing/project-builder';
 import { buildPlanOutline, groupIncoming, predecessorText, toggledSummary } from './plan-outline';
 
 const TASKS = [
@@ -74,6 +82,33 @@ describe('predecessorText', () => {
     const incoming = groupIncoming(plan.dependencies);
     expect(predecessorText(incoming.get('c'), outline.wbsById)).toBe('1, 2SS+2h');
     expect(predecessorText(incoming.get('a'), outline.wbsById)).toBe('');
+  });
+
+  it('writes the links to the whole task apart from those to one block, by task then by block', () => {
+    const plan = project(
+      [
+        splitTask('a', [
+          [2, 0],
+          [2, 0],
+          [2, 0],
+        ]),
+        splitTask('b', [
+          [2, 0],
+          [2, 0],
+        ]),
+      ],
+      [
+        blockLink('a', 'b', { from: 1, to: 1 }, 'startToStart'),
+        blockLink('a', 'b', { to: 1 }),
+        blockLink('a', 'b', { from: 0, to: 1 }, 'startToFinish'),
+        blockLink('a', 'b', {}, 'startToStart'),
+      ],
+    );
+    const outline = buildPlanOutline(plan.tasks, new Set());
+    const incoming = groupIncoming(plan.dependencies).get('b');
+    expect(predecessorText(incoming, outline.wbsById)).toBe('1SS');
+    expect(predecessorText(incoming, outline.wbsById, 1)).toBe('1, 1#1SF, 1#2SS');
+    expect(predecessorText(incoming, outline.wbsById, 0)).toBe('');
   });
 });
 

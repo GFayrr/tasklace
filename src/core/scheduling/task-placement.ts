@@ -29,9 +29,7 @@ export interface ScheduledSegment {
   readonly end: ProjectHour;
 }
 
-export interface Placement {
-  readonly start: ProjectHour;
-  readonly end: ProjectHour;
+export interface Placement extends ScheduledSegment {
   readonly segments: readonly ScheduledSegment[];
 }
 
@@ -211,15 +209,15 @@ function hasValidSegments(segments: readonly TaskSegment[]): boolean {
   );
 }
 
-/** Tells whether a gap before a block is valid: none for the first block, whole days for the others. */
+/** Tells whether a gap before a block is valid: none for the first block, whole days for the others, zero meaning right after the previous block. */
 function isValidGap(gapDays: number, isFirstSegment: boolean): boolean {
   if (isFirstSegment) {
     return gapDays === 0;
   }
-  return Number.isInteger(gapDays) && gapDays >= 1 && gapDays <= MAX_SEGMENT_GAP_DAYS;
+  return Number.isInteger(gapDays) && gapDays >= 0 && gapDays <= MAX_SEGMENT_GAP_DAYS;
 }
 
-/** Places every block of a work task, each one resuming its gap in days after the previous one. */
+/** Places every block of a work task, each one resuming no earlier than its gap in days after the previous one, and never before it ends. */
 function placeSegments(
   calendar: CompiledCalendar,
   task: WorkTask,
@@ -230,7 +228,10 @@ function placeSegments(
   for (const segment of task.segments) {
     const previous = segments.at(-1);
     if (previous !== undefined) {
-      resumeFrom = startOfDay(dayIndexOf(previous.end - QUARTER_HOUR) + segment.gapDaysBefore);
+      resumeFrom = Math.max(
+        previous.end,
+        startOfDay(dayIndexOf(previous.end - QUARTER_HOUR) + segment.gapDaysBefore),
+      );
     }
     const placed = placeSegment(calendar, task, segment, resumeFrom);
     if (!placed.ok) {

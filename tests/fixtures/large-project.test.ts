@@ -9,11 +9,11 @@ import { LARGE_PROJECT_SEED, buildLargeProject } from './large-project';
 import { createRandom } from './random';
 
 const LARGE_PROJECT_FINGERPRINT =
-  '6293639069451349d290768e94b6a820845c94e611e22092fd28a430baa4eb29';
+  'ccb4306cd9658d39ac6f834e7a565c5ba4b2f5c46a67d0eea76dc2861ed1c841';
 
-const SCHEDULE_FINGERPRINT = 'b71829094294d71c788b9d903b0c23c845fc7e73e79a49a42bac98e461476bd6';
+const SCHEDULE_FINGERPRINT = '04da93f6c20d9d0f9bbd12c17e74b6444fb3fae72c73cb60c0bedd557553a7b5';
 const ADVANCED_SCHEDULE_FINGERPRINT =
-  'b6250c248af0492e06194741ea9a30db91968cbe019313ba7a41bf97e9563d8d';
+  'a9e6e2466beb7952ec26140f9da5f7cce4a1b61edf2f1c3657a9e921bead2ade';
 
 /** Returns the SHA-256 fingerprint of a value serialized as JSON. */
 function fingerprint(value: unknown): string {

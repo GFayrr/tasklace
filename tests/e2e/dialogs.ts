@@ -1,4 +1,4 @@
-import type { ElectronApplication } from '@playwright/test';
+import type { ElectronApplication, Page } from '@playwright/test';
 
 export interface ChosenPaths {
   readonly open?: string | null;
@@ -22,4 +22,16 @@ export async function answerDialogs(
     },
     { open: paths.open ?? null, save: paths.save ?? null },
   );
+}
+
+/** Closes the application, answering "Don't save" if it asks whether to save a project that has no file yet. */
+export async function closeDiscarding(application: ElectronApplication, page: Page): Promise<void> {
+  const closing = application.close();
+  const discard = page
+    .getByRole('dialog', { name: 'Save this project?' })
+    .getByRole('button', { name: "Don't save" })
+    .click()
+    .catch(() => undefined);
+  await Promise.race([closing, discard]);
+  await closing;
 }

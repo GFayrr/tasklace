@@ -131,7 +131,7 @@ export function rowShape(
   };
 }
 
-/** Routes the arrow of a dependency from the side of its predecessor it starts from to the side of its successor it constrains, around the bars. */
+/** Routes the arrow of a dependency from the side of the task or block it leaves to the side of the task or block it constrains, around the bars. */
 export function dependencyArrow(
   dependency: Dependency,
   from: RowShape,
@@ -139,8 +139,11 @@ export function dependencyArrow(
 ): readonly Point[] {
   const fromRight = !usesPredecessorStart(dependency);
   const toLeft = constrainsSuccessorStart(dependency);
-  const start = { x: fromRight ? shapeEnd(from) : shapeStart(from), y: rowMiddle(from.row) };
-  const end = { x: toLeft ? shapeStart(to) : shapeEnd(to), y: rowMiddle(to.row) };
+  const start = {
+    x: blockEdge(from, dependency.predecessorBlock, fromRight),
+    y: rowMiddle(from.row),
+  };
+  const end = { x: blockEdge(to, dependency.successorBlock, !toLeft), y: rowMiddle(to.row) };
   const outX = start.x + (fromRight ? ARROW_GAP : -ARROW_GAP);
   const inX = end.x + (toLeft ? -ARROW_GAP : ARROW_GAP);
   const direct = toLeft ? outX <= inX : outX >= inX;
@@ -156,6 +159,15 @@ export function dependencyArrow(
     { x: inX, y: end.y },
     end,
   ];
+}
+
+/** Returns the left or right edge of a block of a shape, or of the whole shape when no block is named or the shape does not show it. */
+function blockEdge(shape: RowShape, block: number | null, right: boolean): number {
+  const segment = block === null || shape.kind !== 'task' ? undefined : shape.segments[block];
+  if (segment === undefined) {
+    return right ? shapeEnd(shape) : shapeStart(shape);
+  }
+  return right ? segment.x + segment.width : segment.x;
 }
 
 /** Returns the left edge of a shape. */

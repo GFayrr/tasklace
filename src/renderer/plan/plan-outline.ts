@@ -84,20 +84,27 @@ export function groupIncoming(
   return grouped;
 }
 
-/** Writes the predecessors of a task in the notation of the task table, by WBS number in WBS order. */
+/** Writes the predecessors of a task, or of one of its blocks, in the notation of the task table, by WBS number in WBS order. */
 export function predecessorText(
   incoming: readonly Dependency[] | undefined,
   wbsById: ReadonlyMap<TaskId, string>,
+  block: number | null = null,
 ): string {
   if (incoming === undefined) {
     return '';
   }
-  const references = incoming.map((dependency) => ({
-    wbs: wbsById.get(dependency.predecessorId) ?? '',
-    type: dependency.type,
-    lagHours: dependency.lagHours,
-  }));
-  references.sort((left, right) => compareWbsNumbers(left.wbs, right.wbs));
+  const references = incoming
+    .filter((dependency) => dependency.successorBlock === block)
+    .map((dependency) => ({
+      wbs: wbsById.get(dependency.predecessorId) ?? '',
+      block: dependency.predecessorBlock,
+      type: dependency.type,
+      lagHours: dependency.lagHours,
+    }));
+  references.sort(
+    (left, right) =>
+      compareWbsNumbers(left.wbs, right.wbs) || (left.block ?? -1) - (right.block ?? -1),
+  );
   return formatPredecessors(references);
 }
 

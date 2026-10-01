@@ -5,17 +5,18 @@ import {
 } from '../calendar/working-time';
 import type { SchedulableTask } from '../model/project';
 import { failure, success, type Result } from '../result';
-import type { ProjectHour } from '../time';
-import type { DependencyGraph, ResolvedDependency } from './dependency-graph';
+import { dayIndexOf, startOfDay, type ProjectHour } from '../time';
+import type { DependencyGraph, ScheduleUnit, UnitDependency } from './dependency-graph';
 import {
   constrainsSuccessorStart,
   dependencyAnchor,
+  gapBefore,
   usesPredecessorStart,
   type PlacementsByIndex,
   type SchedulingContext,
   type TaskPlacementError,
 } from './forward-pass';
-import { placeTaskLatest, type Placement, type PlacementErrorCode } from './task-placement';
+import { placeTaskLatest, type PlacementErrorCode, type ScheduledSegment } from './task-placement';
 
 export interface TaskFloat {
   readonly lateStart: ProjectHour;
@@ -27,12 +28,14 @@ export interface TaskFloat {
 
 export type FloatsByIndex = readonly (TaskFloat | undefined)[];
 
+type SpansByUnit = readonly (ScheduledSegment | undefined)[];
+
 interface LateBounds {
   readonly latestStart: ProjectHour;
   readonly latestEnd: ProjectHour;
 }
 
-/** Computes the latest placement, the floats and the critical flag of every task. */
+/** Computes the latest placement of every block, then the floats and the critical flag of every task. */
 export function runBackwardPass(
   context: SchedulingContext,
   graph: DependencyGraph,
@@ -42,46 +45,58 @@ export function runBackwardPass(
     (latest, placement) => Math.max(latest, placement?.end ?? latest),
     Number.NEGATIVE_INFINITY,
   );
-  const latePlacements = new Array<Placement | undefined>(earlyPlacements.length);
-  for (const { index, task } of [...graph.order].reverse()) {
-    const outgoing = graph.outgoing[index] ?? [];
-    const late = placeLate(context, task, outgoing, latePlacements, projectEnd);
+  const lateBlocks = new Array<ScheduledSegment | undefined>(graph.units.length);
+  for (const unit of [...graph.order].reverse()) {
+    const late = placeLate(context, unit, graph.outgoing[unit.index] ?? [], lateBlocks, projectEnd);
     if (!late.ok) {
-      return failure({ code: late.error, taskId: task.id });
+      return failure({ code: late.error, taskId: unit.task.id });
     }
-    latePlacements[index] = late.value;
+    lateBlocks[unit.index] = late.value;
   }
-  return collectFloats(context, graph, earlyPlacements, latePlacements, projectEnd);
+  const earlyBlocks = blocksOf(graph, earlyPlacements);
+  return collectFloats(context, graph, { early: earlyBlocks, late: lateBlocks }, projectEnd);
 }
 
-/** Places one task as late as its successors, the project end and its advanced constraints allow. */
+/** Places one block as late as the next block of its task, its successors, the project end and the advanced constraints of its task allow. */
 function placeLate(
   context: SchedulingContext,
-  task: SchedulableTask,
-  outgoing: readonly ResolvedDependency[],
-  latePlacements: PlacementsByIndex,
+  unit: ScheduleUnit,
+  outgoing: readonly UnitDependency[],
+  lateBlocks: SpansByUnit,
   projectEnd: ProjectHour,
-): Result<Placement, PlacementErrorCode> {
-  const bounds = computeLateBounds(context, task, outgoing, latePlacements, projectEnd);
+): Result<ScheduledSegment, PlacementErrorCode> {
+  const bounds = computeLateBounds(context, unit, outgoing, lateBlocks, projectEnd);
   if (!bounds.ok) {
     return bounds;
   }
   const { latestStart, latestEnd } = bounds.value;
-  return placeTaskLatest(context.calendar, task, latestStart, latestEnd);
+  const placed = placeTaskLatest(context.calendar, unit.blockTask, latestStart, latestEnd);
+  return placed.ok ? success({ start: placed.value.start, end: placed.value.end }) : placed;
 }
 
-/** Combines the project end, advanced constraints and successors into latest start and end bounds. */
+/** Combines the project end, advanced constraints, the next block and successors into latest start and end bounds. */
 function computeLateBounds(
   context: SchedulingContext,
-  task: SchedulableTask,
-  outgoing: readonly ResolvedDependency[],
-  latePlacements: PlacementsByIndex,
+  unit: ScheduleUnit,
+  outgoing: readonly UnitDependency[],
+  lateBlocks: SpansByUnit,
   projectEnd: ProjectHour,
 ): Result<LateBounds, PlacementErrorCode> {
-  let latestEnd = Math.min(projectEnd, ...advancedEndLimits(context, task));
+  const advanced = unit.isLast ? advancedEndLimits(context, unit.task) : [];
+  let latestEnd = Math.min(projectEnd, ...advanced);
+  const next = unit.isLast ? undefined : lateBlocks[unit.index + 1];
+  if (!unit.isLast && next === undefined) {
+    return failure('INVALID_INSTANT');
+  }
+  if (next !== undefined) {
+    latestEnd = Math.min(
+      latestEnd,
+      latestEndBefore(next.start, gapBefore(unit.task, unit.block + 1)),
+    );
+  }
   let latestStart = latestEnd;
-  for (const { dependency, successorIndex } of outgoing) {
-    const successor = latePlacements[successorIndex];
+  for (const { dependency, successorUnit } of outgoing) {
+    const successor = lateBlocks[successorUnit];
     if (successor === undefined) {
       return failure('INVALID_INSTANT');
     }
@@ -99,6 +114,11 @@ function computeLateBounds(
   return success({ latestStart, latestEnd });
 }
 
+/** Returns the latest end of a block that still lets the next block of its task start at the given instant, given the gap in days between them. */
+function latestEndBefore(nextStart: ProjectHour, gapDays: number): ProjectHour {
+  return Math.min(nextStart, startOfDay(dayIndexOf(nextStart) - gapDays + 1));
+}
+
 /** Moves a start limit forward to the next working hour, which is the same moment in working time. */
 function latestEquivalentStart(context: SchedulingContext, limit: ProjectHour): ProjectHour {
   const next = nextWorkingHour(context.calendar, limit);
@@ -113,61 +133,105 @@ function advancedEndLimits(context: SchedulingContext, task: SchedulableTask): P
   return [task.mustFinishOn, task.deadline].filter((limit) => limit !== null);
 }
 
-/** Derives the total float, free float and critical flag of every task from both placements. */
+/** Lists the early time span of every block from the early placements of the tasks, a milestone spanning its own instant. */
+function blocksOf(
+  graph: DependencyGraph,
+  placements: PlacementsByIndex,
+): (ScheduledSegment | undefined)[] {
+  return graph.units.map((unit) => {
+    const placement = placements[unit.taskIndex];
+    return unit.task.kind === 'milestone' ? placement : placement?.segments[unit.block];
+  });
+}
+
+/** Derives the total float, free float and critical flag of every task from the early and late spans of its blocks. */
 function collectFloats(
   context: SchedulingContext,
   graph: DependencyGraph,
-  earlyPlacements: PlacementsByIndex,
-  latePlacements: PlacementsByIndex,
+  spans: { readonly early: SpansByUnit; readonly late: SpansByUnit },
   projectEnd: ProjectHour,
 ): Result<FloatsByIndex, TaskPlacementError> {
-  const floats = new Array<TaskFloat | undefined>(earlyPlacements.length);
-  for (const { index, task } of graph.order) {
-    const early = earlyPlacements[index];
-    const late = latePlacements[index];
-    const outgoing = graph.outgoing[index] ?? [];
-    const taskFloat =
-      early === undefined || late === undefined
-        ? failure('INVALID_INSTANT' as const)
-        : computeTaskFloat(context, { early, late }, outgoing, earlyPlacements, projectEnd);
-    if (!taskFloat.ok) {
-      return failure({ code: taskFloat.error, taskId: task.id });
+  const floats = new Array<TaskFloat | undefined>(graph.firstUnitOfTask.length);
+  for (const unit of graph.units) {
+    if (!unit.isLast) {
+      continue;
     }
-    floats[index] = taskFloat.value;
+    const first = graph.firstUnitOfTask[unit.taskIndex];
+    if (first === undefined) {
+      return failure({ code: 'INVALID_INSTANT', taskId: unit.task.id });
+    }
+    const taskFloat = computeTaskFloat(
+      context,
+      graph,
+      spans,
+      { first, last: unit.index },
+      projectEnd,
+    );
+    if (!taskFloat.ok) {
+      return failure({ code: taskFloat.error, taskId: unit.task.id });
+    }
+    floats[unit.taskIndex] = taskFloat.value;
   }
   return success(floats);
 }
 
-/** Computes the floats of one task from its early and late placements. */
+/** Computes the floats of one task: the smallest total float of its blocks, and the smallest slack of the links leaving them, or the time left until the project end when none leaves. */
 function computeTaskFloat(
   context: SchedulingContext,
-  { early, late }: { readonly early: Placement; readonly late: Placement },
-  outgoing: readonly ResolvedDependency[],
-  earlyPlacements: PlacementsByIndex,
+  graph: DependencyGraph,
+  spans: { readonly early: SpansByUnit; readonly late: SpansByUnit },
+  units: { readonly first: number; readonly last: number },
   projectEnd: ProjectHour,
 ): Result<TaskFloat, PlacementErrorCode> {
-  const totalFloat = computeTotalFloat(context, early, late);
-  if (!totalFloat.ok) {
-    return totalFloat;
+  let totalFloat = Number.POSITIVE_INFINITY;
+  let freeFloat = Number.POSITIVE_INFINITY;
+  let hasLinks = false;
+  for (let index = units.first; index <= units.last; index += 1) {
+    const early = spans.early[index];
+    const late = spans.late[index];
+    if (early === undefined || late === undefined) {
+      return failure('INVALID_INSTANT');
+    }
+    const blockFloat = computeTotalFloat(context, early, late);
+    if (!blockFloat.ok) {
+      return blockFloat;
+    }
+    totalFloat = Math.min(totalFloat, blockFloat.value);
+    const outgoing = graph.outgoing[index] ?? [];
+    hasLinks ||= outgoing.length > 0;
+    const slack = computeFreeFloat(context, early, outgoing, spans.early);
+    if (!slack.ok) {
+      return slack;
+    }
+    freeFloat = Math.min(freeFloat, slack.value);
   }
-  const freeFloat = computeFreeFloat(context, early, outgoing, earlyPlacements, projectEnd);
-  if (!freeFloat.ok) {
-    return freeFloat;
+  const lastEarly = spans.early[units.last];
+  const firstLate = spans.late[units.first];
+  const lastLate = spans.late[units.last];
+  if (lastEarly === undefined || firstLate === undefined || lastLate === undefined) {
+    return failure('INVALID_INSTANT');
+  }
+  if (!hasLinks) {
+    const toEnd = signedWorkingHoursBetween(context.calendar, lastEarly.end, projectEnd);
+    if (!toEnd.ok) {
+      return toEnd;
+    }
+    freeFloat = toEnd.value;
   }
   return success({
-    lateStart: late.start,
-    lateFinish: late.end,
-    totalFloatHours: totalFloat.value,
-    freeFloatHours: Math.min(freeFloat.value, totalFloat.value),
-    isCritical: totalFloat.value <= 0,
+    lateStart: firstLate.start,
+    lateFinish: lastLate.end,
+    totalFloatHours: totalFloat,
+    freeFloatHours: Math.min(freeFloat, totalFloat),
+    isCritical: totalFloat <= 0,
   });
 }
 
-/** Computes the total float as the smaller of the start float and the finish float. */
+/** Computes the total float of a block as the smaller of its start float and its finish float. */
 function computeTotalFloat(
   context: SchedulingContext,
-  early: Placement,
-  late: Placement,
+  early: ScheduledSegment,
+  late: ScheduledSegment,
 ): Result<number, PlacementErrorCode> {
   const startFloat = signedWorkingHoursBetween(context.calendar, early.start, late.start);
   if (!startFloat.ok) {
@@ -177,20 +241,16 @@ function computeTotalFloat(
   return finishFloat.ok ? success(Math.min(startFloat.value, finishFloat.value)) : finishFloat;
 }
 
-/** Computes how long a task can slip without delaying the early placement of any successor. */
+/** Computes how long a block can slip without delaying the early placement of any successor, or an unlimited value when it has none. */
 function computeFreeFloat(
   context: SchedulingContext,
-  early: Placement,
-  outgoing: readonly ResolvedDependency[],
-  earlyPlacements: PlacementsByIndex,
-  projectEnd: ProjectHour,
+  early: ScheduledSegment,
+  outgoing: readonly UnitDependency[],
+  earlyBlocks: SpansByUnit,
 ): Result<number, PlacementErrorCode> {
-  if (outgoing.length === 0) {
-    return signedWorkingHoursBetween(context.calendar, early.end, projectEnd);
-  }
   let freeFloat = Number.POSITIVE_INFINITY;
   for (const link of outgoing) {
-    const slack = dependencySlack(context, link, early, earlyPlacements);
+    const slack = dependencySlack(context, link, early, earlyBlocks);
     if (!slack.ok) {
       return slack;
     }
@@ -202,11 +262,11 @@ function computeFreeFloat(
 /** Measures the working hours between what a dependency requires and where its successor is. */
 function dependencySlack(
   context: SchedulingContext,
-  { dependency, successorIndex }: ResolvedDependency,
-  early: Placement,
-  earlyPlacements: PlacementsByIndex,
+  { dependency, successorUnit }: UnitDependency,
+  early: ScheduledSegment,
+  earlyBlocks: SpansByUnit,
 ): Result<number, PlacementErrorCode> {
-  const successor = earlyPlacements[successorIndex];
+  const successor = earlyBlocks[successorUnit];
   if (successor === undefined) {
     return failure('INVALID_INSTANT');
   }

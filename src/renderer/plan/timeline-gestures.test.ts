@@ -4,10 +4,12 @@ import {
   gestureAt,
   LINK_HANDLE_GAP,
   linkHandleCenter,
+  linkHandles,
   movedStart,
   snapHour,
   STRETCH_ZONE,
   stretchedEnd,
+  targetBlockAt,
 } from './timeline-gestures';
 import { ROW_HEIGHT, type RowShape, type TimelineFrame } from './timeline-geometry';
 
@@ -18,6 +20,17 @@ const TASK: RowShape = {
   segments: [{ x: 100, width: 80, filled: 0 }],
   start: 100,
   end: 180,
+};
+const SPLIT: RowShape = {
+  kind: 'task',
+  taskId: 't',
+  row: 2,
+  segments: [
+    { x: 100, width: 40, filled: 0 },
+    { x: 200, width: 60, filled: 0 },
+  ],
+  start: 100,
+  end: 260,
 };
 const MILESTONE: RowShape = { kind: 'milestone', taskId: 'm', row: 3, x: 300 };
 const SUMMARY: RowShape = { kind: 'summary', taskId: 's', row: 0, start: 0, end: 400 };
@@ -33,10 +46,32 @@ describe('gestureAt', () => {
   });
 
   it('links from the handle of the selected task only', () => {
-    const handle = linkHandleCenter(TASK);
+    const handle = linkHandleCenter(TASK, null);
     expect(handle).toEqual({ x: 180 + LINK_HANDLE_GAP, y: MIDDLE });
     expect(gestureAt(TASK, handle.x, handle.y, 't')?.kind).toBe('link');
     expect(gestureAt(TASK, handle.x, handle.y, null)).toBeNull();
+  });
+
+  it('links from the end of each block of a split task, the last handle standing for the whole task', () => {
+    expect(linkHandles(SPLIT).map(({ block, center }) => [block, center.x])).toEqual([
+      [0, 140],
+      [null, 260 + LINK_HANDLE_GAP],
+    ]);
+    expect(gestureAt(SPLIT, 140, MIDDLE, 't')).toMatchObject({ kind: 'link', block: 0 });
+    expect(gestureAt(SPLIT, 260 + LINK_HANDLE_GAP, MIDDLE, 't')).toMatchObject({
+      kind: 'link',
+      block: null,
+    });
+    expect(gestureAt(SPLIT, 140, MIDDLE, null)?.kind).toBe('move');
+  });
+
+  it('drops a link on the nearest block, the first block standing for the whole task', () => {
+    expect(targetBlockAt(SPLIT, 120)).toBeNull();
+    expect(targetBlockAt(SPLIT, 230)).toBe(1);
+    expect(targetBlockAt(SPLIT, 190)).toBe(1);
+    expect(targetBlockAt(SPLIT, 150)).toBeNull();
+    expect(targetBlockAt(TASK, 150)).toBeNull();
+    expect(targetBlockAt(MILESTONE, 300)).toBeNull();
   });
 
   it('moves a milestone, and never drags a summary', () => {

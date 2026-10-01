@@ -10,13 +10,23 @@ import {
   CONSTANT_MAX_RATIO,
   growthRatio,
   LARGE_TASK_COUNT,
+  LINEAR_MAX_RATIO,
   MEASURED_RUNS,
   SMALL_TASK_COUNT,
 } from './measure-growth';
-import { TEST_DOCUMENT_ID } from '../../src/core/testing/project-builder';
+import {
+  link,
+  project,
+  splitTask,
+  TEST_DOCUMENT_ID,
+  workTask,
+} from '../../src/core/testing/project-builder';
 
 const WARM_UP_RUNS = 1;
 const EDITS_NEEDED = (MEASURED_RUNS + WARM_UP_RUNS) * BATCH_SIZE;
+const HUB_ID = 'hub';
+const HUB_BLOCK_HOURS = 2;
+const MIN_HUB_BLOCKS = 2;
 
 /** Opens a session on a copy of a shared document, failing the test when it cannot be opened. */
 function openCopy(document: Y.Doc): SharedSession {
@@ -60,6 +70,20 @@ function sharedProject(taskCount: number): Y.Doc {
   return createSharedDocument(project, TEST_DOCUMENT_ID);
 }
 
+/** Builds a shared document where a split task leads to every other task, themselves chained one after the other. */
+function hubProject(taskCount: number): Y.Doc {
+  const hub = splitTask(HUB_ID, [
+    [HUB_BLOCK_HOURS, 0],
+    [HUB_BLOCK_HOURS, 0],
+  ]);
+  const others = Array.from({ length: taskCount }, (_unused, index) =>
+    workTask(`t${String(index)}`),
+  );
+  const fromHub = others.map((task) => link(HUB_ID, task.id));
+  const chain = others.slice(1).map((task, index) => link(others[index]?.id ?? '', task.id));
+  return createSharedDocument(project([hub, ...others], [...fromHub, ...chain]), TEST_DOCUMENT_ID);
+}
+
 describe('growth of shared session operations with the size of the project', () => {
   const smallDocument = sharedProject(SMALL_TASK_COUNT);
   const largeDocument = sharedProject(LARGE_TASK_COUNT);
@@ -88,6 +112,27 @@ describe('growth of shared session operations with the size of the project', () 
     const ratio = growthRatio(merge(small, smallUpdates), merge(large, largeUpdates));
     console.info(`Received edit: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(CONSTANT_MAX_RATIO);
+  });
+
+  it('changes the number of blocks of a task linked to every other task in linear time', () => {
+    const resplitter = (taskCount: number) => {
+      const session = openCopy(hubProject(taskCount));
+      const hub = session.project().tasks.find((task) => task.id === HUB_ID);
+      if (hub?.kind !== 'task') {
+        throw new Error('Missing hub task');
+      }
+      return batched(1, (index) => {
+        const blockCount = MIN_HUB_BLOCKS + (index % 2);
+        const segments = Array.from({ length: blockCount }, () => ({
+          durationHours: HUB_BLOCK_HOURS,
+          gapDaysBefore: 0,
+        }));
+        expect(session.apply({ type: 'putTask', task: { ...hub, segments } }).ok).toBe(true);
+      });
+    };
+    const ratio = growthRatio(resplitter(SMALL_TASK_COUNT), resplitter(LARGE_TASK_COUNT));
+    console.info(`Change the blocks of a linked task: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
   });
 
   it('undoes a local edit in a time that does not depend on the size of the project', () => {

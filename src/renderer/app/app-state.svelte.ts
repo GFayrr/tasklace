@@ -25,11 +25,17 @@ import {
   type Messages,
 } from '../i18n/messages';
 import type { EditableColumn } from '../plan/cell-editing';
-import { buildPlanOutline, NOTHING_COLLAPSED, toggledSummary } from '../plan/plan-outline';
-import { taskFromDraft, type TaskDraft } from '../plan/task-details';
+import {
+  buildPlanOutline,
+  NOTHING_COLLAPSED,
+  predecessorText,
+  toggledSummary,
+} from '../plan/plan-outline';
+import { taskBasis, taskFromDraft, type TaskDraft } from '../plan/task-details';
 import {
   deleteTasks,
   insertTask,
+  findBlockWaitProblem,
   replaceTask,
   type Edit,
   type EditContext,
@@ -49,6 +55,12 @@ import type { Theme } from '../theme/theme';
 import type { Command } from './shortcuts';
 
 export type NoticeKind = 'error' | 'warning' | 'info';
+
+export type CloseChoice = 'save' | 'discard' | 'cancel';
+
+export interface ClosePrompt {
+  readonly answer: (choice: CloseChoice) => void;
+}
 
 export interface EditRequest {
   readonly taskId: TaskId;
@@ -93,6 +105,7 @@ export class AppState {
   selectedTaskId = $state<TaskId | null>(null);
   editRequest = $state<EditRequest | null>(null);
   detailsTaskId = $state<TaskId | null>(null);
+  closePrompt = $state.raw<ClosePrompt | null>(null);
   collapsed = $state.raw<ReadonlySet<TaskId>>(NOTHING_COLLAPSED);
   openedCount = $state(0);
   regionalFormat = $state.raw<RegionalFormat>(DEFAULT_TABLE_FORMAT);
@@ -110,6 +123,7 @@ export class AppState {
   readonly #scheduler: Scheduler;
   #session: SharedSession | null = null;
   #refreshQueued = false;
+  #changedSinceOpened = false;
   #nextNoticeId = 0;
 
   /** Creates the state of the interface around the bridge to the main process and a schedule worker. */
@@ -165,8 +179,27 @@ export class AppState {
     return actions[command]();
   }
 
+  /** Asks whether to save a changed project that has no file yet before it is closed, telling whether it may be closed. */
+  async readyToClose(): Promise<boolean> {
+    if (this.project === null || this.hasFile || !this.#changedSinceOpened) {
+      return true;
+    }
+    const choice = await new Promise<CloseChoice>((answer) => {
+      this.closePrompt = { answer };
+    });
+    this.closePrompt = null;
+    if (choice === 'save') {
+      await this.saveAs();
+      return this.hasFile;
+    }
+    return choice === 'discard';
+  }
+
   /** Starts a new empty project. */
   async newProject(): Promise<void> {
+    if (!(await this.readyToClose())) {
+      return;
+    }
     const { messages, createId, now } = this.#context;
     const project = buildNewProject(messages.projects.untitled, now(), createId);
     this.#attach(await this.#files.create(project));
@@ -174,17 +207,23 @@ export class AppState {
 
   /** Asks for a project file and opens it. */
   async open(): Promise<void> {
-    await this.#load(this.#files.open());
+    if (await this.readyToClose()) {
+      await this.#load(this.#files.open());
+    }
   }
 
   /** Opens one of the recent projects. */
   async openRecent(index: number): Promise<void> {
-    await this.#load(this.#files.openRecent(index));
+    if (await this.readyToClose()) {
+      await this.#load(this.#files.openRecent(index));
+    }
   }
 
   /** Asks for a CSV or JSON file and imports it as a new project. */
   async importFile(kind: ExchangeKind): Promise<void> {
-    await this.#load(this.#files.importFile(kind));
+    if (await this.readyToClose()) {
+      await this.#load(this.#files.importFile(kind));
+    }
   }
 
   /** Saves the project to its file, asking where for a project that has none yet. */
@@ -267,6 +306,18 @@ export class AppState {
     }
   }
 
+  /** Writes what a block of a task waits for, as in the task table. */
+  blockWaitText(id: TaskId, block: number): string {
+    const incoming = this.project?.dependencies.filter((link) => link.successorId === id);
+    return predecessorText(incoming, this.outline.wbsById, block);
+  }
+
+  /** Describes a task and the links that touch it, so that the details panel can tell whether it changed while open. */
+  detailsBasis(id: TaskId): string {
+    const project = this.project;
+    return project === null ? '' : taskBasis(project, id);
+  }
+
   /** Applies the details panel to its task, returning why it was refused, or null once applied. */
   saveDetails(draft: TaskDraft): string | null {
     const id = this.detailsTaskId;
@@ -274,9 +325,16 @@ export class AppState {
     if (task === undefined) {
       return editErrorMessage(this.messages, 'NOT_POSSIBLE');
     }
+    if (draft.basis !== this.detailsBasis(task.id)) {
+      return editErrorMessage(this.messages, 'TASK_CHANGED');
+    }
+    const blockProblem = this.project === null ? null : this.#blockWaitProblem(draft);
+    if (blockProblem !== null) {
+      return blockProblem;
+    }
     const refusal = this.tryEdit((context) => {
       const built = taskFromDraft(task, draft, context.dayHours);
-      return built.ok ? replaceTask(context, built.value) : built;
+      return built.ok ? replaceTask(context, built.value, draft.blocks) : built;
     });
     if (refusal === null) {
       this.detailsTaskId = null;
@@ -389,6 +447,7 @@ export class AppState {
     this.selectedTaskId = null;
     this.editRequest = null;
     this.detailsTaskId = null;
+    this.#changedSinceOpened = false;
     this.collapsed = NOTHING_COLLAPSED;
     this.openedCount += 1;
     session.document.on('update', this.#queueRefresh);
@@ -396,6 +455,7 @@ export class AppState {
   }
 
   readonly #queueRefresh = (): void => {
+    this.#changedSinceOpened = true;
     if (this.#refreshQueued) {
       return;
     }
@@ -439,6 +499,21 @@ export class AppState {
     this.schedule = result.value;
   }
 
+  /** Tells which field of the details panel names a task or block that does not exist, or null. */
+  #blockWaitProblem(draft: TaskDraft): string | null {
+    const project = this.project;
+    if (project === null || draft.blocks.length < 2) {
+      return null;
+    }
+    const problem = findBlockWaitProblem(this.#editContext(project), draft.blocks);
+    return problem === null
+      ? null
+      : fillMessage(this.messages.details.blockError, {
+          number: String(problem.block + 1),
+          message: editErrorMessage(this.messages, problem.error),
+        });
+  }
+
   /** Computes the CSV table of a project in the regional format of the system. */
   async #csvText(project: Project): Promise<string | null> {
     const schedule = scheduleProject(project);
@@ -448,7 +523,11 @@ export class AppState {
     }
     const format = await this.#context.bridge.regionalFormat();
     const text = exportProjectCsv(project, schedule.value, format);
-    return text.ok ? text.value : null;
+    if (!text.ok) {
+      this.#notify('error', this.messages.notices.exportFailed[text.error]);
+      return null;
+    }
+    return text.value;
   }
 
   /** Tells the user why a file action failed, a cancelled action needing no message. */

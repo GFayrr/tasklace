@@ -1,8 +1,23 @@
 import { compareStrings } from '../compare-strings';
 import { MAX_HIERARCHY_DEPTH } from '../limits';
 import type { Dependency, DependencyId, Project, Tag, TagId, Task, TaskId } from '../model/project';
+import {
+  blockKey,
+  blockPairKey,
+  predecessorBlockOf,
+  successorBlockOf,
+  unitCountOf,
+} from '../scheduling/block-links';
 import type { StructureErrorCode } from '../scheduling/project-structure';
 import type { ProjectHeader } from './shared-document';
+
+interface ReachedBlock {
+  readonly taskId: TaskId;
+  readonly block: number;
+  readonly origin: number;
+}
+
+const NOT_THE_TASK = -1;
 
 export interface ProjectState {
   header: ProjectHeader;
@@ -85,7 +100,7 @@ export function putDependency(state: ProjectState, dependency: Dependency): void
   state.dependencies.set(dependency.id, dependency);
   addToIndex(state.links, dependency.predecessorId, dependency.id);
   addToIndex(state.links, dependency.successorId, dependency.id);
-  state.pairs.set(pairKey(dependency), dependency.id);
+  state.pairs.set(blockPairKey(dependency), dependency.id);
 }
 
 /** Removes a dependency and its index entries. */
@@ -97,8 +112,8 @@ export function removeDependency(state: ProjectState, id: DependencyId): void {
   state.dependencies.delete(id);
   removeFromIndex(state.links, dependency.predecessorId, id);
   removeFromIndex(state.links, dependency.successorId, id);
-  if (state.pairs.get(pairKey(dependency)) === id) {
-    state.pairs.delete(pairKey(dependency));
+  if (state.pairs.get(blockPairKey(dependency)) === id) {
+    state.pairs.delete(blockPairKey(dependency));
   }
 }
 
@@ -110,11 +125,6 @@ export function putTag(state: ProjectState, tag: Tag): void {
 /** Removes a tag, leaving the tasks that use it unchanged. */
 export function removeTag(state: ProjectState, id: TagId): void {
   state.tags.delete(id);
-}
-
-/** Returns the key identifying the two tasks of a dependency, in order. */
-export function pairKey(dependency: Pick<Dependency, 'predecessorId' | 'successorId'>): string {
-  return JSON.stringify([dependency.predecessorId, dependency.successorId]);
 }
 
 /** Returns the dependencies touching a task, as either predecessor or successor. */
@@ -176,27 +186,93 @@ export function subtreeHeight(state: ProjectState, taskId: TaskId): number {
   return height;
 }
 
-/** Tells whether a task can be reached from another by following dependencies forward. */
-export function isReachable(state: ProjectState, from: TaskId, target: TaskId): boolean {
-  const visited = new Set<TaskId>([from]);
-  const pending: TaskId[] = [from];
-  for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
-    if (id === target) {
+/** Tells whether a dependency closes a loop, by searching a path from the block it leads to back to the block it leaves, a task missing from the state counting as a loop so that nothing doubtful is accepted. */
+export function closesCycle(state: ProjectState, dependency: Dependency): boolean {
+  const predecessor = state.tasks.get(dependency.predecessorId);
+  const successor = state.tasks.get(dependency.successorId);
+  if (predecessor === undefined || successor === undefined) {
+    return true;
+  }
+  const target = blockKey(predecessor.id, predecessorBlockOf(dependency, unitCountOf(predecessor)));
+  const start = blockKey(successor.id, successorBlockOf(dependency, unitCountOf(successor)));
+  const visited = new Set<string>([start]);
+  const pending = [
+    { taskId: successor.id, block: successorBlockOf(dependency, unitCountOf(successor)) },
+  ];
+  for (let unit = pending.pop(); unit !== undefined; unit = pending.pop()) {
+    if (blockKey(unit.taskId, unit.block) === target) {
       return true;
     }
-    for (const successor of successorsOf(state, id).filter((next) => !visited.has(next))) {
-      visited.add(successor);
-      pending.push(successor);
-    }
+    const unseen = nextBlocks(state, unit.taskId, unit.block).filter(
+      (next) => !visited.has(blockKey(next.taskId, next.block)),
+    );
+    unseen.forEach((next) => visited.add(blockKey(next.taskId, next.block)));
+    pending.push(...unseen);
   }
   return false;
 }
 
-/** Lists the tasks that directly follow a task through a dependency. */
-function successorsOf(state: ProjectState, taskId: TaskId): TaskId[] {
-  return dependenciesOf(state, taskId)
-    .filter((dependency) => dependency.predecessorId === taskId)
-    .map((dependency) => dependency.successorId);
+/** Tells whether some loop goes through the blocks of a task, in a single search that remembers, for every block reached, the highest block of the task it comes from. */
+export function loopsThroughTask(state: ProjectState, task: Task): boolean {
+  const highestOrigin = new Map<string, number>();
+  const pending: ReachedBlock[] = [];
+  for (let block = 0; block < unitCountOf(task); block += 1) {
+    highestOrigin.set(blockKey(task.id, block), block);
+    pending.push({ taskId: task.id, block, origin: block });
+  }
+  for (let reached = pending.pop(); reached !== undefined; reached = pending.pop()) {
+    const next = reachedFrom(state, task, reached, highestOrigin);
+    if (next === null) {
+      return true;
+    }
+    pending.push(...next);
+  }
+  return false;
+}
+
+/** Lists the blocks a reached block leads to whose highest origin grows, or returns null when one of them is a block of the task not after that origin. */
+function reachedFrom(
+  state: ProjectState,
+  task: Task,
+  reached: ReachedBlock,
+  highestOrigin: Map<string, number>,
+): ReachedBlock[] | null {
+  const grown: ReachedBlock[] = [];
+  for (const next of nextBlocks(state, reached.taskId, reached.block)) {
+    const own = next.taskId === task.id ? next.block : NOT_THE_TASK;
+    if (own !== NOT_THE_TASK && reached.origin >= own) {
+      return null;
+    }
+    const origin = Math.max(reached.origin, own);
+    const key = blockKey(next.taskId, next.block);
+    if ((highestOrigin.get(key) ?? NOT_THE_TASK) < origin) {
+      highestOrigin.set(key, origin);
+      grown.push({ ...next, origin });
+    }
+  }
+  return grown;
+}
+
+/** Lists the blocks that directly follow a block: the next block of its task and the blocks its dependencies lead to. */
+function nextBlocks(
+  state: ProjectState,
+  taskId: TaskId,
+  block: number,
+): { readonly taskId: TaskId; readonly block: number }[] {
+  const task = state.tasks.get(taskId);
+  const count = task === undefined ? 0 : unitCountOf(task);
+  const next = block + 1 < count ? [{ taskId, block: block + 1 }] : [];
+  for (const dependency of dependenciesOf(state, taskId)) {
+    const successor = state.tasks.get(dependency.successorId);
+    const leaves = predecessorBlockOf(dependency, count);
+    if (dependency.predecessorId === taskId && leaves === block && successor !== undefined) {
+      next.push({
+        taskId: successor.id,
+        block: successorBlockOf(dependency, unitCountOf(successor)),
+      });
+    }
+  }
+  return next;
 }
 
 /** Adds a value to the set stored under a key of an index. */

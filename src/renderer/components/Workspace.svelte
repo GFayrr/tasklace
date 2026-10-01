@@ -17,7 +17,7 @@
     zoomedScrollLeft,
     type ZoomLevel,
   } from '../plan/time-scale';
-  import { linkTasks, moveStart, stretchEnd } from '../plan/task-commands';
+  import { linkTasks, moveStart, stretchEnd, type LinkEnd } from '../plan/task-commands';
   import { movedStart, stretchedEnd } from '../plan/timeline-gestures';
   import { ROW_HEIGHT, timelineFrame, xOf, type RowShape } from '../plan/timeline-geometry';
   import { tagStylesOf } from '../plan/tag-styles';
@@ -168,11 +168,11 @@
     }
   }
 
-  /** Links a task to the task of the row a link was dropped on. */
-  function linkBar(fromId: TaskId, toRow: number): void {
+  /** Links a task, or one of its blocks, to the task or block a link was dropped on. */
+  function linkBar(from: LinkEnd, toRow: number, toBlock: number | null): void {
     const target = outline.rows[toRow]?.task;
     if (target !== undefined) {
-      app.edit((context) => linkTasks(context, fromId, target.id));
+      app.edit((context) => linkTasks(context, from, { taskId: target.id, block: toBlock }));
     }
   }
 

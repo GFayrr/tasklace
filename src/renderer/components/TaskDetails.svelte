@@ -40,7 +40,12 @@
       dialog?.close();
       return;
     }
-    draft = draftFromTask(task);
+    const taskId = task.id;
+    draft = draftFromTask(
+      task,
+      (block) => app.blockWaitText(taskId, block),
+      app.detailsBasis(taskId),
+    );
     refusal = null;
     dialog.showModal();
   });
@@ -72,6 +77,9 @@
         <span>{text.name}</span>
         <input bind:value={draft.name} />
       </label>
+      {#if task.kind === 'milestone'}
+        <p class="hint">{text.milestoneHint}</p>
+      {/if}
       {#if task.kind !== 'summary'}
         <div class="pair">
           <label class="field">
@@ -125,6 +133,10 @@
                 <input bind:value={block.duration} />
               </label>
               {#if draft.blocks.length > 1}
+                <label class="field waits">
+                  <span>{fillMessage(text.blockWaitsFor, { number: String(index + 1) })}</span>
+                  <input bind:value={block.waitsFor} placeholder={text.blockWaitsForExample} />
+                </label>
                 <button
                   type="button"
                   class="icon-button"
@@ -164,7 +176,7 @@
 
 <style>
   .details {
-    width: min(520px, calc(100% - 32px));
+    width: min(640px, calc(100% - 32px));
     max-height: calc(100% - 64px);
     padding: 0;
     color: var(--color-text);
@@ -188,6 +200,12 @@
     margin: 0;
     font-size: 20px;
     font-weight: 600;
+  }
+
+  .hint {
+    margin: 0;
+    font-size: var(--font-size-small);
+    color: var(--color-text-secondary);
   }
 
   .refusal {
@@ -252,7 +270,11 @@
   }
 
   .gap {
-    flex: 0 0 150px;
+    flex: 0 0 120px;
+  }
+
+  .waits {
+    flex: 1.4;
   }
 
   .actions {

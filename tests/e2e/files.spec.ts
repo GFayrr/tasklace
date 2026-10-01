@@ -23,7 +23,7 @@ import {
 } from '../../src/core/testing/project-builder';
 import { parseLocalCopyIndex } from '../../src/main/local-copies';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
-import { answerDialogs } from './dialogs';
+import { answerDialogs, closeDiscarding } from './dialogs';
 
 const SAMPLE = project([workTask('a', { name: 'Écrire' }), workTask('b')], [link('a', 'b')]);
 
@@ -41,7 +41,7 @@ test.beforeEach(async () => {
 });
 
 test.afterEach(async () => {
-  await application.close();
+  await closeDiscarding(application, page);
   await rm(folder, { recursive: true, force: true });
   await rm(userData, { recursive: true, force: true });
 });

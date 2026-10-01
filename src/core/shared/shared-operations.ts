@@ -14,8 +14,8 @@ import {
   countAncestors,
   dependenciesOf,
   findAncestorProblem,
-  isReachable,
-  pairKey,
+  closesCycle,
+  loopsThroughTask,
   putDependency,
   putTag,
   putTask,
@@ -25,6 +25,7 @@ import {
   subtreeHeight,
   type ProjectState,
 } from './project-state';
+import { blockPairKey, isKnownBlock, unitCountOf } from '../scheduling/block-links';
 import type { ProjectHeader } from './shared-document';
 
 export type SharedOperation =
@@ -139,7 +140,7 @@ function putTaskChecked(state: ProjectState, input: Task): Check {
     return refuse('tasks', 'TOO_MANY_ITEMS');
   }
   putTask(state, task);
-  const problem = findTaskProblem(state, task);
+  const problem = findTaskProblem(state, task, previous);
   if (problem !== null) {
     restoreTask(state, task.id, previous);
     return refuse(`tasks.${task.id}`, problem);
@@ -147,8 +148,12 @@ function putTaskChecked(state: ProjectState, input: Task): Check {
   return success(touched({ tasks: [task.id] }));
 }
 
-/** Returns the first structural problem a task already placed in the state causes, or null. */
-export function findTaskProblem(state: ProjectState, task: Task): ValidationIssueCode | null {
+/** Returns the first structural problem a task already placed in the state causes, or null, given its previous version. */
+export function findTaskProblem(
+  state: ProjectState,
+  task: Task,
+  previous?: Task,
+): ValidationIssueCode | null {
   const ancestorProblem = findAncestorProblem(state, task);
   if (ancestorProblem !== null) {
     return ancestorProblem;
@@ -162,7 +167,32 @@ export function findTaskProblem(state: ProjectState, task: Task): ValidationIssu
   if (task.kind === 'summary' && dependenciesOf(state, task.id).length > 0) {
     return 'SUMMARY_DEPENDENCY';
   }
+  const linkProblem = findBlockLinkProblem(state, task, previous);
+  if (linkProblem !== null) {
+    return linkProblem;
+  }
   return task.kind === 'task' ? findDailyPatternProblem(state, task) : null;
+}
+
+/** Returns the problem the links of a task cause: a link to a block it does not have, or a loop through its blocks when their number changed. */
+function findBlockLinkProblem(
+  state: ProjectState,
+  task: Task,
+  previous: Task | undefined,
+): ValidationIssueCode | null {
+  const links = dependenciesOf(state, task.id);
+  const unknownBlock = links.some(
+    (link) =>
+      (link.predecessorId === task.id && !isKnownBlock(task, link.predecessorBlock)) ||
+      (link.successorId === task.id && !isKnownBlock(task, link.successorBlock)),
+  );
+  if (unknownBlock) {
+    return 'UNKNOWN_BLOCK';
+  }
+  if (previous === undefined || unitCountOf(previous) === unitCountOf(task)) {
+    return null;
+  }
+  return loopsThroughTask(state, task) ? 'DEPENDENCY_CYCLE' : null;
 }
 
 /** Returns the problem of a work task whose daily pattern does not fit the project calendar, or null. */
@@ -247,10 +277,16 @@ export function findDependencyProblem(
   if (predecessor.kind === 'summary' || successor.kind === 'summary') {
     return 'SUMMARY_DEPENDENCY';
   }
-  if (state.pairs.has(pairKey(dependency))) {
+  if (
+    !isKnownBlock(predecessor, dependency.predecessorBlock) ||
+    !isKnownBlock(successor, dependency.successorBlock)
+  ) {
+    return 'UNKNOWN_BLOCK';
+  }
+  if (state.pairs.has(blockPairKey(dependency))) {
     return 'DUPLICATE_DEPENDENCY';
   }
-  return isReachable(state, successor.id, predecessor.id) ? 'DEPENDENCY_CYCLE' : null;
+  return closesCycle(state, dependency) ? 'DEPENDENCY_CYCLE' : null;
 }
 
 /** Adds or replaces a tag after checking its fields. */

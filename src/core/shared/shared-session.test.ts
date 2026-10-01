@@ -416,7 +416,10 @@ type OperationShape =
       readonly from: number;
       readonly to: number;
       readonly kind: DependencyType;
+      readonly fromBlock: number | null;
+      readonly toBlock: number | null;
     }
+  | { readonly type: 'blocks'; readonly task: number; readonly count: number }
   | { readonly type: 'unlink'; readonly index: number }
   | { readonly type: 'putTag'; readonly id: string }
   | { readonly type: 'removeTag'; readonly id: string }
@@ -469,6 +472,13 @@ const operationArbitrary: fc.Arbitrary<OperationShape> = fc.oneof(
       'finishToFinish',
       'startToFinish',
     ),
+    fromBlock: fc.option(fc.nat({ max: 2 })),
+    toBlock: fc.option(fc.nat({ max: 2 })),
+  }),
+  fc.record({
+    type: fc.constant('blocks' as const),
+    task: position,
+    count: fc.integer({ min: 1, max: 3 }),
   }),
   fc.record({ type: fc.constant('unlink' as const), index: position }),
   fc.record({ type: fc.constant('putTag' as const), id: tagId }),
@@ -571,8 +581,29 @@ function toOperation(shape: OperationShape, current: Project, newId: string): Sh
       const to = pick(shape.to);
       return from === undefined || to === undefined
         ? noOperation()
-        : { type: 'putDependency', dependency: { ...link(from.id, to.id, shape.kind), id: newId } };
+        : {
+            type: 'putDependency',
+            dependency: {
+              ...link(from.id, to.id, shape.kind),
+              id: newId,
+              predecessorBlock: shape.fromBlock,
+              successorBlock: shape.toBlock,
+            },
+          };
     }
+    case 'blocks':
+      return task?.kind === 'task'
+        ? {
+            type: 'putTask',
+            task: {
+              ...task,
+              segments: Array.from({ length: shape.count }, (_unused, index) => ({
+                durationHours: 3,
+                gapDaysBefore: index === 0 ? 0 : 1,
+              })),
+            },
+          }
+        : noOperation();
     case 'unlink':
       return {
         type: 'removeDependency',

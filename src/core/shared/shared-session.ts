@@ -593,6 +593,7 @@ function applyChangedItems(
     [...items.tasks, ...untouchedTasksOfTags(state, items)],
     items.rounded,
   );
+  const previous = new Map(fixed.tasks.map((task) => [task.id, state.tasks.get(task.id)]));
   fixed.tasks.forEach((task) => {
     putTask(state, task);
   });
@@ -600,7 +601,7 @@ function applyChangedItems(
     state.tags.size > MAX_TAGS ||
     state.tasks.size > MAX_TASKS ||
     hasOrphans(state, items.deletedTasks) ||
-    fixed.tasks.some((task) => findTaskProblem(state, task) !== null);
+    fixed.tasks.some((task) => findTaskProblem(state, task, previous.get(task.id)) !== null);
   return broken || !addDependencies(state, items.dependencies) ? null : fixed;
 }
 
