@@ -372,10 +372,24 @@ describe('readProject: values', () => {
     [{ type: 'FS' }, 'dependencies[0].type', 'OUT_OF_RANGE'],
     [{ lagHours: MAX_LAG_HOURS + 1 }, 'dependencies[0].lagHours', 'OUT_OF_RANGE'],
     [{ lagHours: 0.3 }, 'dependencies[0].lagHours', 'WRONG_TYPE'],
+    [{ predecessorBlock: -1 }, 'dependencies[0].predecessorBlock', 'OUT_OF_RANGE'],
+    [{ predecessorBlock: 1.5 }, 'dependencies[0].predecessorBlock', 'WRONG_TYPE'],
+    [{ successorBlock: '1' }, 'dependencies[0].successorBlock', 'WRONG_TYPE'],
+    [{ successorBlock: true }, 'dependencies[0].successorBlock', 'WRONG_TYPE'],
+    [{ successorBlock: MAX_SEGMENTS_PER_TASK }, 'dependencies[0].successorBlock', 'OUT_OF_RANGE'],
   ] as const)('rejects the dependency %j at %s', (overrides, path, code) => {
     expect(issuesOf(projectWith({ dependencies: [{ ...link('a', 'b'), ...overrides }] }))).toEqual(
       issue(path, code),
     );
+  });
+});
+
+describe('readProject: links to blocks', () => {
+  it('reads a missing block reference as the whole task', () => {
+    const { id, predecessorId, successorId, type, lagHours } = link('a', 'b');
+    const bare = { id, predecessorId, successorId, type, lagHours };
+    const result = readProject(projectWith({ dependencies: [bare] }), STORED_VALUE_CODEC);
+    expect(result.ok && result.value.dependencies).toEqual([link('a', 'b')]);
   });
 });
 
@@ -417,7 +431,7 @@ describe('readProject: tasks', () => {
       {
         segments: [
           { durationHours: 1, gapDaysBefore: 0 },
-          { durationHours: 1, gapDaysBefore: 0 },
+          { durationHours: 1, gapDaysBefore: -1 },
         ],
       },
       'tasks[1].segments[1].gapDaysBefore',

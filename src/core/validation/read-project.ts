@@ -135,7 +135,15 @@ const SEGMENT_KEYS = ['durationHours', 'gapDaysBefore'];
 const BASELINE_KEYS = ['takenAt', 'entries'];
 const BASELINE_ENTRY_KEYS = ['taskId', 'start', 'end', 'durationHours'];
 const MAX_BASELINE_DURATION_HOURS = END_PROJECT_HOUR - MIN_PROJECT_HOUR;
-export const DEPENDENCY_KEYS = ['id', 'predecessorId', 'successorId', 'type', 'lagHours'];
+export const DEPENDENCY_KEYS = [
+  'id',
+  'predecessorId',
+  'successorId',
+  'type',
+  'lagHours',
+  'predecessorBlock',
+  'successorBlock',
+];
 const TASK_KINDS = ['task', 'milestone', 'summary'] as const;
 const DEPENDENCY_TYPES: readonly DependencyType[] = [
   'finishToStart',
@@ -427,7 +435,7 @@ function readWorkTask(
   return allDefined(task) ? task : undefined;
 }
 
-/** Reads the blocks of a task: at least one, no gap before the first, at least one whole day before each other, and a total duration within the limit. */
+/** Reads the blocks of a task: at least one, no gap before the first, a gap of zero or more whole days before each other, and a total duration within the limit. */
 function readSegments(field: Field, issues: IssueList): TaskSegment[] | undefined {
   const segments = readList(field, issues, MAX_SEGMENTS_PER_TASK, (item, list, index) =>
     readSegment(item, list, index === 0),
@@ -457,7 +465,7 @@ function readSegment(field: Field, issues: IssueList, isFirst: boolean): TaskSeg
   if (record === undefined) {
     return undefined;
   }
-  const minimumGap = isFirst ? 0 : 1;
+  const minimumGap = 0;
   const maximumGap = isFirst ? 0 : MAX_SEGMENT_GAP_DAYS;
   const segment = {
     durationHours: readQuarterHours(
@@ -489,8 +497,18 @@ function readDependency(field: Field, issues: IssueList): Dependency | undefined
     successorId: readIdentifier(child('successorId'), issues),
     type: readEnum(child('type'), issues, DEPENDENCY_TYPES),
     lagHours: readQuarterHours(child('lagHours'), issues, -MAX_LAG_HOURS, MAX_LAG_HOURS),
+    predecessorBlock: readBlockReference(child('predecessorBlock'), issues),
+    successorBlock: readBlockReference(child('successorBlock'), issues),
   };
   return allDefined(dependency) ? dependency : undefined;
+}
+
+/** Reads the block of a split task a dependency starts from or leads to, an absent or null value meaning the whole task. */
+function readBlockReference(field: Field, issues: IssueList): number | null | undefined {
+  if (field.value === undefined || field.value === null) {
+    return null;
+  }
+  return readInteger(field, issues, 0, MAX_SEGMENTS_PER_TASK - 1);
 }
 
 /** Reads a baseline plan: when it was taken and the frozen dates of each task, at most once per task. */

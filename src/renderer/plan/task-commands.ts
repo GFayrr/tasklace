@@ -5,6 +5,7 @@ import { parsePredecessors } from '../../core/exchange/csv/task-notations';
 import { MAX_DEPENDENCIES } from '../../core/limits';
 import type {
   Dependency,
+  DependencyType,
   Milestone,
   Project,
   SummaryTask,
@@ -14,11 +15,19 @@ import type {
   WorkTask,
 } from '../../core/model/project';
 import { failure, success, type Result } from '../../core/result';
+import {
+  blockKey,
+  isKnownBlock,
+  predecessorBlockOf,
+  shortestLink,
+  unitCountOf,
+} from '../../core/scheduling/block-links';
 import { keyBetween, spreadKeys } from '../../core/shared/fractional-index';
 import type { SharedOperation } from '../../core/shared/shared-operations';
 import { dayIndexOf, QUARTER_HOUR, startOfDay, type ProjectHour } from '../../core/time';
+import { relinkBlocks } from './block-links';
 import { parseDuration } from './durations';
-import type { PlanOutline } from './plan-outline';
+import { predecessorText, type PlanOutline } from './plan-outline';
 
 export type EditError =
   | 'NOT_POSSIBLE'
@@ -28,7 +37,11 @@ export type EditError =
   | 'INVALID_END'
   | 'INVALID_PROGRESS'
   | 'INVALID_PREDECESSORS'
-  | 'UNKNOWN_TASK_NUMBER';
+  | 'UNKNOWN_TASK_NUMBER'
+  | 'UNKNOWN_BLOCK'
+  | 'LINKS_WOULD_MERGE'
+  | 'WAITS_NEED_TWO_BLOCKS'
+  | 'TASK_CHANGED';
 
 export type Edit = Result<readonly SharedOperation[], EditError>;
 
@@ -37,6 +50,16 @@ export interface EditContext {
   readonly outline: PlanOutline;
   readonly createId: () => string;
   readonly dayHours: number;
+}
+
+export interface LinkEnd {
+  readonly taskId: TaskId;
+  readonly block: number | null;
+}
+
+export interface BlockChoice {
+  readonly origin: number | null;
+  readonly waitsFor: string;
 }
 
 export interface InsertedTask {
@@ -165,7 +188,7 @@ export function setDuration(context: EditContext, id: TaskId, text: string): Edi
     return failure('INVALID_DURATION');
   }
   if (hours === 0) {
-    return success([putTask(asMilestone(task))]);
+    return task.kind === 'task' ? toMilestone(context, task) : success([]);
   }
   if (task.kind === 'milestone') {
     return success([putTask(asWorkTask(task, hours))]);
@@ -243,45 +266,82 @@ export function setProgress(context: EditContext, id: TaskId, text: string): Edi
   return success([putTask({ ...task, progressPercent: percent })]);
 }
 
-/** Replaces the predecessors of a task by those written as in the task table ("1.2, 3SS+2h"), keeping the identifier of each link that stays. */
-export function setPredecessors(context: EditContext, id: TaskId, text: string): Edit {
+/** Replaces the predecessors of a task, or of one of its blocks, by those written as in the task table ("1.2, 3#2SS+2h"), keeping the identifier of each link that stays. */
+export function setPredecessors(
+  context: EditContext,
+  id: TaskId,
+  text: string,
+  block: number | null = null,
+): Edit {
   const task = findTask(context, id);
-  if (task === undefined || task.kind === 'summary') {
+  if (task === undefined || task.kind === 'summary' || !isKnownBlock(task, block)) {
     return failure('NOT_POSSIBLE');
   }
+  return replaceIncoming(context, context.project.dependencies, { taskId: id, block }, text);
+}
+
+/** Lists the operations replacing the links that lead to a task or block by those written, among the given links of the project. */
+function replaceIncoming(
+  context: EditContext,
+  links: readonly Dependency[],
+  target: LinkEnd,
+  text: string,
+): Edit {
   const references = parsePredecessors(text, MAX_DEPENDENCIES);
   if (!references.ok) {
     return failure('INVALID_PREDECESSORS');
   }
-  const idByWbs = new Map([...context.outline.wbsById].map(([taskId, wbs]) => [wbs, taskId]));
   const current = new Map(
-    context.project.dependencies
-      .filter((dependency) => dependency.successorId === id)
-      .map((dependency) => [dependency.predecessorId, dependency]),
+    links
+      .filter((link) => link.successorId === target.taskId && link.successorBlock === target.block)
+      .map((link) => [blockKey(link.predecessorId, link.predecessorBlock), link]),
   );
-  const wanted = new Map<TaskId, Dependency>();
+  const wanted = new Map<string, Dependency>();
   for (const reference of references.value) {
-    const predecessorId = idByWbs.get(reference.wbs);
-    if (predecessorId === undefined) {
-      return failure('UNKNOWN_TASK_NUMBER');
+    const source = resolveSource(context, reference.wbs, reference.block, reference.type);
+    if (!source.ok) {
+      return source;
     }
-    if (wanted.has(predecessorId)) {
+    const key = blockKey(source.value.taskId, source.value.block);
+    if (wanted.has(key)) {
       return failure('INVALID_PREDECESSORS');
     }
-    const dependencyId = current.get(predecessorId)?.id ?? context.createId();
-    const { type, lagHours } = reference;
-    wanted.set(predecessorId, { id: dependencyId, predecessorId, successorId: id, type, lagHours });
+    wanted.set(key, {
+      id: current.get(key)?.id ?? context.createId(),
+      predecessorId: source.value.taskId,
+      predecessorBlock: source.value.block,
+      successorId: target.taskId,
+      successorBlock: target.block,
+      type: reference.type,
+      lagHours: reference.lagHours,
+    });
   }
-  const removed = [...current.values()].filter(
-    (dependency) => !wanted.has(dependency.predecessorId),
-  );
-  const changed = [...wanted.values()].filter(
-    (dependency) => !sameLink(current.get(dependency.predecessorId), dependency),
-  );
+  const removed = [...current].filter(([key]) => !wanted.has(key)).map(([, link]) => link);
+  const changed = [...wanted].filter(([key, link]) => !sameLink(current.get(key), link));
   return success([
     ...removed.map(removeLink),
-    ...changed.map((dependency): SharedOperation => ({ type: 'putDependency', dependency })),
+    ...changed.map(([, dependency]): SharedOperation => ({ type: 'putDependency', dependency })),
   ]);
+}
+
+/** Finds the task, and the block of it, that a task number and an optional block number name, a block that the whole task would stand for anyway for a link of that type becoming the whole task. */
+function resolveSource(
+  context: EditContext,
+  wbs: string,
+  block: number | null,
+  type: DependencyType,
+): Result<LinkEnd, EditError> {
+  const taskId = [...context.outline.wbsById].find(([, number]) => number === wbs)?.[0];
+  const task = taskId === undefined ? undefined : findTask(context, taskId);
+  if (taskId === undefined || task === undefined) {
+    return failure('UNKNOWN_TASK_NUMBER');
+  }
+  if (!isKnownBlock(task, block)) {
+    return failure('UNKNOWN_BLOCK');
+  }
+  const leaves = { type, predecessorBlock: null, successorBlock: null };
+  const whole = block === predecessorBlockOf(leaves, unitCountOf(task));
+  return success({ taskId, block: whole ? null : block });
 }
 
 /** Gives a work task or milestone a tag, or none. */
@@ -294,14 +354,101 @@ export function setTag(context: EditContext, id: TaskId, tagId: TagId | null): E
   return success([putTask({ ...task, tagId })]);
 }
 
-/** Replaces a task by its version edited in the details panel, moving the project start when the task now starts before it. */
-export function replaceTask(context: EditContext, task: Task): Edit {
+/** Replaces a task by its version edited in the details panel, moving the project start if needed and keeping the links of its blocks on the right blocks. */
+export function replaceTask(
+  context: EditContext,
+  task: Task,
+  blocks: readonly BlockChoice[] = [],
+): Edit {
   if (findTask(context, task.id) === undefined) {
     return failure('NOT_POSSIBLE');
   }
   const start = task.kind === 'summary' ? null : task.startNoEarlierThan;
-  const operations = [putTask(task)];
-  return success(start === null ? operations : startingAt(context, start, operations));
+  const written = [putTask(task)];
+  const operations = start === null ? written : startingAt(context, start, written);
+  if (task.kind !== 'task' || blocks.length === 0) {
+    return success(operations);
+  }
+  if (!keepsBlockOrder(task, blocks)) {
+    return failure('NOT_POSSIBLE');
+  }
+  const origins = blocks.map((block) => block.origin);
+  const relinked = relinkBlocks(
+    context.project,
+    task.id,
+    (oldIndex) => (origins.includes(oldIndex) ? origins.indexOf(oldIndex) : null),
+    task.segments.length,
+  );
+  if (relinked.losesLink) {
+    return failure('LINKS_WOULD_MERGE');
+  }
+  const waits = waitOperations(context, task, blocks, relinked.links);
+  return waits.ok ? success([...relinked.operations, ...operations, ...waits.value]) : waits;
+}
+
+/** Tells whether the chosen blocks match the blocks of a work task one for one, keeping the order of the old ones and adding new ones at the end only. */
+function keepsBlockOrder(task: WorkTask, blocks: readonly BlockChoice[]): boolean {
+  const firstNew = blocks.findIndex((block) => block.origin === null);
+  const kept = blocks.slice(0, firstNew < 0 ? blocks.length : firstNew);
+  const increasing = kept.every(
+    (block, index) => index === 0 || (block.origin ?? 0) > (kept[index - 1]?.origin ?? 0),
+  );
+  const onlyNewAfter = blocks.slice(kept.length).every((block) => block.origin === null);
+  return blocks.length === task.segments.length && increasing && onlyNewAfter;
+}
+
+/** Lists the operations writing what each block of a split task waits for, a task left with one block accepting only what its block already waited for. */
+function waitOperations(
+  context: EditContext,
+  task: WorkTask,
+  blocks: readonly BlockChoice[],
+  links: readonly Dependency[],
+): Edit {
+  if (task.segments.length < 2) {
+    const unchanged = blocks.every(
+      (block) => block.waitsFor.trim() === writtenWaits(context, task.id, block.origin),
+    );
+    return unchanged ? success([]) : failure('WAITS_NEED_TWO_BLOCKS');
+  }
+  const operations: SharedOperation[] = [];
+  for (const [block, { waitsFor }] of blocks.entries()) {
+    const edit = replaceIncoming(context, links, { taskId: task.id, block }, waitsFor);
+    if (!edit.ok) {
+      return edit;
+    }
+    operations.push(...edit.value);
+  }
+  return success(operations);
+}
+
+/** Writes what a block of a task waits for in the project as it is, nothing for a new block. */
+function writtenWaits(context: EditContext, taskId: TaskId, origin: number | null): string {
+  if (origin === null) {
+    return '';
+  }
+  const incoming = context.project.dependencies.filter((link) => link.successorId === taskId);
+  return predecessorText(incoming, context.outline.wbsById, origin);
+}
+
+/** Finds the first block whose waits cannot be read or name a task or block that does not exist, so that the details panel can tell which field to fix. */
+export function findBlockWaitProblem(
+  context: EditContext,
+  blocks: readonly BlockChoice[],
+): { readonly block: number; readonly error: EditError } | null {
+  for (const [block, { waitsFor }] of blocks.entries()) {
+    const references = parsePredecessors(waitsFor, MAX_DEPENDENCIES);
+    if (!references.ok) {
+      return { block, error: 'INVALID_PREDECESSORS' };
+    }
+    const [error] = references.value.flatMap((reference) => {
+      const source = resolveSource(context, reference.wbs, reference.block, reference.type);
+      return source.ok ? [] : [source.error];
+    });
+    if (error !== undefined) {
+      return { block, error };
+    }
+  }
+  return null;
 }
 
 /** Turns a work task into a milestone or a milestone into a work task of one working day. */
@@ -310,9 +457,9 @@ export function toggleMilestone(context: EditContext, id: TaskId): Edit {
   if (task === undefined || task.kind === 'summary') {
     return failure('NOT_POSSIBLE');
   }
-  return success([
-    putTask(task.kind === 'task' ? asMilestone(task) : asWorkTask(task, dayHoursOf(context, task))),
-  ]);
+  return task.kind === 'task'
+    ? toMilestone(context, task)
+    : success([putTask(asWorkTask(task, dayHoursOf(context, task)))]);
 }
 
 /** Asks a task not to start before an instant, as when its bar is moved. */
@@ -343,19 +490,48 @@ export function stretchEnd(
   return success([putTask({ ...task, segments })]);
 }
 
-/** Links two tasks so that the second starts after the first ends. */
-export function linkTasks(context: EditContext, predecessorId: TaskId, successorId: TaskId): Edit {
-  if (predecessorId === successorId) {
+/** Links two tasks, or blocks of them, so that the second starts after the first ends, a block of a task that is not split meaning the whole task. */
+export function linkTasks(context: EditContext, from: LinkEnd, to: LinkEnd): Edit {
+  const predecessor = findTask(context, from.taskId);
+  const successor = findTask(context, to.taskId);
+  if (predecessor === undefined || successor === undefined || from.taskId === to.taskId) {
     return failure('NOT_POSSIBLE');
+  }
+  const predecessorBlock = blockOf(predecessor, from.block);
+  const successorBlock = blockOf(successor, to.block);
+  if (!predecessorBlock.ok || !successorBlock.ok) {
+    return failure('UNKNOWN_BLOCK');
   }
   const dependency: Dependency = {
     id: context.createId(),
-    predecessorId,
-    successorId,
+    predecessorId: from.taskId,
+    predecessorBlock: predecessorBlock.value,
+    successorId: to.taskId,
+    successorBlock: successorBlock.value,
     type: 'finishToStart',
     lagHours: 0,
   };
-  return success([{ type: 'putDependency', dependency }]);
+  return success([
+    { type: 'putDependency', dependency: shortestLink(dependency, predecessor, successor) },
+  ]);
+}
+
+/** Returns the block of a task a gesture names: the whole task when the task is not split, or the block when the task has it. */
+function blockOf(task: Task, block: number | null): Result<number | null, EditError> {
+  const split = task.kind === 'task' && task.segments.length > 1;
+  if (block === null || !split) {
+    return success(null);
+  }
+  return isKnownBlock(task, block) ? success(block) : failure('UNKNOWN_BLOCK');
+}
+
+/** Turns a work task into a milestone, its links to or from its blocks first pointing at the whole task, unless two different links would then become one. */
+function toMilestone(context: EditContext, task: WorkTask): Edit {
+  const relinked = relinkBlocks(context.project, task.id, (oldIndex) => oldIndex, 1);
+  if (relinked.losesLink) {
+    return failure('LINKS_WOULD_MERGE');
+  }
+  return success([...relinked.operations, putTask(asMilestone(task))]);
 }
 
 /** Adds, before the operations placing a task at an instant, the move of the project start to the day of that instant when the project starts later. */
@@ -431,7 +607,7 @@ function asSummary(task: Task): SummaryTask {
 }
 
 /** Turns a work task into a milestone with the same dates and constraints. */
-function asMilestone(task: WorkTask | Milestone): Milestone {
+function asMilestone(task: WorkTask): Milestone {
   const { id, name, parentId, sortKey, progressPercent, tagId } = task;
   const { startNoEarlierThan, mustFinishOn, deadline } = task;
   return {

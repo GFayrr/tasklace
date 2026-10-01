@@ -51,6 +51,8 @@ export interface Dependency {
   readonly successorId: TaskId;
   readonly type: DependencyType;
   readonly lagHours: number;
+  readonly predecessorBlock: number | null;
+  readonly successorBlock: number | null;
 }
 
 export interface Tag {

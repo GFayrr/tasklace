@@ -134,14 +134,14 @@ describe('quarter hours in schedules and exchanges', () => {
   });
 
   it('reads quarter hours in notations, and refuses other fractions', () => {
-    expect(formatBlocks([{ durationHours: 1.5, gapDaysBefore: 0 }])).toBe('1.5h');
-    expect(unwrap(parseBlocks('1.25h; +2d 0.5h', 10))).toEqual([
+    expect(formatBlocks([{ durationHours: 1.5, gapDaysBefore: 0 }], new Map())).toBe('1.5h');
+    expect(unwrap(parseBlocks('1.25h; +2d 0.5h', 10, 10)).segments).toEqual([
       { durationHours: 1.25, gapDaysBefore: 0 },
       { durationHours: 0.5, gapDaysBefore: 2 },
     ]);
-    expect(parseBlocks('1.3h', 10).ok).toBe(false);
+    expect(parseBlocks('1.3h', 10, 10).ok).toBe(false);
     expect(unwrap(parsePredecessors('1SS-0.75h', 10))).toEqual([
-      { wbs: '1', type: 'startToStart', lagHours: -0.75 },
+      { wbs: '1', block: null, type: 'startToStart', lagHours: -0.75 },
     ]);
     expect(parsePredecessors('1+0.1h', 10).ok).toBe(false);
   });

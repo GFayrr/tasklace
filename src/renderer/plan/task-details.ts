@@ -1,5 +1,6 @@
 import { formatDateTime } from '../../core/civil-format';
-import type { Task, TagId, TaskSegment } from '../../core/model/project';
+import { compareStrings } from '../../core/compare-strings';
+import type { Project, Task, TagId, TaskId, TaskSegment } from '../../core/model/project';
 import { failure, success, type Result } from '../../core/result';
 import { HOURS_PER_DAY, QUARTER_HOUR, type ProjectHour } from '../../core/time';
 import { hourFromPicker } from './cell-editing';
@@ -9,6 +10,8 @@ import type { EditError } from './task-commands';
 export interface BlockDraft {
   readonly duration: string;
   readonly gapDays: string;
+  readonly origin: number | null;
+  readonly waitsFor: string;
 }
 
 export interface TaskDraft {
@@ -19,6 +22,7 @@ export interface TaskDraft {
   readonly hoursPerDay: string;
   readonly dailyStart: string;
   readonly blocks: readonly BlockDraft[];
+  readonly basis: string;
 }
 
 export type DetailsError =
@@ -28,7 +32,8 @@ const PROGRESS_PATTERN = /^\d{1,3}$/;
 const GAP_PATTERN = /^\d{1,4}$/;
 const TIME_PATTERN = /^(\d{2}):(\d{2})$/;
 const MAX_PROGRESS = 100;
-const MIN_GAP_DAYS = 1;
+const MIN_GAP_DAYS = 0;
+const ADDED_BLOCK_GAP_DAYS = 1;
 const MIN_HOURS_PER_DAY = 1;
 const MINUTES_PER_HOUR = 60;
 const TWO_DIGITS = 2;
@@ -42,12 +47,17 @@ const EMPTY_DRAFT: TaskDraft = {
   hoursPerDay: '',
   dailyStart: '',
   blocks: [],
+  basis: '',
 };
 
-/** Fills the fields of the details panel from a task. */
-export function draftFromTask(task: Task): TaskDraft {
+/** Fills the fields of the details panel from a task, with what each of its blocks waits for written as in the task table and the description of the task it was opened on. */
+export function draftFromTask(
+  task: Task,
+  waitsFor: (block: number) => string,
+  basis: string,
+): TaskDraft {
   if (task.kind === 'summary') {
-    return { ...EMPTY_DRAFT, name: task.name };
+    return { ...EMPTY_DRAFT, name: task.name, basis };
   }
   const common = {
     name: task.name,
@@ -56,17 +66,29 @@ export function draftFromTask(task: Task): TaskDraft {
     start: task.startNoEarlierThan === null ? '' : formatDateTime(task.startNoEarlierThan),
   };
   if (task.kind === 'milestone') {
-    return { ...EMPTY_DRAFT, ...common };
+    return { ...EMPTY_DRAFT, ...common, basis };
   }
   return {
     ...common,
+    basis,
     hoursPerDay: task.hoursPerDay === null ? '' : durationEditorText(task.hoursPerDay),
     dailyStart: task.dailyStartHour === null ? '' : timeOfDay(task.dailyStartHour),
-    blocks: task.segments.map((segment) => ({
+    blocks: task.segments.map((segment, block) => ({
       duration: durationEditorText(segment.durationHours),
       gapDays: String(segment.gapDaysBefore),
+      origin: block,
+      waitsFor: waitsFor(block),
     })),
   };
+}
+
+/** Describes a task and the links that touch it, in an order that does not depend on the project, so that two descriptions differ only when the task or its links changed. */
+export function taskBasis(project: Project, id: TaskId): string {
+  const task = project.tasks.find((candidate) => candidate.id === id);
+  const links = project.dependencies
+    .filter((link) => link.predecessorId === id || link.successorId === id)
+    .sort((left, right) => compareStrings(left.id, right.id));
+  return JSON.stringify([task, links]);
 }
 
 /** Builds the task the details panel asks for, reading every field, or tells which field cannot be read. */
@@ -108,9 +130,14 @@ export function taskFromDraft(
   return segments.ok ? success({ ...dated, ...pattern.value, segments: segments.value }) : segments;
 }
 
-/** Returns the blocks of a draft with one more block of a working day, a day after the last one. */
+/** Returns the blocks of a draft with one more block of a working day, a day after the last one, waiting for nothing. */
 export function withAddedBlock(draft: TaskDraft, dayHours: number): TaskDraft {
-  const block = { duration: durationEditorText(dayHours), gapDays: String(MIN_GAP_DAYS) };
+  const block = {
+    duration: durationEditorText(dayHours),
+    gapDays: String(ADDED_BLOCK_GAP_DAYS),
+    origin: null,
+    waitsFor: '',
+  };
   return { ...draft, blocks: [...draft.blocks, block] };
 }
 
@@ -197,7 +224,7 @@ function readBlocks(
   return segments.length === 0 ? failure('INVALID_BLOCK') : success(segments);
 }
 
-/** Reads a gap of at least one whole day between two blocks, or null. */
+/** Reads a gap of whole days between two blocks, zero meaning the same day, or null. */
 function readGap(text: string): number | null {
   const trimmed = text.trim();
   const value = GAP_PATTERN.test(trimmed) ? Number.parseInt(trimmed, DECIMAL_RADIX) : Number.NaN;

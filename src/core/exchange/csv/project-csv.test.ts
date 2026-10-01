@@ -8,13 +8,15 @@ import {
   MAX_TAGS,
   MAX_TASKS,
 } from '../../limits';
-import type { Project, Task } from '../../model/project';
+import type { Dependency, Project, Task } from '../../model/project';
+import { shortestLink } from '../../scheduling/block-links';
 import { scheduleProject, type Schedule } from '../../scheduling/schedule-project';
 import { TAG_PALETTE } from '../../tags/tag-palette';
 import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../../testing/arbitraries';
 import { at } from '../../testing/civil-time';
-import { projectArbitrary } from '../../testing/project-arbitrary';
+import { interleavedProjectArbitrary, projectArbitrary } from '../../testing/project-arbitrary';
 import {
+  blockLink,
   link,
   milestone,
   project,
@@ -130,7 +132,7 @@ const nameArbitrary = fc
 /** Generates table-compatible projects whose tasks carry random names, including separators, quotes and formula characters, and random tags. */
 const namedProjectArbitrary = fc
   .record({
-    generated: projectArbitrary,
+    generated: fc.oneof(projectArbitrary, interleavedProjectArbitrary),
     names: fc.array(nameArbitrary, {
       minLength: MAX_GENERATED_TASKS,
       maxLength: MAX_GENERATED_TASKS,
@@ -182,9 +184,19 @@ function describeByWbs(input: Project, schedule: Schedule) {
     dates:
       task.kind === 'summary' ? schedule.summaries.get(task.id) : schedule.placements.get(task.id),
   }));
-  const dependencies = input.dependencies.map((dependency) => ({
+  const taskById = new Map(input.tasks.map((task) => [task.id, task]));
+  const shortest = (dependency: Dependency): Dependency => {
+    const predecessor = taskById.get(dependency.predecessorId);
+    const successor = taskById.get(dependency.successorId);
+    return predecessor === undefined || successor === undefined
+      ? dependency
+      : shortestLink(dependency, predecessor, successor);
+  };
+  const dependencies = input.dependencies.map(shortest).map((dependency) => ({
     from: wbs(dependency.predecessorId),
+    fromBlock: dependency.predecessorBlock,
     to: wbs(dependency.successorId),
+    toBlock: dependency.successorBlock,
     type: dependency.type,
     lagHours: dependency.lagHours,
   }));
@@ -337,6 +349,8 @@ describe('importProjectCsv reading a table written by hand', () => {
         successorId: 'task-2',
         type: 'finishToStart',
         lagHours: 0,
+        predecessorBlock: null,
+        successorBlock: null,
       },
     ]);
   });
@@ -392,6 +406,184 @@ describe('importProjectCsv reading a table written by hand', () => {
       { path: 'rows[4].start', code: 'START_DIFFERS' },
       { path: 'rows[4].end', code: 'END_DIFFERS' },
     ]);
+  });
+});
+
+describe('importProjectCsv with links to and from blocks', () => {
+  it('reads a block of a predecessor and what each block waits for', () => {
+    const { project: rebuilt } = importLines(
+      '1;design;;;7',
+      '2;develop;;;6;;;;3h, +0d 3h after 1 & 3SS+1h',
+      '3;test;;;4;;2#1',
+    );
+    expect(
+      rebuilt.dependencies.map(
+        ({ predecessorId, successorId, predecessorBlock, successorBlock, type, lagHours }) => ({
+          predecessorId,
+          successorId,
+          predecessorBlock,
+          successorBlock,
+          type,
+          lagHours,
+        }),
+      ),
+    ).toEqual([
+      {
+        predecessorId: 'task-1',
+        successorId: 'task-2',
+        predecessorBlock: null,
+        successorBlock: 1,
+        type: 'finishToStart',
+        lagHours: 0,
+      },
+      {
+        predecessorId: 'task-3',
+        successorId: 'task-2',
+        predecessorBlock: null,
+        successorBlock: 1,
+        type: 'startToStart',
+        lagHours: 1,
+      },
+      {
+        predecessorId: 'task-2',
+        successorId: 'task-3',
+        predecessorBlock: 0,
+        successorBlock: null,
+        type: 'finishToStart',
+        lagHours: 0,
+      },
+    ]);
+  });
+
+  it('writes links to a block in the blocks column and blocks of predecessors with their number', () => {
+    const input = project(
+      [
+        workTask('design'),
+        splitTask('develop', [
+          [3, 0],
+          [3, 0],
+        ]),
+        workTask('test'),
+      ],
+      [
+        blockLink('design', 'develop', { to: 1 }),
+        blockLink('develop', 'test', { from: 0 }, 'startToStart', 2),
+      ],
+    );
+    const lines = unwrap(exportProjectCsv(input, scheduleOrThrow(input), FRENCH)).split('\r\n');
+    expect(lines[2]).toMatch(/;;"3h; \+0d 3h after 1"$/);
+    expect(lines[3]).toMatch(/;2#1SS\+2h;;$/);
+  });
+
+  it('refuses a block its task does not have at the cell that names it', () => {
+    const refused = importFrench(
+      [HEADER, '1;design;;;7', '2;develop;;;6;;;;3h, +1d 3h after 1#2', '3;test;;;4;;2#3'].join(
+        '\n',
+      ),
+    );
+    expect(refused.ok ? [] : refused.error.map((issue) => issue.path).sort()).toEqual([
+      'rows[3].blocks',
+      'rows[4].predecessors',
+    ]);
+  });
+
+  it('ignores, with the blocks, what the blocks of a summary wait for', () => {
+    const { project: rebuilt, warnings } = importLines(
+      '1;phase;;;;;;;3h, +1d 3h after 2',
+      '1.1;write;;;7',
+      '2;review;;;7',
+    );
+    expect(rebuilt.dependencies).toEqual([]);
+    expect(warnings).toContainEqual({ path: 'rows[2].blocks', code: 'IGNORED_VALUE' });
+    expect(warnings).toContainEqual({ path: 'rows[2].blocks', code: 'IGNORED_LINKS' });
+  });
+
+  it('reads back a block that waits for many tasks, however long its cell', () => {
+    const others = Array.from({ length: 20 }, (_unused, index) => workTask(`t${String(index)}`));
+    const input = project(
+      [
+        splitTask('dev', [
+          [3, 0],
+          [3, 0],
+        ]),
+        ...others,
+      ],
+      others.map((other) => blockLink(other.id, 'dev', { to: 1 }, 'startToStart', 16)),
+    );
+    const text = unwrap(exportProjectCsv(input, scheduleOrThrow(input), FRENCH));
+    const imported = importFrench(text);
+    if (!imported.ok) {
+      throw new Error(JSON.stringify(imported.error));
+    }
+    expect(describeByWbs(imported.value.project, imported.value.schedule).dependencies).toEqual(
+      describeByWbs(input, scheduleOrThrow(input)).dependencies,
+    );
+  });
+
+  it('writes a block the whole task stands for anyway as the whole task', () => {
+    const { project: rebuilt } = importLines(
+      '1;design;;;7',
+      '2;develop;;;6;;;;3h, +0d 3h',
+      '3;test;;;4;;2#2',
+    );
+    expect(rebuilt.dependencies).toEqual([
+      expect.objectContaining({ predecessorId: 'task-2', predecessorBlock: null }),
+    ]);
+  });
+
+  it('reads a single waiting block as a link to its whole task, and refuses a block waiting for its own task or twice for the same', () => {
+    const issuesAt = (...lines: string[]) => {
+      const refused = importFrench([HEADER, ...lines].join('\n'));
+      return refused.ok ? [] : refused.error.map((issue) => `${issue.path} ${issue.code}`);
+    };
+    expect(issuesAt('1;design;;;3;;;;3h after 2', '2;test;;;4')).toEqual([]);
+    expect(importLines('1;design;;;3;;;;3h after 2', '2;test;;;4').project.dependencies).toEqual([
+      expect.objectContaining({
+        predecessorId: 'task-2',
+        successorId: 'task-1',
+        successorBlock: null,
+      }),
+    ]);
+    expect(issuesAt('1;design;;;6;;;;3h, +0d 3h after 1#1')).toEqual([
+      'rows[2].blocks SELF_DEPENDENCY',
+    ]);
+    expect(issuesAt('1;design;;;7', '2;develop;;;6;;;;3h, +0d 3h after 1 & 1SS')).toEqual([
+      'rows[3].blocks DUPLICATE_DEPENDENCY',
+    ]);
+  });
+
+  it('refuses to export a link to a block its task does not have', () => {
+    const broken = project(
+      [workTask('design'), workTask('test')],
+      [blockLink('design', 'test', { to: 1 })],
+    );
+    expect(exportProjectCsv(broken, scheduleOrThrow(project(broken.tasks)), FRENCH)).toEqual({
+      ok: false,
+      error: 'UNKNOWN_BLOCK',
+    });
+  });
+
+  it('writes the waits of a block by task number, then by block, the whole task first', () => {
+    const input = project(
+      [
+        splitTask('source', [
+          [2, 0],
+          [2, 0],
+          [2, 0],
+        ]),
+        splitTask('target', [
+          [2, 0],
+          [2, 0],
+        ]),
+      ],
+      [
+        blockLink('source', 'target', { from: 1, to: 1 }, 'startToStart'),
+        blockLink('source', 'target', { to: 1 }),
+        blockLink('source', 'target', { from: 0, to: 1 }, 'startToFinish'),
+      ],
+    );
+    const lines = unwrap(exportProjectCsv(input, scheduleOrThrow(input), FRENCH)).split('\r\n');
+    expect(lines[2]).toMatch(/after 1 & 1#1SF & 1#2SS"$/);
   });
 });
 
@@ -655,6 +847,18 @@ describe('importProjectCsv refusing a table', () => {
     expect(issuesOf('1;A;;;7', `2;B;;;7;;"${many(half)}"`, `3;C;;;7;;"${many(half + 1)}"`)).toEqual(
       [{ path: 'rows[4].predecessors', code: 'TOO_MANY_ITEMS' }],
     );
+  });
+
+  it('spends the budget of predecessors on what blocks wait for too', () => {
+    const many = (count: number) => Array.from({ length: count }, () => '1').join(' & ');
+    const half = MAX_DEPENDENCIES / 2;
+    expect(
+      issuesOf(
+        '1;A;;;7',
+        `2;B;;;7;;"${Array.from({ length: half }, () => '1').join(',')}"`,
+        `3;C;;;6;;;;"3h; +0d 3h after ${many(half + 1)}"`,
+      ),
+    ).toEqual([{ path: 'rows[4].blocks', code: 'TOO_MANY_ITEMS' }]);
   });
 
   it('refuses a duration or progress column counted in another unit', () => {

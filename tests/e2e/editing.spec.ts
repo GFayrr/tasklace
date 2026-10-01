@@ -244,6 +244,35 @@ test('chooses a start on the calendar of the system, to the quarter hour', async
   await expect(row('Review').getByRole('gridcell').nth(3)).toContainText(/2:00 PM|14:00/);
 });
 
+test('makes a block of a split task wait for another task, shown in its details only', async () => {
+  await addTask('Brief');
+  await addTask('Build');
+  await row('Build').getByRole('gridcell').nth(1).click();
+  await page.keyboard.press('Alt+Enter');
+  const details = page.getByRole('dialog', { name: 'Task details' });
+  await details.getByRole('button', { name: 'Add a block' }).click();
+  await details.getByRole('textbox', { name: 'Days after block 1' }).fill('0');
+  const waits = details.getByRole('textbox', { name: 'Block 2 waits for' });
+  await waits.fill('9');
+  await details.getByRole('button', { name: 'Save' }).click();
+  await expect(details.getByRole('alert')).toContainText('There is no task with this number');
+  await waits.fill('1#2');
+  await details.getByRole('button', { name: 'Save' }).click();
+  await expect(details.getByRole('alert')).toContainText('no block with this number');
+  await waits.fill('1');
+  await details.getByRole('button', { name: 'Save' }).click();
+  await expect(details).toBeHidden();
+  await expect(row('Build').getByRole('gridcell').nth(6)).toHaveText('');
+
+  await page.keyboard.press('Alt+Enter');
+  await expect(waits).toHaveValue('1');
+  await details.getByRole('button', { name: 'Remove block 1' }).click();
+  await expect(waits).toHaveCount(0);
+  await details.getByRole('button', { name: 'Save' }).click();
+  await expect(details).toBeHidden();
+  await expect(row('Build').getByRole('gridcell').nth(6)).toHaveText('1');
+});
+
 test('tags a task from the table and splits it into blocks in its details', async () => {
   await addTask('Write');
   await row('Write').getByRole('gridcell').nth(7).dblclick();
@@ -267,9 +296,9 @@ test('tags a task from the table and splits it into blocks in its details', asyn
   await expect(details).toBeVisible();
   await details.getByRole('textbox', { name: 'Duration of block 1' }).fill('4 h');
   await details.getByRole('button', { name: 'Add a block' }).click();
-  await details.getByRole('textbox', { name: 'Days after block 1' }).fill('0');
+  await details.getByRole('textbox', { name: 'Days after block 1' }).fill('half');
   await details.getByRole('button', { name: 'Save' }).click();
-  await expect(details.getByRole('alert')).toContainText('at least one whole day');
+  await expect(details.getByRole('alert')).toContainText('0 for the same day');
   await details.getByRole('textbox', { name: 'Days after block 1' }).fill('2');
   await details.getByRole('textbox', { name: 'Duration of block 2' }).fill('1 h 30');
   await picture('details');

@@ -121,13 +121,6 @@ describe('placeTask', () => {
     ['no block', []],
     ['a gap before the first block', [[7, 1]]],
     [
-      'a zero gap between blocks',
-      [
-        [7, 0],
-        [7, 0],
-      ],
-    ],
-    [
       'a negative gap',
       [
         [7, 0],

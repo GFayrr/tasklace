@@ -4,6 +4,7 @@ import {
   MAX_TAGS,
   MAX_HIERARCHY_DEPTH,
   MAX_LAG_HOURS,
+  MAX_SEGMENTS_PER_TASK,
   MAX_TASKS,
 } from '../limits';
 import type { Dependency, DependencyId, Project, Tag, TagId, Task, TaskId } from '../model/project';
@@ -11,9 +12,16 @@ import { failure, success, type Result } from '../result';
 import { compareStrings } from '../compare-strings';
 import {
   buildDependencyGraph,
+  listUnits,
+  toUnitDependency,
   type DependencyGraph,
-  type ResolvedDependency,
+  type GraphNode,
+  type ScheduleUnits,
+  type UnitDependency,
 } from './dependency-graph';
+import { isKnownBlock } from './block-links';
+
+const BLOCK_SLOTS = MAX_SEGMENTS_PER_TASK + 1;
 
 type LimitErrorCode = 'TOO_MANY_TASKS' | 'TOO_MANY_DEPENDENCIES' | 'TOO_MANY_TAGS';
 type TaskErrorCode =
@@ -29,7 +37,8 @@ type DependencyErrorCode =
   | 'SELF_DEPENDENCY'
   | 'SUMMARY_DEPENDENCY'
   | 'DUPLICATE_DEPENDENCY'
-  | 'INVALID_LAG';
+  | 'INVALID_LAG'
+  | 'UNKNOWN_BLOCK';
 
 export type StructureErrorCode =
   LimitErrorCode | TaskErrorCode | DependencyErrorCode | 'DUPLICATE_TAG_ID';
@@ -68,7 +77,7 @@ export interface ProjectStructure {
   readonly graph: DependencyGraph;
 }
 
-/** Checks the size limits, identifiers, the task tree and the dependency network, then orders tasks for scheduling. */
+/** Checks the size limits, identifiers, the task tree and the dependency network, then orders the blocks of the tasks for scheduling. */
 export function analyzeProjectStructure(
   project: Pick<Project, 'tasks' | 'dependencies' | 'tags'>,
 ): Result<ProjectStructure, readonly StructureError[]> {
@@ -76,7 +85,7 @@ export function analyzeProjectStructure(
   return limitError === null ? analyzeStructureWithinLimits(project) : failure([limitError]);
 }
 
-/** Checks identifiers, the task tree and the dependency network of a project already within the size limits, then orders tasks for scheduling. */
+/** Checks identifiers, the task tree and the dependency network of a project already within the size limits, then orders the blocks of the tasks for scheduling. */
 export function analyzeStructureWithinLimits(
   project: Pick<Project, 'tasks' | 'dependencies' | 'tags'>,
 ): Result<ProjectStructure, readonly ItemStructureError[]> {
@@ -87,7 +96,11 @@ export function analyzeStructureWithinLimits(
     tasksById.set(task.id, task);
     indexById.set(task.id, index);
   });
-  const checked = checkDependencies(project.dependencies, tasks, indexById);
+  const nodes = tasks.flatMap((task, index): GraphNode[] =>
+    task.kind === 'summary' ? [] : [{ index, task }],
+  );
+  const units = listUnits(nodes, tasks.length);
+  const checked = checkDependencies(project.dependencies, tasks, { indexById, units });
   const errors = [
     ...findDuplicateTaskIds(tasks),
     ...findHierarchyErrors(tasks, tasksById),
@@ -97,8 +110,7 @@ export function analyzeStructureWithinLimits(
   if (errors.length > 0) {
     return failure(errors);
   }
-  const nodes = tasks.flatMap((task, index) => (task.kind === 'summary' ? [] : [{ index, task }]));
-  const graph = buildDependencyGraph(nodes, tasks.length, checked.resolved);
+  const graph = buildDependencyGraph(units, checked.resolved);
   if (!graph.ok) {
     const blocked = [...graph.error].sort((left, right) =>
       compareStrings(left.task.id, right.task.id),
@@ -212,33 +224,70 @@ function findParentChainError(
   return null;
 }
 
-/** Resolves dependencies to task indices and reports duplicated, dangling, reflexive, summary-linked, repeated and badly lagged ones. */
+/** Resolves dependencies to the blocks they join and reports duplicated, dangling, reflexive, summary-linked, unknown-block, repeated and badly lagged ones. */
 function checkDependencies(
   dependencies: readonly Dependency[],
   tasks: readonly Task[],
-  indexById: ReadonlyMap<TaskId, number>,
-): { readonly errors: DependencyStructureError[]; readonly resolved: ResolvedDependency[] } {
+  {
+    indexById,
+    units,
+  }: { readonly indexById: ReadonlyMap<TaskId, number>; readonly units: ScheduleUnits },
+): { readonly errors: DependencyStructureError[]; readonly resolved: UnitDependency[] } {
   const seenIds = new Set<DependencyId>();
   const seenPairs = new Set<number>();
   const errors: DependencyStructureError[] = [];
-  const resolved: ResolvedDependency[] = [];
+  const resolved: UnitDependency[] = [];
   dependencies.forEach((dependency, index) => {
     const predecessorIndex = indexById.get(dependency.predecessorId) ?? -1;
     const successorIndex = indexById.get(dependency.successorId) ?? -1;
-    const pairKey = predecessorIndex * tasks.length + successorIndex;
+    const pairKey = numericPairKey(dependency, predecessorIndex, successorIndex, tasks.length);
     const code = seenIds.has(dependency.id)
       ? 'DUPLICATE_DEPENDENCY_ID'
       : (findDependencyError(dependency, tasks[predecessorIndex], tasks[successorIndex]) ??
         (seenPairs.has(pairKey) ? 'DUPLICATE_DEPENDENCY' : null));
-    if (code === null) {
-      resolved.push({ dependency, predecessorIndex, successorIndex });
-      seenPairs.add(pairKey);
+    const linked =
+      code === null
+        ? linkUnits(dependency, tasks, units, { predecessorIndex, successorIndex })
+        : null;
+    if (linked === null) {
+      const refused = code ?? 'UNKNOWN_DEPENDENCY_TASK';
+      errors.push({ code: refused, list: 'dependencies', index, dependencyId: dependency.id });
     } else {
-      errors.push({ code, list: 'dependencies', index, dependencyId: dependency.id });
+      resolved.push(linked);
+      seenPairs.add(pairKey);
     }
     seenIds.add(dependency.id);
   });
   return { errors, resolved };
+}
+
+/** Joins a dependency between two scheduled tasks to their blocks, or returns null when one of them is not scheduled. */
+function linkUnits(
+  dependency: Dependency,
+  tasks: readonly Task[],
+  { firstUnitOfTask }: ScheduleUnits,
+  indexes: { readonly predecessorIndex: number; readonly successorIndex: number },
+): UnitDependency | null {
+  const predecessor = tasks[indexes.predecessorIndex];
+  const successor = tasks[indexes.successorIndex];
+  const predecessorFirst = firstUnitOfTask[indexes.predecessorIndex];
+  const successorFirst = firstUnitOfTask[indexes.successorIndex];
+  if (
+    predecessor === undefined ||
+    successor === undefined ||
+    predecessor.kind === 'summary' ||
+    successor.kind === 'summary'
+  ) {
+    return null;
+  }
+  if (predecessorFirst === undefined || successorFirst === undefined) {
+    return null;
+  }
+  return toUnitDependency(
+    dependency,
+    { predecessor, successor },
+    { predecessor: predecessorFirst, successor: successorFirst },
+  );
 }
 
 /** Returns the problem of a single dependency considered on its own, if any. */
@@ -256,8 +305,29 @@ function findDependencyError(
   if (predecessor.kind === 'summary' || successor.kind === 'summary') {
     return 'SUMMARY_DEPENDENCY';
   }
+  if (
+    !isKnownBlock(predecessor, dependency.predecessorBlock) ||
+    !isKnownBlock(successor, dependency.successorBlock)
+  ) {
+    return 'UNKNOWN_BLOCK';
+  }
   const { lagHours } = dependency;
   return isQuarterHours(lagHours) && Math.abs(lagHours) <= MAX_LAG_HOURS ? null : 'INVALID_LAG';
+}
+
+/** Returns a number shared by the dependencies joining the same tasks or blocks in the same direction, smaller for links between whole tasks, without building any text. */
+function numericPairKey(
+  dependency: Dependency,
+  predecessorIndex: number,
+  successorIndex: number,
+  taskCount: number,
+): number {
+  if (dependency.predecessorBlock === null && dependency.successorBlock === null) {
+    return predecessorIndex * taskCount + successorIndex;
+  }
+  const from = predecessorIndex * BLOCK_SLOTS + (dependency.predecessorBlock ?? -1) + 1;
+  const to = successorIndex * BLOCK_SLOTS + (dependency.successorBlock ?? -1) + 1;
+  return taskCount * taskCount + from * taskCount * BLOCK_SLOTS + to;
 }
 
 /** Groups tasks by parent identifier, top-level tasks being grouped under null. */

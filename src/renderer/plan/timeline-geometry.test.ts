@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  blockLink,
   link,
   milestone,
   PROJECT_START,
@@ -117,6 +118,22 @@ describe('dependencyArrow', () => {
     expect(backwards).toHaveLength(6);
     expect(backwards[2]?.y).toBe((to.row + 1) * ROW_HEIGHT);
     expect(backwards.at(-2)?.x).toBe((to.kind === 'task' ? to.start : 0) - ARROW_GAP);
+  });
+
+  it('leaves the end of the block a link names, and enters the start of a named block', () => {
+    const from = shapeOf('b');
+    const to = shapeOf('m');
+    const [first, second] = from.kind === 'task' ? from.segments : [];
+    const leaving = dependencyArrow(blockLink('b', 'm', { from: 0 }), from, to);
+    expect(leaving[0]?.x).toBe((first?.x ?? 0) + (first?.width ?? 0));
+    const entering = dependencyArrow(blockLink('a', 'b', { to: 1 }), shapeOf('a'), from);
+    expect(entering.at(-1)?.x).toBe(second?.x);
+  });
+
+  it('falls back on the edge of the whole bar for a block the shape does not show', () => {
+    const from = shapeOf('b');
+    const points = dependencyArrow(blockLink('b', 'm', { from: 7 }), from, shapeOf('m'));
+    expect(points[0]?.x).toBe(from.kind === 'task' ? from.end : 0);
   });
 
   it('enters the end of the successor for finish-to-finish links', () => {

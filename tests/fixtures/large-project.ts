@@ -69,6 +69,8 @@ export function buildLargeProject(
       successorId: idOf(to),
       type,
       lagHours: 0,
+      predecessorBlock: null,
+      successorBlock: null,
     });
   }
   return project(tasks, [...dependencies.values()], { tags: PERSON_TAGS });
