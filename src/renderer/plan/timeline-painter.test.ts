@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TEST_CALENDAR } from '../../core/testing/test-calendar';
 import { at, compileOrThrow, dayOf } from '../../core/testing/civil-time';
 import { paleColor } from './tag-styles';
-import { nonWorkingIntervals, visibleRows } from './timeline-painter';
+import { nonWorkingIntervals, splitAtDaysOff, visibleRows } from './timeline-painter';
 import { ROW_HEIGHT } from './timeline-geometry';
 
 const CALENDAR = compileOrThrow(TEST_CALENDAR);
@@ -58,5 +58,24 @@ describe('paleColor', () => {
     expect(paleColor('#000000', 0.5)).toBe('#808080');
     expect(paleColor('#2a78d6', 0)).toBe('#2a78d6');
     expect(paleColor('#2a78d6', 1)).toBe('#ffffff');
+  });
+});
+
+describe('splitAtDaysOff', () => {
+  it('splits a span crossing a weekend into the worked parts and the weekend', () => {
+    expect(splitAtDaysOff(CALENDAR, at(2026, 10, 2, 9), at(2026, 10, 6, 17))).toEqual({
+      parts: [
+        { start: at(2026, 10, 2, 9), end: at(2026, 10, 3) },
+        { start: at(2026, 10, 5), end: at(2026, 10, 6, 17) },
+      ],
+      daysOff: [{ start: at(2026, 10, 3), end: at(2026, 10, 5) }],
+    });
+  });
+
+  it('keeps a span within working days whole, nights included', () => {
+    expect(splitAtDaysOff(CALENDAR, at(2026, 10, 5, 9), at(2026, 10, 7, 12))).toEqual({
+      parts: [{ start: at(2026, 10, 5, 9), end: at(2026, 10, 7, 12) }],
+      daysOff: [],
+    });
   });
 });

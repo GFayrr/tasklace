@@ -545,7 +545,7 @@
 
   .header,
   .body {
-    width: max(100%, 1010px);
+    width: max(100%, 1058px);
   }
 
   .header {
@@ -666,7 +666,7 @@
   }
 
   .date {
-    width: 156px;
+    width: 180px;
   }
 
   .predecessors {
