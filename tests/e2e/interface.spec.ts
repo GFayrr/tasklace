@@ -12,7 +12,7 @@ import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
 import { link, project, TEST_DOCUMENT_ID, workTask } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
-import { answerDialogs } from './dialogs';
+import { answerDialogs, closeDiscarding } from './dialogs';
 
 const SAMPLE = {
   ...project([workTask('a'), workTask('b')], [link('a', 'b')]),
@@ -43,7 +43,7 @@ test.beforeEach(async () => {
 
 test.afterEach(async () => {
   expect(policyViolations).toEqual([]);
-  await application.close();
+  await closeDiscarding(application, page);
   await rm(folder, { recursive: true, force: true });
   await rm(userData, { recursive: true, force: true });
 });

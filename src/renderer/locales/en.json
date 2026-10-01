@@ -125,7 +125,7 @@
     "outdent": "Outdent: move out of its summary",
     "moveUp": "Move up",
     "moveDown": "Move down",
-    "milestone": "Turn into a milestone or back into a task",
+    "milestone": "Turn into a milestone, a key date with no duration, or back into a task",
     "delete": "Delete",
     "details": "Details of the task"
   },
@@ -176,6 +176,14 @@
     "addBlock": "Add a block",
     "removeBlock": "Remove block {number}",
     "cancel": "Cancel",
-    "save": "Save"
+    "save": "Save",
+    "milestoneHint": "A milestone marks a key date with no duration, such as a delivery or an approval. Link tasks to it to show what they lead to or wait for."
+  },
+  "closePrompt": {
+    "title": "Save this project?",
+    "body": "This project has not been saved to a file yet. Save it before closing it, or its changes will be lost.",
+    "save": "Save…",
+    "discard": "Don't save",
+    "cancel": "Cancel"
   }
 }

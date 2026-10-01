@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { AppState } from '../app/app-state.svelte';
   import { commandOf } from '../app/shortcuts';
+  import ClosePrompt from './ClosePrompt.svelte';
   import Notices from './Notices.svelte';
   import StatusBar from './StatusBar.svelte';
   import TaskDetails from './TaskDetails.svelte';
@@ -39,6 +40,7 @@
   <TaskDetails {app} />
 {/if}
 <Notices {app} />
+<ClosePrompt {app} />
 
 <style>
   .shell {

@@ -50,6 +50,12 @@ import type { Command } from './shortcuts';
 
 export type NoticeKind = 'error' | 'warning' | 'info';
 
+export type CloseChoice = 'save' | 'discard' | 'cancel';
+
+export interface ClosePrompt {
+  readonly answer: (choice: CloseChoice) => void;
+}
+
 export interface EditRequest {
   readonly taskId: TaskId;
   readonly column: EditableColumn;
@@ -93,6 +99,7 @@ export class AppState {
   selectedTaskId = $state<TaskId | null>(null);
   editRequest = $state<EditRequest | null>(null);
   detailsTaskId = $state<TaskId | null>(null);
+  closePrompt = $state.raw<ClosePrompt | null>(null);
   collapsed = $state.raw<ReadonlySet<TaskId>>(NOTHING_COLLAPSED);
   openedCount = $state(0);
   regionalFormat = $state.raw<RegionalFormat>(DEFAULT_TABLE_FORMAT);
@@ -110,6 +117,7 @@ export class AppState {
   readonly #scheduler: Scheduler;
   #session: SharedSession | null = null;
   #refreshQueued = false;
+  #changedSinceOpened = false;
   #nextNoticeId = 0;
 
   /** Creates the state of the interface around the bridge to the main process and a schedule worker. */
@@ -165,8 +173,27 @@ export class AppState {
     return actions[command]();
   }
 
+  /** Asks whether to save a changed project that has no file yet before it is closed, telling whether it may be closed. */
+  async readyToClose(): Promise<boolean> {
+    if (this.project === null || this.hasFile || !this.#changedSinceOpened) {
+      return true;
+    }
+    const choice = await new Promise<CloseChoice>((answer) => {
+      this.closePrompt = { answer };
+    });
+    this.closePrompt = null;
+    if (choice === 'save') {
+      await this.saveAs();
+      return this.hasFile;
+    }
+    return choice === 'discard';
+  }
+
   /** Starts a new empty project. */
   async newProject(): Promise<void> {
+    if (!(await this.readyToClose())) {
+      return;
+    }
     const { messages, createId, now } = this.#context;
     const project = buildNewProject(messages.projects.untitled, now(), createId);
     this.#attach(await this.#files.create(project));
@@ -174,17 +201,23 @@ export class AppState {
 
   /** Asks for a project file and opens it. */
   async open(): Promise<void> {
-    await this.#load(this.#files.open());
+    if (await this.readyToClose()) {
+      await this.#load(this.#files.open());
+    }
   }
 
   /** Opens one of the recent projects. */
   async openRecent(index: number): Promise<void> {
-    await this.#load(this.#files.openRecent(index));
+    if (await this.readyToClose()) {
+      await this.#load(this.#files.openRecent(index));
+    }
   }
 
   /** Asks for a CSV or JSON file and imports it as a new project. */
   async importFile(kind: ExchangeKind): Promise<void> {
-    await this.#load(this.#files.importFile(kind));
+    if (await this.readyToClose()) {
+      await this.#load(this.#files.importFile(kind));
+    }
   }
 
   /** Saves the project to its file, asking where for a project that has none yet. */
@@ -389,6 +422,7 @@ export class AppState {
     this.selectedTaskId = null;
     this.editRequest = null;
     this.detailsTaskId = null;
+    this.#changedSinceOpened = false;
     this.collapsed = NOTHING_COLLAPSED;
     this.openedCount += 1;
     session.document.on('update', this.#queueRefresh);
@@ -396,6 +430,7 @@ export class AppState {
   }
 
   readonly #queueRefresh = (): void => {
+    this.#changedSinceOpened = true;
     if (this.#refreshQueued) {
       return;
     }

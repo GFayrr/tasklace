@@ -9,6 +9,7 @@ import {
   type Locator,
   type Page,
 } from '@playwright/test';
+import { closeDiscarding } from './dialogs';
 
 import { paleColor } from '../../src/renderer/plan/tag-styles';
 import { SAND_GRAPHITE } from '../../src/renderer/theme/sand-graphite';
@@ -32,7 +33,7 @@ test.beforeEach(async () => {
 });
 
 test.afterEach(async () => {
-  await application.close();
+  await closeDiscarding(application, page);
   await rm(userData, { recursive: true, force: true });
 });
 
@@ -246,7 +247,18 @@ test('chooses a start on the calendar of the system, to the quarter hour', async
 test('tags a task from the table and splits it into blocks in its details', async () => {
   await addTask('Write');
   await row('Write').getByRole('gridcell').nth(7).dblclick();
-  await grid.getByRole('combobox').selectOption({ label: 'Design' });
+  await page.getByRole('listbox').getByRole('option', { name: 'Testing' }).click();
+  await expect(row('Write')).toContainText('Testing');
+  await row('Write').getByRole('gridcell').nth(7).dblclick();
+  await expect(page.getByRole('listbox')).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+  await expect(row('Write')).toContainText('Design');
+  await row('Write').getByRole('gridcell').nth(7).dblclick();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('listbox')).toHaveCount(0);
   await expect(row('Write')).toContainText('Design');
 
   await row('Write').getByRole('gridcell').nth(1).click();

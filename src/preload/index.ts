@@ -36,9 +36,14 @@ const bridge: TasklaceBridge = {
   onFlushRequested: (flush) => {
     ipcRenderer.removeAllListeners(IPC_CHANNELS.flushRequested);
     ipcRenderer.on(IPC_CHANNELS.flushRequested, () => {
-      void flush().finally(() => {
-        ipcRenderer.send(IPC_CHANNELS.flushDone);
-      });
+      flush().then(
+        (mayClose) => {
+          ipcRenderer.send(IPC_CHANNELS.flushDone, mayClose);
+        },
+        () => {
+          ipcRenderer.send(IPC_CHANNELS.flushDone, true);
+        },
+      );
     });
   },
 };

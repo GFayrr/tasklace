@@ -22,7 +22,7 @@ import {
 } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 import { buildLargeProject } from '../fixtures/large-project';
-import { answerDialogs } from './dialogs';
+import { answerDialogs, closeDiscarding } from './dialogs';
 
 const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
 const DESIGN: Tag = {
@@ -119,7 +119,7 @@ test.beforeEach(async () => {
 });
 
 test.afterEach(async () => {
-  await application.close();
+  await closeDiscarding(application, page);
   await rm(folder, { recursive: true, force: true });
   await rm(userData, { recursive: true, force: true });
 });

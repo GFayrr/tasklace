@@ -72,6 +72,9 @@
         <span>{text.name}</span>
         <input bind:value={draft.name} />
       </label>
+      {#if task.kind === 'milestone'}
+        <p class="hint">{text.milestoneHint}</p>
+      {/if}
       {#if task.kind !== 'summary'}
         <div class="pair">
           <label class="field">
@@ -188,6 +191,12 @@
     margin: 0;
     font-size: 20px;
     font-weight: 600;
+  }
+
+  .hint {
+    margin: 0;
+    font-size: var(--font-size-small);
+    color: var(--color-text-secondary);
   }
 
   .refusal {

@@ -69,7 +69,7 @@ export interface TasklaceBridge {
   readonly saveProject: (state: Uint8Array) => Promise<BridgeResult<null>>;
   readonly saveProjectAs: (state: Uint8Array) => Promise<BridgeResult<null>>;
   readonly exportProject: (kind: ExchangeKind, text: string) => Promise<BridgeResult<null>>;
-  readonly onFlushRequested: (flush: () => Promise<void>) => void;
+  readonly onFlushRequested: (flush: () => Promise<boolean>) => void;
 }
 
 export const BRIDGE_NAME = 'tasklace';
