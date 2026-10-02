@@ -10,6 +10,7 @@ import type { EditError } from './task-commands';
 export interface BlockDraft {
   readonly duration: string;
   readonly gapDays: string;
+  readonly start: string;
   readonly origin: number | null;
   readonly waitsFor: string;
 }
@@ -76,6 +77,7 @@ export function draftFromTask(
     blocks: task.segments.map((segment, block) => ({
       duration: durationEditorText(segment.durationHours),
       gapDays: String(segment.gapDaysBefore),
+      start: segment.startNoEarlierThan === null ? '' : formatDateTime(segment.startNoEarlierThan),
       origin: block,
       waitsFor: waitsFor(block),
     })),
@@ -135,13 +137,14 @@ export function withAddedBlock(draft: TaskDraft, dayHours: number): TaskDraft {
   const block = {
     duration: durationEditorText(dayHours),
     gapDays: String(ADDED_BLOCK_GAP_DAYS),
+    start: '',
     origin: null,
     waitsFor: '',
   };
   return { ...draft, blocks: [...draft.blocks, block] };
 }
 
-/** Returns the blocks of a draft without the block at an index, the first block always keeping no gap. */
+/** Returns the blocks of a draft without the block at an index, the first block always keeping no gap and no start date of its own, the task keeping the later of its start date and the one that block had. */
 export function withoutBlock(draft: TaskDraft, index: number): TaskDraft {
   if (draft.blocks.length <= 1) {
     return draft;
@@ -149,8 +152,29 @@ export function withoutBlock(draft: TaskDraft, index: number): TaskDraft {
   const blocks = draft.blocks.filter((_block, position) => position !== index);
   return {
     ...draft,
-    blocks: blocks.map((block, position) => (position === 0 ? { ...block, gapDays: '0' } : block)),
+    start: laterStart(draft.start, blocks[0]?.start ?? ''),
+    blocks: blocks.map((block, position) =>
+      position === 0 ? { ...block, gapDays: '0', start: '' } : block,
+    ),
   };
+}
+
+/** Returns the index of the first later block whose start date cannot be read, or null, so that the details panel can tell which field to fix. */
+export function findUnreadableBlockStart(draft: TaskDraft): number | null {
+  const index = draft.blocks.findIndex(
+    (block, position) => position > 0 && readStart(block.start) === undefined,
+  );
+  return index < 0 ? null : index;
+}
+
+/** Returns the later of two start dates written in pickers, keeping the first one when either cannot be read so that saving reports it. */
+function laterStart(taskStart: string, blockStart: string): string {
+  const task = readStart(taskStart);
+  const block = readStart(blockStart);
+  if (block === null || block === undefined || task === undefined) {
+    return taskStart;
+  }
+  return task === null || block > task ? blockStart : taskStart;
 }
 
 /** Reads a whole progress from 0 to 100, or null. */
@@ -204,7 +228,7 @@ function readTime(text: string): number | null | undefined {
   return onQuarter && hours >= 0 && hours < HOURS_PER_DAY ? hours : undefined;
 }
 
-/** Reads the blocks of a work task: a duration each, and a gap of whole days before every block after the first. */
+/** Reads the blocks of a work task: a duration each, and a gap of whole days and an optional start date for every block after the first. */
 function readBlocks(
   blocks: readonly BlockDraft[],
   dayHours: number,
@@ -219,7 +243,11 @@ function readBlocks(
     if (gap === null) {
       return failure('INVALID_GAP');
     }
-    segments.push({ durationHours, gapDaysBefore: gap });
+    const start = index === 0 ? null : readStart(block.start);
+    if (start === undefined) {
+      return failure('INVALID_DATE');
+    }
+    segments.push({ durationHours, gapDaysBefore: gap, startNoEarlierThan: start });
   }
   return segments.length === 0 ? failure('INVALID_BLOCK') : success(segments);
 }

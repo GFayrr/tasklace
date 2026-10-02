@@ -131,7 +131,7 @@ export const TASK_KEYS_BY_KIND: Readonly<Record<Task['kind'], readonly string[]>
   milestone: MILESTONE_KEYS,
   task: WORK_TASK_KEYS,
 };
-const SEGMENT_KEYS = ['durationHours', 'gapDaysBefore'];
+const SEGMENT_KEYS = ['durationHours', 'gapDaysBefore', 'startNoEarlierThan'];
 const BASELINE_KEYS = ['takenAt', 'entries'];
 const BASELINE_ENTRY_KEYS = ['taskId', 'start', 'end', 'durationHours'];
 const MAX_BASELINE_DURATION_HOURS = END_PROJECT_HOUR - MIN_PROJECT_HOUR;
@@ -262,7 +262,7 @@ function readCalendar(
   return allDefined(calendar) ? calendar : undefined;
 }
 
-/** Reads one daily working time range made of whole hours. */
+/** Reads one daily working time range made of whole quarter hours. */
 function readTimeRange(field: Field, issues: IssueList): TimeRange | undefined {
   const record = readRecord(field, issues, TIME_RANGE_KEYS);
   if (record === undefined) {
@@ -428,17 +428,21 @@ function readWorkTask(
   const task = {
     kind: 'task' as const,
     ...readDatedFields(record, path, issues, codec),
-    segments: readSegments(child('segments'), issues),
+    segments: readSegments(child('segments'), issues, codec),
     hoursPerDay: readNullable(child('hoursPerDay'), issues, readHoursPerDay),
     dailyStartHour: readNullable(child('dailyStartHour'), issues, readDailyStart),
   };
   return allDefined(task) ? task : undefined;
 }
 
-/** Reads the blocks of a task: at least one, no gap before the first, a gap of zero or more whole days before each other, and a total duration within the limit. */
-function readSegments(field: Field, issues: IssueList): TaskSegment[] | undefined {
+/** Reads the blocks of a task: at least one, no gap or start date of its own for the first, a gap of zero or more whole days and an optional start date for each other, and a total duration within the limit. */
+function readSegments(
+  field: Field,
+  issues: IssueList,
+  codec: ValueCodec,
+): TaskSegment[] | undefined {
   const segments = readList(field, issues, MAX_SEGMENTS_PER_TASK, (item, list, index) =>
-    readSegment(item, list, index === 0),
+    readSegment(item, list, index === 0, codec),
   );
   if (segments === undefined) {
     return undefined;
@@ -460,7 +464,12 @@ function totalDurationHours(segments: readonly TaskSegment[]): number {
 }
 
 /** Reads one block of a task. */
-function readSegment(field: Field, issues: IssueList, isFirst: boolean): TaskSegment | undefined {
+function readSegment(
+  field: Field,
+  issues: IssueList,
+  isFirst: boolean,
+  codec: ValueCodec,
+): TaskSegment | undefined {
   const record = readRecord(field, issues, SEGMENT_KEYS);
   if (record === undefined) {
     return undefined;
@@ -480,8 +489,31 @@ function readSegment(field: Field, issues: IssueList, isFirst: boolean): TaskSeg
       minimumGap,
       maximumGap,
     ),
+    startNoEarlierThan: readBlockStart(
+      childField(record, 'startNoEarlierThan', field.path),
+      issues,
+      isFirst,
+      codec,
+    ),
   };
   return allDefined(segment) ? segment : undefined;
+}
+
+/** Reads the optional start date of a block, absent or null meaning none, which the first block never has since the task start date stands for it. */
+function readBlockStart(
+  field: Field,
+  issues: IssueList,
+  isFirst: boolean,
+  codec: ValueCodec,
+): ProjectHour | null | undefined {
+  if (field.value === undefined || field.value === null) {
+    return null;
+  }
+  if (isFirst) {
+    issues.add(field.path, 'OUT_OF_RANGE');
+    return undefined;
+  }
+  return codec.readInstant(field, issues);
 }
 
 /** Reads one dependency between two tasks. */

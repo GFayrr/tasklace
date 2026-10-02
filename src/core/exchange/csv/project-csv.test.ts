@@ -673,7 +673,11 @@ describe('importProjectCsv choices made for the user', () => {
 
   it('imports a project exported with another calendar, warning about the dates that move', () => {
     const everyDay = project(
-      [workTask('a', { segments: [{ durationHours: 20, gapDaysBefore: 0 }] })],
+      [
+        workTask('a', {
+          segments: [{ durationHours: 20, gapDaysBefore: 0, startNoEarlierThan: null }],
+        }),
+      ],
       [],
       {
         calendar: { ...DEFAULT_CALENDAR, workingWeekdays: [0, 1, 2, 3, 4, 5, 6] },

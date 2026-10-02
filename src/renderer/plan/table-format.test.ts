@@ -19,7 +19,10 @@ const PLAN = project(
   [
     summary('s'),
     workTask('a', { parentId: 's', progressPercent: 40 }),
-    workTask('b', { parentId: 's', segments: [{ durationHours: 14, gapDaysBefore: 0 }] }),
+    workTask('b', {
+      parentId: 's',
+      segments: [{ durationHours: 14, gapDaysBefore: 0, startNoEarlierThan: null }],
+    }),
     milestone('m'),
   ],
   [link('a', 'b'), link('b', 'm')],

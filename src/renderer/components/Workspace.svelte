@@ -17,7 +17,7 @@
     zoomedScrollLeft,
     type ZoomLevel,
   } from '../plan/time-scale';
-  import { linkTasks, moveStart, stretchEnd, type LinkEnd } from '../plan/task-commands';
+  import { linkTasks, moveOnTimeline, stretchEnd, type LinkEnd } from '../plan/task-commands';
   import { movedStart, stretchedEnd } from '../plan/timeline-gestures';
   import { ROW_HEIGHT, timelineFrame, xOf, type RowShape } from '../plan/timeline-geometry';
   import { tagStylesOf } from '../plan/tag-styles';
@@ -148,13 +148,15 @@
     viewportHeight = height;
   }
 
-  /** Asks a dragged bar to start where it was dropped, aligned to the hour or the day. */
-  function moveBar(shape: RowShape, offset: number): void {
-    const placement = app.schedule?.placements.get(shape.taskId);
-    if (placement !== undefined) {
-      const start = movedStart(frame, placement.start, offset, snapHours(app.zoom));
-      app.edit((context) => moveStart(context, shape.taskId, start));
-    }
+  /** Asks a dragged bar, or a later block of it, to start where it was dropped, aligned to the quarter hour or the day. */
+  function moveBar(shape: RowShape, offset: number, block: number | null): void {
+    const placement = app.schedule?.placements.get(shape.taskId) ?? null;
+    const snap = snapHours(app.zoom);
+    app.edit((context) =>
+      moveOnTimeline(context, shape.taskId, block, placement, (from) =>
+        movedStart(frame, from, offset, snap),
+      ),
+    );
   }
 
   /** Changes the duration of a stretched bar so that it ends where it was dropped. */

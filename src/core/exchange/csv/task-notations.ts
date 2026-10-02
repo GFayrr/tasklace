@@ -1,7 +1,8 @@
 import { MAX_HIERARCHY_DEPTH, MAX_SEGMENTS_PER_TASK } from '../../limits';
 import type { DependencyType, TaskSegment } from '../../model/project';
 import { failure, success, type Result } from '../../result';
-import { isQuarterHours } from '../../time';
+import { formatDateTime, parseDateTime } from '../../civil-format';
+import { isQuarterHours, type ProjectHour } from '../../time';
 
 export type WbsNumber = string;
 
@@ -22,7 +23,7 @@ export interface ParsedBlocks {
   readonly waits: readonly BlockWait[];
 }
 
-export type NotationError = 'INVALID_NOTATION' | 'TOO_MANY_ITEMS';
+export type NotationError = 'INVALID_NOTATION' | 'TOO_MANY_ITEMS' | 'INVALID_DATE';
 
 const TYPE_CODES: Readonly<Record<DependencyType, string>> = {
   finishToStart: 'FS',
@@ -40,7 +41,8 @@ const WBS_PATTERN = /^\d{1,9}(?:\.\d{1,9})*$/;
 const PREDECESSOR_PATTERN =
   /^(\d{1,9}(?:\.\d{1,9})*)\s*(?:#\s*(\d{1,3}))?\s*(FS|SS|FF|SF)?\s*(?:([+-])\s*(\d{1,9}(?:\.\d{1,2})?)\s*h?)?$/i;
 const FIRST_BLOCK_PATTERN = /^(\d{1,9}(?:\.\d{1,2})?)\s*h$/i;
-const NEXT_BLOCK_PATTERN = /^\+\s*(\d{1,9})\s*d\s+(\d{1,9}(?:\.\d{1,2})?)\s*h$/i;
+const NEXT_BLOCK_PATTERN =
+  /^\+\s*(\d{1,9})\s*d\s+(\d{1,9}(?:\.\d{1,2})?)\s*h(?:\s+from\s+(\d{4}-\d{2}-\d{2}t\d{2}:\d{2}))?$/i;
 const LIST_ITEM = /[^;,]*/y;
 const MAX_ITEM_LENGTH = 256;
 const WBS_SEPARATOR = '.';
@@ -50,6 +52,7 @@ const WRITTEN_LIST_SEPARATOR = ', ';
 const WRITTEN_BLOCK_SEPARATOR = '; ';
 const BLOCK_MARK = '#';
 const WAIT_KEYWORD = ' after ';
+const START_KEYWORD = ' from ';
 const WAIT_KEYWORD_PATTERN = /\safter\s/i;
 const WAIT_SEPARATOR = '&';
 const PARTS_BESIDE_SEPARATORS = 2;
@@ -112,17 +115,21 @@ export function parsePredecessors(
   return success(references);
 }
 
-/** Writes the blocks of a split task as "4h; +2d 3.5h after 2.1 & 3#2SS", each later block after its gap in calendar days, hours with a dot as decimal mark, and each block followed by what it waits for. */
+/** Writes the blocks of a split task as "4h; +2d 3.5h from 2026-10-05T14:00 after 2.1 & 3#2SS": each later block after its gap in calendar days and its start date if any, hours with a dot as decimal mark, then what the block waits for. */
 export function formatBlocks(
   segments: readonly TaskSegment[],
   waits: ReadonlyMap<number, readonly PredecessorReference[]>,
 ): string {
   return segments
     .map((segment, index) => {
+      const start =
+        segment.startNoEarlierThan === null
+          ? ''
+          : `${START_KEYWORD}${formatDateTime(segment.startNoEarlierThan)}`;
       const block =
         index === 0
           ? `${String(segment.durationHours)}h`
-          : `+${String(segment.gapDaysBefore)}d ${String(segment.durationHours)}h`;
+          : `+${String(segment.gapDaysBefore)}d ${String(segment.durationHours)}h${start}`;
       const references = waits.get(index) ?? [];
       return references.length === 0
         ? block
@@ -131,7 +138,7 @@ export function formatBlocks(
     .join(WRITTEN_BLOCK_SEPARATOR);
 }
 
-/** Reads the blocks of a split task written as "4h; +2d 3h after 2.1 & 3#2SS", spending what the blocks wait for from a budget of references. */
+/** Reads the blocks of a split task written as "4h; +2d 3h from 2026-10-05T14:00 after 2.1 & 3#2SS", spending what the blocks wait for from a budget of references. */
 export function parseBlocks(
   text: string,
   maxCount: number,
@@ -169,7 +176,14 @@ function parseBlockItem(
   }
   const keyword = WAIT_KEYWORD_PATTERN.exec(item);
   const head = keyword === null ? item : item.slice(0, keyword.index).trim();
-  const segment = head.length > MAX_ITEM_LENGTH ? null : parseBlock(head, block === 0);
+  const parsed =
+    head.length > MAX_ITEM_LENGTH
+      ? failure('INVALID_NOTATION' as const)
+      : parseBlock(head, block === 0);
+  if (!parsed.ok) {
+    return parsed;
+  }
+  const segment = parsed.value;
   const references =
     keyword === null
       ? []
@@ -177,7 +191,7 @@ function parseBlockItem(
           .slice(keyword.index + keyword[0].length)
           .split(WAIT_SEPARATOR)
           .map((reference) => parsePredecessor(reference.trim()));
-  if (segment === null || references.some((reference) => reference === null)) {
+  if (references.some((reference) => reference === null)) {
     return failure('INVALID_NOTATION');
   }
   if (references.length > maxReferences) {
@@ -255,19 +269,31 @@ function parsePredecessor(item: string): PredecessorReference | null {
   return { wbs, block, type, lagHours: sign === '-' ? -magnitude : magnitude };
 }
 
-/** Reads one block, the first one having no gap before it, or returns null when it is not well written. */
-function parseBlock(item: string, isFirst: boolean): TaskSegment | null {
-  if (isFirst) {
-    const first = FIRST_BLOCK_PATTERN.exec(item);
-    return first === null ? null : quarterBlock(Number(first[1]), 0);
+/** Reads one block, the first one having no gap or start date of its own, telling a start date that does not exist apart from a block that is not well written. */
+function parseBlock(item: string, isFirst: boolean): Result<TaskSegment, NotationError> {
+  const written = isFirst ? FIRST_BLOCK_PATTERN.exec(item) : NEXT_BLOCK_PATTERN.exec(item);
+  if (written === null) {
+    return failure('INVALID_NOTATION');
   }
-  const next = NEXT_BLOCK_PATTERN.exec(item);
-  return next === null ? null : quarterBlock(Number(next[2]), toNumber(next[1]));
+  const start = written[3] === undefined ? null : parseDateTime(written[3].toUpperCase());
+  if (start !== null && !start.ok) {
+    return failure('INVALID_DATE');
+  }
+  const gapDaysBefore = isFirst ? 0 : toNumber(written[1]);
+  const durationHours = Number(isFirst ? written[1] : written[2]);
+  const segment = quarterBlock(durationHours, gapDaysBefore, start === null ? null : start.value);
+  return segment === null ? failure('INVALID_NOTATION') : success(segment);
 }
 
 /** Builds a block whose duration is a whole number of quarter hours, or returns null. */
-function quarterBlock(durationHours: number, gapDaysBefore: number): TaskSegment | null {
-  return isQuarterHours(durationHours) ? { durationHours, gapDaysBefore } : null;
+function quarterBlock(
+  durationHours: number,
+  gapDaysBefore: number,
+  startNoEarlierThan: ProjectHour | null = null,
+): TaskSegment | null {
+  return isQuarterHours(durationHours)
+    ? { durationHours, gapDaysBefore, startNoEarlierThan }
+    : null;
 }
 
 /** Converts decimal digits into a number. */

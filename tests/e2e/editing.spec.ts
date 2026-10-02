@@ -1,15 +1,8 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  _electron as electron,
-  expect,
-  test,
-  type ElectronApplication,
-  type Locator,
-  type Page,
-} from '@playwright/test';
-import { closeDiscarding } from './dialogs';
+import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
+import { closeDiscarding, launchApplication } from './application';
 
 import { paleColor } from '../../src/renderer/plan/tag-styles';
 import { SAND_GRAPHITE } from '../../src/renderer/theme/sand-graphite';
@@ -24,7 +17,7 @@ let grid: Locator;
 
 test.beforeEach(async () => {
   userData = await mkdtemp(join(tmpdir(), 'tasklace-e2e-data-'));
-  application = await electron.launch({ args: ['.', `--user-data-dir=${userData}`] });
+  application = await launchApplication(userData);
   page = await application.firstWindow();
   await page.setViewportSize({ width: 1440, height: 800 });
   await expect(page.locator('#app')).toHaveAttribute('data-started', 'true');
@@ -271,6 +264,28 @@ test('makes a block of a split task wait for another task, shown in its details 
   await details.getByRole('button', { name: 'Save' }).click();
   await expect(details).toBeHidden();
   await expect(row('Build').getByRole('gridcell').nth(6)).toHaveText('1');
+});
+
+test('starts a later block no earlier than a date chosen in the details', async () => {
+  await addTask('Build');
+  await row('Build').getByRole('gridcell').nth(1).click();
+  await page.keyboard.press('Alt+Enter');
+  const details = page.getByRole('dialog', { name: 'Task details' });
+  await details.getByRole('button', { name: 'Add a block' }).click();
+  await details.getByRole('button', { name: 'Save' }).click();
+  await expect(details).toBeHidden();
+  const endBefore = await row('Build').getByRole('gridcell').nth(4).textContent();
+  await page.keyboard.press('Alt+Enter');
+  const start = details.getByLabel('Block 2 starts no earlier than');
+  await start.fill(isoDaysFromToday(8, '14:00').replace(' ', 'T'));
+  await details.getByRole('button', { name: 'Save' }).click();
+  await expect(details).toBeHidden();
+  await expect(row('Build').getByRole('gridcell').nth(4)).not.toHaveText(endBefore ?? '');
+  await expect(row('Build').getByRole('gridcell').nth(4)).toContainText(/2:00 PM|14:00/);
+  await page.keyboard.press('Alt+Enter');
+  await expect(start).toHaveValue(isoDaysFromToday(8, '14:00').replace(' ', 'T'));
+  await page.keyboard.press('Escape');
+  await expect(details).toBeHidden();
 });
 
 test('tags a task from the table and splits it into blocks in its details', async () => {

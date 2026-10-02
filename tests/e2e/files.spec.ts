@@ -1,13 +1,7 @@
 import { mkdtemp, readdir, readFile, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  _electron as electron,
-  expect,
-  test,
-  type ElectronApplication,
-  type Page,
-} from '@playwright/test';
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { DEFAULT_CALENDAR } from '../../src/core/calendar/default-calendar';
 import { exportProjectCsv } from '../../src/core/exchange/csv/project-csv-export';
 import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
@@ -23,7 +17,8 @@ import {
 } from '../../src/core/testing/project-builder';
 import { parseLocalCopyIndex } from '../../src/main/local-copies';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
-import { answerDialogs, closeDiscarding } from './dialogs';
+import { closeDiscarding, launchApplication } from './application';
+import { answerDialogs, askedQuestion, suggestedPath } from './dialogs';
 
 const SAMPLE = project([workTask('a', { name: 'Écrire' }), workTask('b')], [link('a', 'b')]);
 
@@ -35,7 +30,7 @@ let page: Page;
 test.beforeEach(async () => {
   folder = await mkdtemp(join(tmpdir(), 'tasklace-e2e-files-'));
   userData = await mkdtemp(join(tmpdir(), 'tasklace-e2e-data-'));
-  application = await electron.launch({ args: ['.', `--user-data-dir=${userData}`] });
+  application = await launchApplication(userData);
   page = await application.firstWindow();
   await page.waitForLoadState('domcontentloaded');
 });
@@ -95,7 +90,7 @@ test('imports a CSV table into a project kept in its local copy until saved as a
       return { imported };
     }
     const kept = await api?.saveProject(imported.value.state);
-    const savedAs = await api?.saveProjectAs(imported.value.state);
+    const savedAs = await api?.saveProjectAs(imported.value.state, 'Tasks');
     return { name: imported.value.name, warnings: imported.value.warnings, kept, savedAs };
   });
   expect(outcome).toEqual({
@@ -139,8 +134,77 @@ test('refuses bridge messages whose content is not valid', async () => {
       attempt(api?.saveProject('not bytes')),
       attempt(api?.importProject('tasklace')),
       attempt(api?.openRecentProject(99)),
-      attempt(api?.exportProject('pdf', 'x')),
+      attempt(api?.exportProject('pdf', 'x', 'Plan')),
+      attempt(api?.exportProject('json', '{}', 'x'.repeat(10_000))),
+      attempt(
+        Reflect.apply(api?.saveProjectAs ?? (() => undefined), api, [new Uint8Array([1]), 42]),
+      ),
     ]);
   });
-  expect(refusals).toEqual(['refused', 'refused', 'refused', 'refused']);
+  expect(refusals).toEqual(['refused', 'refused', 'refused', 'refused', 'refused', 'refused']);
+});
+
+test('exports with the extension added and the project name suggested, asking before replacing what the extension leads to', async () => {
+  const chosen = join(folder, 'out');
+  const exportAs = async (replace: boolean) => {
+    await answerDialogs(application, { save: chosen, replace });
+    return page.evaluate(async () => {
+      const api = window.tasklace;
+      await api?.newProject();
+      return api?.exportProject('json', '{}', 'Launch: plan');
+    });
+  };
+  expect(await exportAs(false)).toEqual({ ok: true, value: { fileName: 'out.json' } });
+  expect(await suggestedPath(application)).toBe('Launch  plan.json');
+  expect(await readFile(`${chosen}.json`, 'utf8')).toBe('{}');
+  await writeFile(`${chosen}.json`, 'kept');
+  expect(await exportAs(false)).toEqual({ ok: false, error: { code: 'CANCELLED' } });
+  expect(await askedQuestion(application)).toBe(
+    'out.json already exists. Do you want to replace it?',
+  );
+  expect(await readFile(`${chosen}.json`, 'utf8')).toBe('kept');
+  expect(await exportAs(true)).toEqual({ ok: true, value: { fileName: 'out.json' } });
+  expect(await readFile(`${chosen}.json`, 'utf8')).toBe('{}');
+});
+
+test('tells what was exported and imported, naming an untitled imported project after its file', async () => {
+  const exported = join(folder, 'Shared plan');
+  await page.getByRole('button', { name: 'New project' }).first().click();
+  await page.getByRole('button', { name: 'Add task' }).click();
+  await page.keyboard.press('Enter');
+  await answerDialogs(application, { save: exported });
+  await page.getByRole('button', { name: 'Export' }).click();
+  await page.getByRole('menuitem', { name: 'JSON file…' }).click();
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Exported to Shared plan.json.' }),
+  ).toBeVisible();
+  await answerDialogs(application, { open: `${exported}.json` });
+  await page.getByRole('button', { name: 'Import' }).click();
+  await page.getByRole('menuitem', { name: 'JSON file…' }).click();
+  const prompt = page.getByRole('dialog', { name: 'Save this project?' });
+  await prompt.getByRole('button', { name: "Don't save" }).click();
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Imported Shared plan.json: 1 task.' }),
+  ).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('Shared plan');
+});
+
+test('saves as next to the current file under the project name, asking before replacing a project file', async () => {
+  const path = join(folder, 'Plan.tasklace');
+  await writeSampleProject(path);
+  const chosen = join(folder, 'Copy');
+  await writeFile(`${chosen}.tasklace`, 'kept');
+  const saveAs = async (replace: boolean) => {
+    await answerDialogs(application, { open: path, save: chosen, replace });
+    return page.evaluate(async () => {
+      const api = window.tasklace;
+      const opened = await api?.openProject();
+      return opened?.ok === true ? api?.saveProjectAs(opened.value.state, 'Plan v2') : opened;
+    });
+  };
+  expect(await saveAs(false)).toEqual({ ok: false, error: { code: 'CANCELLED' } });
+  expect(await suggestedPath(application)).toBe(join(folder, 'Plan v2.tasklace'));
+  expect(await readFile(`${chosen}.tasklace`, 'utf8')).toBe('kept');
+  expect(await saveAs(true)).toEqual({ ok: true, value: null });
+  expect((await readFile(`${chosen}.tasklace`)).subarray(0, 4).toString()).toBe('TSKL');
 });

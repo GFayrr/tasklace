@@ -11,6 +11,7 @@ import {
   link,
   milestone,
   project,
+  scheduleOrThrow,
   splitTask,
   summary,
   TEST_DOCUMENT_ID,
@@ -22,6 +23,8 @@ import {
   indentTask,
   insertTask,
   linkTasks,
+  moveBlock,
+  moveOnTimeline,
   moveStart,
   moveTask,
   outdentTask,
@@ -66,6 +69,15 @@ const PLAN = project(
   ],
   [link('a', 'b'), link('b', 'c'), link('c', 'd')],
 );
+
+/** Returns the task an edit writes, or undefined when it writes none or is refused. */
+function writtenTask(edit: Edit): Task | undefined {
+  if (!edit.ok) {
+    return undefined;
+  }
+  const operation = edit.value.find((candidate) => candidate.type === 'putTask');
+  return operation?.type === 'putTask' ? operation.task : undefined;
+}
 
 /** Names a whole task as one end of a link. */
 function whole(taskId: string): LinkEnd {
@@ -222,7 +234,10 @@ describe('editing cells', () => {
     expect(taskOf(session, 'a')).toMatchObject({ kind: 'task', segments: [{ durationHours: 5 }] });
     applied(session, setDuration(context(), 'd', '20'));
     expect(taskOf(session, 'd')).toMatchObject({
-      segments: [{ durationHours: 7 }, { durationHours: 13, gapDaysBefore: 2 }],
+      segments: [
+        { durationHours: 7 },
+        { durationHours: 13, gapDaysBefore: 2, startNoEarlierThan: null },
+      ],
     });
     expect(setDuration(context(), 'd', '7')).toEqual({ ok: false, error: 'INVALID_DURATION' });
     expect(setDuration(context(), 'a', 'soon')).toEqual({ ok: false, error: 'INVALID_DURATION' });
@@ -388,6 +403,79 @@ function workTaskOf(session: SharedSession, id: string): WorkTask {
   }
   return task;
 }
+
+describe('moving a later block alone', () => {
+  it('asks the block not to start before the instant, its gap becoming the days since the previous block', () => {
+    const { session, context } = openPlan(SPLIT_WITH_WAIT);
+    applied(
+      session,
+      moveBlock(context(), 'd', 1, {
+        start: at(2026, 10, 2, 14),
+        previousEnd: at(2026, 9, 28, 17),
+      }),
+    );
+    expect(workTaskOf(session, 'd').segments[1]).toEqual({
+      durationHours: 7,
+      gapDaysBefore: 4,
+      startNoEarlierThan: at(2026, 10, 2, 14),
+    });
+    applied(
+      session,
+      moveBlock(context(), 'd', 1, {
+        start: at(2026, 9, 28, 15),
+        previousEnd: at(2026, 9, 28, 17),
+      }),
+    );
+    expect(workTaskOf(session, 'd').segments[1]).toMatchObject({
+      gapDaysBefore: 0,
+      startNoEarlierThan: null,
+    });
+  });
+
+  it('moves the dates of the later blocks with the task when its whole bar moves', () => {
+    const dated = project([
+      splitTask('d', [
+        [7, 0],
+        [7, 1, at(2026, 10, 5, 13)],
+      ]),
+    ]);
+    const { session, context } = openPlan(dated);
+    applied(session, moveStart(context(), 'd', at(2026, 9, 30, 9), at(2026, 9, 28, 9)));
+    expect(workTaskOf(session, 'd')).toMatchObject({
+      startNoEarlierThan: at(2026, 9, 30, 9),
+      segments: [{ startNoEarlierThan: null }, { startNoEarlierThan: at(2026, 10, 7, 13) }],
+    });
+    applied(session, moveStart(context(), 'd', at(2026, 10, 1, 9)));
+    expect(workTaskOf(session, 'd').segments[1]?.startNoEarlierThan).toBe(at(2026, 10, 7, 13));
+  });
+
+  it('chooses on the timeline between moving a later block, moving the whole task, and refusing what the schedule no longer shows', () => {
+    const { session, context } = openPlan(SPLIT_WITH_WAIT);
+    const placement = scheduleOrThrow(session.project()).placements.get('d') ?? null;
+    const later = (from: number) => from + 24;
+    const asked = writtenTask(moveOnTimeline(context(), 'd', 1, placement, later));
+    expect(asked).toMatchObject({
+      segments: [
+        { startNoEarlierThan: null },
+        { startNoEarlierThan: (placement?.segments[1]?.start ?? 0) + 24 },
+      ],
+    });
+    const whole = writtenTask(moveOnTimeline(context(), 'd', null, placement, later));
+    expect(whole).toMatchObject({ startNoEarlierThan: (placement?.start ?? 0) + 24 });
+    const notPossible = { ok: false, error: 'NOT_POSSIBLE' };
+    expect(moveOnTimeline(context(), 'd', 4, placement, later)).toEqual(notPossible);
+    expect(moveOnTimeline(context(), 'd', 1, null, later)).toEqual(notPossible);
+  });
+
+  it('refuses the first block, a block the task does not have, and a task that is not split', () => {
+    const { context } = openPlan(SPLIT_WITH_WAIT);
+    const notPossible = { ok: false, error: 'NOT_POSSIBLE' };
+    const hour = at(2026, 10, 2, 14);
+    expect(moveBlock(context(), 'd', 0, { start: hour, previousEnd: hour })).toEqual(notPossible);
+    expect(moveBlock(context(), 'd', 2, { start: hour, previousEnd: hour })).toEqual(notPossible);
+    expect(moveBlock(context(), 'a', 1, { start: hour, previousEnd: hour })).toEqual(notPossible);
+  });
+});
 
 describe('block edits refused with a reason', () => {
   it('refuses to merge two different links when a split task loses its blocks or becomes a milestone', () => {
@@ -669,7 +757,13 @@ function blockEdit(context: EditContext, kind: string, id: string): Edit {
   if (kind === 'addBlock') {
     return replaceTask(
       context,
-      { ...task, segments: [...task.segments, { durationHours: 2, gapDaysBefore: 0 }] },
+      {
+        ...task,
+        segments: [
+          ...task.segments,
+          { durationHours: 2, gapDaysBefore: 0, startNoEarlierThan: null },
+        ],
+      },
       [...blocks, { origin: null, waitsFor: '' }],
     );
   }

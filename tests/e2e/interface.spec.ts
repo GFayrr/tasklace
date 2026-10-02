@@ -1,18 +1,13 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  _electron as electron,
-  expect,
-  test,
-  type ElectronApplication,
-  type Page,
-} from '@playwright/test';
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
 import { link, project, TEST_DOCUMENT_ID, workTask } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
-import { answerDialogs, closeDiscarding } from './dialogs';
+import { closeDiscarding, launchApplication } from './application';
+import { answerDialogs } from './dialogs';
 
 const SAMPLE = {
   ...project([workTask('a'), workTask('b')], [link('a', 'b')]),
@@ -30,7 +25,7 @@ let policyViolations: string[];
 test.beforeEach(async () => {
   folder = await mkdtemp(join(tmpdir(), 'tasklace-e2e-interface-'));
   userData = await mkdtemp(join(tmpdir(), 'tasklace-e2e-data-'));
-  application = await electron.launch({ args: ['.', `--user-data-dir=${userData}`] });
+  application = await launchApplication(userData);
   page = await application.firstWindow();
   policyViolations = [];
   page.on('console', (message) => {
@@ -42,10 +37,10 @@ test.beforeEach(async () => {
 });
 
 test.afterEach(async () => {
-  expect(policyViolations).toEqual([]);
   await closeDiscarding(application, page);
   await rm(folder, { recursive: true, force: true });
   await rm(userData, { recursive: true, force: true });
+  expect(policyViolations).toEqual([]);
 });
 
 /** Saves a picture of the window when a folder for pictures is given, to review the interface by eye. */

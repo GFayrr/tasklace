@@ -127,3 +127,29 @@ describe('date and time picker values', () => {
     expect(hourFromPicker('tomorrow')).toBeNull();
   });
 });
+
+describe('typing the start of a split task', () => {
+  it('moves the dates of its later blocks by as much as the task', () => {
+    const dated = project([
+      splitTask('d', [
+        [7, 0],
+        [7, 1, at(2026, 10, 5, 13)],
+      ]),
+    ]);
+    const schedule = scheduleOrThrow(dated);
+    const context = {
+      project: dated,
+      outline: buildPlanOutline(dated.tasks, new Set()),
+      createId: () => 'new',
+      dayHours: 7,
+    };
+    const source = { ...SOURCE, schedule };
+    const edit = cellEdit(context, 'd', 'start', '2026-09-30 09:00', source);
+    const operation = edit.ok
+      ? edit.value.find((candidate) => candidate.type === 'putTask')
+      : undefined;
+    expect(operation?.type === 'putTask' && operation.task).toMatchObject({
+      segments: [{ startNoEarlierThan: null }, { startNoEarlierThan: at(2026, 10, 7, 13) }],
+    });
+  });
+});

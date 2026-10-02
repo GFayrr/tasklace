@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { TEST_CALENDAR } from '../../core/testing/test-calendar';
 import { at, compileOrThrow, dayOf } from '../../core/testing/civil-time';
 import { paleColor } from './tag-styles';
-import { nonWorkingIntervals, splitAtDaysOff, visibleRows } from './timeline-painter';
+import { nonWorkingIntervals, previewSpan, splitAtDaysOff, visibleRows } from './timeline-painter';
+import type { RowShape } from './timeline-geometry';
 import { ROW_HEIGHT } from './timeline-geometry';
 
 const CALENDAR = compileOrThrow(TEST_CALENDAR);
@@ -76,6 +77,44 @@ describe('splitAtDaysOff', () => {
     expect(splitAtDaysOff(CALENDAR, at(2026, 10, 5, 9), at(2026, 10, 7, 12))).toEqual({
       parts: [{ start: at(2026, 10, 5, 9), end: at(2026, 10, 7, 12) }],
       daysOff: [],
+    });
+  });
+});
+
+describe('previewSpan', () => {
+  const shape: Extract<RowShape, { kind: 'task' }> = {
+    kind: 'task',
+    taskId: 't',
+    row: 0,
+    segments: [
+      { x: 100, width: 40, filled: 0 },
+      { x: 200, width: 60, filled: 0 },
+    ],
+    start: 100,
+    end: 260,
+  };
+
+  it('shifts only the block moved alone, keeping its width', () => {
+    expect(previewSpan(shape, { kind: 'move', shape, offset: 30, block: 1 })).toEqual({
+      start: 230,
+      width: 60,
+    });
+  });
+
+  it('shifts the whole bar when no block, or a block the bar does not show, is moved', () => {
+    const whole = { start: 130, width: 160 };
+    expect(previewSpan(shape, { kind: 'move', shape, offset: 30, block: null })).toEqual(whole);
+    expect(previewSpan(shape, { kind: 'move', shape, offset: 30, block: 5 })).toEqual(whole);
+  });
+
+  it('widens a stretched bar, keeping at least one pixel', () => {
+    expect(previewSpan(shape, { kind: 'stretch', shape, offset: 20 })).toEqual({
+      start: 100,
+      width: 180,
+    });
+    expect(previewSpan(shape, { kind: 'stretch', shape, offset: -500 })).toEqual({
+      start: 100,
+      width: 1,
     });
   });
 });

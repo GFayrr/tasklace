@@ -9,7 +9,7 @@ import { LARGE_PROJECT_SEED, buildLargeProject } from './large-project';
 import { createRandom } from './random';
 
 const LARGE_PROJECT_FINGERPRINT =
-  'ccb4306cd9658d39ac6f834e7a565c5ba4b2f5c46a67d0eea76dc2861ed1c841';
+  '176ce5698f63be87b8c9a80aa4db90ecbe6ad9f3895d8443fa2c5323db4f575c';
 
 const SCHEDULE_FINGERPRINT = '04da93f6c20d9d0f9bbd12c17e74b6444fb3fae72c73cb60c0bedd557553a7b5';
 const ADVANCED_SCHEDULE_FINGERPRINT =

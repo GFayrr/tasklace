@@ -9,6 +9,7 @@ import type {
   WorkTask,
 } from '../model/project';
 import { scheduleProject, type Schedule } from '../scheduling/schedule-project';
+import type { ProjectHour } from '../time';
 import { at } from './civil-time';
 
 export const TEST_DOCUMENT_ID = '00000000-0000-4000-8000-000000000001';
@@ -23,7 +24,7 @@ export function workTask(id: string, overrides: Partial<WorkTask> = {}): WorkTas
     name: id,
     parentId: null,
     sortKey: id,
-    segments: [{ durationHours: 7, gapDaysBefore: 0 }],
+    segments: [{ durationHours: 7, gapDaysBefore: 0, startNoEarlierThan: null }],
     hoursPerDay: null,
     dailyStartHour: null,
     progressPercent: 0,
@@ -38,12 +39,17 @@ export function workTask(id: string, overrides: Partial<WorkTask> = {}): WorkTas
 /** Builds a work task made of several blocks with the given durations and gaps in days. */
 export function splitTask(
   id: string,
-  blocks: readonly (readonly [durationHours: number, gapDaysBefore: number])[],
+  blocks: readonly (readonly [
+    durationHours: number,
+    gapDaysBefore: number,
+    startNoEarlierThan?: ProjectHour,
+  ])[],
   overrides: Partial<WorkTask> = {},
 ): WorkTask {
-  const segments = blocks.map(([durationHours, gapDaysBefore]) => ({
+  const segments = blocks.map(([durationHours, gapDaysBefore, startNoEarlierThan]) => ({
     durationHours,
     gapDaysBefore,
+    startNoEarlierThan: startNoEarlierThan ?? null,
   }));
   return workTask(id, { segments, ...overrides });
 }

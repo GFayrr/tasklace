@@ -41,7 +41,10 @@ function datesAfterScheduling(
 
 /** Builds a work task of a given duration in hours. */
 function taskOf(id: string, durationHours: number, overrides: Partial<WorkTask> = {}): Task {
-  return workTask(id, { segments: [{ durationHours, gapDaysBefore: 0 }], ...overrides });
+  return workTask(id, {
+    segments: [{ durationHours, gapDaysBefore: 0, startNoEarlierThan: null }],
+    ...overrides,
+  });
 }
 
 describe('scheduleProject: dates', () => {

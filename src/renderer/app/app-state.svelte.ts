@@ -31,7 +31,12 @@ import {
   predecessorText,
   toggledSummary,
 } from '../plan/plan-outline';
-import { taskBasis, taskFromDraft, type TaskDraft } from '../plan/task-details';
+import {
+  findUnreadableBlockStart,
+  taskBasis,
+  taskFromDraft,
+  type TaskDraft,
+} from '../plan/task-details';
 import {
   deleteTasks,
   insertTask,
@@ -219,10 +224,16 @@ export class AppState {
     }
   }
 
-  /** Asks for a CSV or JSON file and imports it as a new project. */
+  /** Asks for a CSV or JSON file, imports it as a new project and tells how many tasks it brought. */
   async importFile(kind: ExchangeKind): Promise<void> {
-    if (await this.readyToClose()) {
-      await this.#load(this.#files.importFile(kind));
+    if (!(await this.readyToClose())) {
+      return;
+    }
+    const imported = await this.#load(this.#files.importFile(kind));
+    if (imported !== null) {
+      const taskCount = imported.session.project().tasks.length;
+      const counted = countMessage(this.messages.notices.imported, taskCount, this.locale);
+      this.#notify('info', fillMessage(counted, { file: imported.fileName }));
     }
   }
 
@@ -240,16 +251,24 @@ export class AppState {
     await this.loadRecentProjects();
   }
 
-  /** Writes the project as a CSV table or a JSON file where the user chooses. */
+  /** Writes the project as a CSV table or a JSON file where the user chooses, suggesting the project name, and tells the name of the file written. */
   async exportFile(kind: ExchangeKind): Promise<void> {
     const project = this.project;
     if (project === null) {
       return;
     }
     const text = kind === 'json' ? exportProjectJson(project) : await this.#csvText(project);
-    if (text !== null) {
-      this.#showResult(await this.#context.bridge.exportProject(kind, text));
+    if (text === null) {
+      return;
     }
+    const exported = await this.#context.bridge.exportProject(kind, text, project.name);
+    if (exported.ok) {
+      this.#notify(
+        'info',
+        fillMessage(this.messages.notices.exported, { file: exported.value.fileName }),
+      );
+    }
+    this.#showResult(exported);
   }
 
   /** Renames the project, telling whether the name was accepted. */
@@ -328,7 +347,7 @@ export class AppState {
     if (draft.basis !== this.detailsBasis(task.id)) {
       return editErrorMessage(this.messages, 'TASK_CHANGED');
     }
-    const blockProblem = this.project === null ? null : this.#blockWaitProblem(draft);
+    const blockProblem = this.project === null ? null : this.#blockProblem(draft);
     if (blockProblem !== null) {
       return blockProblem;
     }
@@ -407,12 +426,12 @@ export class AppState {
     this.notices = this.notices.filter((notice) => notice.id !== id);
   }
 
-  /** Shows a project read from a file, with its warnings, or why it could not be read. */
-  async #load(opening: Promise<BridgeResult<OpenedSession>>): Promise<void> {
+  /** Shows a project read from a file, with its warnings, and returns it, or tells why it could not be read and returns null. */
+  async #load(opening: Promise<BridgeResult<OpenedSession>>): Promise<OpenedSession | null> {
     const opened = await opening;
     if (!opened.ok) {
       this.#showResult(opened);
-      return;
+      return null;
     }
     this.#attach(opened.value.session);
     const warnings = opened.value.warnings.length;
@@ -424,6 +443,7 @@ export class AppState {
     }
     this.#notifyRepairs(opened.value.session.openingRepairs.length);
     await this.loadRecentProjects();
+    return opened.value;
   }
 
   /** Returns what the editing commands need to know about the project. */
@@ -499,11 +519,18 @@ export class AppState {
     this.schedule = result.value;
   }
 
-  /** Tells which field of the details panel names a task or block that does not exist, or null. */
-  #blockWaitProblem(draft: TaskDraft): string | null {
+  /** Tells which block of the details panel has a start date that cannot be read or waits for a task or block that does not exist, or null. */
+  #blockProblem(draft: TaskDraft): string | null {
     const project = this.project;
     if (project === null || draft.blocks.length < 2) {
       return null;
+    }
+    const unreadable = findUnreadableBlockStart(draft);
+    if (unreadable !== null) {
+      return fillMessage(this.messages.details.blockError, {
+        number: String(unreadable + 1),
+        message: editErrorMessage(this.messages, 'INVALID_DATE'),
+      });
     }
     const problem = findBlockWaitProblem(this.#editContext(project), draft.blocks);
     return problem === null

@@ -184,11 +184,17 @@ describe('growth of task placement with the duration of the task', () => {
     const calendar = calendarOf(project([]));
     const start = at(2026, 9, 28, 9);
     const shortTask = workTask('short', {
-      segments: [{ durationHours: SHORT_TASK_HOURS, gapDaysBefore: 0 }],
+      segments: [{ durationHours: SHORT_TASK_HOURS, gapDaysBefore: 0, startNoEarlierThan: null }],
       hoursPerDay: 3,
     });
     const longTask = workTask('long', {
-      segments: [{ durationHours: SHORT_TASK_HOURS * SIZE_FACTOR, gapDaysBefore: 0 }],
+      segments: [
+        {
+          durationHours: SHORT_TASK_HOURS * SIZE_FACTOR,
+          gapDaysBefore: 0,
+          startNoEarlierThan: null,
+        },
+      ],
       hoursPerDay: 3,
     });
     const ratio = growthRatio(

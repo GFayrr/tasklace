@@ -18,6 +18,7 @@ import {
   IPC_CHANNELS,
   type BridgeResult,
   type ExchangeKind,
+  type ExportedFile,
   type OpenedProject,
   type RecentProject,
 } from '../preload/bridge-contract';
@@ -27,10 +28,16 @@ import {
   readExportText,
   readProjectState,
   readRecentIndex,
+  readSuggestedName,
 } from './ipc-validators';
 import { refuseMessage, type TrustCheck } from './ipc-trust';
 import { MESSAGES } from './messages';
-import { localProjectHour, projectNameFromPath } from './project-names';
+import {
+  fileNameForProject,
+  localProjectHour,
+  projectNameFromPath,
+  withExtension,
+} from './project-names';
 import { readRecentProjects, recordRecentProject } from './recent-projects';
 import { writeFileSafely } from './safe-write';
 import { regionalFormatOf } from './system-regional-format';
@@ -48,6 +55,9 @@ interface WindowProject {
 
 type FileKind = 'tasklace' | ExchangeKind;
 
+type SaveDestination =
+  { readonly kind: 'current' } | { readonly kind: 'chosen'; readonly suggestedName: string };
+
 const MAX_BYTES: Readonly<Record<FileKind, number>> = {
   tasklace: MAX_FILE_BYTES,
   json: MAX_JSON_FILE_BYTES,
@@ -59,6 +69,9 @@ const FILTERS: Readonly<Record<FileKind, FileFilter>> = {
   csv: { name: MESSAGES.dialogs.csvFiles, extensions: ['csv'] },
 };
 const RECENT_STORE = 'recent-projects.json';
+const REPLACE_BUTTON = 0;
+const CANCEL_BUTTON = 1;
+const FILE_PLACEHOLDER = '{file}';
 const LOCAL_COPY_FOLDER = 'local-copies';
 const projects = new WeakMap<WebContents, WindowProject>();
 
@@ -82,13 +95,16 @@ export function registerProjectFileHandlers(services: ProjectFileServices): void
   handle(IPC_CHANNELS.recentProjects, () => listRecent(services));
   handle(IPC_CHANNELS.importProject, (event, kind) => importProject(services, event.sender, kind));
   handle(IPC_CHANNELS.saveProject, (event, state) =>
-    saveProject(services, event.sender, state, false),
+    saveProject(services, event.sender, state, { kind: 'current' }),
   );
-  handle(IPC_CHANNELS.saveProjectAs, (event, state) =>
-    saveProject(services, event.sender, state, true),
+  handle(IPC_CHANNELS.saveProjectAs, (event, state, name) =>
+    saveProject(services, event.sender, state, {
+      kind: 'chosen',
+      suggestedName: readSuggestedName(name) ?? refuseMessage(),
+    }),
   );
-  handle(IPC_CHANNELS.exportProject, (event, kind, text) =>
-    exportProject(event.sender, kind, text),
+  handle(IPC_CHANNELS.exportProject, (event, kind, text, name) =>
+    exportProject(event.sender, kind, text, name),
   );
 }
 
@@ -171,9 +187,10 @@ async function importProject(
     projectName: projectNameFromPath(path, MESSAGES.projects.untitled),
     fallbackStart: localProjectHour(new Date(), MIN_PROJECT_HOUR),
   };
+  const naming = { untitled: MESSAGES.projects.untitled, fromFile: options.projectName };
   const task: FileTask =
     kind === 'json'
-      ? { kind: 'importJson', path, documentId }
+      ? { kind: 'importJson', path, documentId, naming }
       : { kind: 'importCsv', path, documentId, options };
   const loaded = await loadedProject(services.runTask(task));
   if (!loaded.ok) {
@@ -183,20 +200,23 @@ async function importProject(
   return success(openedProject(loaded.value, path));
 }
 
-/** Saves the project of a window: to its file, asking where first only when asked to save as, a project without file keeping only its local copy so that saving automatically never opens a dialog. */
+/** Saves the project of a window: to its file, or where the user chooses when saving as, the name of the project being suggested, a project without file keeping only its local copy so that saving automatically never opens a dialog. */
 async function saveProject(
   services: ProjectFileServices,
   sender: WebContents,
   value: unknown,
-  choosePath: boolean,
+  destination: SaveDestination,
 ): Promise<BridgeResult<null>> {
   const state = readProjectState(value) ?? refuseMessage();
   const project = projects.get(sender);
   if (project === undefined) {
     return failure({ code: 'NO_PROJECT' });
   }
-  const path = choosePath ? await chooseFileToSave(sender, 'tasklace') : project.path;
-  if (choosePath && path === null) {
+  const path =
+    destination.kind === 'chosen'
+      ? await chooseFileToSave(sender, 'tasklace', destination.suggestedName)
+      : project.path;
+  if (destination.kind === 'chosen' && path === null) {
     return failure({ code: 'CANCELLED' });
   }
   const localCopyFolder = join(services.userDataFolder, LOCAL_COPY_FOLDER);
@@ -221,21 +241,23 @@ async function saveProject(
   return success(null);
 }
 
-/** Lets the user choose where to export the project of a window, then writes the export safely. */
+/** Lets the user choose where to export the project of a window, the name of the project being suggested, then writes the export safely and tells the name of the file written. */
 async function exportProject(
   sender: WebContents,
   kindValue: unknown,
   textValue: unknown,
-): Promise<BridgeResult<null>> {
+  nameValue: unknown,
+): Promise<BridgeResult<ExportedFile>> {
   const kind = readExchangeKind(kindValue) ?? refuseMessage();
   const text = readExportText(textValue, kind) ?? refuseMessage();
-  const path = await chooseFileToSave(sender, kind);
+  const name = readSuggestedName(nameValue) ?? refuseMessage();
+  const path = await chooseFileToSave(sender, kind, name);
   if (path === null) {
     return failure({ code: 'CANCELLED' });
   }
   try {
     await writeFileSafely(path, text);
-    return success(null);
+    return success({ fileName: basename(path) });
   } catch (error) {
     if (error instanceof Error) {
       return failure({ code: 'WRITE_FAILED' });
@@ -271,6 +293,7 @@ function openedProject(loaded: LoadedProject, path: string): OpenedProject {
   return {
     state: loaded.state,
     name: projectNameFromPath(path, MESSAGES.projects.untitled),
+    fileName: basename(path),
     warnings: loaded.warnings,
   };
 }
@@ -286,19 +309,62 @@ async function chooseFileToOpen(sender: WebContents, kind: FileKind): Promise<st
   return chosen.canceled ? null : (chosen.filePaths[0] ?? null);
 }
 
-/** Shows the save dialog for a kind of file, giving the chosen path or null. */
-async function chooseFileToSave(sender: WebContents, kind: FileKind): Promise<string | null> {
+/** Shows the save dialog for a kind of file with the name of the project suggested, giving the chosen path with its extension, or null when the user cancels or declines to replace a file the added extension leads to. */
+async function chooseFileToSave(
+  sender: WebContents,
+  kind: FileKind,
+  suggestedName: string,
+): Promise<string | null> {
   const current = projects.get(sender)?.path ?? null;
+  const fileName = fileNameForProject(suggestedName, kind, MESSAGES.projects.untitled);
   const options = {
     filters: [FILTERS[kind]],
-    ...(current === null ? {} : { defaultPath: basename(current) }),
+    defaultPath: current === null ? fileName : join(dirname(current), fileName),
+    properties: ['showOverwriteConfirmation' as const],
   };
   const window = BrowserWindow.fromWebContents(sender);
   const chosen =
     window === null
       ? await dialog.showSaveDialog(options)
       : await dialog.showSaveDialog(window, options);
-  return chosen.canceled || chosen.filePath === '' ? null : chosen.filePath;
+  if (chosen.canceled || chosen.filePath === '') {
+    return null;
+  }
+  const path = withExtension(chosen.filePath, kind);
+  const mayWrite = path === chosen.filePath || (await mayReplace(window, path));
+  return mayWrite ? path : null;
+}
+
+/** Tells whether a file the added extension leads to may be written, asking the user first when it already exists, since the save dialog could not warn about it. */
+async function mayReplace(window: BrowserWindow | null, path: string): Promise<boolean> {
+  if (!(await fileExists(path))) {
+    return true;
+  }
+  const options = {
+    type: 'question' as const,
+    buttons: [MESSAGES.dialogs.replace, MESSAGES.dialogs.cancel],
+    defaultId: CANCEL_BUTTON,
+    cancelId: CANCEL_BUTTON,
+    message: MESSAGES.dialogs.replaceExisting.replace(FILE_PLACEHOLDER, basename(path)),
+  };
+  const answer =
+    window === null
+      ? await dialog.showMessageBox(options)
+      : await dialog.showMessageBox(window, options);
+  return answer.response === REPLACE_BUTTON;
+}
+
+/** Tells whether a file can be found, a file that cannot be examined counting as missing so that the writing that follows reports the problem. */
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Error) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 /** Returns where the recent projects are stored. */

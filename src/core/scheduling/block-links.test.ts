@@ -15,9 +15,9 @@ import {
   splitTask,
   workTask,
 } from '../testing/project-builder';
-import { blockPairKey, shortestLink } from './block-links';
+import { blockPairKey, blockResumption, shortestLink } from './block-links';
 import { analyzeProjectStructure } from './project-structure';
-import { constrainsSuccessorStart, dependencyAnchor, resumeAfter } from './forward-pass';
+import { constrainsSuccessorStart, dependencyAnchor } from './forward-pass';
 import { scheduleProject, type Schedule } from './schedule-project';
 import type { ScheduledSegment } from './task-placement';
 
@@ -31,6 +31,82 @@ const TEST = workTask('test');
 function blocksOf(schedule: Schedule, id: string): readonly ScheduledSegment[] {
   return schedule.placements.get(id)?.segments ?? [];
 }
+
+describe('start dates of later blocks', () => {
+  it('starts a later block no earlier than its own date, the blocks after it following', () => {
+    const dated = splitTask('dev', [
+      [7, 0],
+      [3, 0, at(2026, 10, 1, 14)],
+      [3, 0],
+    ]);
+    const blocks = blocksOf(scheduleOrThrow(project([dated])), 'dev');
+    expect(blocks.map((block) => block.start)).toEqual([
+      at(2026, 9, 28, 9),
+      at(2026, 10, 1, 14),
+      at(2026, 10, 2, 9),
+    ]);
+  });
+
+  it('keeps a later block after the previous one when its own date is earlier', () => {
+    const dated = splitTask('dev', [
+      [7, 0],
+      [3, 0, at(2026, 9, 27, 9)],
+    ]);
+    const blocks = blocksOf(scheduleOrThrow(project([dated])), 'dev');
+    expect(blocks[1]?.start).toBe(at(2026, 9, 29, 9));
+  });
+});
+
+describe('start dates of later blocks with links and floats', () => {
+  const dated = splitTask('dev', [
+    [7, 0],
+    [3, 0, at(2026, 10, 1, 14)],
+  ]);
+
+  it('lets the later of a link and the date of a block decide when the block starts', () => {
+    const later = blocksOf(
+      scheduleOrThrow(
+        project(
+          [
+            dated,
+            workTask('long', {
+              segments: [{ durationHours: 28, gapDaysBefore: 0, startNoEarlierThan: null }],
+            }),
+          ],
+          [blockLink('long', 'dev', { to: 1 })],
+        ),
+      ),
+      'dev',
+    );
+    expect(later[1]?.start).toBe(at(2026, 10, 2, 9));
+    const earlier = blocksOf(
+      scheduleOrThrow(project([dated, workTask('short')], [blockLink('short', 'dev', { to: 1 })])),
+      'dev',
+    );
+    expect(earlier[1]?.start).toBe(at(2026, 10, 1, 14));
+  });
+
+  it('makes a task that starts with a dated block follow its date', () => {
+    const schedule = scheduleOrThrow(
+      project([dated, workTask('test')], [blockLink('dev', 'test', { from: 1 }, 'startToStart')]),
+    );
+    expect(schedule.placements.get('test')?.start).toBe(at(2026, 10, 1, 14));
+  });
+
+  it('counts the float of a block held by its date only up to that date', () => {
+    const schedule = scheduleOrThrow(
+      project([dated, workTask('test')], [link('dev', 'test')], {
+        options: {
+          criticalPathEnabled: true,
+          dateConstraintsEnabled: false,
+          alwaysShowPatterns: false,
+        },
+      }),
+    );
+    expect(schedule.floats?.get('dev')).toMatchObject({ totalFloatHours: 0, isCritical: true });
+    expect(schedule.floats?.get('test')).toMatchObject({ totalFloatHours: 0, isCritical: true });
+  });
+});
 
 describe('shortestLink', () => {
   it('writes a named block as the whole task when the whole task stands for it anyway', () => {
@@ -125,7 +201,9 @@ describe('links to and from blocks', () => {
           [7, 0],
           [7, 3],
         ]),
-        workTask('test', { segments: [{ durationHours: 2, gapDaysBefore: 0 }] }),
+        workTask('test', {
+          segments: [{ durationHours: 2, gapDaysBefore: 0, startNoEarlierThan: null }],
+        }),
       ],
       [blockLink('dev', 'test', { from: 0 }), blockLink('test', 'dev', { to: 1 })],
     );
@@ -254,9 +332,9 @@ describe('links to and from blocks', () => {
   });
 
   it('resumes a block with no gap right after the previous one', () => {
-    expect(resumeAfter({ start: at(2026, 9, 28, 9), end: at(2026, 9, 28, 11) }, 0)).toBe(
-      at(2026, 9, 28, 11),
-    );
+    expect(
+      blockResumption(at(2026, 9, 28, 11), { gapDaysBefore: 0, startNoEarlierThan: null }),
+    ).toBe(at(2026, 9, 28, 11));
     const plan = project([
       splitTask('dev', [
         [2, 0],
@@ -377,7 +455,10 @@ describe('scheduling properties with block links', { timeout: PROPERTY_TEST_TIME
             const previous = blocks[index];
             if (previous !== undefined) {
               expect(block.start).toBeGreaterThanOrEqual(
-                resumeAfter(previous, task.segments[index + 1]?.gapDaysBefore ?? 0),
+                blockResumption(
+                  previous.end,
+                  task.segments[index + 1] ?? { gapDaysBefore: 0, startNoEarlierThan: null },
+                ),
               );
             }
           });
