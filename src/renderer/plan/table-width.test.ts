@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   clampTableWidth,
   DEFAULT_TABLE_WIDTH,
@@ -41,10 +41,19 @@ describe('table width', () => {
     expect(readTableWidth(store)).toBe(420);
     store.setItem('tasklace.taskTableWidth', 'wide');
     expect(readTableWidth(store)).toBe(DEFAULT_TABLE_WIDTH);
-    expect(readTableWidth(BROKEN)).toBe(DEFAULT_TABLE_WIDTH);
-    expect(() => {
-      rememberTableWidth(BROKEN, 400);
-    }).not.toThrow();
     expect(readTableWidth(null)).toBe(DEFAULT_TABLE_WIDTH);
+  });
+
+  it('warns when the storage of the browser refuses to read or keep the width', () => {
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      expect(readTableWidth(BROKEN)).toBe(DEFAULT_TABLE_WIDTH);
+      expect(() => {
+        rememberTableWidth(BROKEN, 400);
+      }).not.toThrow();
+      expect(warned).toHaveBeenCalledTimes(2);
+    } finally {
+      warned.mockRestore();
+    }
   });
 });

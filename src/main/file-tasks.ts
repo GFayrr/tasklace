@@ -1,17 +1,24 @@
-import { readFile } from 'node:fs/promises';
+import { open, type FileHandle } from 'node:fs/promises';
 import * as Y from 'yjs';
 import { importProjectCsv, type CsvImportOptions } from '../core/exchange/csv/project-csv-import';
 import { importProjectJson } from '../core/exchange/project-json';
-import { encodeTasklaceState, readTasklaceFile } from '../core/file/tasklace-file';
+import {
+  MAX_CSV_FILE_BYTES,
+  MAX_FILE_BYTES,
+  MAX_JSON_FILE_BYTES,
+  UNITS_PER_MEBI,
+} from '../core/limits';
+import {
+  checkStateToSave,
+  encodeTasklaceState,
+  readTasklaceDocument,
+} from '../core/file/tasklace-file';
 import type { Project } from '../core/model/project';
 import { failure, success, type Result } from '../core/result';
-import {
-  createSharedDocument,
-  readDocumentId,
-  type DocumentId,
-} from '../core/shared/shared-document';
+import { createSharedDocument, type DocumentId } from '../core/shared/shared-document';
 import type { FileFailure } from '../preload/bridge-contract';
 import { saveLocalCopy } from './local-copies';
+import { isSystemError } from './stored-files';
 import { writeFileSafely } from './safe-write';
 import { zlibCompressor } from './zlib-compressor';
 
@@ -44,13 +51,20 @@ export interface ImportNaming {
 }
 
 export interface LoadedProject {
+  readonly kind: 'loaded';
   readonly state: Uint8Array;
   readonly documentId: DocumentId;
   readonly warnings: readonly { readonly path: string; readonly code: string }[];
 }
 
-export type FileTaskResult = Result<LoadedProject | null, FileFailure>;
+export interface SavedFiles {
+  readonly kind: 'saved';
+  readonly localCopySaved: boolean;
+}
 
+export type FileTaskResult = Result<LoadedProject | SavedFiles, FileFailure>;
+
+const READ_CHUNK_BYTES = 16 * UNITS_PER_MEBI;
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 /** Runs one file task: reading and checking a project file or an import, or writing a project and its local copy. */
@@ -59,9 +73,13 @@ export async function runFileTask(task: FileTask): Promise<FileTaskResult> {
     case 'openProject':
       return openProject(task.path);
     case 'importJson':
-      return importText(task.path, (text) => importJsonText(text, task.documentId, task.naming));
+      return importText(task.path, MAX_JSON_FILE_BYTES, (text) =>
+        importJsonText(text, task.documentId, task.naming),
+      );
     case 'importCsv':
-      return importText(task.path, (text) => importCsvText(text, task.documentId, task.options));
+      return importText(task.path, MAX_CSV_FILE_BYTES, (text) =>
+        importCsvText(text, task.documentId, task.options),
+      );
     case 'saveProject':
       return saveProject(task);
   }
@@ -69,31 +87,35 @@ export async function runFileTask(task: FileTask): Promise<FileTaskResult> {
 
 /** Reads a .tasklace file and checks it completely, giving back its Yjs state and document identifier. */
 async function openProject(path: string): Promise<FileTaskResult> {
-  const bytes = await readBytes(path);
+  const bytes = await readBytes(path, MAX_FILE_BYTES);
   if (!bytes.ok) {
     return bytes;
   }
-  const read = readTasklaceFile(bytes.value, zlibCompressor);
+  const read = readTasklaceDocument(bytes.value, zlibCompressor);
   if (!read.ok) {
     return failure(read.error);
   }
-  const documentId = readDocumentId(read.value);
-  return documentId === null
-    ? failure({ code: 'INVALID_CONTENT' })
-    : success({ state: Y.encodeStateAsUpdate(read.value), documentId, warnings: [] });
+  const { document, documentId } = read.value;
+  return success({
+    kind: 'loaded',
+    state: Y.encodeStateAsUpdate(document),
+    documentId,
+    warnings: [],
+  });
 }
 
 /** Reads a text file strictly as UTF-8, keeping its byte order mark for the importer, and imports it. */
 async function importText(
   path: string,
+  limit: number,
   importer: (text: string) => FileTaskResult,
 ): Promise<FileTaskResult> {
-  const bytes = await readBytes(path);
+  const bytes = await readBytes(path, limit);
   if (!bytes.ok) {
     return bytes;
   }
   const text = decodeUtf8(bytes.value);
-  return text === null ? failure({ code: 'INVALID_ENCODING' }) : importer(text);
+  return text.ok ? importer(text.value) : text;
 }
 
 /** Imports a JSON project into a new shared document, a project still bearing the untitled name taking the name of its file. */
@@ -130,53 +152,101 @@ function loaded(
   warnings: LoadedProject['warnings'],
 ): LoadedProject {
   const state = Y.encodeStateAsUpdate(createSharedDocument(project, documentId));
-  return { state, documentId, warnings };
+  return { kind: 'loaded', state, documentId, warnings };
 }
 
-/** Writes a project file safely when it has one, then its local copy, which alone keeps a project not saved yet, reporting a failure to write either. */
+/** Checks the state to save, then writes the project file safely when it has one and its local copy in every case, so that a failed file still leaves a local copy: the save fails when the file, or for a project without file its local copy, could not be written, and otherwise tells whether the local copy was written. */
 async function saveProject(
   task: Extract<FileTask, { kind: 'saveProject' }>,
 ): Promise<FileTaskResult> {
+  const checked = checkStateToSave(task.state, task.documentId);
+  if (!checked.ok) {
+    return failure(checked.error);
+  }
   const file = encodeTasklaceState(task.state, zlibCompressor);
+  const { path } = task;
+  const fileWritten =
+    path === null || (await attemptWrite('The project file', () => writeFileSafely(path, file)));
+  const localCopySaved = await attemptWrite('The local copy', () =>
+    saveLocalCopy(task.localCopyFolder, task.documentId, file, path, new Date(task.savedAt)),
+  );
+  if (!fileWritten || (path === null && !localCopySaved)) {
+    return failure({ code: 'WRITE_FAILED' });
+  }
+  return success({ kind: 'saved', localCopySaved });
+}
+
+/** Runs a write and tells whether it succeeded, logging the whole error that stopped it. */
+async function attemptWrite(what: string, write: () => Promise<void>): Promise<boolean> {
   try {
-    if (task.path !== null) {
-      await writeFileSafely(task.path, file);
-    }
-    await saveLocalCopy(
-      task.localCopyFolder,
-      task.documentId,
-      file,
-      task.path,
-      new Date(task.savedAt),
-    );
-    return success(null);
+    await write();
+    return true;
   } catch (error) {
     if (error instanceof Error) {
-      return failure({ code: 'WRITE_FAILED' });
+      console.error(`${what} could not be written:`, error);
+      return false;
     }
     throw error;
   }
 }
 
-/** Reads the bytes of a file, reporting a file that cannot be read. */
-async function readBytes(path: string): Promise<Result<Uint8Array, FileFailure>> {
+/** Reads the bytes of a regular file through a single handle, checking its size on that same handle and reading at most one byte past the limit, so that a file growing or replaced meanwhile, or a device, can never be read without bound. */
+async function readBytes(path: string, limit: number): Promise<Result<Uint8Array, FileFailure>> {
+  let handle: FileHandle | null = null;
   try {
-    return success(await readFile(path));
+    handle = await open(path, 'r');
+    const details = await handle.stat();
+    if (!details.isFile()) {
+      return failure({ code: 'READ_FAILED' });
+    }
+    if (details.size > limit) {
+      return failure({ code: 'TOO_LARGE' });
+    }
+    return await readAtMost(handle, limit);
   } catch (error) {
-    if (error instanceof Error) {
+    if (isSystemError(error)) {
+      console.error('The file could not be read:', error);
       return failure({ code: 'READ_FAILED' });
     }
     throw error;
+  } finally {
+    await handle?.close().catch((error: unknown) => {
+      console.error('The file read could not be closed:', error);
+    });
   }
 }
 
-/** Decodes bytes as strict UTF-8, or returns null for bytes that are not UTF-8. */
-function decodeUtf8(bytes: Uint8Array): string | null {
+/** Reads a file handle up to one byte past a limit, refusing a file that turns out larger than the limit. */
+async function readAtMost(
+  handle: FileHandle,
+  limit: number,
+): Promise<Result<Uint8Array, FileFailure>> {
+  const buffer = Buffer.alloc(Math.min(limit + 1, READ_CHUNK_BYTES));
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for (;;) {
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, total);
+    if (bytesRead === 0) {
+      return success(Buffer.concat(chunks, total));
+    }
+    total += bytesRead;
+    if (total > limit) {
+      return failure({ code: 'TOO_LARGE' });
+    }
+    chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+  }
+}
+
+/** Decodes bytes as strict UTF-8, refusing bytes that are not UTF-8 and a text longer than the engine can hold. */
+function decodeUtf8(bytes: Uint8Array): Result<string, FileFailure> {
   try {
-    return UTF8_DECODER.decode(bytes);
+    return success(UTF8_DECODER.decode(bytes));
   } catch (error) {
     if (error instanceof TypeError) {
-      return null;
+      return failure({ code: 'INVALID_ENCODING' });
+    }
+    if (error instanceof RangeError) {
+      return failure({ code: 'TOO_LARGE' });
     }
     throw error;
   }

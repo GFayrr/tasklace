@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import type { TaskId } from '../../core/model/project';
-  import type { AppState } from '../app/app-state.svelte';
+  import type { Project, TaskId } from '../../core/model/project';
+  import type { AppState, DrawingPart } from '../app/app-state.svelte';
   import { createTableFormatters } from '../plan/table-format';
   import {
     clampTableWidth,
@@ -17,15 +17,21 @@
     zoomedScrollLeft,
     type ZoomLevel,
   } from '../plan/time-scale';
-  import { linkTasks, moveOnTimeline, stretchEnd, type LinkEnd } from '../plan/task-commands';
+  import {
+    linkTasks,
+    moveOnTimeline,
+    stretchOnTimeline,
+    type LinkEnd,
+  } from '../plan/task-commands';
   import { movedStart, stretchedEnd } from '../plan/timeline-gestures';
   import { ROW_HEIGHT, timelineFrame, xOf, type RowShape } from '../plan/timeline-geometry';
   import { tagStylesOf } from '../plan/tag-styles';
   import { localHourOf } from '../project/new-project';
+  import { pixels } from './css-length';
   import TaskTable from './TaskTable.svelte';
   import Timeline from './Timeline.svelte';
 
-  let { app }: { app: AppState } = $props();
+  let { app, project }: { app: AppState; project: Project } = $props();
 
   const TODAY_REFRESH_MS = 60_000;
   const LEAD_DAYS_SHOWN = 2;
@@ -33,7 +39,8 @@
   const storage = (() => {
     try {
       return window.localStorage;
-    } catch {
+    } catch (error) {
+      console.warn('The width of the table will not be remembered:', error);
       return null;
     }
   })();
@@ -41,12 +48,10 @@
   let tableWidth = $state(readTableWidth(storage));
   let containerWidth = $state(0);
   let scrollTop = $state(0);
-  let scrollLeft = $state(0);
   let viewportHeight = $state(0);
   let timelineWidth = 0;
   let today = $state(localHourOf(new Date()));
 
-  const project = $derived(app.project);
   const outline = $derived(app.outline);
   const calendar = $derived(app.calendar);
   const tagStyles = $derived(tagStylesOf(project));
@@ -54,8 +59,9 @@
     new Set(app.schedule?.tagConflicts.conflicts.flatMap((conflict) => conflict.taskIds) ?? []),
   );
   const frame = $derived(
-    timelineFrame(project?.startDate ?? today, app.schedule, today, pixelsPerHour(app.zoom)),
+    timelineFrame(project.startDate, app.schedule, today, pixelsPerHour(app.zoom)),
   );
+  let scrollLeft = $state(untrack(() => startScrollLeft()));
   const formatters = $derived(createTableFormatters(app.locale));
   const labels = $derived(createScaleLabels(app.locale));
   const shownWidth = $derived(clampTableWidth(tableWidth, containerWidth));
@@ -65,9 +71,9 @@
     rows: outline.rows,
     rowIndexById: outline.rowIndexById,
     schedule: app.schedule,
-    dependencies: project?.dependencies ?? [],
+    dependencies: project.dependencies,
     calendar,
-    nonWorkingPeriods: project?.calendar.nonWorkingPeriods ?? [],
+    nonWorkingPeriods: project.calendar.nonWorkingPeriods,
     theme: app.theme,
     tagStyles,
     conflictTaskIds,
@@ -84,22 +90,6 @@
     };
   });
 
-  let scrolledForOpening = -1;
-  $effect(() => {
-    const opening = app.openedCount;
-    if (opening === scrolledForOpening) {
-      return;
-    }
-    scrolledForOpening = opening;
-    untrack(() => {
-      const start = app.project?.startDate;
-      if (start !== undefined) {
-        scrollTop = 0;
-        scrollLeft = Math.max(0, xOf(frame, start - LEAD_DAYS_SHOWN * HOURS_PER_DAY));
-      }
-    });
-  });
-
   let previousZoom: ZoomLevel = untrack(() => app.zoom);
   $effect.pre(() => {
     const zoom = app.zoom;
@@ -110,6 +100,11 @@
     previousZoom = zoom;
     scrollLeft = untrack(() => zoomedScrollLeft(scrollLeft, timelineWidth, from, zoom));
   });
+
+  /** Returns the scroll that shows the project from a little before its start, where a newly opened project is shown. */
+  function startScrollLeft(): number {
+    return Math.max(0, xOf(frame, project.startDate - LEAD_DAYS_SHOWN * HOURS_PER_DAY));
+  }
 
   /** Opens the details of a task. */
   function openDetails(id: TaskId): void {
@@ -150,7 +145,7 @@
 
   /** Asks a dragged bar, or a later block of it, to start where it was dropped, aligned to the quarter hour or the day. */
   function moveBar(shape: RowShape, offset: number, block: number | null): void {
-    const placement = app.schedule?.placements.get(shape.taskId) ?? null;
+    const placement = app.schedule?.placements.get(shape.taskId);
     const snap = snapHours(app.zoom);
     app.edit((context) =>
       moveOnTimeline(context, shape.taskId, block, placement, (from) =>
@@ -161,21 +156,21 @@
 
   /** Changes the duration of a stretched bar so that it ends where it was dropped. */
   function stretchBar(shape: RowShape, offset: number): void {
-    const placement = app.schedule?.placements.get(shape.taskId);
-    const lastBlock = placement?.segments.at(-1);
-    const compiled = app.calendar;
-    if (placement !== undefined && lastBlock !== undefined && compiled !== null) {
-      const end = stretchedEnd(frame, placement.end, offset, snapHours(app.zoom));
-      app.edit((context) => stretchEnd(context, shape.taskId, lastBlock.start, end, compiled));
-    }
+    const placed = {
+      placement: app.schedule?.placements.get(shape.taskId),
+      calendar: app.calendar,
+    };
+    const snap = snapHours(app.zoom);
+    app.edit((context) =>
+      stretchOnTimeline(context, shape.taskId, placed, (end) =>
+        stretchedEnd(frame, end, offset, snap),
+      ),
+    );
   }
 
   /** Links a task, or one of its blocks, to the task or block a link was dropped on. */
-  function linkBar(from: LinkEnd, toRow: number, toBlock: number | null): void {
-    const target = outline.rows[toRow]?.task;
-    if (target !== undefined) {
-      app.edit((context) => linkTasks(context, from, { taskId: target.id, block: toBlock }));
-    }
+  function linkBar(from: LinkEnd, to: LinkEnd): void {
+    app.edit((context) => linkTasks(context, from, to));
   }
 
   /** Changes the width of the table and remembers it. */
@@ -215,7 +210,7 @@
 </script>
 
 <main class="workspace" aria-label={app.messages.app.workspace} bind:clientWidth={containerWidth}>
-  <div class="table-pane" style:width="{shownWidth}px">
+  <div class="table-pane" style:width={pixels(shownWidth)}>
     <TaskTable {app} {formatters} {scrollTop} {viewportHeight} scrollBy={scrollRowsBy} {reveal} />
   </div>
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
@@ -245,6 +240,9 @@
       stretched={stretchBar}
       linked={linkBar}
       opened={openDetails}
+      drawingFailed={(part: DrawingPart) => {
+        app.reportDrawingProblem(part);
+      }}
     />
   </div>
 </main>

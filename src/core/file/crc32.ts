@@ -10,7 +10,7 @@ const CRC32_TABLE = buildTable();
 export function crc32(bytes: Uint8Array): number {
   let crc = ALL_BITS;
   for (const byte of bytes) {
-    crc = (CRC32_TABLE[(crc ^ byte) & BYTE_MASK] ?? 0) ^ (crc >>> BITS_PER_BYTE);
+    crc = Number(CRC32_TABLE[(crc ^ byte) & BYTE_MASK]) ^ (crc >>> BITS_PER_BYTE);
   }
   return (crc ^ ALL_BITS) >>> 0;
 }

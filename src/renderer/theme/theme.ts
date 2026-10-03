@@ -40,12 +40,12 @@ export const THEME_COLORS: readonly ThemeColor[] = [
   'gridLine',
 ];
 
-/** Returns the name of the style variable holding a colour of the theme. */
+/** Returns the name of the style variable holding a color of the theme. */
 export function themeVariable(color: ThemeColor): string {
   return `--color-${color.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
 }
 
-/** Gives an element the colours of a theme as style variables, which the style sheets of the interface use. */
+/** Gives an element the colors of a theme as style variables, which the style sheets of the interface use. */
 export function applyTheme(theme: Theme, element: HTMLElement): void {
   THEME_COLORS.forEach((color) => {
     element.style.setProperty(themeVariable(color), theme[color]);

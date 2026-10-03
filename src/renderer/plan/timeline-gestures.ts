@@ -1,5 +1,6 @@
 import type { TaskId } from '../../core/model/project';
 import { HOURS_PER_DAY, type ProjectHour } from '../../core/time';
+import type { LinkEnd } from './task-commands';
 import {
   BAR_HEIGHT,
   MILESTONE_SIZE,
@@ -36,9 +37,13 @@ export type DragPreview =
       readonly shape: RowShape;
       readonly block: number | null;
       readonly pointer: Point;
-      readonly targetRow: number | null;
-      readonly targetBlock: number | null;
+      readonly target: LinkTarget | null;
     };
+
+export interface LinkTarget {
+  readonly row: number;
+  readonly end: LinkEnd;
+}
 
 export const LINK_HANDLE_RADIUS = 5;
 export const LINK_HANDLE_GAP = 12;

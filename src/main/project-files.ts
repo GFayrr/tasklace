@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import {
   app,
@@ -12,7 +12,7 @@ import {
 } from 'electron';
 import { MAX_CSV_FILE_BYTES, MAX_FILE_BYTES, MAX_JSON_FILE_BYTES } from '../core/limits';
 import { failure, success } from '../core/result';
-import type { DocumentId } from '../core/shared/shared-document';
+import { isDocumentId, type DocumentId } from '../core/shared/shared-document';
 import { MIN_PROJECT_HOUR } from '../core/time';
 import {
   IPC_CHANNELS,
@@ -21,6 +21,7 @@ import {
   type ExportedFile,
   type OpenedProject,
   type RecentProject,
+  type SavedProject,
 } from '../preload/bridge-contract';
 import type { FileTask, FileTaskResult, LoadedProject } from './file-tasks';
 import {
@@ -30,7 +31,7 @@ import {
   readRecentIndex,
   readSuggestedName,
 } from './ipc-validators';
-import { refuseMessage, type TrustCheck } from './ipc-trust';
+import { RefusedRequest, refuseMessage, type TrustCheck } from './ipc-trust';
 import { MESSAGES } from './messages';
 import {
   fileNameForProject,
@@ -40,6 +41,7 @@ import {
 } from './project-names';
 import { readRecentProjects, recordRecentProject } from './recent-projects';
 import { writeFileSafely } from './safe-write';
+import { isSystemError } from './stored-files';
 import { regionalFormatOf } from './system-regional-format';
 
 export interface ProjectFileServices {
@@ -74,8 +76,9 @@ const CANCEL_BUTTON = 1;
 const FILE_PLACEHOLDER = '{file}';
 const LOCAL_COPY_FOLDER = 'local-copies';
 const projects = new WeakMap<WebContents, WindowProject>();
+const offered = new WeakMap<WebContents, WindowProject>();
 
-/** Answers the project file requests of the bridge: new, open, recent, import, save, save as and export, the main process alone choosing paths through dialogs and knowing the file and document of each window. */
+/** Answers the project file requests of the bridge: new, open, recent, import, adopt, save, save as and export, the main process alone choosing paths through dialogs and knowing the file and document of each window, which changes only once the page has accepted the project offered to it. */
 export function registerProjectFileHandlers(services: ProjectFileServices): void {
   const handle = (
     channel: string,
@@ -86,36 +89,82 @@ export function registerProjectFileHandlers(services: ProjectFileServices): void
       return answer(event, ...values);
     });
   };
+  const handleFileAction = (
+    channel: string,
+    answer: (event: IpcMainInvokeEvent, ...values: unknown[]) => Promise<BridgeResult<unknown>>,
+  ): void => {
+    handle(channel, (event, ...values) => answerOrFail(channel, () => answer(event, ...values)));
+  };
   handle(IPC_CHANNELS.regionalFormat, () => regionalFormatOf(app.getSystemLocale()));
-  handle(IPC_CHANNELS.newProject, (event) => startProject(event.sender, null, randomUUID()));
-  handle(IPC_CHANNELS.openProject, (event) => chooseAndOpen(services, event.sender));
-  handle(IPC_CHANNELS.openRecentProject, (event, index) =>
+  handle(IPC_CHANNELS.newProject, (event) => offerProject(event.sender, null, randomUUID()));
+  handle(IPC_CHANNELS.adoptProject, (event, documentId) =>
+    adoptProject(services, event.sender, documentId),
+  );
+  handleFileAction(IPC_CHANNELS.openProject, (event) => chooseAndOpen(services, event.sender));
+  handleFileAction(IPC_CHANNELS.openRecentProject, (event, index) =>
     openRecent(services, event.sender, index),
   );
   handle(IPC_CHANNELS.recentProjects, () => listRecent(services));
-  handle(IPC_CHANNELS.importProject, (event, kind) => importProject(services, event.sender, kind));
-  handle(IPC_CHANNELS.saveProject, (event, state) =>
+  handleFileAction(IPC_CHANNELS.importProject, (event, kind) =>
+    importProject(services, event.sender, kind),
+  );
+  handleFileAction(IPC_CHANNELS.saveProject, (event, state) =>
     saveProject(services, event.sender, state, { kind: 'current' }),
   );
-  handle(IPC_CHANNELS.saveProjectAs, (event, state, name) =>
+  handleFileAction(IPC_CHANNELS.saveProjectAs, (event, state, name) =>
     saveProject(services, event.sender, state, {
       kind: 'chosen',
       suggestedName: readSuggestedName(name) ?? refuseMessage(),
     }),
   );
-  handle(IPC_CHANNELS.exportProject, (event, kind, text, name) =>
+  handleFileAction(IPC_CHANNELS.exportProject, (event, kind, text, name) =>
     exportProject(event.sender, kind, text, name),
   );
 }
 
-/** Remembers the file and document a window now works on, returning the document identifier. */
-function startProject(
+/** Answers a file request of the bridge (open, open recent, import, save, save as, export), turning an Error other than a refused message into a file failure the page can tell the user about and logging it, a thrown value that is not an Error being thrown again. */
+async function answerOrFail(
+  channel: string,
+  answer: () => Promise<BridgeResult<unknown>>,
+): Promise<BridgeResult<unknown>> {
+  try {
+    return await answer();
+  } catch (error) {
+    if (error instanceof RefusedRequest || !(error instanceof Error)) {
+      throw error;
+    }
+    console.error(`The request ${channel} failed:`, error);
+    return failure({ code: 'TASK_FAILED' });
+  }
+}
+
+/** Offers a window the file and document it is about to work on, which become its project once its page adopts them, returning the document identifier. */
+function offerProject(
   sender: WebContents,
   path: string | null,
   documentId: DocumentId,
 ): DocumentId {
-  projects.set(sender, { path, documentId });
+  offered.set(sender, { path, documentId });
   return documentId;
+}
+
+/** Makes the project offered to a window its project once the page tells it accepted that document, adding its file to the recent projects, and refuses any other document. */
+async function adoptProject(
+  services: ProjectFileServices,
+  sender: WebContents,
+  value: unknown,
+): Promise<BridgeResult<null>> {
+  const documentId = isDocumentId(value) ? value : refuseMessage();
+  const project = offered.get(sender);
+  if (project?.documentId !== documentId) {
+    return failure({ code: 'TASK_FAILED' });
+  }
+  offered.delete(sender);
+  projects.set(sender, project);
+  if (project.path !== null) {
+    await rememberRecentProject(services, project.path);
+  }
+  return success(null);
 }
 
 /** Lets the user choose a project file, then opens it. */
@@ -138,16 +187,24 @@ async function openRecent(
   return path === undefined ? failure({ code: 'READ_FAILED' }) : openPath(services, sender, path);
 }
 
-/** Lists the recent projects by name and folder. */
+/** Lists the recent projects by name and folder, a list that cannot be read being logged and shown empty, since it only holds shortcuts. */
 async function listRecent(services: ProjectFileServices): Promise<RecentProject[]> {
-  const paths = await readRecentProjects(recentStore(services));
-  return paths.map((path) => ({
-    name: projectNameFromPath(path, MESSAGES.projects.untitled),
-    folder: dirname(path),
-  }));
+  try {
+    const paths = await readRecentProjects(recentStore(services));
+    return paths.map((path) => ({
+      name: projectNameFromPath(path, MESSAGES.projects.untitled),
+      folder: dirname(path),
+    }));
+  } catch (error) {
+    if (!isSystemError(error)) {
+      throw error;
+    }
+    console.error('The recent projects could not be read:', error);
+    return [];
+  }
 }
 
-/** Checks the size of a project file, decodes it in the worker and makes it the project of the window. */
+/** Checks the size of a project file, decodes it in the worker and offers it to the window. */
 async function openPath(
   services: ProjectFileServices,
   sender: WebContents,
@@ -161,12 +218,11 @@ async function openPath(
   if (!loaded.ok) {
     return loaded;
   }
-  startProject(sender, path, loaded.value.documentId);
-  await recordRecentProject(recentStore(services), path);
+  offerProject(sender, path, loaded.value.documentId);
   return success(openedProject(loaded.value, path));
 }
 
-/** Lets the user choose a JSON or CSV file, imports it in the worker into a new, not yet saved document, and makes it the project of the window. */
+/** Lets the user choose a JSON or CSV file, imports it in the worker into a new, not yet saved document, and offers it to the window. */
 async function importProject(
   services: ProjectFileServices,
   sender: WebContents,
@@ -196,17 +252,17 @@ async function importProject(
   if (!loaded.ok) {
     return loaded;
   }
-  startProject(sender, null, documentId);
+  offerProject(sender, null, documentId);
   return success(openedProject(loaded.value, path));
 }
 
-/** Saves the project of a window: to its file, or where the user chooses when saving as, the name of the project being suggested, a project without file keeping only its local copy so that saving automatically never opens a dialog. */
+/** Saves the project of a window: to its file, or where the user chooses when saving as, the name of the project being suggested, a project without file keeping only its local copy so that saving automatically never opens a dialog; once a file chosen by saving as is written, it becomes the file of the window and a recent project, even when its local copy failed. */
 async function saveProject(
   services: ProjectFileServices,
   sender: WebContents,
   value: unknown,
   destination: SaveDestination,
-): Promise<BridgeResult<null>> {
+): Promise<BridgeResult<SavedProject>> {
   const state = readProjectState(value) ?? refuseMessage();
   const project = projects.get(sender);
   if (project === undefined) {
@@ -219,26 +275,38 @@ async function saveProject(
   if (destination.kind === 'chosen' && path === null) {
     return failure({ code: 'CANCELLED' });
   }
-  const localCopyFolder = join(services.userDataFolder, LOCAL_COPY_FOLDER);
-  await mkdir(localCopyFolder, { recursive: true });
   const { documentId } = project;
-  const task = {
+  const saved = await services.runTask({
     kind: 'saveProject',
     path,
     state,
     documentId,
-    localCopyFolder,
+    localCopyFolder: join(services.userDataFolder, LOCAL_COPY_FOLDER),
     savedAt: Date.now(),
-  } as const;
-  const saved = await services.runTask(task);
+  });
   if (!saved.ok) {
     return saved;
   }
-  if (path !== null && path !== project.path) {
-    startProject(sender, path, documentId);
-    await recordRecentProject(recentStore(services), path);
+  if (saved.value.kind !== 'saved') {
+    return failure({ code: 'TASK_FAILED' });
   }
-  return success(null);
+  if (path !== null && path !== project.path) {
+    projects.set(sender, { path, documentId });
+    await rememberRecentProject(services, path);
+  }
+  return success({ localCopySaved: saved.value.localCopySaved });
+}
+
+/** Adds a project to the recent list, a list that cannot be read or written being only logged since the project itself is fine. */
+async function rememberRecentProject(services: ProjectFileServices, path: string): Promise<void> {
+  try {
+    await recordRecentProject(recentStore(services), path);
+  } catch (error) {
+    if (!isSystemError(error)) {
+      throw error;
+    }
+    console.error('The recent projects could not be recorded:', error);
+  }
 }
 
 /** Lets the user choose where to export the project of a window, the name of the project being suggested, then writes the export safely and tells the name of the file written. */
@@ -259,10 +327,11 @@ async function exportProject(
     await writeFileSafely(path, text);
     return success({ fileName: basename(path) });
   } catch (error) {
-    if (error instanceof Error) {
-      return failure({ code: 'WRITE_FAILED' });
+    if (!isSystemError(error)) {
+      throw error;
     }
-    throw error;
+    console.error('The export could not be written:', error);
+    return failure({ code: 'WRITE_FAILED' });
   }
 }
 
@@ -272,10 +341,11 @@ async function checkSize(path: string, kind: FileKind): Promise<BridgeResult<nev
     const { size } = await stat(path);
     return size > MAX_BYTES[kind] ? failure({ code: 'TOO_LARGE' }) : null;
   } catch (error) {
-    if (error instanceof Error) {
-      return failure({ code: 'READ_FAILED' });
+    if (!isSystemError(error)) {
+      throw error;
     }
-    throw error;
+    console.error('The size of the file could not be read:', error);
+    return failure({ code: 'READ_FAILED' });
   }
 }
 
@@ -285,13 +355,14 @@ async function loadedProject(task: Promise<FileTaskResult>): Promise<BridgeResul
   if (!result.ok) {
     return result;
   }
-  return result.value === null ? failure({ code: 'TASK_FAILED' }) : success(result.value);
+  return result.value.kind === 'loaded' ? success(result.value) : failure({ code: 'TASK_FAILED' });
 }
 
 /** Describes a loaded project to the page. */
 function openedProject(loaded: LoadedProject, path: string): OpenedProject {
   return {
     state: loaded.state,
+    documentId: loaded.documentId,
     name: projectNameFromPath(path, MESSAGES.projects.untitled),
     fileName: basename(path),
     warnings: loaded.warnings,
@@ -360,7 +431,7 @@ async function fileExists(path: string): Promise<boolean> {
     await stat(path);
     return true;
   } catch (error) {
-    if (error instanceof Error) {
+    if (isSystemError(error)) {
       return false;
     }
     throw error;

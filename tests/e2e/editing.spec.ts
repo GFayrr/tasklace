@@ -5,15 +5,21 @@ import { expect, test, type ElectronApplication, type Locator, type Page } from 
 import { closeDiscarding, launchApplication } from './application';
 
 import { paleColor } from '../../src/renderer/plan/tag-styles';
+import { pixelsPerHour } from '../../src/renderer/plan/time-scale';
+import { ROW_HEIGHT } from '../../src/renderer/plan/timeline-geometry';
 import { SAND_GRAPHITE } from '../../src/renderer/theme/sand-graphite';
 
 const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
-const ROW_HEIGHT = 34;
+const HOURS_PER_DAY = 24;
+const DAY_WIDTH = HOURS_PER_DAY * pixelsPerHour('day');
+const DAYS_DRAGGED = 3;
+const HALF = 0.5;
 
 let userData: string;
 let application: ElectronApplication;
 let page: Page;
 let grid: Locator;
+let today: Date;
 
 test.beforeEach(async () => {
   userData = await mkdtemp(join(tmpdir(), 'tasklace-e2e-data-'));
@@ -22,6 +28,7 @@ test.beforeEach(async () => {
   await page.setViewportSize({ width: 1440, height: 800 });
   await expect(page.locator('#app')).toHaveAttribute('data-started', 'true');
   await page.getByRole('button', { name: /New project/ }).click();
+  today = new Date(await page.evaluate(() => Date.now()));
   grid = page.getByRole('grid', { name: 'Tasks' });
 });
 
@@ -30,9 +37,9 @@ test.afterEach(async () => {
   await rm(userData, { recursive: true, force: true });
 });
 
-/** Returns the hours a new one-day task works once its end is stretched by some calendar days, under the default calendar of 9 hours from Monday to Friday, so that the test does not depend on the day it runs. */
+/** Returns the hours a new one-day task works once its end is stretched by some calendar days, under the default calendar of 9 hours from Monday to Friday, counted from the day the application created the project so that the test does not depend on the day it runs. */
 function stretchedHours(days: number): number {
-  const day = new Date();
+  const day = new Date(today);
   while (day.getDay() === 0 || day.getDay() === 6) {
     day.setDate(day.getDate() + 1);
   }
@@ -122,42 +129,9 @@ test('moves, stretches and links bars on the timeline', async () => {
   if (box === null) {
     throw new Error('No timeline');
   }
-  const pale = paleColor(SAND_GRAPHITE.bar);
-  const channels = [1, 3, 5].map((offset) => Number.parseInt(pale.slice(offset, offset + 2), 16));
   const barCentre = async (index: number) => {
-    const found = await page.evaluate(
-      ({ rowIndex, color }) => {
-        const canvas = document.querySelector<HTMLCanvasElement>('.timeline .layer');
-        if (canvas === null) {
-          return null;
-        }
-        const context = canvas.getContext('2d');
-        if (context === null) {
-          return null;
-        }
-        const density = window.devicePixelRatio || 1;
-        const y = Math.round((rowIndex * 34 + 17) * density);
-        const { data } = context.getImageData(0, y, canvas.width, 1);
-        const xs: number[] = [];
-        for (let x = 0; x < canvas.width; x += 1) {
-          const [red = 0, green = 0, blue = 0] = data.slice(x * 4, x * 4 + 3);
-          const [wantedRed = 0, wantedGreen = 0, wantedBlue = 0] = color;
-          if (
-            Math.abs(red - wantedRed) < 4 &&
-            Math.abs(green - wantedGreen) < 4 &&
-            Math.abs(blue - wantedBlue) < 4
-          ) {
-            xs.push(x / density);
-          }
-        }
-        return xs.length === 0 ? null : { start: Math.min(...xs), end: Math.max(...xs) };
-      },
-      { rowIndex: index, color: channels },
-    );
-    if (found === null) {
-      throw new Error(`No bar in row ${String(index)}`);
-    }
-    return found;
+    const spans = await blockSpans(index);
+    return { start: spans[0]?.start ?? 0, end: spans.at(-1)?.end ?? 0 };
   };
   const first = await barCentre(0);
   const second = await barCentre(1);
@@ -187,9 +161,9 @@ test('moves, stretches and links bars on the timeline', async () => {
   await picture('editing-timeline');
 });
 
-/** Writes a local working day, about some days away from today and moved forward past a weekend, as an ISO date and time. */
+/** Writes a local working day, about some days away from the day the application created the project and moved forward past a weekend, as an ISO date and time. */
 function isoDaysFromToday(days: number, time: string): string {
-  const moment = new Date();
+  const moment = new Date(today);
   moment.setDate(moment.getDate() + days);
   while (moment.getDay() === 0 || moment.getDay() === 6) {
     moment.setDate(moment.getDate() + 1);
@@ -204,17 +178,25 @@ test('works to the quarter hour and moves the project start for an earlier task'
   await typeInCell('Meeting', 2, '1h30');
   await expect(row('Meeting')).toContainText('1 h 30');
   await typeInCell('Meeting', 3, isoDaysFromToday(1, '10:15'));
-  await expect(row('Meeting').getByRole('gridcell').nth(3)).toContainText(/10:15/);
-  await expect(row('Meeting').getByRole('gridcell').nth(4)).toContainText(/11:45/);
+  await expect(row('Meeting').getByRole('gridcell').nth(3)).toHaveText(
+    isoDaysFromToday(1, '10:15'),
+  );
+  await expect(row('Meeting').getByRole('gridcell').nth(4)).toHaveText(
+    isoDaysFromToday(1, '11:45'),
+  );
   await typeInCell('Meeting', 4, isoDaysFromToday(1, '12:00'));
   await expect(row('Meeting')).toContainText('1 h 45');
   await typeInCell('Meeting', 3, isoDaysFromToday(-10, '09:00'));
   await expect(
     page.getByRole('status').filter({ hasText: 'The project now starts on' }),
   ).toBeVisible();
-  await expect(row('Meeting').getByRole('gridcell').nth(3)).toContainText(/9:00/);
+  await expect(row('Meeting').getByRole('gridcell').nth(3)).toHaveText(
+    isoDaysFromToday(-10, '09:00'),
+  );
   await page.keyboard.press('Control+z');
-  await expect(row('Meeting').getByRole('gridcell').nth(3)).toContainText(/10:15/);
+  await expect(row('Meeting').getByRole('gridcell').nth(3)).toHaveText(
+    isoDaysFromToday(1, '10:15'),
+  );
 });
 
 test('chooses a start on the calendar of the system, to the quarter hour', async () => {
@@ -234,7 +216,7 @@ test('chooses a start on the calendar of the system, to the quarter hour', async
     },
     isoDaysFromToday(2, '14:05').replace(' ', 'T'),
   );
-  await expect(row('Review').getByRole('gridcell').nth(3)).toContainText(/2:00 PM|14:00/);
+  await expect(row('Review').getByRole('gridcell').nth(3)).toHaveText(isoDaysFromToday(2, '14:00'));
 });
 
 test('makes a block of a split task wait for another task, shown in its details only', async () => {
@@ -281,7 +263,9 @@ test('starts a later block no earlier than a date chosen in the details', async 
   await details.getByRole('button', { name: 'Save' }).click();
   await expect(details).toBeHidden();
   await expect(row('Build').getByRole('gridcell').nth(4)).not.toHaveText(endBefore ?? '');
-  await expect(row('Build').getByRole('gridcell').nth(4)).toContainText(/2:00 PM|14:00/);
+  await expect(row('Build').getByRole('gridcell').nth(4)).toHaveText(
+    /^\s*\d{4}-\d{2}-\d{2} 14:00\s*$/,
+  );
   await page.keyboard.press('Alt+Enter');
   await expect(start).toHaveValue(isoDaysFromToday(8, '14:00').replace(' ', 'T'));
   await page.keyboard.press('Escape');
@@ -328,4 +312,112 @@ test('tags a task from the table and splits it into blocks in its details', asyn
   await expect(details).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(details).toBeHidden();
+});
+
+/** Returns the numbers the table shows, from top to bottom, with the task name of each row. */
+async function outlineTexts(): Promise<string[]> {
+  const rows = grid.locator('.body [role="row"]:not(.add-row)');
+  const texts: string[] = [];
+  for (let index = 0; index < (await rows.count()); index += 1) {
+    const cells = rows.nth(index).getByRole('gridcell');
+    texts.push(
+      `${(await cells.nth(0).innerText()).trim()} ${(await cells.nth(1).innerText()).trim()}`,
+    );
+  }
+  return texts;
+}
+
+test('indents, outdents, reorders and folds tasks from the keyboard', async () => {
+  await addTask('Parent');
+  await addTask('Child');
+  await addTask('Other');
+  await row('Child').getByRole('gridcell').first().click();
+  await page.keyboard.press('Alt+Shift+ArrowRight');
+  await expect.poll(outlineTexts).toEqual(['1 Parent', '1.1 Child', '2 Other']);
+  await row('Parent').getByRole('gridcell').first().click();
+  await page.keyboard.press('Alt+ArrowLeft');
+  await expect.poll(outlineTexts).toEqual(['1 Parent', '2 Other']);
+  await page.keyboard.press('Alt+ArrowRight');
+  await expect.poll(outlineTexts).toEqual(['1 Parent', '1.1 Child', '2 Other']);
+  await row('Child').getByRole('gridcell').first().click();
+  await page.keyboard.press('Alt+Shift+ArrowLeft');
+  await expect.poll(outlineTexts).toEqual(['1 Parent', '2 Child', '3 Other']);
+  await page.keyboard.press('Alt+ArrowUp');
+  await expect.poll(outlineTexts).toEqual(['1 Child', '2 Parent', '3 Other']);
+  await page.keyboard.press('Alt+ArrowDown');
+  await expect.poll(outlineTexts).toEqual(['1 Parent', '2 Child', '3 Other']);
+});
+
+/** Finds the blocks drawn in a row of the timeline by the pale color of untagged bars, from left to right, failing when the row shows none. */
+async function blockSpans(rowIndex: number): Promise<{ start: number; end: number }[]> {
+  const pale = paleColor(SAND_GRAPHITE.bar);
+  const color = [1, 3, 5].map((offset) => Number.parseInt(pale.slice(offset, offset + 2), 16));
+  const spans = await page.evaluate(
+    ({ row: wanted, rgb }) => {
+      const canvas = document.querySelector<HTMLCanvasElement>('.timeline .layer');
+      const context = canvas?.getContext('2d');
+      if (canvas === null || context === null || context === undefined) {
+        return [];
+      }
+      const density = window.devicePixelRatio || 1;
+      const y = Math.round((wanted * 34 + 17) * density);
+      const { data } = context.getImageData(0, y, canvas.width, 1);
+      const found: { start: number; end: number }[] = [];
+      for (let x = 0; x < canvas.width; x += 1) {
+        const [red = 0, green = 0, blue = 0] = data.slice(x * 4, x * 4 + 3);
+        const [wantedRed = 0, wantedGreen = 0, wantedBlue = 0] = rgb;
+        const matches =
+          Math.abs(red - wantedRed) < 4 &&
+          Math.abs(green - wantedGreen) < 4 &&
+          Math.abs(blue - wantedBlue) < 4;
+        const last = found.at(-1);
+        if (matches && last !== undefined && x / density - last.end <= 3) {
+          last.end = x / density;
+        } else if (matches) {
+          found.push({ start: x / density, end: x / density });
+        }
+      }
+      return found;
+    },
+    { row: rowIndex, rgb: color },
+  );
+  if (spans.length === 0) {
+    throw new Error(`No bar in row ${String(rowIndex)}`);
+  }
+  return spans;
+}
+
+test('moves a later block of a split task alone, giving it the start where it was dropped', async () => {
+  await addTask('Split');
+  await row('Split').getByRole('gridcell').first().click();
+  await page.keyboard.press('Alt+Enter');
+  const details = page.getByRole('dialog', { name: 'Task details' });
+  await details.getByRole('button', { name: 'Add a block' }).click();
+  await details.getByRole('textbox', { name: 'Days after block 1' }).fill('0');
+  await details.getByRole('button', { name: 'Save' }).click();
+  await expect(details).toBeHidden();
+  const scroller = page.locator('.timeline .scroller');
+  const box = await scroller.boundingBox();
+  if (box === null) {
+    throw new Error('No timeline');
+  }
+  await expect.poll(async () => (await blockSpans(0)).length).toBe(2);
+  const [first, second] = await blockSpans(0);
+  if (first === undefined || second === undefined) {
+    throw new Error('Missing blocks');
+  }
+  const middle = box.y + ROW_HEIGHT / 2;
+  await page.mouse.move(box.x + (second.start + second.end) / 2, middle);
+  await page.mouse.down();
+  const dragged = DAYS_DRAGGED * DAY_WIDTH;
+  await page.mouse.move(box.x + (second.start + second.end) / 2 + dragged, middle, { steps: 5 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await blockSpans(0))[1]?.start ?? 0)
+    .toBeGreaterThanOrEqual(second.start + dragged - HALF * DAY_WIDTH);
+  const [kept] = await blockSpans(0);
+  expect(kept?.start).toBeCloseTo(first.start, 0);
+  expect(kept?.end).toBeCloseTo(first.end, 0);
+  await page.getByRole('button', { name: 'Details of the task' }).click();
+  await expect(details.getByLabel('Block 2 starts no earlier than')).not.toHaveValue('');
 });

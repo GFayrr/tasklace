@@ -46,7 +46,7 @@ Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit
 - Maximum sizes measured on the largest possible project, then fixed as powers of two above it: 128 MiB for a file, 512 MiB once decompressed.
 - Opening a file runs in a separate process with capped memory, so that a forged file can never bring the application down (done in 5b).
 - Fast compression (zlib level 1): the file is slightly larger, but saving, which happens automatically, is much faster.
-- JSON export is compact, so that the largest possible project stays within the 256 Mi-unit import limit.
+- JSON export is compact, so that the largest possible project stays within the import limit (512 Mi UTF-16 units since block start dates were added).
 - Test files generated in memory: random, truncated, altered, wrong version or flags, lying declared size, decompression bomb, hidden content.
 
 ### 4d. CSV import and export (done)
@@ -58,7 +58,7 @@ Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit
 - Line-by-line validation with the same complete checks as JSON; each error gives its row, and its column when a single cell is at fault. Limits on rows, predecessors and blocks are checked before anything is built, so that an oversized file is refused without exhausting memory. The separator is detected automatically, and a single leading byte order mark is removed.
 - Predecessors are imported and exported as `1.2FS+2h`: WBS number, dependency type (FS, SS, FF, SF) and lag.
 - Protection against formula injection: a cell starting with `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed with an apostrophe on export, which the import removes.
-- Import limited to 128 Mi UTF-16 units, above the export of the largest allowed project.
+- Import limited to 256 Mi UTF-16 units, above the export of the largest allowed project (raised from 128 Mi when block start dates were added).
 - Faster import and export (step 4 follow-up): one scheduling pass per import, keeping only the start dates the schedule needs; dates parsed and formatted once each; blank lines and unknown columns skipped without building their cells.
 
 ## Step 5: secure Electron shell and Svelte user interface
@@ -126,11 +126,24 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 - A window closed while its interface is still starting now closes at once (it used to stay open forever).
 - Moving a whole task moves the dates of its later blocks with it.
 
+### 5d, after the project review: file safety and full test coverage (done)
+
+- One file action at a time: opening, importing, creating, saving or exporting while another runs is refused with a message, and the open project is saved before another replaces it (or kept open when that save fails); automatic and manual saves are sent one after the other.
+- The main process switches to a new, opened or imported project only once the interface has accepted it, so that both always agree on the project of the window.
+- A window whose last save fails stays open and offers to save elsewhere, close without saving or cancel; a page that crashes or cannot start offers to reload or close the window, and a page that stops responding while closing offers to wait or close anyway.
+- Every failure the main process meets while handling a file is reported, and unexpected errors of the interface are shown; failed imports, import warnings and repairs list each problem with its row, column or task.
+- Errors and warnings of the application, of its pages and of its file worker are written to a log file in the user data folder, kept under 1 MiB.
+- Files are read through a single handle with a bounded size; the state is checked before writing; a file saved without its local copy is kept, with a warning; a damaged local copy index is kept aside.
+- A schedule worker that fails is replaced and asked again for the latest project; a failure that repeats leaves a lasting message.
+- The table writes and reads dates only as ISO (2026-10-05 14:30); CSV keeps the regional format.
+- Recent projects are listed once per path, with their folder; summaries fold and unfold with Alt+Left / Alt+Right.
+- Every file of `src/` except the entry points and workers, which the end-to-end tests cover, is unit tested to at least 90 % of its lines, branches, functions and statements, Svelte components included; new property tests (date constraints turned off, weighted progress, tag conflicts, order of the data); new end-to-end journeys (automatic save, keyboard outline, dragging a block, crashed page, shortcuts during a dialog, unexpected errors) and an opening benchmark (under 2 s for 10,000 tasks).
+
 ### 5e. Project settings and advanced options
 
 - Project name and start date, working calendar editor, tag management.
 - Advanced options, disabled by default: critical path, date constraints, baseline plan with ghost bars, always showing patterns.
-- Lists of tag conflicts, repairs, import warnings and located errors.
+- List of tag conflicts.
 
 ## After version 1
 

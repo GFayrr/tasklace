@@ -13,6 +13,7 @@ import {
   weekdayOf,
   type Weekday,
 } from '../time';
+import { valueAt } from '../table-value';
 
 const COPY_GROWTH_FACTOR = 2;
 const MAX_CACHED_CALENDARS = 8;
@@ -209,7 +210,7 @@ function linkWorkingDays(
     offset += step
   ) {
     const worked =
-      (workingQuartersBeforeDay[offset + 1] ?? 0) > (workingQuartersBeforeDay[offset] ?? 0);
+      valueAt(workingQuartersBeforeDay, offset + 1) > valueAt(workingQuartersBeforeDay, offset);
     nearest = worked ? offset : nearest;
     links[offset] = nearest;
   }
@@ -222,11 +223,11 @@ function listWorkingDays(
   quartersPerWorkingDay: number,
 ): Int32Array {
   const dayCount = workingQuartersBeforeDay.length - 1;
-  const total = workingQuartersBeforeDay[dayCount] ?? 0;
+  const total = valueAt(workingQuartersBeforeDay, dayCount);
   const workingDays = new Int32Array(total / quartersPerWorkingDay);
   let rank = 0;
   for (let offset = 0; offset < dayCount; offset += 1) {
-    if ((workingQuartersBeforeDay[offset + 1] ?? 0) > (workingQuartersBeforeDay[offset] ?? 0)) {
+    if (valueAt(workingQuartersBeforeDay, offset + 1) > valueAt(workingQuartersBeforeDay, offset)) {
       workingDays[rank] = offset;
       rank += 1;
     }
@@ -283,7 +284,7 @@ function accumulateWorkingQuartersPerDay(
   }
   const totals = new Int32Array(dayCount + 1);
   for (let offset = 0; offset < dayCount; offset += 1) {
-    totals[offset + 1] = (totals[offset] ?? 0) + (dailyQuarters[offset] ?? 0);
+    totals[offset + 1] = valueAt(totals, offset) + valueAt(dailyQuarters, offset);
   }
   return totals;
 }

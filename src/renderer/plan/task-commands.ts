@@ -1,6 +1,6 @@
+import { parseTableDate } from './table-dates';
 import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
 import { countWorkingHours } from '../../core/calendar/working-time';
-import { parseCsvDate, type RegionalFormat } from '../../core/exchange/csv/regional-format';
 import { parsePredecessors } from '../../core/exchange/csv/task-notations';
 import { MAX_DEPENDENCIES } from '../../core/limits';
 import type {
@@ -36,6 +36,7 @@ export type EditError =
   | 'INVALID_DURATION'
   | 'INVALID_DATE'
   | 'INVALID_END'
+  | 'OUT_OF_RANGE'
   | 'INVALID_PROGRESS'
   | 'INVALID_PREDECESSORS'
   | 'UNKNOWN_TASK_NUMBER'
@@ -78,7 +79,7 @@ export function insertTask(
   context: EditContext,
   afterId: TaskId | null,
   name: string,
-): Result<InsertedTask, EditError> {
+): InsertedTask {
   const after = afterId === null ? undefined : findTask(context, afterId);
   const parentId = after?.parentId ?? null;
   const siblings = siblingsOf(context, parentId);
@@ -99,7 +100,7 @@ export function insertTask(
     mustFinishOn: null,
     deadline: null,
   };
-  return success({ taskId, operations: placeAmong(siblings, task, position) });
+  return { taskId, operations: placeAmong(siblings, task, position) };
 }
 
 /** Deletes tasks together with everything under them. */
@@ -205,12 +206,11 @@ export function setDuration(context: EditContext, id: TaskId, text: string): Edi
   ]);
 }
 
-/** Sets the date a task may not start before, written in the regional format or as an ISO date, an empty text removing it, the start dates of its later blocks moving by as much as the task when its scheduled start is known. */
+/** Sets the date a task may not start before, written as an ISO date, an empty text removing it, the start dates of its later blocks moving by as much as the task when its scheduled start is known. */
 export function setStart(
   context: EditContext,
   id: TaskId,
   text: string,
-  format: RegionalFormat,
   scheduledStart: ProjectHour | null = null,
 ): Edit {
   const task = findTask(context, id);
@@ -220,7 +220,7 @@ export function setStart(
   if (text.trim() === '') {
     return success([putTask({ ...task, startNoEarlierThan: null })]);
   }
-  const date = parseCsvDate(text, format);
+  const date = parseTableDate(text);
   if (!date.ok) {
     return failure('INVALID_DATE');
   }
@@ -228,16 +228,15 @@ export function setStart(
   return moveStart(context, id, hour, scheduledStart);
 }
 
-/** Sets the end of a work task, changing the duration of its last block, or moves a milestone to that instant; a date without time ends the task at the end of that day. */
+/** Sets the end of a work task, written as an ISO date, changing the duration of its last block, or moves a milestone to that instant; a date without time ends the task at the end of that day. */
 export function setEnd(
   context: EditContext,
   id: TaskId,
   text: string,
-  format: RegionalFormat,
   placed: { readonly lastBlockStart: ProjectHour; readonly calendar: CompiledCalendar },
 ): Edit {
   const task = findTask(context, id);
-  const date = parseCsvDate(text, format);
+  const date = parseTableDate(text);
   if (task === undefined || task.kind === 'summary') {
     return failure('NOT_POSSIBLE');
   }
@@ -498,10 +497,10 @@ export function moveOnTimeline(
   context: EditContext,
   id: TaskId,
   block: number | null,
-  placement: Placement | null,
+  placement: Placement | undefined,
   dropped: (scheduledStart: ProjectHour) => ProjectHour,
 ): Edit {
-  if (placement === null) {
+  if (placement === undefined) {
     return failure('NOT_POSSIBLE');
   }
   if (block === null) {
@@ -537,7 +536,21 @@ export function moveBlock(
   return success([putTask({ ...task, segments })]);
 }
 
-/** Changes the last block of a task so that it ends at an instant, as when its bar is stretched, keeping at least a quarter hour. */
+/** Changes the last block of a task so that it ends where its stretched bar was dropped, refusing it when the task has no placement or the calendar is not available. */
+export function stretchOnTimeline(
+  context: EditContext,
+  id: TaskId,
+  placed: { readonly placement: Placement | undefined; readonly calendar: CompiledCalendar | null },
+  dropped: (scheduledEnd: ProjectHour) => ProjectHour,
+): Edit {
+  const lastBlock = placed.placement?.segments.at(-1);
+  if (placed.placement === undefined || lastBlock === undefined || placed.calendar === null) {
+    return failure('NOT_POSSIBLE');
+  }
+  return stretchEnd(context, id, lastBlock.start, dropped(placed.placement.end), placed.calendar);
+}
+
+/** Changes the last block of a task so that it ends at an instant, as when its bar is stretched, keeping at least a quarter hour and refusing an end beyond the dates the calendar covers. */
 export function stretchEnd(
   context: EditContext,
   id: TaskId,
@@ -551,7 +564,10 @@ export function stretchEnd(
     return failure('NOT_POSSIBLE');
   }
   const hours = countWorkingHours(calendar, lastBlockStart, Math.max(end, lastBlockStart));
-  const durationHours = Math.max(QUARTER_HOUR, hours.ok ? hours.value : QUARTER_HOUR);
+  if (!hours.ok) {
+    return failure('OUT_OF_RANGE');
+  }
+  const durationHours = Math.max(QUARTER_HOUR, hours.value);
   const segments = [...task.segments.slice(0, -1), { ...lastSegment, durationHours }];
   return success([putTask({ ...task, segments })]);
 }

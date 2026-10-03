@@ -1,14 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { contrastRatio, findContrastIssues, isThemeHexColor } from './contrast';
 import { SAND_GRAPHITE } from './sand-graphite';
-import { THEME_COLORS, themeVariable, type Theme } from './theme';
+import { applyTheme, THEME_COLORS, themeVariable, type Theme } from './theme';
+
+describe('applyTheme', () => {
+  it('gives an element every color of a theme as a style variable', () => {
+    const element = document.createElement('div');
+    applyTheme(SAND_GRAPHITE, element);
+    for (const color of THEME_COLORS) {
+      expect(element.style.getPropertyValue(themeVariable(color))).toBe(SAND_GRAPHITE[color]);
+    }
+  });
+});
 
 describe('official themes', () => {
-  it('keeps every colour of Sand & Graphite readable, as WCAG AA asks', () => {
+  it('keeps every color of Sand & Graphite readable, as WCAG AA asks', () => {
     expect(findContrastIssues(SAND_GRAPHITE)).toEqual([]);
   });
 
-  it('writes every colour of Sand & Graphite as six hexadecimal digits', () => {
+  it('writes every color of Sand & Graphite as six hexadecimal digits', () => {
     expect(THEME_COLORS.every((color) => isThemeHexColor(SAND_GRAPHITE[color]))).toBe(true);
     expect(Object.keys(SAND_GRAPHITE).sort()).toEqual([...THEME_COLORS].sort());
   });

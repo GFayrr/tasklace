@@ -106,9 +106,11 @@ describe('block links edited at the same time', () => {
     const repairs = syncBoth(alice, bob);
     expect(alice.project().dependencies.map((dependency) => dependency.id)).toEqual(['dev_0-test']);
     expect(bob.project()).toEqual(alice.project());
-    expect(repairs.map((repair) => repair.code)).toEqual(
-      expect.arrayContaining(['BLOCK_LINK_CLEARED', 'DEPENDENCY_REMOVED']),
-    );
+    expect(repairs).toEqual([
+      { code: 'BLOCK_LINK_CLEARED', id: 'dev_0-test' },
+      { code: 'BLOCK_LINK_CLEARED', id: 'test-dev_1' },
+      { code: 'DEPENDENCY_REMOVED', id: 'test-dev_1' },
+    ]);
   });
 
   it('breaks a loop made through the blocks by two collaborators, the same way for both', () => {

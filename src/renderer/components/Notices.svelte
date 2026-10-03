@@ -9,14 +9,26 @@
 <section class="notices" aria-label={text.notices.label}>
   {#each app.notices as notice (notice.id)}
     <div
-      class="notice {notice.kind}"
+      class={['notice', notice.kind, { lasting: notice.lasting }]}
       role={notice.kind === 'error' ? 'alert' : 'status'}
       onanimationend={() => {
-        app.dismiss(notice.id);
+        if (!notice.lasting) {
+          app.dismiss(notice.id);
+        }
       }}
     >
       <Icon name="alert" />
       <p>{notice.text}</p>
+      {#if notice.report !== null}
+        {@const report = notice.report}
+        <button
+          type="button"
+          class="details"
+          onclick={() => {
+            app.openReport(report);
+          }}>{text.notices.details}</button
+        >
+      {/if}
       <button
         type="button"
         class="dismiss"
@@ -109,6 +121,25 @@
     flex-grow: 1;
     margin: 0;
     color: var(--color-text);
+  }
+
+  .notice.lasting {
+    animation: none !important;
+  }
+
+  .details {
+    height: 28px;
+    padding: 0 var(--space-2);
+    color: var(--color-text);
+    font-weight: 500;
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: calc(var(--radius) - 2px);
+    cursor: pointer;
+  }
+
+  .details:hover {
+    background: var(--color-panel);
   }
 
   .dismiss {

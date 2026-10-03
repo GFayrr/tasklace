@@ -92,6 +92,7 @@ test('exposes only the listed bridge functions, which check what they receive', 
   );
   expect(bridge).toEqual({
     keys: [
+      'adoptProject',
       'appVersion',
       'exportProject',
       'importProject',
@@ -102,6 +103,7 @@ test('exposes only the listed bridge functions, which check what they receive', 
       'openRecentProject',
       'recentProjects',
       'regionalFormat',
+      'reportStartFailure',
       'saveProject',
       'saveProjectAs',
     ],

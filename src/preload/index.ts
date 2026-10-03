@@ -30,6 +30,7 @@ const bridge: TasklaceBridge = {
     return projects.filter(isRecentProject);
   },
   importProject: (kind) => request(IPC_CHANNELS.importProject, kind),
+  adoptProject: (documentId) => request(IPC_CHANNELS.adoptProject, documentId),
   saveProject: (state) => request(IPC_CHANNELS.saveProject, state),
   saveProjectAs: (state, suggestedName) =>
     request(IPC_CHANNELS.saveProjectAs, state, suggestedName),
@@ -38,13 +39,16 @@ const bridge: TasklaceBridge = {
   onFlushRequested: (flush) => {
     pageFlush = flush;
   },
+  reportStartFailure: () => {
+    ipcRenderer.send(IPC_CHANNELS.pageStartFailed);
+  },
 };
 
 let pageFlush: (() => Promise<boolean>) | null = null;
 
 ipcRenderer.on(IPC_CHANNELS.flushRequested, answerCloseRequest);
 
-/** Answers a request to close the window: at once while the page has not started, since it holds nothing to save yet, otherwise once the page has saved and agreed. */
+/** Answers a request to close the window: at once while the page has not started, since it holds nothing to save yet, otherwise once the page has saved and agreed, keeping the window open when the page fails unexpectedly. */
 function answerCloseRequest(): void {
   if (pageFlush === null) {
     ipcRenderer.send(IPC_CHANNELS.flushDone, true);
@@ -54,8 +58,9 @@ function answerCloseRequest(): void {
     (mayClose) => {
       ipcRenderer.send(IPC_CHANNELS.flushDone, mayClose);
     },
-    () => {
-      ipcRenderer.send(IPC_CHANNELS.flushDone, true);
+    (error: unknown) => {
+      console.error('The page could not prepare to close:', error);
+      ipcRenderer.send(IPC_CHANNELS.flushDone, false);
     },
   );
 }

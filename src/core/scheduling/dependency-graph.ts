@@ -1,6 +1,7 @@
 import type { Dependency, SchedulableTask } from '../model/project';
 import { failure, success, type Result } from '../result';
 import { predecessorBlockOf, successorBlockOf, unitCountOf } from './block-links';
+import { valueAt } from '../table-value';
 
 export interface UnitDependency {
   readonly dependency: Dependency;
@@ -41,7 +42,7 @@ export function buildDependencyGraph(
   const incoming = groupLinks(units.length, links, (link) => link.successorUnit);
   const outgoing = groupLinks(units.length, links, (link) => link.predecessorUnit);
   const remaining = units.map(
-    (unit) => (incoming[unit.index]?.length ?? 0) + (unit.block > 0 ? 1 : 0),
+    (unit) => valueAt(incoming, unit.index).length + (unit.block > 0 ? 1 : 0),
   );
   const ready = units.filter((unit) => remaining[unit.index] === 0);
   const order: ScheduleUnit[] = [];
@@ -130,7 +131,7 @@ function releaseUnit(
   units: readonly ScheduleUnit[],
   ready: ScheduleUnit[],
 ): void {
-  const count = (remaining[index] ?? 0) - 1;
+  const count = valueAt(remaining, index) - 1;
   remaining[index] = count;
   const unit = units[index];
   if (count === 0 && unit !== undefined) {
@@ -142,7 +143,7 @@ function releaseUnit(
 function blockedTasks(units: readonly ScheduleUnit[], remaining: readonly number[]): GraphNode[] {
   const blocked = new Map<number, GraphNode>();
   for (const unit of units) {
-    if ((remaining[unit.index] ?? 0) > 0 && !blocked.has(unit.taskIndex)) {
+    if (valueAt(remaining, unit.index) > 0 && !blocked.has(unit.taskIndex)) {
       blocked.set(unit.taskIndex, { index: unit.taskIndex, task: unit.task });
     }
   }

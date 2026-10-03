@@ -577,16 +577,15 @@ function paintLinkPreview(
   context.moveTo(from.x, from.y);
   context.lineTo(preview.pointer.x, preview.pointer.y);
   context.stroke();
-  if (preview.targetRow === null) {
+  if (preview.target === null) {
     return;
   }
-  const top = preview.targetRow * ROW_HEIGHT;
+  const { row, end } = preview.target;
+  const top = row * ROW_HEIGHT;
   context.strokeRect(0, top + 1, xOf(scene.frame, scene.frame.end), ROW_HEIGHT - 2);
-  const target = shapeAt(scene, preview.targetRow);
+  const target = shapeAt(scene, row);
   const block =
-    preview.targetBlock === null || target?.kind !== 'task'
-      ? undefined
-      : target.segments[preview.targetBlock];
+    end.block === null || target?.kind !== 'task' ? undefined : target.segments[end.block];
   if (block !== undefined) {
     const barTop = top + (ROW_HEIGHT - BAR_HEIGHT) / HALF - BLOCK_TARGET_MARGIN;
     const height = BAR_HEIGHT + BLOCK_TARGET_MARGIN * HALF;

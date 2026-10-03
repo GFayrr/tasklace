@@ -12,7 +12,9 @@ import {
   type Placement,
   type PlacementErrorCode,
   computePlacementSlots,
+  worksFullDays,
 } from './task-placement';
+import { unwrap } from '../testing/arbitraries';
 import type { Result } from '../result';
 
 const calendar = compileOrThrow(TEST_CALENDAR);
@@ -273,5 +275,55 @@ describe('placeTaskLatest', () => {
   it('propagates errors met while searching', () => {
     const result = placeTaskLatest(calendar, workTask('a', { hoursPerDay: 0 }), MONDAY_9, MONDAY_9);
     expect(result).toEqual({ ok: false, error: 'INVALID_HOURS_PER_DAY' });
+  });
+});
+
+describe('placement edge cases', () => {
+  const COMPILED = calendar;
+
+  it('moves the end bound of a placement back to the end of the last working hour before it', () => {
+    const task = workTask('a', {
+      segments: [{ durationHours: 3, gapDaysBefore: 0, startNoEarlierThan: null }],
+    });
+    const placed = placeTaskEarliest(COMPILED, task, at(2026, 9, 28, 9), at(2026, 10, 3, 12));
+    expect(placed.ok && placed.value.end).toBe(at(2026, 10, 2, 17));
+    const already = placeTaskEarliest(COMPILED, task, at(2026, 10, 2, 14), at(2026, 10, 3, 12));
+    expect(already.ok && already.value.start).toBe(at(2026, 10, 2, 14));
+  });
+
+  it('places a milestone no earlier than its end bound', () => {
+    const placed = placeTaskEarliest(
+      COMPILED,
+      milestone('m'),
+      at(2026, 9, 28, 9),
+      at(2026, 9, 29, 10),
+    );
+    expect(placed.ok && placed.value.start).toBe(at(2026, 9, 29, 10));
+  });
+
+  it('refuses a work task without any block, and slots for a block the task does not have', () => {
+    const empty = { ...workTask('a'), segments: [] };
+    expect(placeTask(COMPILED, empty, at(2026, 9, 28, 9))).toEqual({
+      ok: false,
+      error: 'INVALID_SEGMENTS',
+    });
+    const task = workTask('a');
+    const placement = unwrap(placeTask(COMPILED, task, at(2026, 9, 28, 9)));
+    const extra = {
+      ...placement,
+      segments: [...placement.segments, placement.segments[0] ?? placement],
+    };
+    expect(computePlacementSlots(COMPILED, task, extra)).toEqual({
+      ok: false,
+      error: 'INVALID_SEGMENTS',
+    });
+  });
+
+  it('works full days only with the hours and daily start of the project', () => {
+    const task = workTask('a');
+    expect(worksFullDays(COMPILED, task)).toBe(true);
+    expect(worksFullDays(COMPILED, { ...task, dailyStartHour: 9 })).toBe(true);
+    expect(worksFullDays(COMPILED, { ...task, dailyStartHour: 10 })).toBe(false);
+    expect(worksFullDays(COMPILED, { ...task, hoursPerDay: 4 })).toBe(false);
   });
 });

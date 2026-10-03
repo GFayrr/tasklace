@@ -19,19 +19,21 @@
     return app.hasFile ? text.saveStatus.saved : text.saveStatus.localOnly;
   });
   const openItems: readonly MenuItem[] = $derived([
-    { label: text.toolbar.openFile, select: () => void app.open() },
+    { key: 'open', label: text.toolbar.openFile, select: () => void app.open() },
     ...app.recentProjects.map((recent, index) => ({
+      key: `recent-${String(index)}`,
       label: recent.name,
+      hint: recent.folder,
       select: () => void app.openRecent(index),
     })),
   ]);
   const importItems: readonly MenuItem[] = $derived([
-    { label: text.toolbar.importCsv, select: () => void app.importFile('csv') },
-    { label: text.toolbar.importJson, select: () => void app.importFile('json') },
+    { key: 'csv', label: text.toolbar.importCsv, select: () => void app.importFile('csv') },
+    { key: 'json', label: text.toolbar.importJson, select: () => void app.importFile('json') },
   ]);
   const exportItems: readonly MenuItem[] = $derived([
-    { label: text.toolbar.exportCsv, select: () => void app.exportFile('csv') },
-    { label: text.toolbar.exportJson, select: () => void app.exportFile('json') },
+    { key: 'csv', label: text.toolbar.exportCsv, select: () => void app.exportFile('csv') },
+    { key: 'json', label: text.toolbar.exportJson, select: () => void app.exportFile('json') },
   ]);
 
   const taskActions: readonly TaskAction[] = $derived([
@@ -86,18 +88,20 @@
     },
   ]);
 
+  const projectName = $derived(app.project?.name ?? '');
+
   /** Renames the project when the name field is left, restoring the name if it was refused. */
   function commitName(event: Event & { currentTarget: HTMLInputElement }): void {
     const field = event.currentTarget;
     if (!app.rename(field.value)) {
-      field.value = app.project?.name ?? '';
+      field.value = projectName;
     }
   }
 
   /** Leaves the name field with Enter, or restores its name with Escape. */
   function nameKey(event: KeyboardEvent & { currentTarget: HTMLInputElement }): void {
     if (event.key === 'Escape') {
-      event.currentTarget.value = app.project?.name ?? '';
+      event.currentTarget.value = projectName;
     }
     if (event.key === 'Enter' || event.key === 'Escape') {
       event.currentTarget.blur();
@@ -110,7 +114,7 @@
     <input
       class="name"
       aria-label={text.toolbar.projectName}
-      value={app.project?.name ?? ''}
+      value={projectName}
       onchange={commitName}
       onkeydown={nameKey}
     />

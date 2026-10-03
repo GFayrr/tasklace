@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
-import { app, BrowserWindow, protocol, session } from 'electron';
+import { app, BrowserWindow, dialog, protocol, session } from 'electron';
 import { APP_ENTRY_URL, APP_SCHEME, isAppAddress, resolveAppFile } from './app-files';
 import { MAX_FILE_WORKER_HEAP_MEBIBYTES } from '../core/limits';
 import { contentSecurityPolicy } from './content-security-policy';
@@ -11,7 +11,9 @@ import { registerIpcHandlers } from './ipc-handlers';
 import { createTrustCheck } from './ipc-trust';
 import { registerProjectFileHandlers } from './project-files';
 import { CONTENT_SECURITY_POLICY_HEADER, hardenContents, hardenSession } from './security';
+import { MESSAGES } from './messages';
 import { installApplicationMenu } from './platform/application-menu';
+import { captureConsole, createLogFile, logPageMessages, logWorkerErrors } from './log-file';
 import { createMainWindow } from './window';
 
 const NOT_FOUND = 404;
@@ -21,6 +23,14 @@ const policy = contentSecurityPolicy(developmentUrl !== null);
 const rendererRoot = join(import.meta.dirname, '../renderer');
 const preloadPath = join(import.meta.dirname, '../preload/index.cjs');
 const fileWorkerPath = join(import.meta.dirname, 'file-worker.js');
+const EXIT_AFTER_FAILURE = 1;
+const LOG_FOLDER = 'logs';
+const log = createLogFile(
+  join(app.getPath('userData'), LOG_FOLDER),
+  () => new Date(),
+  reportLogFailure,
+);
+captureConsole(console, log);
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -35,7 +45,7 @@ if (app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {
     app.quit();
   });
-  app.whenReady().then(start, stop);
+  app.whenReady().then(start).catch(stop);
 } else {
   app.quit();
 }
@@ -54,15 +64,29 @@ function start(): void {
   });
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath);
+  logPageMessages(window.webContents, log);
   flushBeforeClosing(window);
-  window.loadURL(developmentUrl ?? APP_ENTRY_URL).catch(stop);
+  let closing = false;
+  window.once('close', () => {
+    closing = true;
+  });
+  window.loadURL(developmentUrl ?? APP_ENTRY_URL).catch((error: unknown) => {
+    if (closing || window.isDestroyed()) {
+      console.warn('The interface stopped loading because its window was closed:', error);
+      return;
+    }
+    stop(error);
+  });
 }
 
-/** Starts a worker for one file task, with the memory limit that keeps a forged file from exhausting the application. */
+/** Starts a worker for one file task, with the memory limit that keeps a forged file from exhausting the application, what it reports as errors going to the log. */
 function createFileWorker(): Worker {
-  return new Worker(fileWorkerPath, {
+  const worker = new Worker(fileWorkerPath, {
     resourceLimits: { maxOldGenerationSizeMb: MAX_FILE_WORKER_HEAP_MEBIBYTES },
+    stderr: true,
   });
+  logWorkerErrors(worker.stderr, log, process.stderr);
+  return worker;
 }
 
 /** Answers a request of the application scheme with a file of the interface and the content security policy, or not found. */
@@ -87,8 +111,19 @@ function focusFirstWindow(): void {
   window?.focus();
 }
 
-/** Quits after a failure while starting, reporting it on the error output. */
+/** Quits after a failure while starting, telling the user in an error box and logging the cause, its windows being destroyed so that a page that does not answer cannot hold the application open. */
 function stop(error: unknown): void {
-  console.error(error);
-  app.quit();
+  console.error('Tasklace could not start:', error);
+  dialog.showErrorBox(MESSAGES.startup.failedTitle, MESSAGES.startup.failedBody);
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.destroy();
+  }
+  void log.written().finally(() => {
+    app.exit(EXIT_AFTER_FAILURE);
+  });
+}
+
+/** Reports on the error output that the log file could not be written. */
+function reportLogFailure(error: unknown): void {
+  process.stderr.write(`The log file could not be written: ${String(error)}\n`);
 }

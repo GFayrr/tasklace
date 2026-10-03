@@ -5,12 +5,16 @@ const CLOSE_LIMIT_MS = 15_000;
 const PROBE_LIMIT_MS = 1_000;
 const EXIT_LIMIT_MS = 5_000;
 const NO_ANSWER = 'no answer';
-const CLOSED_TARGET = /closed/i;
+const CLOSED_TARGET = /closed|Target crashed/i;
+const closedApplications = new WeakSet<ElectronApplication>();
 
-/** Launches the application, with its own user data folder when one is given, and starts recording a trace, closing it again when the trace cannot start. */
+/** Launches the application, with its own user data folder when one is given, remembering when it closes, and starts recording a trace, closing it again when the trace cannot start. */
 export async function launchApplication(userData?: string): Promise<ElectronApplication> {
   const args = userData === undefined ? ['.'] : ['.', `--user-data-dir=${userData}`];
   const application = await electron.launch({ args });
+  application.once('close', () => {
+    closedApplications.add(application);
+  });
   try {
     await application.context().tracing.start({ screenshots: true, snapshots: true });
   } catch (error) {
@@ -20,8 +24,15 @@ export async function launchApplication(userData?: string): Promise<ElectronAppl
   return application;
 }
 
-/** Closes the application, answering "Don't save" if it asks whether to save a project that has no file yet, keeping the trace of a failed test, and stopping the process with a description of its state when it does not close in time. */
+/** Closes the application unless a test already closed it (Playwright no longer gives the process of a closed application), answering "Don't save" if it asks whether to save a project that has no file yet, keeping the trace of a failed test, and stopping the process with a description of its state when it does not close in time. */
 export async function closeDiscarding(application: ElectronApplication, page: Page): Promise<void> {
+  if (closedApplications.has(application)) {
+    return;
+  }
+  const process = application.process();
+  if (process.exitCode !== null || process.signalCode !== null) {
+    return;
+  }
   await keepTraceOfFailure(application);
   const closing = application.close();
   void page
@@ -61,7 +72,7 @@ async function stopStuckApplication(
   );
 }
 
-/** Ignores an error that only says the page or application is already closed, and reports any other. */
+/** Ignores an error that only says the page or application is already closed or its page crashed, and reports any other. */
 function reportUnlessClosed(error: unknown): void {
   if (!(error instanceof Error && CLOSED_TARGET.test(error.message))) {
     console.warn('Unexpected error while closing the application:', error);

@@ -1,6 +1,7 @@
+import { mkdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isDocumentId, type DocumentId } from '../core/shared/shared-document';
-import { isStoredPath, parseStoredJson, readStoredText } from './stored-files';
+import { isStoredPath, isSystemError, parseStoredJson, readStoredText } from './stored-files';
 import { writeFileSafely } from './safe-write';
 import { createSerialQueue } from './serial-queue';
 
@@ -22,8 +23,16 @@ export function localCopyPath(folder: string, documentId: DocumentId): string | 
   return isDocumentId(documentId) ? join(folder, `${documentId}${COPY_EXTENSION}`) : null;
 }
 
-/** Reads the untrusted content of the local copy index, keeping only well-formed entries. */
-export function parseLocalCopyIndex(text: string): LocalCopyIndex {
+export interface IndexReading {
+  readonly index: LocalCopyIndex;
+  readonly damaged: boolean;
+}
+
+/** Parses the untrusted text of the local copy index, keeping only well-formed entries and telling whether anything had to be dropped, an empty text, as read for a missing index, counting as undamaged. */
+export function readIndexText(text: string): IndexReading {
+  if (text === '') {
+    return { index: {}, damaged: false };
+  }
   const data = parseStoredJson(text);
   const copies: unknown = Reflect.get(Object(data), 'copies');
   if (
@@ -31,14 +40,16 @@ export function parseLocalCopyIndex(text: string): LocalCopyIndex {
     typeof copies !== 'object' ||
     copies === null
   ) {
-    return {};
+    return { index: {}, damaged: true };
   }
-  const entries = Object.entries(copies).filter(
+  const all = Object.entries(copies);
+  const entries = all.filter(
     (entry): entry is [DocumentId, LocalCopyEntry] => isDocumentId(entry[0]) && isEntry(entry[1]),
   );
-  return Object.fromEntries(
+  const index = Object.fromEntries(
     entries.map(([id, entry]) => [id, { path: entry.path, savedAt: entry.savedAt }]),
   );
+  return { index, damaged: entries.length !== all.length };
 }
 
 /** Writes the local copy index in its store format. */
@@ -46,7 +57,7 @@ export function formatLocalCopyIndex(index: LocalCopyIndex): string {
   return JSON.stringify({ version: INDEX_VERSION, copies: index });
 }
 
-/** Writes the local copy of a document and records where its file was saved and when, one index update at a time. */
+/** Writes the local copy of a document, creating its folder when needed, and records where its file was saved and when, one index update at a time. */
 export async function saveLocalCopy(
   folder: string,
   documentId: DocumentId,
@@ -58,18 +69,33 @@ export async function saveLocalCopy(
   if (copyPath === null) {
     throw new Error('Invalid document identifier for a local copy.');
   }
+  await mkdir(folder, { recursive: true });
   await writeFileSafely(copyPath, file);
   await runInOrder(async () => {
     const indexPath = join(folder, INDEX_FILE);
-    const index = await readIndex(indexPath);
+    const index = await readIndex(indexPath, new Date());
     const entry = { path: sourcePath, savedAt: savedAt.toISOString() };
     await writeFileSafely(indexPath, formatLocalCopyIndex({ ...index, [documentId]: entry }));
   });
 }
 
-/** Reads the local copy index from its store, a missing index meaning no copy yet. */
-async function readIndex(indexPath: string): Promise<LocalCopyIndex> {
-  return parseLocalCopyIndex(await readStoredText(indexPath));
+/** Reads the local copy index from its store, a missing index meaning no copy yet, and sets a damaged index aside under a name ending with the time in milliseconds before it is rewritten, so that what it held can still be recovered; an index that cannot be set aside is only logged and then rewritten with its well-formed entries. */
+async function readIndex(indexPath: string, now: Date): Promise<LocalCopyIndex> {
+  const { index, damaged } = readIndexText(await readStoredText(indexPath));
+  if (!damaged) {
+    return index;
+  }
+  const asidePath = `${indexPath}.damaged-${String(now.getTime())}`;
+  try {
+    await rename(indexPath, asidePath);
+    console.error(`The local copy index was damaged and was kept as ${asidePath}.`);
+  } catch (error) {
+    if (!isSystemError(error)) {
+      throw error;
+    }
+    console.error('The damaged local copy index could not be kept aside and is replaced:', error);
+  }
+  return index;
 }
 
 /** Tells whether an untrusted value is an index entry: a stored path or none, and an ISO instant. */
