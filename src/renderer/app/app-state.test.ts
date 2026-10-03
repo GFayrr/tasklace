@@ -371,10 +371,28 @@ describe('saving and exporting', () => {
       { name: 'Too long', startDate: at(2199, 6, 1) },
     );
     control.openResult = openedProjectOf(broken);
-    await app.open();
-    await app.exportFile('csv');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await app.open();
+      app.dismiss(app.notices[0]?.id ?? -1);
+      await app.exportFile('csv');
+      expect(logged).toHaveBeenLastCalledWith('The schedule could not be computed:', {
+        kind: 'task',
+        error: { code: 'BEYOND_PLANNING_HORIZON', taskId: 'long' },
+      });
+    } finally {
+      logged.mockRestore();
+    }
     expect(control.exports).toEqual([]);
-    expect(noticeTexts(app)).toContain(english.notices.scheduleFailed);
+    expect(app.notices.map((notice) => [notice.text, notice.report])).toEqual([
+      [
+        english.scheduleFailures.task.replace('{name}', 'long'),
+        {
+          title: english.report.scheduleFailed,
+          entries: [english.issues.BEYOND_PLANNING_HORIZON],
+        },
+      ],
+    ]);
   });
 
   it('reports a failed automatic save in a message', async () => {
@@ -561,17 +579,20 @@ describe('schedules and messages', () => {
     if (opened === null) {
       throw new Error('No project');
     }
-    scheduler.listener().scheduled({ ok: false, error: { kind: 'startDate' } }, opened);
-    expect(app.schedule).toBeNull();
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
+      scheduler.listener().scheduled({ ok: false, error: { kind: 'startDate' } }, opened);
+      expect(app.schedule).toBeNull();
+      expect(logged).toHaveBeenCalledWith('The schedule could not be computed:', {
+        kind: 'startDate',
+      });
       scheduler.listener().failed(new Error('worker gone'));
     } finally {
       logged.mockRestore();
     }
-    expect(app.notices.map((notice) => [notice.text, notice.lasting])).toEqual([
-      [english.notices.scheduleFailed, false],
-      [english.notices.scheduleStopped, true],
+    expect(app.notices.map((notice) => [notice.text, notice.report, notice.lasting])).toEqual([
+      [english.scheduleFailures.startDate, null, false],
+      [english.notices.scheduleStopped, null, true],
     ]);
   });
 

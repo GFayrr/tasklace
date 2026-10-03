@@ -107,13 +107,18 @@
     "undoFailed": "This change cannot be undone any more, because it no longer fits the project as it is now. Nothing was changed.",
     "redoFailed": "This change cannot be redone any more, because it no longer fits the project as it is now. Nothing was changed.",
     "scheduleStopped": "The schedule could not be updated, so the dates shown may be out of date. Your changes are kept; make another change to try again, and if this message comes back, save your project and restart Tasklace.",
-    "scheduleFailed": "The schedule could not be computed. Check the calendar and the start date of the project.",
     "exportFailed": {
       "SCHEDULE_MISMATCH": "The table could not be written while the schedule was being updated. Try again.",
       "UNKNOWN_BLOCK": "The table could not be written: a link names a block its task does not have. Check the links of the split tasks."
     },
     "projectStartMoved": "The project now starts on {date}, so that this task can start earlier.",
     "details": "Details"
+  },
+  "scheduleFailures": {
+    "calendar": "The schedule could not be computed because the working calendar of the project is not valid.",
+    "startDate": "The schedule could not be computed because the start date of the project is outside the supported years.",
+    "structure": "The schedule could not be computed because the plan contains an error.",
+    "task": "The schedule could not be computed because the task “{name}” cannot be placed."
   },
   "table": {
     "label": "Tasks",
@@ -376,7 +381,8 @@
     "fileFailed": "Why the file could not be read",
     "importWarnings": "What changed during the import",
     "repairs": "What was adjusted",
-    "close": "Close"
+    "close": "Close",
+    "scheduleFailed": "Why the schedule could not be computed"
   },
   "startup": {
     "failedTitle": "Tasklace could not start",

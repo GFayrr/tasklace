@@ -5,6 +5,7 @@ import type { Project, TaskId } from '../../core/model/project';
 import type { Result } from '../../core/result';
 import type { MergeFailure, SharedRepair } from '../../core/shared/shared-project';
 import { issueText, repairText, type ReportedIssue } from '../i18n/issue-text';
+import { scheduleFailureText } from '../i18n/schedule-failure-text';
 import {
   scheduleProject,
   type Schedule,
@@ -664,10 +665,26 @@ export class AppState {
     }
     if (!result.ok) {
       this.schedule = null;
-      this.#notify('error', this.messages.notices.scheduleFailed);
+      this.#showScheduleFailure(result.error, project);
       return;
     }
     this.schedule = result.value;
+  }
+
+  /** Tells the user why the schedule of a project could not be computed, with each problem and the task it concerns, and logs the cause. */
+  #showScheduleFailure(failure: SchedulingFailure, project: Project): void {
+    console.error('The schedule could not be computed:', failure);
+    const names: Readonly<Record<string, string>> = Object.fromEntries(
+      project.tasks.map((task) => [task.id, task.name]),
+    );
+    const { text, entries } = scheduleFailureText(
+      this.messages,
+      failure,
+      (id) => (Object.hasOwn(names, id) ? names[id] : undefined) ?? null,
+    );
+    const report =
+      entries.length === 0 ? null : { title: this.messages.report.scheduleFailed, entries };
+    this.#notify('error', text, report);
   }
 
   /** Tells which block of the details panel has a start date that cannot be read or waits for a task or block that does not exist, or null. */
@@ -696,7 +713,7 @@ export class AppState {
   async #csvText(project: Project): Promise<string | null> {
     const schedule = scheduleProject(project);
     if (!schedule.ok) {
-      this.#notify('error', this.messages.notices.scheduleFailed);
+      this.#showScheduleFailure(schedule.error, project);
       return null;
     }
     const format = await this.#context.bridge.regionalFormat();
