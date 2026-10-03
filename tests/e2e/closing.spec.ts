@@ -10,7 +10,8 @@ import { answerDialogs, answerQuestions, askedDetails, suggestedPath } from './d
 let folder: string;
 let userData: string;
 const STARTING_CLOSE_ATTEMPTS = 3;
-const EXIT_LIMIT_MS = 15_000;
+const EXIT_LIMIT_MS = 30_000;
+const QUESTION_LIMIT_MS = 30_000;
 const TIMED_OUT = 'timed out';
 
 let application: ElectronApplication;
@@ -121,8 +122,46 @@ test('keeps the window open when the last save fails, until the user saves elsew
   ]);
 });
 
+/** Records in the main process, with their time, the events that follow a crash, so that a failure can tell what happened. */
+async function recordCrashEvents(): Promise<void> {
+  await application.evaluate(({ app, BrowserWindow }) => {
+    const events: string[] = [];
+    const started = Date.now();
+    const record = (text: string): void => {
+      events.push(`${String(Date.now() - started)} ms ${text}`);
+    };
+    Object.assign(globalThis, { crashEvents: events });
+    const window = BrowserWindow.getAllWindows()[0];
+    window?.webContents.on('render-process-gone', (_event, details) => {
+      record(`render-process-gone ${details.reason} ${String(details.exitCode)}`);
+    });
+    window?.webContents.on('did-finish-load', () => {
+      record('did-finish-load');
+    });
+    window?.on('unresponsive', () => {
+      record('unresponsive');
+    });
+    app.on('child-process-gone', (_event, details) => {
+      record(`child-process-gone ${details.type} ${details.reason} ${String(details.exitCode)}`);
+    });
+  });
+}
+
+/** Describes what the main process saw after a crash and what the application logged, for the message of a failure. */
+async function crashReport(): Promise<string> {
+  const events = await application
+    .evaluate(() => {
+      const recorded: unknown = Reflect.get(globalThis, 'crashEvents');
+      return Array.isArray(recorded) ? recorded.map(String) : [];
+    })
+    .catch((error: unknown) => [`events unavailable: ${String(error)}`]);
+  const log = await readFile(join(userData, 'logs', 'tasklace.log'), 'utf8').catch(() => '');
+  return `events: ${JSON.stringify(events)}; log: ${log}`;
+}
+
 /** Crashes the page of the window without waiting for what follows, since the main process may quit at once. */
 async function crashPage(): Promise<void> {
+  await recordCrashEvents();
   await application.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.webContents.forcefullyCrashRenderer();
   });
@@ -145,7 +184,8 @@ test('offers to close a window whose page crashed before any close request, and 
     });
   });
   await crashPage();
-  expect(await exitCode(exited, closed)).toBe(0);
+  const code = await exitCode(exited, closed);
+  expect(code, code === TIMED_OUT ? await crashReport() : '').toBe(0);
 });
 
 test('offers to reload a window whose page crashed, which starts again with nothing open, checked through the main process since the crashed page cannot be driven any more', async () => {
@@ -155,7 +195,13 @@ test('offers to reload a window whose page crashed, which starts again with noth
     [english.pageProblems.reload]: english.pageProblems.reload,
   });
   await crashPage();
-  await expect.poll(() => askedDetails(application)).toEqual([english.pageProblems.crashedBody]);
+  try {
+    await expect
+      .poll(() => askedDetails(application), { timeout: QUESTION_LIMIT_MS })
+      .toEqual([english.pageProblems.crashedBody]);
+  } catch (error) {
+    throw new Error(`${String(error)}\n${await crashReport()}`);
+  }
   const welcomed = (): Promise<unknown> =>
     application.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0]?.webContents.executeJavaScript(

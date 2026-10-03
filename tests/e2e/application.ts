@@ -5,7 +5,7 @@ const CLOSE_LIMIT_MS = 15_000;
 const PROBE_LIMIT_MS = 1_000;
 const EXIT_LIMIT_MS = 5_000;
 const NO_ANSWER = 'no answer';
-const CLOSED_TARGET = /closed/i;
+const CLOSED_TARGET = /closed|Target crashed/i;
 const closedApplications = new WeakSet<ElectronApplication>();
 
 /** Launches the application, with its own user data folder when one is given, remembering when it closes, and starts recording a trace, closing it again when the trace cannot start. */
@@ -72,7 +72,7 @@ async function stopStuckApplication(
   );
 }
 
-/** Ignores an error that only says the page or application is already closed, and reports any other. */
+/** Ignores an error that only says the page or application is already closed or its page crashed, and reports any other. */
 function reportUnlessClosed(error: unknown): void {
   if (!(error instanceof Error && CLOSED_TARGET.test(error.message))) {
     console.warn('Unexpected error while closing the application:', error);
