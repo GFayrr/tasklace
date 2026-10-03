@@ -33,6 +33,16 @@ describe('recent projects', () => {
     expect(withRecentProject([A, B, C], D)).toHaveLength(MAX_RECENT_PROJECTS);
   });
 
+  it('lists a project once whatever way its path is written, in the store or when recorded', () => {
+    const unnormalized = A.replace('a.tasklace', join('.', 'x', '..', 'a.tasklace'));
+    expect(withRecentProject([A, B], unnormalized)).toEqual([A, B]);
+    expect(parseRecentProjects(formatRecentProjects([A, B, A, unnormalized, C]))).toEqual([
+      A,
+      B,
+      C,
+    ]);
+  });
+
   it('reads back what it writes', () => {
     expect(parseRecentProjects(formatRecentProjects([A, B]))).toEqual([A, B]);
   });

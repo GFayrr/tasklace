@@ -21,7 +21,8 @@ export function readTableWidth(store: WidthStore | null): number {
   try {
     const stored = Number(store?.getItem(STORAGE_KEY) ?? Number.NaN);
     return Number.isFinite(stored) && stored >= MIN_TABLE_WIDTH ? stored : DEFAULT_TABLE_WIDTH;
-  } catch {
+  } catch (error) {
+    console.warn('The remembered width of the table could not be read:', error);
     return DEFAULT_TABLE_WIDTH;
   }
 }
@@ -30,7 +31,7 @@ export function readTableWidth(store: WidthStore | null): number {
 export function rememberTableWidth(store: WidthStore | null, width: number): void {
   try {
     store?.setItem(STORAGE_KEY, String(width));
-  } catch {
-    return;
+  } catch (error) {
+    console.warn('The width of the table could not be remembered:', error);
   }
 }

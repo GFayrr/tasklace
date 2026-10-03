@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { END_PROJECT_HOUR } from '../../core/time';
 import fc from 'fast-check';
 import { TEST_CALENDAR } from '../../core/testing/test-calendar';
-import type { RegionalFormat } from '../../core/exchange/csv/regional-format';
 import type { Project, Task, WorkTask } from '../../core/model/project';
 import { createSharedDocument } from '../../core/shared/shared-document';
 import { openSharedSession, type SharedSession } from '../../core/shared/shared-session';
@@ -37,6 +37,7 @@ import {
   replaceTask,
   setStart,
   stretchEnd,
+  stretchOnTimeline,
   toggleMilestone,
   findBlockWaitProblem,
   type Edit,
@@ -44,12 +45,6 @@ import {
   type LinkEnd,
 } from './task-commands';
 
-const FRENCH: RegionalFormat = {
-  listSeparator: ';',
-  dateOrder: 'dayMonthYear',
-  dateSeparator: '/',
-  twelveHourClock: false,
-};
 const CALENDAR = compileOrThrow(TEST_CALENDAR);
 const PLAN = project(
   [
@@ -140,21 +135,15 @@ describe('adding, deleting and reordering tasks', () => {
   it('adds a one-day task after the selected one, or at the end', () => {
     const { session, context } = openPlan();
     const inserted = insertTask(context(), 'a', 'New task');
-    expect(inserted.ok).toBe(true);
-    if (!inserted.ok) {
-      return;
-    }
-    applied(session, { ok: true, value: inserted.value.operations });
+    applied(session, { ok: true, value: inserted.operations });
     expect(rowsOf(session).slice(0, 4)).toEqual(['1 s', '1.1 a', '1.2 new1', '1.3 b']);
     expect(taskOf(session, 'new1')).toMatchObject({
       name: 'New task',
       segments: [{ durationHours: 7 }],
     });
     const last = insertTask(context(), null, 'Last');
-    if (last.ok) {
-      applied(session, { ok: true, value: last.value.operations });
-    }
-    expect(rowsOf(session).at(-1)).toBe(`5 ${last.ok ? last.value.taskId : ''}`);
+    applied(session, { ok: true, value: last.operations });
+    expect(rowsOf(session).at(-1)).toBe(`5 ${last.taskId}`);
   });
 
   it('deletes a summary with everything under it and their links', () => {
@@ -244,42 +233,49 @@ describe('editing cells', () => {
     expect(setDuration(context(), 's', '3')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
   });
 
-  it('reads a start date in the regional format or as ISO, an empty text removing it', () => {
+  it('reads a start date only as ISO, with or without a time, an empty text removing it', () => {
     const { session, context } = openPlan();
-    applied(session, setStart(context(), 'c', '05/10/2026 14:00', FRENCH));
+    applied(session, setStart(context(), 'c', '2026-10-05 14:00'));
     expect(taskOf(session, 'c')).toMatchObject({ startNoEarlierThan: at(2026, 10, 5, 14) });
-    applied(session, setStart(context(), 'c', '2026-10-06', FRENCH));
+    applied(session, setStart(context(), 'c', '2026-10-06'));
     expect(taskOf(session, 'c')).toMatchObject({ startNoEarlierThan: at(2026, 10, 6) });
-    applied(session, setStart(context(), 'c', ' ', FRENCH));
+    applied(session, setStart(context(), 'c', ' '));
     expect(taskOf(session, 'c')).toMatchObject({ startNoEarlierThan: null });
-    expect(setStart(context(), 'c', '31/02/2026', FRENCH)).toEqual({
-      ok: false,
-      error: 'INVALID_DATE',
-    });
+    applied(session, setStart(context(), 'c', '2026-10-07T09:45'));
+    expect(taskOf(session, 'c')).toMatchObject({ startNoEarlierThan: at(2026, 10, 7, 9) + 0.75 });
+    for (const text of [
+      '2026-02-31',
+      '05/10/2026',
+      '2026/10/05',
+      '2026-10-05 9:00',
+      '2026-10-05 09:10',
+    ]) {
+      expect(setStart(context(), 'c', text)).toEqual({ ok: false, error: 'INVALID_DATE' });
+    }
   });
 
   it('sets the end of a task through the duration of its last block, or moves a milestone', () => {
     const { session, context } = openPlan();
     const placed = { lastBlockStart: at(2026, 9, 28, 9), calendar: CALENDAR };
-    applied(session, setEnd(context(), 'c', '28/09/2026 11:30', FRENCH, placed));
+    applied(session, setEnd(context(), 'c', '2026-09-28 11:30', placed));
     expect(taskOf(session, 'c')).toMatchObject({ segments: [{ durationHours: 2.5 }] });
-    applied(session, setEnd(context(), 'c', '29/09/2026', FRENCH, placed));
+    applied(session, setEnd(context(), 'c', '2026-09-29', placed));
     expect(taskOf(session, 'c')).toMatchObject({ segments: [{ durationHours: 14 }] });
-    expect(setEnd(context(), 'c', '28/09/2026 08:00', FRENCH, placed)).toEqual({
+    expect(setEnd(context(), 'c', '2026-09-28 08:00', placed)).toEqual({
       ok: false,
       error: 'INVALID_END',
     });
-    expect(setEnd(context(), 'c', 'soon', FRENCH, placed)).toEqual({
+    expect(setEnd(context(), 'c', 'soon', placed)).toEqual({
       ok: false,
       error: 'INVALID_DATE',
     });
-    applied(session, setEnd(context(), 'm', '02/10/2026 15:00', FRENCH, placed));
+    applied(session, setEnd(context(), 'm', '2026-10-02 15:00', placed));
     expect(taskOf(session, 'm')).toMatchObject({ startNoEarlierThan: at(2026, 10, 2, 15) });
   });
 
   it('moves the project start to the day of a task placed before it', () => {
     const { session, context } = openPlan();
-    applied(session, setStart(context(), 'c', '21/09/2026 10:15', FRENCH));
+    applied(session, setStart(context(), 'c', '2026-09-21 10:15'));
     expect(session.project().startDate).toBe(at(2026, 9, 21));
     expect(taskOf(session, 'c')).toMatchObject({ startNoEarlierThan: at(2026, 9, 21, 10) + 0.25 });
     applied(session, moveStart(context(), 'm', at(2026, 9, 14, 9)));
@@ -451,7 +447,7 @@ describe('moving a later block alone', () => {
 
   it('chooses on the timeline between moving a later block, moving the whole task, and refusing what the schedule no longer shows', () => {
     const { session, context } = openPlan(SPLIT_WITH_WAIT);
-    const placement = scheduleOrThrow(session.project()).placements.get('d') ?? null;
+    const placement = scheduleOrThrow(session.project()).placements.get('d');
     const later = (from: number) => from + 24;
     const asked = writtenTask(moveOnTimeline(context(), 'd', 1, placement, later));
     expect(asked).toMatchObject({
@@ -464,7 +460,27 @@ describe('moving a later block alone', () => {
     expect(whole).toMatchObject({ startNoEarlierThan: (placement?.start ?? 0) + 24 });
     const notPossible = { ok: false, error: 'NOT_POSSIBLE' };
     expect(moveOnTimeline(context(), 'd', 4, placement, later)).toEqual(notPossible);
-    expect(moveOnTimeline(context(), 'd', 1, null, later)).toEqual(notPossible);
+    expect(moveOnTimeline(context(), 'd', 1, undefined, later)).toEqual(notPossible);
+  });
+
+  it('stretches the bar dropped on the timeline, and refuses without its placement or the calendar', () => {
+    const { session, context } = openPlan();
+    const placement = scheduleOrThrow(session.project()).placements.get('c');
+    const stretched = stretchOnTimeline(
+      context(),
+      'c',
+      { placement, calendar: CALENDAR },
+      (end) => end + 24,
+    );
+    expect(writtenTask(stretched)).toMatchObject({ segments: [{ durationHours: 14 }] });
+    const notPossible = { ok: false, error: 'NOT_POSSIBLE' };
+    const later = (end: number) => end + 24;
+    expect(
+      stretchOnTimeline(context(), 'c', { placement: undefined, calendar: CALENDAR }, later),
+    ).toEqual(notPossible);
+    expect(stretchOnTimeline(context(), 'c', { placement, calendar: null }, later)).toEqual(
+      notPossible,
+    );
   });
 
   it('refuses the first block, a block the task does not have, and a task that is not split', () => {
@@ -686,7 +702,7 @@ describe('dragging on the timeline', () => {
     expect(moveStart(context(), 's', 0)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
   });
 
-  it('stretches the last block to end at an instant, keeping at least one hour', () => {
+  it('stretches the last block to end at an instant, keeping at least a quarter hour', () => {
     const { session, context } = openPlan();
     applied(session, stretchEnd(context(), 'c', at(2026, 9, 28, 9), at(2026, 9, 29, 17), CALENDAR));
     expect(taskOf(session, 'c')).toMatchObject({ segments: [{ durationHours: 14 }] });
@@ -695,6 +711,14 @@ describe('dragging on the timeline', () => {
     expect(stretchEnd(context(), 'm', 0, 1, CALENDAR)).toEqual({
       ok: false,
       error: 'NOT_POSSIBLE',
+    });
+  });
+
+  it('refuses to stretch a bar to an end the calendar does not cover', () => {
+    const { context } = openPlan();
+    expect(stretchEnd(context(), 'c', at(2026, 9, 28, 9), END_PROJECT_HOUR, CALENDAR)).toEqual({
+      ok: false,
+      error: 'OUT_OF_RANGE',
     });
   });
 
@@ -804,10 +828,7 @@ describe('any sequence of structural edits', () => {
           const current = context();
           const edit: Edit =
             kind === 'insert'
-              ? (() => {
-                  const inserted = insertTask(current, id, 'New');
-                  return inserted.ok ? { ok: true, value: inserted.value.operations } : inserted;
-                })()
+              ? { ok: true, value: insertTask(current, id, 'New').operations }
               : kind === 'delete'
                 ? deleteTasks(current, [id])
                 : kind === 'indent'

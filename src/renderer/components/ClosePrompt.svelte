@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { AppState, CloseChoice } from '../app/app-state.svelte';
+  import { fillMessage } from '../i18n/messages';
 
   let { app }: { app: AppState } = $props();
 
@@ -30,8 +31,13 @@
     answer('cancel');
   }}
 >
-  <h2 id="close-prompt-title">{text.title}</h2>
-  <p id="close-prompt-body">{text.body}</p>
+  {#if app.closePrompt?.reason === 'saveFailed'}
+    <h2 id="close-prompt-title">{text.failedTitle}</h2>
+    <p id="close-prompt-body">{fillMessage(text.failedBody, { reason: app.closePrompt.detail })}</p>
+  {:else}
+    <h2 id="close-prompt-title">{text.title}</h2>
+    <p id="close-prompt-body">{text.body}</p>
+  {/if}
   <div class="actions">
     <button
       type="button"
@@ -45,14 +51,14 @@
       class="button"
       onclick={() => {
         answer('discard');
-      }}>{text.discard}</button
+      }}>{app.closePrompt?.reason === 'saveFailed' ? text.closeAnyway : text.discard}</button
     >
     <button
       type="button"
       class="button primary"
       onclick={() => {
         answer('save');
-      }}>{text.save}</button
+      }}>{app.closePrompt?.reason === 'saveFailed' ? text.saveElsewhere : text.save}</button
     >
   </div>
 </dialog>

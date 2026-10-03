@@ -4,9 +4,10 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { DEFAULT_CALENDAR } from '../../src/core/calendar/default-calendar';
 import { exportProjectCsv } from '../../src/core/exchange/csv/project-csv-export';
-import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
+import { encodeTasklaceFile, readTasklaceFile } from '../../src/core/file/tasklace-file';
 import { MAX_FILE_BYTES } from '../../src/core/limits';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
+import { readSharedProject } from '../../src/core/shared/shared-project';
 import { unwrap } from '../../src/core/testing/arbitraries';
 import {
   link,
@@ -15,7 +16,7 @@ import {
   TEST_DOCUMENT_ID,
   workTask,
 } from '../../src/core/testing/project-builder';
-import { parseLocalCopyIndex } from '../../src/main/local-copies';
+import { readIndexText } from '../../src/main/local-copies';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 import { closeDiscarding, launchApplication } from './application';
 import { answerDialogs, askedQuestion, suggestedPath } from './dialogs';
@@ -58,12 +59,16 @@ test('opens a project, saves it back to its file and lists it as recent', async 
     if (opened?.ok !== true) {
       return { opened };
     }
+    const before = await api?.recentProjects();
+    const adopted = await api?.adoptProject(opened.value.documentId);
     const saved = await api?.saveProject(opened.value.state);
-    return { name: opened.value.name, saved, recent: await api?.recentProjects() };
+    return { name: opened.value.name, before, adopted, saved, recent: await api?.recentProjects() };
   });
   expect(outcome).toEqual({
     name: 'Plan',
-    saved: { ok: true, value: null },
+    before: [],
+    adopted: { ok: true, value: null },
+    saved: { ok: true, value: { localCopySaved: true } },
     recent: [{ name: 'Plan', folder }],
   });
   const copies = await readdir(join(userData, 'local-copies'));
@@ -89,6 +94,7 @@ test('imports a CSV table into a project kept in its local copy until saved as a
     if (imported?.ok !== true) {
       return { imported };
     }
+    await api?.adoptProject(imported.value.documentId);
     const kept = await api?.saveProject(imported.value.state);
     const savedAs = await api?.saveProjectAs(imported.value.state, 'Tasks');
     return { name: imported.value.name, warnings: imported.value.warnings, kept, savedAs };
@@ -96,11 +102,11 @@ test('imports a CSV table into a project kept in its local copy until saved as a
   expect(outcome).toEqual({
     name: 'Tasks',
     warnings: [],
-    kept: { ok: true, value: null },
-    savedAs: { ok: true, value: null },
+    kept: { ok: true, value: { localCopySaved: true } },
+    savedAs: { ok: true, value: { localCopySaved: true } },
   });
   expect((await readFile(target)).subarray(0, 4).toString()).toBe('TSKL');
-  const index = parseLocalCopyIndex(
+  const { index } = readIndexText(
     await readFile(join(userData, 'local-copies', 'index.json'), 'utf8'),
   );
   expect(Object.values(index)).toMatchObject([{ path: target }]);
@@ -129,8 +135,10 @@ test('refuses bridge messages whose content is not valid', async () => {
         () => 'accepted',
         () => 'refused',
       );
-    await api?.newProject();
+    const documentId = await api?.newProject();
+    await api?.adoptProject(documentId ?? '');
     return Promise.all([
+      attempt(api?.adoptProject('../escape')),
       attempt(api?.saveProject('not bytes')),
       attempt(api?.importProject('tasklace')),
       attempt(api?.openRecentProject(99)),
@@ -141,7 +149,7 @@ test('refuses bridge messages whose content is not valid', async () => {
       ),
     ]);
   });
-  expect(refusals).toEqual(['refused', 'refused', 'refused', 'refused', 'refused', 'refused']);
+  expect(refusals).toEqual(Array.from({ length: 7 }, () => 'refused'));
 });
 
 test('exports with the extension added and the project name suggested, asking before replacing what the extension leads to', async () => {
@@ -199,12 +207,41 @@ test('saves as next to the current file under the project name, asking before re
     return page.evaluate(async () => {
       const api = window.tasklace;
       const opened = await api?.openProject();
-      return opened?.ok === true ? api?.saveProjectAs(opened.value.state, 'Plan v2') : opened;
+      if (opened?.ok !== true) {
+        return opened;
+      }
+      await api?.adoptProject(opened.value.documentId);
+      return api?.saveProjectAs(opened.value.state, 'Plan v2');
     });
   };
   expect(await saveAs(false)).toEqual({ ok: false, error: { code: 'CANCELLED' } });
   expect(await suggestedPath(application)).toBe(join(folder, 'Plan v2.tasklace'));
   expect(await readFile(`${chosen}.tasklace`, 'utf8')).toBe('kept');
-  expect(await saveAs(true)).toEqual({ ok: true, value: null });
+  expect(await saveAs(true)).toEqual({ ok: true, value: { localCopySaved: true } });
   expect((await readFile(`${chosen}.tasklace`)).subarray(0, 4).toString()).toBe('TSKL');
+});
+
+/** Reads the name of the project a .tasklace file holds, or null while it cannot be read. */
+async function projectNameIn(path: string): Promise<string | null> {
+  const read = readTasklaceFile(await readFile(path), zlibCompressor);
+  const project = read.ok ? readSharedProject(read.value) : null;
+  return project?.ok === true ? project.value.name : null;
+}
+
+test('saves a changed project to its file and its local copy a little after the change', async () => {
+  const path = join(folder, 'Plan.tasklace');
+  await writeSampleProject(path);
+  await expect(page.locator('#app')).toHaveAttribute('data-started', 'true');
+  await answerDialogs(application, { open: path });
+  await page.getByRole('button', { name: /^Open…/ }).click();
+  const field = page.getByRole('textbox', { name: 'Project name' });
+  await expect(field).toHaveValue(SAMPLE.name);
+  await field.fill('Plan, renamed');
+  await field.press('Enter');
+  await expect(page.getByRole('status').filter({ hasText: 'Unsaved changes' })).toBeVisible();
+  await expect.poll(() => projectNameIn(path)).toBe('Plan, renamed');
+  await expect(page.getByRole('status').filter({ hasText: 'All changes saved' })).toBeVisible();
+  expect(await readFile(join(userData, 'local-copies', `${TEST_DOCUMENT_ID}.tasklace`))).toEqual(
+    await readFile(path),
+  );
 });

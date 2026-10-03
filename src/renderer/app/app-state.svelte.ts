@@ -1,21 +1,17 @@
 import { compileCalendar } from '../../core/calendar/compile-calendar';
 import { exportProjectCsv } from '../../core/exchange/csv/project-csv-export';
-import type { RegionalFormat } from '../../core/exchange/csv/regional-format';
 import { exportProjectJson } from '../../core/exchange/project-json';
 import type { Project, TaskId } from '../../core/model/project';
 import type { Result } from '../../core/result';
+import type { MergeFailure, SharedRepair } from '../../core/shared/shared-project';
+import { issueText, repairText, type ReportedIssue } from '../i18n/issue-text';
 import {
   scheduleProject,
   type Schedule,
   type SchedulingFailure,
 } from '../../core/scheduling/schedule-project';
 import type { SharedSession } from '../../core/shared/shared-session';
-import type {
-  BridgeResult,
-  ExchangeKind,
-  RecentProject,
-  TasklaceBridge,
-} from '../../preload/bridge-contract';
+import type { ExchangeKind, RecentProject, TasklaceBridge } from '../../preload/bridge-contract';
 import { createDayFormatter } from '../i18n/format';
 import {
   countMessage,
@@ -50,6 +46,7 @@ import { buildNewProject } from '../project/new-project';
 import {
   createProjectFiles,
   FileActionError,
+  type ActionResult,
   type OpenedSession,
   type ProjectFiles,
   type SaveStatus,
@@ -63,9 +60,20 @@ export type NoticeKind = 'error' | 'warning' | 'info';
 
 export type CloseChoice = 'save' | 'discard' | 'cancel';
 
-export interface ClosePrompt {
-  readonly answer: (choice: CloseChoice) => void;
-}
+export type DrawingPart = 'timeline' | 'patterns';
+
+export type ClosePrompt =
+  | { readonly reason: 'unsaved'; readonly answer: (choice: CloseChoice) => void }
+  | {
+      readonly reason: 'saveFailed';
+      readonly detail: string;
+      readonly answer: (choice: CloseChoice) => void;
+    };
+
+type CloseQuestion =
+  { readonly reason: 'unsaved' } | { readonly reason: 'saveFailed'; readonly detail: string };
+
+type CloseDecision = 'proceed' | 'discarded' | 'cancelled';
 
 export interface EditRequest {
   readonly taskId: TaskId;
@@ -73,17 +81,18 @@ export interface EditRequest {
 }
 
 const DEFAULT_DAY_HOURS = 9;
-const DEFAULT_TABLE_FORMAT: RegionalFormat = {
-  listSeparator: ',',
-  dateOrder: 'yearMonthDay',
-  dateSeparator: '-',
-  twelveHourClock: false,
-};
+
+export interface Report {
+  readonly title: string;
+  readonly entries: readonly string[];
+}
 
 export interface Notice {
   readonly id: number;
   readonly kind: NoticeKind;
   readonly text: string;
+  readonly report: Report | null;
+  readonly lasting: boolean;
 }
 
 export interface AppContext {
@@ -110,10 +119,11 @@ export class AppState {
   selectedTaskId = $state<TaskId | null>(null);
   editRequest = $state<EditRequest | null>(null);
   detailsTaskId = $state<TaskId | null>(null);
-  closePrompt = $state.raw<ClosePrompt | null>(null);
+  #closePrompt = $state.raw<ClosePrompt | null>(null);
+  #report = $state.raw<Report | null>(null);
+  #lastQuestion: Promise<unknown> = Promise.resolve();
   collapsed = $state.raw<ReadonlySet<TaskId>>(NOTHING_COLLAPSED);
   openedCount = $state(0);
-  regionalFormat = $state.raw<RegionalFormat>(DEFAULT_TABLE_FORMAT);
   readonly outline = $derived(buildPlanOutline(this.project?.tasks ?? [], this.collapsed));
   readonly calendar = $derived.by(() => {
     const compiled = this.project === null ? null : compileCalendar(this.project.calendar);
@@ -130,6 +140,7 @@ export class AppState {
   #refreshQueued = false;
   #changedSinceOpened = false;
   #nextNoticeId = 0;
+  readonly #drawingProblems: Record<DrawingPart, boolean> = { timeline: false, patterns: false };
 
   /** Creates the state of the interface around the bridge to the main process and a schedule worker. */
   constructor(context: AppContext) {
@@ -144,25 +155,39 @@ export class AppState {
       saveStatus: (status) => {
         this.saveStatus = status;
       },
+      localCopyFailed: () => {
+        this.#notify('warning', this.messages.notices.localCopyFailed);
+      },
     });
     this.#scheduler = context.createScheduler({
       scheduled: (result, project) => {
         this.#showSchedule(result, project);
       },
-      failed: () => {
-        this.#notify('error', this.messages.notices.scheduleFailed);
+      failed: (error) => {
+        console.error('The schedule could not be computed:', error);
+        this.#notify('error', this.messages.notices.scheduleStopped, null, true);
       },
     });
   }
 
-  /** Reads the regional format of the system, used to read the dates typed in the table. */
-  async loadRegionalFormat(): Promise<void> {
-    this.regionalFormat = await this.#context.bridge.regionalFormat();
+  /** Returns the question about closing a project shown to the user, or null. */
+  get closePrompt(): ClosePrompt | null {
+    return this.#closePrompt;
   }
 
-  /** Loads the list of recent projects. */
+  /** Returns the detailed list behind a message shown to the user, or null. */
+  get report(): Report | null {
+    return this.#report;
+  }
+
+  /** Loads the list of recent projects, a list that cannot be loaded leaving the previous one and a warning, so that the action that asked for it still succeeds. */
   async loadRecentProjects(): Promise<void> {
-    this.recentProjects = await this.#context.bridge.recentProjects();
+    try {
+      this.recentProjects = await this.#context.bridge.recentProjects();
+    } catch (error) {
+      console.error('The recent projects could not be loaded:', error);
+      this.#notify('warning', this.messages.notices.recentUnavailable);
+    }
   }
 
   /** Runs the action of a keyboard shortcut. */
@@ -171,7 +196,9 @@ export class AppState {
       newProject: () => this.newProject(),
       open: () => this.open(),
       save: () => this.save(),
-      saveAs: () => this.saveAs(),
+      saveAs: async () => {
+        await this.saveAs();
+      },
       undo: () => {
         this.undo();
         return Promise.resolve();
@@ -186,18 +213,55 @@ export class AppState {
 
   /** Asks whether to save a changed project that has no file yet before it is closed, telling whether it may be closed. */
   async readyToClose(): Promise<boolean> {
-    if (this.project === null || this.hasFile || !this.#changedSinceOpened) {
+    return (await this.#closeDecision()) !== 'cancelled';
+  }
+
+  /** Prepares the window to close: asks about a project without file, closing at once when the user chooses not to save it, then saves, and when that save fails keeps the window open unless the user saves elsewhere or chooses to close without saving. */
+  async prepareClose(): Promise<boolean> {
+    const decision = await this.#closeDecision();
+    if (decision !== 'proceed') {
+      return decision === 'discarded';
+    }
+    try {
+      await this.flush();
       return true;
+    } catch (error) {
+      if (!(error instanceof FileActionError)) {
+        console.error('The project could not be saved before closing:', error);
+      }
+      const code = error instanceof FileActionError ? error.failure.code : 'TASK_FAILED';
+      const detail = fileErrorMessage(this.messages, code) ?? this.messages.fileErrors.TASK_FAILED;
+      const choice = await this.#ask({ reason: 'saveFailed', detail });
+      return choice === 'save' ? this.saveAs() : choice === 'discard';
     }
-    const choice = await new Promise<CloseChoice>((answer) => {
-      this.closePrompt = { answer };
-    });
-    this.closePrompt = null;
+  }
+
+  /** Asks whether to save a changed project that has no file yet, telling whether to go on with saving, to close without saving, or to keep the project open. */
+  async #closeDecision(): Promise<CloseDecision> {
+    if (this.project === null || this.hasFile || !this.#changedSinceOpened) {
+      return 'proceed';
+    }
+    const choice = await this.#ask({ reason: 'unsaved' });
     if (choice === 'save') {
-      await this.saveAs();
-      return this.hasFile;
+      return (await this.saveAs()) ? 'proceed' : 'cancelled';
     }
-    return choice === 'discard';
+    return choice === 'discard' ? 'discarded' : 'cancelled';
+  }
+
+  /** Shows a question about closing a project once the questions asked before it are answered, so that each question gets its own answer. */
+  #ask(question: CloseQuestion): Promise<CloseChoice> {
+    const asked = this.#lastQuestion
+      .then(
+        () =>
+          new Promise<CloseChoice>((answer) => {
+            this.#closePrompt = { ...question, answer };
+          }),
+      )
+      .finally(() => {
+        this.#closePrompt = null;
+      });
+    this.#lastQuestion = asked;
+    return asked;
   }
 
   /** Starts a new empty project. */
@@ -207,7 +271,12 @@ export class AppState {
     }
     const { messages, createId, now } = this.#context;
     const project = buildNewProject(messages.projects.untitled, now(), createId);
-    this.#attach(await this.#files.create(project));
+    const created = await this.#files.create(project);
+    if (!created.ok) {
+      this.#showResult(created);
+      return;
+    }
+    this.#attach(created.value);
   }
 
   /** Asks for a project file and opens it. */
@@ -244,11 +313,13 @@ export class AppState {
     await this.loadRecentProjects();
   }
 
-  /** Asks where to save the project, then saves it there. */
-  async saveAs(): Promise<void> {
-    this.#showResult(await this.#files.saveAs());
+  /** Asks where to save the project, then saves it there, telling whether it was saved. */
+  async saveAs(): Promise<boolean> {
+    const saved = await this.#files.saveAs();
+    this.#showResult(saved);
     this.hasFile = this.#files.hasFile();
     await this.loadRecentProjects();
+    return saved.ok;
   }
 
   /** Writes the project as a CSV table or a JSON file where the user chooses, suggesting the project name, and tells the name of the file written. */
@@ -261,7 +332,7 @@ export class AppState {
     if (text === null) {
       return;
     }
-    const exported = await this.#context.bridge.exportProject(kind, text, project.name);
+    const exported = await this.#files.exportFile(kind, text, project.name);
     if (exported.ok) {
       this.#notify(
         'info',
@@ -271,14 +342,26 @@ export class AppState {
     this.#showResult(exported);
   }
 
-  /** Renames the project, telling whether the name was accepted. */
+  /** Renames the project, telling whether the name was accepted and telling the user why when the project refuses it. */
   rename(name: string): boolean {
     const trimmed = name.trim();
     const session = this.#session;
     if (session === null || trimmed === '' || trimmed === this.project?.name) {
       return false;
     }
-    return session.apply({ type: 'updateProject', fields: { name: trimmed } }).ok;
+    const renamed = session.apply({ type: 'updateProject', fields: { name: trimmed } });
+    if (!renamed.ok) {
+      this.#notify('error', editErrorMessage(this.messages, renamed.error[0]?.code ?? ''));
+    }
+    return renamed.ok;
+  }
+
+  /** Opens or closes a summary task from the keyboard, doing nothing for a task that is not a summary or already in that state. */
+  setSummaryOpen(id: TaskId, open: boolean): void {
+    const isSummary = this.project?.tasks.some((task) => task.id === id && task.kind === 'summary');
+    if (isSummary === true && this.collapsed.has(id) === open) {
+      this.collapsed = toggledSummary(this.collapsed, id);
+    }
   }
 
   /** Opens or closes a summary task. */
@@ -347,7 +430,7 @@ export class AppState {
     if (draft.basis !== this.detailsBasis(task.id)) {
       return editErrorMessage(this.messages, 'TASK_CHANGED');
     }
-    const blockProblem = this.project === null ? null : this.#blockProblem(draft);
+    const blockProblem = this.#blockProblem(draft);
     if (blockProblem !== null) {
       return blockProblem;
     }
@@ -361,7 +444,7 @@ export class AppState {
     return refusal;
   }
 
-  /** Adds a task after the selected one, selects it and asks the table to edit its name. */
+  /** Adds a task after the selected one, selects it and asks the table to edit its name, telling the user when the project refuses it. */
   addTask(): void {
     const session = this.#session;
     const project = this.project;
@@ -373,9 +456,9 @@ export class AppState {
       this.selectedTaskId,
       this.messages.table.newTask,
     );
-    if (inserted.ok && this.edit(() => ({ ok: true, value: inserted.value.operations }))) {
-      this.selectedTaskId = inserted.value.taskId;
-      this.editRequest = { taskId: inserted.value.taskId, column: 'name' };
+    if (this.edit(() => ({ ok: true, value: inserted.operations }))) {
+      this.selectedTaskId = inserted.taskId;
+      this.editRequest = { taskId: inserted.taskId, column: 'name' };
     }
   }
 
@@ -402,18 +485,27 @@ export class AppState {
 
   /** Undoes the latest local change. */
   undo(): void {
-    const undone = this.#session?.history.undo();
-    if (undone?.ok === true) {
-      this.#notifyRepairs(undone.value.length);
-    }
+    this.#showHistoryStep(this.#session?.history.undo(), this.messages.notices.undoFailed);
   }
 
   /** Redoes the latest undone change. */
   redo(): void {
-    const redone = this.#session?.history.redo();
-    if (redone?.ok === true) {
-      this.#notifyRepairs(redone.value.length);
+    this.#showHistoryStep(this.#session?.history.redo(), this.messages.notices.redoFailed);
+  }
+
+  /** Tells the repairs an undone or redone step needed, or that the step could not be applied and the project was left as it was. */
+  #showHistoryStep(
+    step: Result<readonly SharedRepair[], MergeFailure> | undefined,
+    refusal: string,
+  ): void {
+    if (step === undefined) {
+      return;
     }
+    if (!step.ok) {
+      this.#notify('warning', refusal);
+      return;
+    }
+    this.#notifyRepairs(step.value);
   }
 
   /** Saves at once what is not saved yet, before the window closes. */
@@ -421,39 +513,69 @@ export class AppState {
     return this.#files.flush();
   }
 
+  /** Tells the user that an action stopped on an unexpected error, which is logged for diagnosis. */
+  reportUnexpectedError(error: unknown): void {
+    console.error('Unexpected error:', error);
+    this.#notify('error', this.messages.notices.unexpectedError);
+  }
+
+  /** Tells the user that the calendar to choose a date could not open, so the date has to be typed. */
+  reportPickerUnavailable(error: unknown): void {
+    console.error('The date picker could not open:', error);
+    this.#notify('warning', this.messages.notices.pickerUnavailable);
+  }
+
+  /** Tells the user, once per part, that the timeline or the patterns of its bars cannot be drawn. */
+  reportDrawingProblem(part: DrawingPart): void {
+    if (this.#drawingProblems[part]) {
+      return;
+    }
+    this.#drawingProblems[part] = true;
+    console.error(`The ${part} could not be drawn: the canvas gave no drawing context or pattern.`);
+    this.#notify('warning', this.messages.notices.drawingUnavailable[part]);
+  }
+
+  /** Shows the detailed list behind a message. */
+  openReport(report: Report): void {
+    this.#report = report;
+  }
+
+  /** Closes the detailed list of a message. */
+  closeReport(): void {
+    this.#report = null;
+  }
+
   /** Removes a message. */
   dismiss(id: number): void {
     this.notices = this.notices.filter((notice) => notice.id !== id);
   }
 
-  /** Shows a project read from a file, with its warnings, and returns it, or tells why it could not be read and returns null. */
-  async #load(opening: Promise<BridgeResult<OpenedSession>>): Promise<OpenedSession | null> {
+  /** Shows a project read from a file, with its warnings and repairs, and returns it, or tells why it could not be read and returns null. */
+  async #load(opening: Promise<ActionResult<OpenedSession>>): Promise<OpenedSession | null> {
     const opened = await opening;
     if (!opened.ok) {
       this.#showResult(opened);
       return null;
     }
     this.#attach(opened.value.session);
-    const warnings = opened.value.warnings.length;
-    if (warnings > 0) {
+    const { warnings } = opened.value;
+    if (warnings.length > 0) {
       this.#notify(
         'warning',
-        countMessage(this.messages.notices.importWarnings, warnings, this.locale),
+        countMessage(this.messages.notices.importWarnings, warnings.length, this.locale),
+        this.#issueReport(this.messages.report.importWarnings, warnings),
       );
     }
-    this.#notifyRepairs(opened.value.session.openingRepairs.length);
+    this.#notifyRepairs(opened.value.session.openingRepairs);
     await this.loadRecentProjects();
     return opened.value;
   }
 
-  /** Returns what the editing commands need to know about the project. */
+  /** Returns what the editing commands need to know about the open project. */
   #editContext(project: Project): EditContext {
     return {
       project,
-      outline:
-        project === this.project
-          ? this.outline
-          : buildPlanOutline(project.tasks, NOTHING_COLLAPSED),
+      outline: this.outline,
       createId: this.#context.createId,
       dayHours: this.calendar?.workingHoursPerDay ?? DEFAULT_DAY_HOURS,
     };
@@ -557,15 +679,19 @@ export class AppState {
     return text.value;
   }
 
-  /** Tells the user why a file action failed, a cancelled action needing no message. */
-  #showResult(result: BridgeResult<unknown>): void {
+  /** Tells the user why a file action failed, with the list of the problems found when there are any, a cancelled action needing no message. */
+  #showResult(result: ActionResult<unknown>): void {
     if (result.ok) {
       return;
     }
     const text = fileErrorMessage(this.messages, result.error.code);
-    if (text !== null) {
-      this.#notify('error', text);
+    if (text === null) {
+      return;
     }
+    const issues = 'issues' in result.error ? result.error.issues : [];
+    const report =
+      issues.length === 0 ? null : this.#issueReport(this.messages.report.fileFailed, issues);
+    this.#notify('error', text, report);
   }
 
   /** Tells the user that the project now starts earlier, so that a task placed before it fits. */
@@ -577,11 +703,31 @@ export class AppState {
     }
   }
 
-  /** Tells the user that changes were adjusted to keep the project valid. */
-  #notifyRepairs(count: number): void {
-    if (count > 0) {
-      this.#notify('warning', countMessage(this.messages.notices.repairs, count, this.locale));
+  /** Tells the user that changes were adjusted to keep the project valid, with the list of each adjustment and the task it concerns. */
+  #notifyRepairs(repairs: readonly SharedRepair[]): void {
+    if (repairs.length === 0) {
+      return;
     }
+    const names: Readonly<Record<string, string>> = Object.fromEntries(
+      this.project?.tasks.map((task) => [task.id, task.name]) ?? [],
+    );
+    const entries = repairs.map((repair) =>
+      repairText(
+        this.messages,
+        repair,
+        (id) => (Object.hasOwn(names, id) ? names[id] : undefined) ?? null,
+      ),
+    );
+    this.#notify(
+      'warning',
+      countMessage(this.messages.notices.repairs, repairs.length, this.locale),
+      { title: this.messages.report.repairs, entries },
+    );
+  }
+
+  /** Builds the detailed list of the problems or warnings of a file, each with its place. */
+  #issueReport(title: string, issues: readonly ReportedIssue[]): Report {
+    return { title, entries: issues.map((issue) => issueText(this.messages, issue)) };
   }
 
   /** Shows the failure of an action the user did not start, such as an automatic save. */
@@ -594,12 +740,15 @@ export class AppState {
     console.error(error);
   }
 
-  /** Adds a message, once only when the same message is already shown. */
-  #notify(kind: NoticeKind, text: string): void {
-    if (this.notices.some((notice) => notice.text === text)) {
-      return;
-    }
+  /** Adds a message, replacing the same message already shown so that it is shown once, with its latest details; a message with details, or asked to last, stays until the user dismisses it. */
+  #notify(
+    kind: NoticeKind,
+    text: string,
+    report: Report | null = null,
+    lasting = report !== null,
+  ): void {
     this.#nextNoticeId += 1;
-    this.notices = [...this.notices, { id: this.#nextNoticeId, kind, text }];
+    const others = this.notices.filter((notice) => notice.text !== text);
+    this.notices = [...others, { id: this.#nextNoticeId, kind, text, report, lasting }];
   }
 }

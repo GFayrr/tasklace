@@ -15,7 +15,7 @@ import { mergeSharedUpdate } from '../shared/shared-project';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { at } from '../testing/civil-time';
 import { hideListContent } from '../testing/hidden-list-content';
-import { projectArbitrary } from '../testing/project-arbitrary';
+import { projectArbitrary, richProjectArbitrary } from '../testing/project-arbitrary';
 import {
   link,
   milestone,
@@ -26,10 +26,12 @@ import {
 } from '../testing/project-builder';
 import { crc32 } from './crc32';
 import {
+  checkStateToSave,
   encodeTasklaceFile,
   encodeTasklaceState,
   HEADER_BYTES,
   openTasklaceFile,
+  readTasklaceDocument,
   readTasklaceFile,
   type Compressor,
 } from './tasklace-file';
@@ -166,7 +168,7 @@ describe('tasklace file', () => {
 
   it('reads back every generated project unchanged', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
     fc.assert(
-      fc.property(projectArbitrary, ({ project: input }) => {
+      fc.property(fc.oneof(projectArbitrary, richProjectArbitrary), ({ project: input }) => {
         const opened = openTasklaceFile(fileOf(input), storingCompressor);
         expect(opened.ok && opened.value.project()).toEqual(sorted(input));
       }),
@@ -225,6 +227,23 @@ describe('tasklace file', () => {
     });
     const clean = openTasklaceFile(fileOf(SAMPLE), storingCompressor);
     expect(clean.ok && clean.value.openingRepairs).toEqual([]);
+  });
+
+  it('reads a file with the identifier of its document, refusing a file without one', () => {
+    const source = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    const read = readTasklaceDocument(
+      encodeTasklaceFile(source, storingCompressor),
+      storingCompressor,
+    );
+    expect(read.ok && read.value.documentId).toBe(TEST_DOCUMENT_ID);
+    expect(read.ok && readSharedData(read.value.document)).toEqual(readSharedData(source));
+    const anonymous = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    anonymous.getMap('project').delete('documentId');
+    expect(
+      readTasklaceDocument(encodeTasklaceFile(anonymous, storingCompressor), storingCompressor),
+    ).toEqual(
+      failure({ code: 'INVALID_PROJECT', issues: [{ path: 'documentId', code: 'MISSING_FIELD' }] }),
+    );
   });
 
   it('opens a session knowing the identifier of the document', () => {
@@ -407,4 +426,56 @@ describe('reading an untrusted tasklace file', () => {
       );
     },
   );
+});
+
+describe('checking a state before saving it', () => {
+  const OTHER_DOCUMENT_ID = '00000000-0000-4000-8000-0000000000aa';
+
+  it('accepts the complete state of a valid project of the expected document', () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    expect(checkStateToSave(state, TEST_DOCUMENT_ID)).toEqual(success(null));
+  });
+
+  it('refuses the state of another document', () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, OTHER_DOCUMENT_ID));
+    expect(checkStateToSave(state, TEST_DOCUMENT_ID)).toEqual(failure({ code: 'WRONG_DOCUMENT' }));
+  });
+
+  it('refuses a state that cannot be decoded, or that misses an update it depends on', () => {
+    expect(checkStateToSave(Uint8Array.from([255, 255, 255, 1]), TEST_DOCUMENT_ID)).toEqual(
+      failure({ code: 'INVALID_STATE', issues: [] }),
+    );
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    const between = Y.encodeStateVector(document);
+    document.getMap('project').set('name', 'Later');
+    const dependent = Y.encodeStateAsUpdate(document, between);
+    expect(checkStateToSave(dependent, TEST_DOCUMENT_ID)).toEqual(
+      failure({ code: 'INVALID_STATE', issues: [] }),
+    );
+  });
+
+  it('refuses a state holding hidden content, as when reading a file', () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    hideListContent(document.getMap(TASKS_ROOT));
+    expect(checkStateToSave(Y.encodeStateAsUpdate(document), TEST_DOCUMENT_ID)).toEqual(
+      failure({ code: 'INVALID_STATE', issues: [{ path: 'tasks', code: 'WRONG_TYPE' }] }),
+    );
+  });
+
+  it('accepts the state of every generated project', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
+    fc.assert(
+      fc.property(fc.oneof(projectArbitrary, richProjectArbitrary), ({ project: input }) => {
+        const state = Y.encodeStateAsUpdate(createSharedDocument(input, TEST_DOCUMENT_ID));
+        expect(checkStateToSave(state, TEST_DOCUMENT_ID)).toEqual(success(null));
+      }),
+    );
+  });
+
+  it('refuses the state of an invalid project with its problems, without repairing it', () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    document.getMap('project').set('name', '');
+    expect(checkStateToSave(Y.encodeStateAsUpdate(document), TEST_DOCUMENT_ID)).toEqual(
+      failure({ code: 'INVALID_STATE', issues: [{ path: 'name', code: 'EMPTY_TEXT' }] }),
+    );
+  });
 });

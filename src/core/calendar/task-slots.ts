@@ -21,6 +21,7 @@ import {
   workingHoursFrom,
   type WorkingTimeErrorCode,
 } from './working-time';
+import { valueAt } from '../table-value';
 
 const MIN_HOURS_PER_DAY = 1;
 
@@ -79,12 +80,12 @@ export function computeSegmentBounds(
     window.value,
     placement.durationHours,
   );
-  const start = startOfDay(firstDay) + (firstDayHours[0] ?? 0);
+  const start = startOfDay(firstDay) + valueAt(firstDayHours, 0);
   const remaining = toQuarters(placement.durationHours) - firstDayHours.length;
   if (remaining === 0) {
     return success({
       start,
-      end: startOfDay(firstDay) + (firstDayHours.at(-1) ?? 0) + QUARTER_HOUR,
+      end: startOfDay(firstDay) + valueAt(firstDayHours, firstDayHours.length - 1) + QUARTER_HOUR,
     });
   }
   const dailyQuarters = window.value.length;
@@ -94,7 +95,7 @@ export function computeSegmentBounds(
     return failure('BEYOND_PLANNING_HORIZON');
   }
   const lastDayQuarters = remaining - (extraDays - 1) * dailyQuarters;
-  const lastQuarter = window.value[lastDayQuarters - 1] ?? 0;
+  const lastQuarter = valueAt(window.value, lastDayQuarters - 1);
   return success({ start, end: startOfDay(lastDay) + lastQuarter + QUARTER_HOUR });
 }
 
@@ -180,7 +181,7 @@ function firstDayHoursOfDay(
   window: readonly number[],
   durationHours: number,
 ): number[] {
-  const earliestHourOfDay = Math.max(hourOfDay(firstHour), window[0] ?? 0);
+  const earliestHourOfDay = Math.max(hourOfDay(firstHour), valueAt(window, 0));
   return workingHoursFrom(calendar, earliestHourOfDay).slice(
     0,
     Math.min(window.length, toQuarters(durationHours)),

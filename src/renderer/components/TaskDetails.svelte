@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Project } from '../../core/model/project';
   import type { AppState } from '../app/app-state.svelte';
   import { fillMessage } from '../i18n/messages';
   import {
@@ -10,21 +11,14 @@
   import { parseDuration } from '../plan/durations';
   import Icon from './Icon.svelte';
 
-  let { app }: { app: AppState } = $props();
+  let { app, project }: { app: AppState; project: Project } = $props();
 
   const text = $derived(app.messages.details);
-  const task = $derived(app.project?.tasks.find((candidate) => candidate.id === app.detailsTaskId));
+  const task = $derived(project.tasks.find((candidate) => candidate.id === app.detailsTaskId));
   const dayHours = $derived(app.calendar?.workingHoursPerDay ?? 0);
   const tags = $derived(
-    [...(app.project?.tags ?? [])].sort((left, right) =>
-      left.name.localeCompare(right.name, app.locale),
-    ),
+    [...project.tags].sort((left, right) => left.name.localeCompare(right.name, app.locale)),
   );
-  const partDay = $derived.by(() => {
-    const written = draft?.hoursPerDay.trim() ?? '';
-    const hours = written === '' ? null : parseDuration(written, dayHours);
-    return hours !== null && hours < dayHours;
-  });
   let dialog: HTMLDialogElement | undefined = $state();
   let draft = $state<TaskDraft | null>(null);
   let refusal = $state<string | null>(null);
@@ -50,12 +44,16 @@
     dialog.showModal();
   });
 
+  /** Tells whether a draft works fewer hours a day than the project, so that a daily start time makes sense. */
+  function worksPartOfDay(written: TaskDraft): boolean {
+    const hours = parseDuration(written.hoursPerDay.trim(), dayHours);
+    return hours !== null && hours < dayHours;
+  }
+
   /** Applies the panel, keeping it open with the reason when the change is refused. */
-  function save(event: SubmitEvent): void {
+  function save(event: SubmitEvent, current: TaskDraft): void {
     event.preventDefault();
-    if (draft !== null) {
-      refusal = app.saveDetails($state.snapshot(draft));
-    }
+    refusal = app.saveDetails($state.snapshot(current));
   }
 
   /** Closes the panel without applying anything. */
@@ -68,7 +66,12 @@
 
 <dialog class="details" aria-labelledby="details-title" bind:this={dialog} onclose={close}>
   {#if draft !== null && task !== undefined}
-    <form onsubmit={save}>
+    {@const current = draft}
+    <form
+      onsubmit={(event) => {
+        save(event, current);
+      }}
+    >
       <h2 id="details-title">{text.title}</h2>
       {#if refusal !== null}
         <p class="refusal" role="alert">{refusal}</p>
@@ -109,7 +112,7 @@
             <input bind:value={draft.hoursPerDay} />
             <small>{text.hoursPerDayHint}</small>
           </label>
-          {#if partDay}
+          {#if worksPartOfDay(current)}
             <label class="field">
               <span>{text.dailyStart}</span>
               <input type="time" step="900" bind:value={draft.dailyStart} />
@@ -146,9 +149,7 @@
                   class="icon-button"
                   aria-label={fillMessage(text.removeBlock, { number: String(index + 1) })}
                   onclick={() => {
-                    if (draft !== null) {
-                      draft = withoutBlock(draft, index);
-                    }
+                    draft = withoutBlock(current, index);
                   }}
                 >
                   <Icon name="trash" />
@@ -160,9 +161,7 @@
             type="button"
             class="button"
             onclick={() => {
-              if (draft !== null) {
-                draft = withAddedBlock(draft, dayHours);
-              }
+              draft = withAddedBlock(current, dayHours);
             }}
           >
             <Icon name="plus" />

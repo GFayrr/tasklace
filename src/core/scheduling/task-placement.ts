@@ -117,17 +117,21 @@ export function placeTaskLatest(
   return placeTask(calendar, task, Math.max(firstLate.value - QUARTER_HOUR, MIN_PROJECT_HOUR));
 }
 
-/** Computes on demand the exact working time slots of every block of a placed work task. */
+/** Computes on demand the exact working time slots of every block of a placed work task, refusing a placement with a block the task does not have. */
 export function computePlacementSlots(
   calendar: CompiledCalendar,
   task: WorkTask,
   placement: Placement,
-): Result<TimeSlot[][], TaskSlotsErrorCode> {
+): Result<TimeSlot[][], PlacementErrorCode> {
   const slotsByBlock: TimeSlot[][] = [];
   for (const [index, segment] of placement.segments.entries()) {
+    const block = task.segments[index];
+    if (block === undefined) {
+      return failure('INVALID_SEGMENTS');
+    }
     const slots = computeTaskSlots(calendar, {
       start: segment.start,
-      durationHours: task.segments[index]?.durationHours ?? 0,
+      durationHours: block.durationHours,
       hoursPerDay: task.hoursPerDay,
       dailyStartHour: task.dailyStartHour,
     });

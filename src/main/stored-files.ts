@@ -36,5 +36,10 @@ export function isStoredPath(value: unknown): value is string {
 
 /** Tells whether a file system error means the file does not exist. */
 export function isMissingFile(error: unknown): boolean {
-  return error instanceof Error && Reflect.get(error, 'code') === 'ENOENT';
+  return isSystemError(error) && error.code === 'ENOENT';
+}
+
+/** Tells whether an error comes from the system, such as a missing file or a refused access, rather than from a fault of the program. */
+export function isSystemError(error: unknown): error is Error & { readonly code: string } {
+  return error instanceof Error && typeof Reflect.get(error, 'code') === 'string';
 }

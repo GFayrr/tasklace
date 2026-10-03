@@ -64,4 +64,9 @@ describe('editErrorMessage', () => {
     expect(editErrorMessage(messages, 'SOMETHING_ELSE')).toBe(messages.editErrors.NOT_POSSIBLE);
     expect(editErrorMessage(messages, 'toString')).toBe(messages.editErrors.NOT_POSSIBLE);
   });
+
+  it('gives the text of the problem found for a reason that has no edit message of its own', () => {
+    expect(editErrorMessage(messages, 'EMPTY_TEXT')).toBe(messages.issues.EMPTY_TEXT);
+    expect(editErrorMessage(messages, 'TOO_LONG')).toBe(messages.editErrors.TOO_LONG);
+  });
 });

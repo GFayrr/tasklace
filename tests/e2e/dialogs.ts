@@ -64,3 +64,38 @@ export async function askedQuestion(application: ElectronApplication): Promise<s
     return typeof recorded === 'string' ? recorded : null;
   });
 }
+
+/** Makes the questions of the main process whose first button has a given label be answered with another of their buttons, recording the details of each question asked, and refuses any other question. */
+export async function answerQuestions(
+  application: ElectronApplication,
+  answers: Readonly<Record<string, string>>,
+): Promise<void> {
+  await application.evaluate(({ dialog }, chosen) => {
+    Object.assign(globalThis, { askedDetails: [] });
+    dialog.showMessageBox = (...values: unknown[]) => {
+      const options = values.find(
+        (value): value is { message: string; detail?: string; buttons?: string[] } =>
+          typeof value === 'object' && value !== null && 'message' in value,
+      );
+      const first = options?.buttons?.[0] ?? '';
+      const answer = Object.hasOwn(chosen, first) ? chosen[first] : undefined;
+      const response = answer === undefined ? -1 : (options?.buttons ?? []).indexOf(answer);
+      if (response < 0) {
+        return Promise.reject(new Error(`Unexpected question: ${options?.message ?? ''}`));
+      }
+      const asked: unknown = Reflect.get(globalThis, 'askedDetails');
+      if (Array.isArray(asked)) {
+        asked.push(options?.detail ?? options?.message ?? '');
+      }
+      return Promise.resolve({ response, checkboxChecked: false });
+    };
+  }, answers);
+}
+
+/** Returns the details of the questions the main process asked since answers were given to them. */
+export async function askedDetails(application: ElectronApplication): Promise<string[]> {
+  return application.evaluate(() => {
+    const recorded: unknown = Reflect.get(globalThis, 'askedDetails');
+    return Array.isArray(recorded) ? recorded.map(String) : [];
+  });
+}

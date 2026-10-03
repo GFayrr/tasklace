@@ -15,6 +15,7 @@ import {
   type ProjectHour,
 } from '../time';
 import type { CompiledCalendar } from './compile-calendar';
+import { valueAt } from '../table-value';
 
 export type WorkingTimeErrorCode =
   'INVALID_INSTANT' | 'INVALID_INTERVAL' | 'INVALID_HOURS' | 'BEYOND_PLANNING_HORIZON';
@@ -178,7 +179,7 @@ function isValidHourCount(hours: number): boolean {
 
 /** Returns the number of working quarter hours of the supported period that start before a day. */
 function workingQuartersBeforeDay(calendar: CompiledCalendar, day: DayIndex): number {
-  return calendar.workingQuartersBeforeDay[day - MIN_DAY_INDEX] ?? 0;
+  return valueAt(calendar.workingQuartersBeforeDay, day - MIN_DAY_INDEX);
 }
 
 /** Returns the number of working quarter hours of the whole supported period. */
@@ -194,7 +195,7 @@ function workingQuartersBefore(calendar: CompiledCalendar, instant: ProjectHour)
     return beforeDay;
   }
   const quarterOfDay = toQuarters(hourOfDay(instant));
-  return beforeDay + (calendar.workingQuartersBeforeQuarterOfDay[quarterOfDay] ?? 0);
+  return beforeDay + valueAt(calendar.workingQuartersBeforeQuarterOfDay, quarterOfDay);
 }
 
 /** Returns the start or the end of the working quarter hour with a given rank (0 being the first one). */
@@ -207,12 +208,15 @@ function boundaryOfWorkingQuarter(
     return failure('BEYOND_PLANNING_HORIZON');
   }
   const day = dayOfWorkingQuarter(calendar, rank);
-  const start = calendar.workingQuartersOfDay[rank - workingQuartersBeforeDay(calendar, day)] ?? 0;
+  const start = valueAt(
+    calendar.workingQuartersOfDay,
+    rank - workingQuartersBeforeDay(calendar, day),
+  );
   return success(startOfDay(day) + start + (boundary === 'end' ? QUARTER_HOUR : 0));
 }
 
 /** Returns the day containing the working quarter hour with a given rank, every working day having the same number of them. */
 function dayOfWorkingQuarter(calendar: CompiledCalendar, rank: number): DayIndex {
   const dayRank = Math.floor(rank / calendar.workingQuartersOfDay.length);
-  return MIN_DAY_INDEX + (calendar.workingDayOffsetsByRank[dayRank] ?? 0);
+  return MIN_DAY_INDEX + valueAt(calendar.workingDayOffsetsByRank, dayRank);
 }

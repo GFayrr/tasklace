@@ -51,19 +51,19 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = [
   { foreground: 'error', background: 'nonWorking', minimum: INTERFACE_MINIMUM_RATIO },
 ];
 
-/** Tells whether a value is a colour written as six hexadecimal digits after a hash. */
+/** Tells whether a value is a color written as six hexadecimal digits after a hash. */
 export function isThemeHexColor(value: string): boolean {
   return HEX_COLOR_PATTERN.test(value);
 }
 
-/** Computes the WCAG 2 contrast ratio between two colours written as six hexadecimal digits. */
+/** Computes the WCAG 2 contrast ratio between two colors written as six hexadecimal digits. */
 export function contrastRatio(first: string, second: string): number {
   const lighter = Math.max(relativeLuminance(first), relativeLuminance(second));
   const darker = Math.min(relativeLuminance(first), relativeLuminance(second));
   return (lighter + FLARE) / (darker + FLARE);
 }
 
-/** Lists the pairs of colours of a theme whose contrast is below the WCAG AA minimum. */
+/** Lists the pairs of colors of a theme whose contrast is below the WCAG AA minimum. */
 export function findContrastIssues(theme: Theme): ContrastIssue[] {
   return CONTRAST_PAIRS.flatMap((pair) => {
     const ratio = contrastRatio(theme[pair.foreground], theme[pair.background]);
@@ -71,7 +71,7 @@ export function findContrastIssues(theme: Theme): ContrastIssue[] {
   });
 }
 
-/** Computes the WCAG 2 relative luminance of a colour. */
+/** Computes the WCAG 2 relative luminance of a color. */
 function relativeLuminance(color: string): number {
   const red = linearChannel(color, RED_OFFSET);
   const green = linearChannel(color, GREEN_OFFSET);
@@ -79,7 +79,7 @@ function relativeLuminance(color: string): number {
   return RED_WEIGHT * red + GREEN_WEIGHT * green + BLUE_WEIGHT * blue;
 }
 
-/** Reads one channel of a colour and converts it to linear light. */
+/** Reads one channel of a color and converts it to linear light. */
 function linearChannel(color: string, offset: number): number {
   const value = Number.parseInt(color.slice(offset, offset + CHANNEL_DIGITS), HEX_RADIX);
   const channel = value / CHANNEL_MAXIMUM;

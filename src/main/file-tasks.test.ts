@@ -1,12 +1,13 @@
 import { DEFAULT_CALENDAR } from '../core/calendar/default-calendar';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as Y from 'yjs';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { exportProjectCsv } from '../core/exchange/csv/project-csv-export';
 import { exportProjectJson } from '../core/exchange/project-json';
-import { encodeTasklaceFile } from '../core/file/tasklace-file';
+import { encodeTasklaceFile, encodeTasklaceState } from '../core/file/tasklace-file';
+import { MAX_FILE_BYTES } from '../core/limits';
 import { createSharedDocument, readDocumentId } from '../core/shared/shared-document';
 import { readSharedProject } from '../core/shared/shared-project';
 import { unwrap } from '../core/testing/arbitraries';
@@ -18,7 +19,7 @@ import {
   workTask,
 } from '../core/testing/project-builder';
 import { runFileTask, type FileTaskResult, type LoadedProject } from './file-tasks';
-import { parseLocalCopyIndex } from './local-copies';
+import { readIndexText } from './local-copies';
 import { zlibCompressor } from './zlib-compressor';
 
 const NAMING = { untitled: 'Untitled project', fromFile: 'From the file' };
@@ -42,13 +43,30 @@ afterEach(async () => {
   await rm(folder, { recursive: true, force: true });
 });
 
+const SAVED_WITH_COPY = { ok: true, value: { kind: 'saved', localCopySaved: true } };
+
 /** Returns the project a task loaded, failing the test when it failed or loaded nothing. */
 function loadedOf(result: FileTaskResult): LoadedProject {
   const value = unwrap(result);
-  if (value === null) {
+  if (value.kind !== 'loaded') {
     throw new Error('Nothing was loaded');
   }
   return value;
+}
+
+/** Reads the local copy index kept in a folder. */
+async function indexIn(copies: string) {
+  return readIndexText(await readFile(join(copies, 'index.json'), 'utf8')).index;
+}
+
+/** Runs a task while silencing, and returning, what it logs as errors. */
+async function quietly(task: () => Promise<FileTaskResult>) {
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  try {
+    return { result: await task(), logged: logged.mock.calls.map((call) => String(call[0])) };
+  } finally {
+    logged.mockRestore();
+  }
 }
 
 /** Opens a Yjs state as a shared document. */
@@ -59,12 +77,11 @@ function documentOf(state: Uint8Array): Y.Doc {
 }
 
 describe('file tasks', () => {
-  it('saves a project and its local copy, then opens it back unchanged', async () => {
+  it('saves a project and its local copy, creating the folder of the copies, then opens it back unchanged', async () => {
     const path = join(folder, 'plan.tasklace');
     const source = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const state = Y.encodeStateAsUpdate(source);
-    const copies = join(folder, 'copies');
-    await mkdir(copies);
+    const copies = join(folder, 'copies', 'nested');
     expect(
       await runFileTask({
         kind: 'saveProject',
@@ -74,14 +91,14 @@ describe('file tasks', () => {
         localCopyFolder: copies,
         savedAt: SAVED_AT,
       }),
-    ).toEqual({ ok: true, value: null });
+    ).toEqual(SAVED_WITH_COPY);
     const opened = loadedOf(await runFileTask({ kind: 'openProject', path }));
     expect(opened.documentId).toBe(TEST_DOCUMENT_ID);
     expect(readSharedProject(documentOf(opened.state))).toEqual(readSharedProject(source));
     expect(await readFile(join(copies, `${TEST_DOCUMENT_ID}.tasklace`))).toEqual(
       await readFile(path),
     );
-    const index = parseLocalCopyIndex(await readFile(join(copies, 'index.json'), 'utf8'));
+    const index = await indexIn(copies);
     expect(index[TEST_DOCUMENT_ID]).toEqual({ path, savedAt: new Date(SAVED_AT).toISOString() });
   });
 
@@ -181,9 +198,8 @@ describe('file tasks', () => {
       localCopyFolder: folder,
       savedAt: SAVED_AT,
     } as const;
-    expect(await runFileTask(task)).toEqual({ ok: true, value: null });
-    const index = parseLocalCopyIndex(await readFile(join(folder, 'index.json'), 'utf8'));
-    expect(index[TEST_DOCUMENT_ID]?.path).toBeNull();
+    expect(await runFileTask(task)).toEqual(SAVED_WITH_COPY);
+    expect((await indexIn(folder))[TEST_DOCUMENT_ID]?.path).toBeNull();
     const opened = loadedOf(
       await runFileTask({
         kind: 'openProject',
@@ -193,7 +209,7 @@ describe('file tasks', () => {
     expect(opened.documentId).toBe(TEST_DOCUMENT_ID);
   });
 
-  it('reports a project that cannot be written', async () => {
+  it('reports a project that cannot be written, logging why, and still writes its local copy', async () => {
     const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
     const task = {
       kind: 'saveProject',
@@ -203,6 +219,131 @@ describe('file tasks', () => {
       localCopyFolder: folder,
       savedAt: SAVED_AT,
     } as const;
-    expect(await runFileTask(task)).toEqual({ ok: false, error: { code: 'WRITE_FAILED' } });
+    const { result, logged } = await quietly(() => runFileTask(task));
+    expect(result).toEqual({ ok: false, error: { code: 'WRITE_FAILED' } });
+    expect(logged).toEqual(['The project file could not be written:']);
+    const opened = loadedOf(
+      await runFileTask({
+        kind: 'openProject',
+        path: join(folder, `${TEST_DOCUMENT_ID}.tasklace`),
+      }),
+    );
+    expect(opened.documentId).toBe(TEST_DOCUMENT_ID);
+  });
+
+  it('saves a project whose local copy cannot be written, telling so, since its file is written', async () => {
+    const path = join(folder, 'plan.tasklace');
+    const blocking = join(folder, 'a-file');
+    await writeFile(blocking, '');
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const task = {
+      kind: 'saveProject',
+      path,
+      state,
+      documentId: TEST_DOCUMENT_ID,
+      localCopyFolder: join(blocking, 'copies'),
+      savedAt: SAVED_AT,
+    } as const;
+    const { result, logged } = await quietly(() => runFileTask(task));
+    expect(result).toEqual({ ok: true, value: { kind: 'saved', localCopySaved: false } });
+    expect(logged).toEqual(['The local copy could not be written:']);
+    expect(loadedOf(await runFileTask({ kind: 'openProject', path })).documentId).toBe(
+      TEST_DOCUMENT_ID,
+    );
+  });
+
+  it('fails to save a project without file whose local copy cannot be written, since nothing was written', async () => {
+    const blocking = join(folder, 'a-file');
+    await writeFile(blocking, '');
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const task = {
+      kind: 'saveProject',
+      path: null,
+      state,
+      documentId: TEST_DOCUMENT_ID,
+      localCopyFolder: join(blocking, 'copies'),
+      savedAt: SAVED_AT,
+    } as const;
+    const { result } = await quietly(() => runFileTask(task));
+    expect(result).toEqual({ ok: false, error: { code: 'WRITE_FAILED' } });
+  });
+
+  it('reports an import of a file that is gone, and the problems of a table that cannot be imported', async () => {
+    const options = { format: FRENCH, projectName: 'Plan', fallbackStart: SAMPLE.startDate };
+    expect(
+      await runFileTask({
+        kind: 'importCsv',
+        path: join(folder, 'gone.csv'),
+        documentId: NEW_DOCUMENT_ID,
+        options,
+      }),
+    ).toEqual({ ok: false, error: { code: 'READ_FAILED' } });
+    const broken = join(folder, 'broken.csv');
+    await writeFile(broken, 'Name;Duration\nWrite;soon\n');
+    const imported = await runFileTask({
+      kind: 'importCsv',
+      path: broken,
+      documentId: NEW_DOCUMENT_ID,
+      options,
+    });
+    if (imported.ok || imported.error.code !== 'INVALID_IMPORT') {
+      throw new Error('The table should have been refused as an invalid import');
+    }
+    expect(imported.error.issues).toEqual([{ path: 'rows[2].duration', code: 'INVALID_NUMBER' }]);
+  });
+
+  it('refuses a project file whose shared document carries no identifier', async () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    document.getMap('project').delete('documentId');
+    const path = join(folder, 'anonymous.tasklace');
+    await writeFile(path, encodeTasklaceState(Y.encodeStateAsUpdate(document), zlibCompressor));
+    expect(await runFileTask({ kind: 'openProject', path })).toEqual({
+      ok: false,
+      error: {
+        code: 'INVALID_PROJECT',
+        issues: [{ path: 'documentId', code: 'MISSING_FIELD' }],
+      },
+    });
+  });
+
+  it('reads only regular files, refusing a folder, and refuses a file larger than its limit through the same handle', async () => {
+    expect(await runFileTask({ kind: 'openProject', path: folder })).toEqual({
+      ok: false,
+      error: { code: 'READ_FAILED' },
+    });
+    const huge = join(folder, 'huge.tasklace');
+    await writeFile(huge, '');
+    await truncate(huge, MAX_FILE_BYTES + 1);
+    expect(await runFileTask({ kind: 'openProject', path: huge })).toEqual({
+      ok: false,
+      error: { code: 'TOO_LARGE' },
+    });
+  });
+
+  it('never writes a state of another document, a broken state or an invalid project', async () => {
+    const path = join(folder, 'plan.tasklace');
+    const save = (state: Uint8Array) =>
+      runFileTask({
+        kind: 'saveProject',
+        path,
+        state,
+        documentId: TEST_DOCUMENT_ID,
+        localCopyFolder: folder,
+        savedAt: SAVED_AT,
+      });
+    const other = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, NEW_DOCUMENT_ID));
+    expect(await save(other)).toEqual({ ok: false, error: { code: 'WRONG_DOCUMENT' } });
+    expect(await save(Uint8Array.from([1, 2, 3]))).toEqual({
+      ok: false,
+      error: { code: 'INVALID_STATE', issues: [] },
+    });
+    const broken = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    broken.getMap('project').set('name', 42);
+    expect(await save(Y.encodeStateAsUpdate(broken))).toEqual({
+      ok: false,
+      error: { code: 'INVALID_STATE', issues: [{ path: 'name', code: 'WRONG_TYPE' }] },
+    });
+    await expect(readFile(path)).rejects.toThrow(/ENOENT/);
+    await expect(readFile(join(folder, `${TEST_DOCUMENT_ID}.tasklace`))).rejects.toThrow(/ENOENT/);
   });
 });

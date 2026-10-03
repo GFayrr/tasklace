@@ -41,6 +41,10 @@ export type FileError =
   | { readonly code: 'INVALID_CONTENT' }
   | { readonly code: 'INVALID_PROJECT'; readonly issues: readonly ValidationIssue[] };
 
+export type StateCheckError =
+  | { readonly code: 'INVALID_STATE'; readonly issues: readonly ValidationIssue[] }
+  | { readonly code: 'WRONG_DOCUMENT' };
+
 interface ValidatedFile {
   readonly document: Y.Doc;
   readonly project: Project;
@@ -66,6 +70,22 @@ export function encodeTasklaceState(state: Uint8Array, compressor: Compressor): 
   return file;
 }
 
+/** Checks a shared state before it replaces a project file: it must decode completely, hold exactly a valid shared project, and belong to the expected document, so that a wrong or broken state can never overwrite a good file. */
+export function checkStateToSave(
+  state: Uint8Array,
+  documentId: DocumentId,
+): Result<null, StateCheckError> {
+  const document = decodeState(state);
+  if (!document.ok) {
+    return failure({ code: 'INVALID_STATE', issues: [] });
+  }
+  if (readDocumentId(document.value) !== documentId) {
+    return failure({ code: 'WRONG_DOCUMENT' });
+  }
+  const project = validateSharedDocument(document.value);
+  return project.ok ? success(null) : failure({ code: 'INVALID_STATE', issues: project.error });
+}
+
 /** Reads an untrusted .tasklace file step by step and opens a shared session on it, loading nothing when any check fails. */
 export function openTasklaceFile(
   file: Uint8Array,
@@ -86,6 +106,17 @@ export function readTasklaceFile(
 ): Result<Y.Doc, FileError> {
   const read = readValidatedFile(file, compressor);
   return read.ok ? success(read.value.document) : read;
+}
+
+/** Reads an untrusted .tasklace file as readTasklaceFile does, giving with its shared document the identifier the validation found in it. */
+export function readTasklaceDocument(
+  file: Uint8Array,
+  compressor: Compressor,
+): Result<{ readonly document: Y.Doc; readonly documentId: DocumentId }, FileError> {
+  const read = readValidatedFile(file, compressor);
+  return read.ok
+    ? success({ document: read.value.document, documentId: read.value.documentId })
+    : read;
 }
 
 /** Reads and checks an untrusted .tasklace file, returning its shared document with the project it validated. */

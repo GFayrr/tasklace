@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { RegionalFormat } from '../../core/exchange/csv/regional-format';
 import {
   link,
   milestone,
@@ -22,12 +21,6 @@ import {
   type CellSource,
 } from './cell-editing';
 
-const ISO: RegionalFormat = {
-  listSeparator: ',',
-  dateOrder: 'yearMonthDay',
-  dateSeparator: '-',
-  twelveHourClock: false,
-};
 const PLAN = project(
   [
     summary('s', { sortKey: 'a' }),
@@ -50,7 +43,6 @@ const SOURCE: CellSource = {
   calendar: compileOrThrow(TEST_CALENDAR),
   incoming: groupIncoming(PLAN.dependencies),
   wbsById: OUTLINE.wbsById,
-  format: ISO,
 };
 
 /** Finds a task of the sample plan. */
@@ -76,9 +68,15 @@ describe('editorText', () => {
 
   it('builds the change that the same text asks for, without any difference', () => {
     const context = { project: PLAN, outline: OUTLINE, createId: () => 'new', dayHours: 7 };
-    for (const column of ['name', 'duration', 'progress', 'predecessors'] as const) {
+    const unchanged = [{ type: 'putTask', task: taskOf('m') }];
+    for (const [column, expected] of [
+      ['name', unchanged],
+      ['duration', []],
+      ['progress', unchanged],
+      ['predecessors', []],
+    ] as const) {
       const edit = cellEdit(context, 'm', column, editorText(taskOf('m'), column, SOURCE), SOURCE);
-      expect(edit.ok).toBe(true);
+      expect(edit).toEqual({ ok: true, value: expected });
     }
     for (const column of ['start', 'end', 'duration'] as const) {
       const edit = cellEdit(context, 'b', column, editorText(taskOf('b'), column, SOURCE), SOURCE);
@@ -88,6 +86,55 @@ describe('editorText', () => {
     expect(cellEdit(context, 'b', 'end', 'x', noSchedule)).toEqual({
       ok: false,
       error: 'NOT_POSSIBLE',
+    });
+  });
+});
+
+describe('tags and dates in cells', () => {
+  const tagged = project([workTask('t', { tagId: 'design' }), workTask('u')], [], {
+    tags: [{ id: 'design', name: 'Design', color: '#3366AA', representsPersonOrTeam: false }],
+  });
+  const source: CellSource = { ...SOURCE, schedule: null, incoming: new Map(), wbsById: new Map() };
+  const context = {
+    project: tagged,
+    outline: buildPlanOutline(tagged.tasks, new Set()),
+    createId: () => 'new',
+    dayHours: 7,
+  };
+
+  it('starts the tag editor with the tag of the task, or empty without one', () => {
+    const [first, second] = tagged.tasks;
+    if (first === undefined || second === undefined) {
+      throw new Error('Missing task');
+    }
+    expect(editorText(first, 'tag', source)).toBe('design');
+    expect(editorText(second, 'tag', source)).toBe('');
+  });
+
+  it('leaves the dates of a task empty until the schedule is known', () => {
+    const [, second] = tagged.tasks;
+    if (second === undefined) {
+      throw new Error('Missing task');
+    }
+    expect(editorText(second, 'start', source)).toBe('');
+    expect(editorText(second, 'end', source)).toBe('');
+  });
+
+  it('sets a tag, or removes it with an empty choice', () => {
+    expect(cellEdit(context, 'u', 'tag', 'design', source)).toMatchObject({
+      ok: true,
+      value: [{ type: 'putTask', task: { id: 'u', tagId: 'design' } }],
+    });
+    expect(cellEdit(context, 't', 'tag', '', source)).toMatchObject({
+      ok: true,
+      value: [{ type: 'putTask', task: { id: 't', tagId: null } }],
+    });
+  });
+
+  it('sets a typed start without a schedule, its later blocks keeping their dates', () => {
+    expect(cellEdit(context, 'u', 'start', '2026-10-01 10:00', source)).toMatchObject({
+      ok: true,
+      value: [{ type: 'putTask', task: { id: 'u', startNoEarlierThan: at(2026, 10, 1, 10) } }],
     });
   });
 });

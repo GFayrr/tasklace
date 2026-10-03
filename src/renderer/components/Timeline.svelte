@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { TaskId } from '../../core/model/project';
   import type { LinkEnd } from '../plan/task-commands';
+  import type { DrawingPart } from '../app/app-state.svelte';
   import { createPatternCache } from '../plan/bar-patterns';
+  import { pixels } from './css-length';
   import { buildScaleTicks, type ScaleLabels } from '../plan/time-scale';
   import {
     DRAG_THRESHOLD,
@@ -30,8 +32,9 @@
     readonly select: (id: TaskId) => void;
     readonly moved: (shape: RowShape, offset: number, block: number | null) => void;
     readonly stretched: (shape: RowShape, offset: number) => void;
-    readonly linked: (from: LinkEnd, toRow: number, toBlock: number | null) => void;
+    readonly linked: (from: LinkEnd, to: LinkEnd) => void;
     readonly opened: (id: TaskId) => void;
+    readonly drawingFailed: (part: DrawingPart) => void;
   }
 
   interface Drag {
@@ -59,6 +62,7 @@
     stretched,
     linked,
     opened,
+    drawingFailed,
   }: Props = $props();
 
   const HEADER_HEIGHT = 48;
@@ -69,7 +73,6 @@
     none: 'default',
   };
   const EXTRA_ROWS = 3;
-  let scroller: HTMLDivElement | undefined = $state();
   let body: HTMLCanvasElement | undefined = $state();
   let header: HTMLCanvasElement | undefined = $state();
   let width = $state(0);
@@ -82,6 +85,9 @@
   const patternFor = createPatternCache(
     () => document.createElement('canvas'),
     () => body?.getContext('2d') ?? null,
+    () => {
+      drawingFailed('patterns');
+    },
   );
   const contentWidth = $derived(xOf(scene.frame, scene.frame.end));
   const contentHeight = $derived((scene.rows.length + EXTRA_ROWS) * ROW_HEIGHT);
@@ -100,7 +106,11 @@
       canvas.height = pixelHeight;
     }
     const context = canvas.getContext('2d');
-    context?.setTransform(density, 0, 0, density, 0, 0);
+    if (context === null) {
+      drawingFailed('timeline');
+      return null;
+    }
+    context.setTransform(density, 0, 0, density, 0, 0);
     return context;
   }
 
@@ -140,61 +150,63 @@
     }
   });
 
-  $effect(() => {
-    const target = scroller;
-    target?.addEventListener('pointerdown', pointerDown);
-    target?.addEventListener('pointermove', pointerMove);
-    target?.addEventListener('pointerup', pointerUp);
-    target?.addEventListener('pointercancel', pointerCancel);
-    target?.addEventListener('dblclick', openAt);
-    return () => {
-      target?.removeEventListener('dblclick', openAt);
-      target?.removeEventListener('pointerdown', pointerDown);
-      target?.removeEventListener('pointermove', pointerMove);
-      target?.removeEventListener('pointerup', pointerUp);
-      target?.removeEventListener('pointercancel', pointerCancel);
+  /** Listens to the pointer on the scrolling area to select, drag, stretch and link bars, and to open the details of a task. */
+  function followPointer(element: HTMLDivElement): () => void {
+    const down = (event: PointerEvent): void => {
+      pointerDown(event, element);
     };
-  });
+    const move = (event: PointerEvent): void => {
+      pointerMove(event, element);
+    };
+    const up = (event: PointerEvent): void => {
+      pointerUp(event, element);
+    };
+    const open = (event: MouseEvent): void => {
+      openAt(event, element);
+    };
+    element.addEventListener('pointerdown', down);
+    element.addEventListener('pointermove', move);
+    element.addEventListener('pointerup', up);
+    element.addEventListener('pointercancel', pointerCancel);
+    element.addEventListener('dblclick', open);
+    return () => {
+      element.removeEventListener('dblclick', open);
+      element.removeEventListener('pointerdown', down);
+      element.removeEventListener('pointermove', move);
+      element.removeEventListener('pointerup', up);
+      element.removeEventListener('pointercancel', pointerCancel);
+    };
+  }
 
-  $effect(() => {
-    if (scroller === undefined) {
-      return;
-    }
-    const observed = scroller;
+  /** Follows the size of the scrolling area, which is the size of the drawing. */
+  function followSize(element: HTMLDivElement): () => void {
     const observer = new ResizeObserver(() => {
-      width = observed.clientWidth;
-      height = observed.clientHeight;
+      width = element.clientWidth;
+      height = element.clientHeight;
       resized(width, height);
     });
-    observer.observe(observed);
+    observer.observe(element);
     return () => {
       observer.disconnect();
     };
-  });
+  }
 
-  $effect(() => {
-    if (scroller !== undefined && Math.abs(scroller.scrollTop - scrollTop) >= 1) {
-      scroller.scrollTop = scrollTop;
+  /** Scrolls the area to the position the workspace asks for, when it differs from where it is. */
+  function keepScroll(element: HTMLDivElement): void {
+    if (Math.abs(element.scrollTop - scrollTop) >= 1) {
+      element.scrollTop = scrollTop;
     }
-    if (scroller !== undefined && Math.abs(scroller.scrollLeft - scrollLeft) >= 1) {
-      scroller.scrollLeft = scrollLeft;
+    if (Math.abs(element.scrollLeft - scrollLeft) >= 1) {
+      element.scrollLeft = scrollLeft;
     }
-  });
-
-  /** Follows the scroll of the timeline, which drives both panes. */
-  function followScroll(): void {
-    if (scroller === undefined) {
-      return;
-    }
-    scrolled(scroller.scrollTop, scroller.scrollLeft);
   }
 
   /** Returns the position of a pointer in the whole timeline. */
-  function contentPoint(event: PointerEvent): { readonly x: number; readonly y: number } | null {
-    if (scroller === undefined) {
-      return null;
-    }
-    const bounds = scroller.getBoundingClientRect();
+  function contentPoint(
+    event: MouseEvent,
+    element: HTMLElement,
+  ): { readonly x: number; readonly y: number } {
+    const bounds = element.getBoundingClientRect();
     return {
       x: event.clientX - bounds.left + scrollLeft,
       y: event.clientY - bounds.top + scrollTop,
@@ -216,28 +228,25 @@
   }
 
   /** Selects the task under the pointer and starts dragging its bar, its end or its link handle. */
-  function pointerDown(event: PointerEvent): void {
-    const point = contentPoint(event);
-    if (point === null || event.button !== 0) {
+  function pointerDown(event: PointerEvent, element: HTMLElement): void {
+    if (event.button !== 0) {
       return;
     }
+    const point = contentPoint(event, element);
     const target = targetAt(point);
     const task = scene.rows[Math.floor(point.y / ROW_HEIGHT)]?.task;
     if (task !== undefined && target?.kind !== 'link') {
       select(task.id);
     }
-    if (target !== null && scroller !== undefined) {
-      scroller.setPointerCapture(event.pointerId);
+    if (target !== null) {
+      element.setPointerCapture(event.pointerId);
       drag = { target, startX: point.x, startY: point.y, moved: false };
     }
   }
 
   /** Follows a drag with a preview, or shows what the pointer would drag. */
-  function pointerMove(event: PointerEvent): void {
-    const point = contentPoint(event);
-    if (point === null) {
-      return;
-    }
+  function pointerMove(event: PointerEvent, element: HTMLElement): void {
+    const point = contentPoint(event, element);
     if (drag === null) {
       cursor = CURSORS[targetAt(point)?.kind ?? 'none'];
       return;
@@ -251,18 +260,23 @@
     if (target.kind === 'link') {
       const row = Math.floor(point.y / ROW_HEIGHT);
       const candidate = scene.rows[row]?.task;
-      const targetRow =
-        candidate === undefined || candidate.kind === 'summary' || candidate.id === target.taskId
-          ? null
-          : row;
-      const targetShape = targetRow === null ? null : shapeAtY(point.y);
+      const linkable =
+        candidate !== undefined && candidate.kind !== 'summary' && candidate.id !== target.taskId;
+      const targetShape = linkable ? shapeAtY(point.y) : null;
       preview = {
         kind: 'link',
         shape: target.shape,
         block: target.block,
         pointer: point,
-        targetRow,
-        targetBlock: targetShape === null ? null : targetBlockAt(targetShape, point.x),
+        target: linkable
+          ? {
+              row,
+              end: {
+                taskId: candidate.id,
+                block: targetShape === null ? null : targetBlockAt(targetShape, point.x),
+              },
+            }
+          : null,
       };
       return;
     }
@@ -273,33 +287,28 @@
   }
 
   /** Applies a finished drag. */
-  function pointerUp(event: PointerEvent): void {
+  function pointerUp(event: PointerEvent, element: HTMLElement): void {
     const finished = drag;
     const shown = preview;
     drag = null;
     preview = null;
-    const point = contentPoint(event);
-    if (finished === null || !finished.moved || point === null) {
+    if (finished?.moved !== true) {
       return;
     }
-    const offset = point.x - finished.startX;
+    const offset = contentPoint(event, element).x - finished.startX;
     const { target } = finished;
     if (target.kind === 'move') {
       moved(target.shape, offset, target.block);
     } else if (target.kind === 'stretch') {
       stretched(target.shape, offset);
-    } else if (shown?.kind === 'link' && shown.targetRow !== null) {
-      linked({ taskId: target.taskId, block: target.block }, shown.targetRow, shown.targetBlock);
+    } else if (shown?.kind === 'link' && shown.target !== null) {
+      linked({ taskId: target.taskId, block: target.block }, shown.target.end);
     }
   }
 
   /** Opens the details of the task whose bar is double-clicked. */
-  function openAt(event: MouseEvent): void {
-    if (scroller === undefined) {
-      return;
-    }
-    const bounds = scroller.getBoundingClientRect();
-    const row = Math.floor((event.clientY - bounds.top + scrollTop) / ROW_HEIGHT);
+  function openAt(event: MouseEvent, element: HTMLElement): void {
+    const row = Math.floor(contentPoint(event, element).y / ROW_HEIGHT);
     const task = scene.rows[row]?.task;
     if (task !== undefined) {
       opened(task.id);
@@ -314,17 +323,30 @@
 </script>
 
 <section class="timeline" aria-label={label}>
-  <canvas class="header" bind:this={header} style:width="{width}px" aria-hidden="true"></canvas>
+  <canvas class="header" bind:this={header} style:width={pixels(width)} aria-hidden="true"></canvas>
   <div class="body">
     <canvas
       class="layer"
       bind:this={body}
-      style:width="{width}px"
-      style:height="{height}px"
+      style:width={pixels(width)}
+      style:height={pixels(height)}
       aria-hidden="true"
     ></canvas>
-    <div class="scroller" bind:this={scroller} onscroll={followScroll} style:cursor>
-      <div class="spacer" style:width="{contentWidth}px" style:height="{contentHeight}px"></div>
+    <div
+      class="scroller"
+      style:cursor
+      {@attach followPointer}
+      {@attach followSize}
+      {@attach keepScroll}
+      onscroll={(event) => {
+        scrolled(event.currentTarget.scrollTop, event.currentTarget.scrollLeft);
+      }}
+    >
+      <div
+        class="spacer"
+        style:width={pixels(contentWidth)}
+        style:height={pixels(contentHeight)}
+      ></div>
     </div>
   </div>
 </section>
