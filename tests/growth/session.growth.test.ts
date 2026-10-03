@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import type { Project } from '../../src/core/model/project';
+import { repairProject } from '../../src/core/shared/repair-project';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
 import { openSharedSession, type SharedSession } from '../../src/core/shared/shared-session';
 import { buildLargeProject, LARGE_PROJECT_SEED } from '../fixtures/large-project';
@@ -150,5 +151,34 @@ describe('growth of shared session operations with the size of the project', () 
     const ratio = growthRatio(undoer(smallDocument), undoer(largeDocument));
     console.info(`Undo: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(CONSTANT_MAX_RATIO);
+  });
+});
+
+describe('growth of opening a shared session and of a full repair', () => {
+  const smallProject = buildLargeProject(LARGE_PROJECT_SEED, SMALL_TASK_COUNT);
+  const largeProject = buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT);
+
+  it('opens a session on a shared document in linear time', () => {
+    const smallState = Y.encodeStateAsUpdate(createSharedDocument(smallProject, TEST_DOCUMENT_ID));
+    const largeState = Y.encodeStateAsUpdate(createSharedDocument(largeProject, TEST_DOCUMENT_ID));
+    const open = (state: Uint8Array) => (): void => {
+      const document = new Y.Doc();
+      Y.applyUpdate(document, state);
+      if (!openSharedSession(document).ok) {
+        throw new Error('Session refused');
+      }
+    };
+    const ratio = growthRatio(open(smallState), open(largeState));
+    console.info(`Session opening: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
+  });
+
+  it('repairs a whole project in linear time', () => {
+    const ratio = growthRatio(
+      () => repairProject(smallProject),
+      () => repairProject(largeProject),
+    );
+    console.info(`Full repair: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
   });
 });

@@ -31,3 +31,22 @@ describe('growth of reading a .tasklace file with the size of the project', () =
     expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
   });
 });
+
+describe('growth of writing a .tasklace file with the size of the project', () => {
+  it('encodes and compresses a project in linear time', () => {
+    const small = createSharedDocument(
+      buildLargeProject(LARGE_PROJECT_SEED, SMALL_TASK_COUNT),
+      TEST_DOCUMENT_ID,
+    );
+    const large = createSharedDocument(
+      buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT),
+      TEST_DOCUMENT_ID,
+    );
+    const ratio = growthRatio(
+      () => encodeTasklaceFile(small, zlibCompressor),
+      () => encodeTasklaceFile(large, zlibCompressor),
+    );
+    console.info(`File writing: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
+  });
+});

@@ -2,9 +2,9 @@ import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
 import { countWorkingHours } from '../../core/calendar/working-time';
 import type { Task } from '../../core/model/project';
 import type { Schedule } from '../../core/scheduling/schedule-project';
-import type { ProjectHour } from '../../core/time';
 import type { Messages } from '../i18n/messages';
 import { formatDuration } from './durations';
+import { formatTableDateTime } from './table-dates';
 
 export interface TaskCells {
   readonly duration: string;
@@ -14,26 +14,18 @@ export interface TaskCells {
 }
 
 export interface TableFormatters {
-  readonly dateTime: (hour: ProjectHour) => string;
   readonly number: (value: number) => string;
   readonly percent: (percent: number) => string;
 }
 
-const MILLISECONDS_PER_HOUR = 3_600_000;
 const PERCENT = 100;
 const EMPTY_CELLS: TaskCells = { duration: '', start: '', end: '', progress: '' };
 
-/** Creates the formatters of the task table in the regional format, project hours being wall-clock times without time zone. */
+/** Creates the number formatters of the task table in the regional format, dates being always written in ISO form. */
 export function createTableFormatters(locale: string): TableFormatters {
-  const dateTime = new Intl.DateTimeFormat(locale, {
-    dateStyle: 'short',
-    timeStyle: 'short',
-    timeZone: 'UTC',
-  });
   const number = new Intl.NumberFormat(locale);
   const percent = new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 0 });
   return {
-    dateTime: (hour) => dateTime.format(new Date(hour * MILLISECONDS_PER_HOUR)),
     number: (value) => number.format(value),
     percent: (value) => percent.format(value / PERCENT),
   };
@@ -50,16 +42,15 @@ export function taskCells(
   const hours = (count: number) => formatDuration(count, messages, formatters.number);
   if (task.kind === 'summary') {
     const dates = schedule?.summaries.get(task.id);
-    if (dates?.start == null || dates.end == null) {
+    if (dates?.start == null) {
       return EMPTY_CELLS;
     }
     const worked = calendar === null ? null : countWorkingHours(calendar, dates.start, dates.end);
     return {
       duration: worked?.ok === true ? hours(worked.value) : '',
-      start: formatters.dateTime(dates.start),
-      end: formatters.dateTime(dates.end),
-      progress:
-        dates.progressPercent === null ? '' : formatters.percent(Math.round(dates.progressPercent)),
+      start: formatTableDateTime(dates.start),
+      end: formatTableDateTime(dates.end),
+      progress: formatters.percent(Math.round(dates.progressPercent)),
     };
   }
   const duration =
@@ -69,8 +60,8 @@ export function taskCells(
   const placement = schedule?.placements.get(task.id);
   return {
     duration: hours(duration),
-    start: placement === undefined ? '' : formatters.dateTime(placement.start),
-    end: placement === undefined ? '' : formatters.dateTime(placement.end),
+    start: placement === undefined ? '' : formatTableDateTime(placement.start),
+    end: placement === undefined ? '' : formatTableDateTime(placement.end),
     progress: formatters.percent(task.progressPercent),
   };
 }

@@ -11,7 +11,13 @@ import {
   stretchedEnd,
   targetBlockAt,
 } from './timeline-gestures';
-import { ROW_HEIGHT, type RowShape, type TimelineFrame } from './timeline-geometry';
+import {
+  MILESTONE_SIZE,
+  ROW_HEIGHT,
+  rowMiddle,
+  type RowShape,
+  type TimelineFrame,
+} from './timeline-geometry';
 
 const TASK: RowShape = {
   kind: 'task',
@@ -99,5 +105,28 @@ describe('snapping', () => {
     expect(movedStart(FRAME, at(2026, 10, 5, 9), 2 * 24 * 2, 24)).toBe(at(2026, 10, 7));
     expect(movedStart(FRAME, at(2026, 10, 5, 9), -2, 24)).toBe(at(2026, 10, 5));
     expect(stretchedEnd(FRAME, at(2026, 10, 5, 17), 2 * 24 * 2, 24)).toBe(at(2026, 10, 8));
+  });
+});
+
+describe('handles of milestones and missing blocks', () => {
+  it('gives a milestone a single handle after its diamond, standing for the whole task', () => {
+    expect(linkHandles(MILESTONE)).toEqual([
+      {
+        block: null,
+        center: { x: 300 + MILESTONE_SIZE / 2 + LINK_HANDLE_GAP, y: rowMiddle(3) },
+      },
+    ]);
+  });
+
+  it('places the handle of a block the shape does not show after the whole bar', () => {
+    expect(linkHandleCenter(SPLIT, 7)).toEqual(linkHandleCenter(SPLIT, null));
+  });
+
+  it('grabs a milestone only on its diamond', () => {
+    const middle = rowMiddle(3);
+    expect(gestureAt(MILESTONE, 300 + MILESTONE_SIZE / 2, middle, null)).toMatchObject({
+      kind: 'move',
+    });
+    expect(gestureAt(MILESTONE, 300 + MILESTONE_SIZE, middle, null)).toBeNull();
   });
 });

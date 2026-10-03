@@ -1,10 +1,9 @@
-import type { RegionalFormat } from '../../core/exchange/csv/regional-format';
-import { formatRegionalDateTime } from '../../core/exchange/csv/regional-format';
 import type { Dependency, Task, TaskId } from '../../core/model/project';
 import type { Schedule } from '../../core/scheduling/schedule-project';
 import { predecessorText } from './plan-outline';
 import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
 import { formatDateTime, parseDateTime } from '../../core/civil-format';
+import { formatTableDateTime } from './table-dates';
 import { failure } from '../../core/result';
 import { MINUTES_PER_QUARTER, QUARTER_HOUR, type ProjectHour } from '../../core/time';
 import { durationEditorText } from './durations';
@@ -40,7 +39,6 @@ export interface CellSource {
   readonly calendar: CompiledCalendar | null;
   readonly incoming: ReadonlyMap<TaskId, readonly Dependency[]>;
   readonly wbsById: ReadonlyMap<TaskId, string>;
-  readonly format: RegionalFormat;
 }
 
 /** Tells whether a column of a task can be edited: every column of a work task or milestone, only the name of a summary. */
@@ -63,11 +61,11 @@ export function editorText(task: Task, column: EditableColumn, source: CellSourc
     case 'start': {
       const placement = source.schedule?.placements.get(task.id);
       const start = task.startNoEarlierThan ?? placement?.start;
-      return start === undefined ? '' : formatRegionalDateTime(start, source.format);
+      return start === undefined ? '' : formatTableDateTime(start);
     }
     case 'end': {
       const end = source.schedule?.placements.get(task.id)?.end;
-      return end === undefined ? '' : formatRegionalDateTime(end, source.format);
+      return end === undefined ? '' : formatTableDateTime(end);
     }
     case 'progress':
       return String(task.progressPercent);
@@ -86,20 +84,13 @@ export function cellEdit(
   text: string,
   source: CellSource,
 ): Edit {
-  const { format } = source;
   switch (column) {
     case 'name':
       return renameTask(context, id, text);
     case 'duration':
       return setDuration(context, id, text);
     case 'start':
-      return setStart(
-        context,
-        id,
-        text,
-        format,
-        source.schedule?.placements.get(id)?.start ?? null,
-      );
+      return setStart(context, id, text, source.schedule?.placements.get(id)?.start ?? null);
     case 'end':
       return endEdit(context, id, text, source);
     case 'progress':
@@ -123,7 +114,7 @@ function endEdit(context: EditContext, id: TaskId, text: string, source: CellSou
   if (lastBlock === undefined || source.calendar === null) {
     return failure('NOT_POSSIBLE');
   }
-  return setEnd(context, id, text, source.format, {
+  return setEnd(context, id, text, {
     lastBlockStart: lastBlock.start,
     calendar: source.calendar,
   });

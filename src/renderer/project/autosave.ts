@@ -13,9 +13,7 @@ export const AUTOSAVE_DELAY_MS = 2_000;
 const BROWSER_TIMER: Timer = {
   set: (callback, delayMs) => setTimeout(callback, delayMs),
   clear: (handle) => {
-    if (typeof handle === 'number') {
-      clearTimeout(handle);
-    }
+    clearTimeout(Number(handle));
   },
 };
 

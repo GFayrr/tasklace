@@ -69,6 +69,28 @@ describe('timelineFrame', () => {
   });
 });
 
+describe('timelineFrame before the schedule is known', () => {
+  it('covers at least two months from a week before the project', () => {
+    const frame = timelineFrame(PLAN.startDate, null, PLAN.startDate, 1);
+    expect(frame.origin).toBe(at(2026, 9, 21));
+    expect(frame.end - frame.origin).toBeGreaterThanOrEqual(60 * 24);
+  });
+});
+
+describe('rows without dates', () => {
+  it('draws nothing for a task or summary the schedule does not place', () => {
+    const empty = { ...SCHEDULE, placements: new Map(), summaries: new Map() };
+    for (const id of ['s', 'a']) {
+      const index = OUTLINE.rowIndexById.get(id) ?? -1;
+      const row = OUTLINE.rows[index];
+      if (row === undefined) {
+        throw new Error(id);
+      }
+      expect(rowShape(row, index, empty, FRAME)).toBeNull();
+    }
+  });
+});
+
 describe('rowShape', () => {
   it('draws a work task block by block, filling its progress in order by duration', () => {
     const shape = shapeOf('b');

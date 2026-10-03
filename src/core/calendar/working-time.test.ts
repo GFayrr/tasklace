@@ -13,9 +13,12 @@ import { TEST_CALENDAR } from '../testing/test-calendar';
 import {
   addWorkingHours,
   countWorkingHours,
+  isWorkingDay,
+  lastWorkingHourEnd,
   nextWorkingDay,
   nextWorkingHour,
   previousWorkingDay,
+  signedWorkingHoursBetween,
   subtractWorkingHours,
 } from './working-time';
 
@@ -243,5 +246,35 @@ describe('unusual calendars', () => {
       nonWorkingPeriods: [{ firstDay: dayOf(2026, 10, 1), lastDay: dayOf(2026, 10, 31) }],
     });
     expect(formatResult(nextWorkingHour(mondays, at(2026, 10, 1)))).toBe('2026-11-02 08:00');
+  });
+});
+
+describe('instants at the edges of the supported period', () => {
+  it('has no working day outside the supported period', () => {
+    expect(isWorkingDay(calendar, MIN_DAY_INDEX - 1)).toBe(false);
+    expect(isWorkingDay(calendar, MAX_DAY_INDEX + 1)).toBe(false);
+    expect(isWorkingDay(calendar, dayOf(2026, 9, 28))).toBe(true);
+    expect(isWorkingDay(calendar, dayOf(2026, 9, 27))).toBe(false);
+  });
+
+  it('finds the end of the last working quarter hour, and none before the first working day', () => {
+    expect(lastWorkingHourEnd(calendar, at(2026, 9, 28, 20))).toEqual({
+      ok: true,
+      value: at(2026, 9, 28, 17),
+    });
+    expect(lastWorkingHourEnd(calendar, MIN_PROJECT_HOUR).ok).toBe(false);
+  });
+
+  it('counts working hours backwards, and reports an instant outside the supported period either way', () => {
+    expect(signedWorkingHoursBetween(calendar, at(2026, 9, 29, 9), at(2026, 9, 28, 9))).toEqual({
+      ok: true,
+      value: -7,
+    });
+    expect(signedWorkingHoursBetween(calendar, END_PROJECT_HOUR, at(2026, 9, 28, 9)).ok).toBe(
+      false,
+    );
+    expect(signedWorkingHoursBetween(calendar, at(2026, 9, 28, 9), END_PROJECT_HOUR).ok).toBe(
+      false,
+    );
   });
 });

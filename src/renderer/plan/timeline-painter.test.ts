@@ -55,7 +55,7 @@ describe('nonWorkingIntervals at the month zoom', () => {
 });
 
 describe('paleColor', () => {
-  it('mixes a colour with white', () => {
+  it('mixes a color with white', () => {
     expect(paleColor('#000000', 0.5)).toBe('#808080');
     expect(paleColor('#2a78d6', 0)).toBe('#2a78d6');
     expect(paleColor('#2a78d6', 1)).toBe('#ffffff');

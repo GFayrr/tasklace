@@ -13,7 +13,7 @@ const CHANNEL_MAXIMUM = 255;
 const CHANNEL_DIGITS = 2;
 const CHANNEL_OFFSETS = [1, 3, 5] as const;
 
-/** Gives every tag of a project the colour, pale colour and pattern of its bars. */
+/** Gives every tag of a project the color, pale color and pattern of its bars. */
 export function tagStylesOf(project: Project | null): ReadonlyMap<TagId, TagStyle> {
   const styles = new Map<TagId, TagStyle>();
   const appearances =
@@ -33,7 +33,7 @@ export function tagStylesOf(project: Project | null): ReadonlyMap<TagId, TagStyl
   return styles;
 }
 
-/** Mixes a colour written as six hexadecimal digits with white. */
+/** Mixes a color written as six hexadecimal digits with white. */
 export function paleColor(color: string, whiteShare = PALE_MIX): string {
   const channels = CHANNEL_OFFSETS.map((offset) => {
     const value = Number.parseInt(color.slice(offset, offset + CHANNEL_DIGITS), HEX_RADIX);

@@ -99,7 +99,7 @@ export function rowShape(
   const { task } = row;
   if (task.kind === 'summary') {
     const dates = schedule.summaries.get(task.id);
-    if (dates?.start == null || dates.end == null) {
+    if (dates?.start == null) {
       return null;
     }
     const start = xOf(frame, dates.start);

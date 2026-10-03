@@ -1,5 +1,7 @@
 import fc from 'fast-check';
-import { compileCalendar } from '../calendar/compile-calendar';
+import { compileCalendar, type CompiledCalendar } from '../calendar/compile-calendar';
+import { MAX_HIERARCHY_DEPTH } from '../limits';
+import { TAG_PALETTE } from '../tags/tag-palette';
 import type { Dependency, DependencyType, Project, SchedulableTask, Task } from '../model/project';
 import { fromQuarters, QUARTER_HOUR, QUARTERS_PER_HOUR, toQuarters } from '../time';
 import { calendarArbitrary, instantArbitrary, quarterHoursArbitrary, unwrap } from './arbitraries';
@@ -221,3 +223,107 @@ function withTaskBetweenBlocks(
   ];
   return { project: { ...input, dependencies: [...kept, ...between] } };
 }
+
+const MAX_RICH_TAGS = 6;
+const MAX_GENERATED_NAME = 20;
+const CONTROL_CHARACTER = /\p{Cc}/u;
+
+/** Generates names of any script, emoji included, that a project accepts: well formed, without control characters and not blank. */
+const nameArbitrary = fc
+  .string({ unit: 'grapheme', minLength: 1, maxLength: MAX_GENERATED_NAME })
+  .filter((text) => text.trim() !== '' && text.isWellFormed() && !CONTROL_CHARACTER.test(text));
+
+const richTaskArbitrary = fc.record({
+  name: nameArbitrary,
+  tagPick: fc.option(fc.nat()),
+  mustFinishOn: fc.option(instantArbitrary),
+  deadline: fc.option(instantArbitrary),
+  dailyStartPick: fc.option(fc.nat()),
+});
+
+/** Picks a daily start time that leaves a work task enough working time each day, or none when the task uses the hours of the project or no pick is given. */
+function dailyStartOf(
+  task: SchedulableTask,
+  calendar: CompiledCalendar,
+  pick: number | null,
+): number | null {
+  if (task.kind !== 'task' || task.hoursPerDay === null || pick === null) {
+    return null;
+  }
+  const starts = calendar.workingQuartersOfDay;
+  const choices = starts.length - toQuarters(task.hoursPerDay) + 1;
+  return starts[pick % Math.max(choices, 1)] ?? null;
+}
+
+/** Generates projects using every feature a file can hold: tags, some of them people or teams, date constraints enabled or not, daily start times, Unicode names and summaries nested up to the deepest allowed level. */
+export const richProjectArbitrary: fc.Arbitrary<GeneratedProject> = projectArbitrary.chain(
+  ({ project: base }) =>
+    fc
+      .record({
+        projectName: nameArbitrary,
+        tags: fc.uniqueArray(
+          fc.record({
+            name: nameArbitrary,
+            color: fc.constantFrom(...TAG_PALETTE),
+            person: fc.boolean(),
+          }),
+          { maxLength: MAX_RICH_TAGS, selector: (tag) => tag.name },
+        ),
+        tasks: fc.array(richTaskArbitrary, {
+          minLength: base.tasks.length,
+          maxLength: base.tasks.length,
+        }),
+        depth: fc.integer({ min: 0, max: MAX_HIERARCHY_DEPTH - 1 }),
+        dateConstraintsEnabled: fc.boolean(),
+        alwaysShowPatterns: fc.boolean(),
+      })
+      .map((extra) => {
+        const calendar = unwrap(compileCalendar(base.calendar));
+        const tags = extra.tags.map((tag, index) => ({
+          id: `g${String(index)}`,
+          name: tag.name,
+          color: tag.color,
+          representsPersonOrTeam: tag.person,
+        }));
+        const chain: Task[] = Array.from({ length: extra.depth }, (_, level) =>
+          summary(`d${String(level)}`, { parentId: level === 0 ? null : `d${String(level - 1)}` }),
+        );
+        const deepest = chain.at(-1)?.id ?? null;
+        const tasks = base.tasks.map((task, index): Task => {
+          const shape = extra.tasks[index];
+          if (shape === undefined || task.kind === 'summary') {
+            return { ...task, name: shape?.name ?? task.name };
+          }
+          const tagId =
+            shape.tagPick === null || tags.length === 0
+              ? null
+              : (tags[shape.tagPick % tags.length]?.id ?? null);
+          const moved = deepest !== null && task.id === 't00' ? { parentId: deepest } : {};
+          const constraints = { mustFinishOn: shape.mustFinishOn, deadline: shape.deadline };
+          if (task.kind === 'milestone') {
+            return { ...task, ...moved, name: shape.name, tagId, ...constraints };
+          }
+          return {
+            ...task,
+            ...moved,
+            name: shape.name,
+            tagId,
+            ...constraints,
+            dailyStartHour: dailyStartOf(task, calendar, shape.dailyStartPick),
+          };
+        });
+        return {
+          project: {
+            ...base,
+            name: extra.projectName,
+            tags,
+            tasks: [...chain, ...tasks],
+            options: {
+              criticalPathEnabled: true,
+              dateConstraintsEnabled: extra.dateConstraintsEnabled,
+              alwaysShowPatterns: extra.alwaysShowPatterns,
+            },
+          },
+        };
+      }),
+);

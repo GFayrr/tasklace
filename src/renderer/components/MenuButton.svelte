@@ -2,7 +2,9 @@
   import Icon from './Icon.svelte';
 
   export interface MenuItem {
+    readonly key: string;
     readonly label: string;
+    readonly hint?: string;
     readonly select: () => void;
   }
 
@@ -46,7 +48,7 @@
   </button>
   {#if open}
     <ul class="items" role="menu" aria-label={label}>
-      {#each items as item (item.label)}
+      {#each items as item (item.key)}
         <li role="none">
           <button
             type="button"
@@ -57,6 +59,9 @@
             }}
           >
             {item.label}
+            {#if item.hint !== undefined}
+              <span class="hint">{item.hint}</span>
+            {/if}
           </button>
         </li>
       {/each}
@@ -65,6 +70,12 @@
 </div>
 
 <style>
+  .hint {
+    display: block;
+    color: var(--color-text-secondary);
+    font-size: 0.8em;
+  }
+
   .menu {
     position: relative;
   }

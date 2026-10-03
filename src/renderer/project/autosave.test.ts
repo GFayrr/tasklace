@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { createAutosave, type Timer } from './autosave';
+import { describe, expect, it, vi } from 'vitest';
+import { AUTOSAVE_DELAY_MS, createAutosave, type Timer } from './autosave';
 
 /** A timer driven by hand, keeping only the last callback set. */
 function manualTimer(): Timer & { readonly fire: () => void; readonly pending: () => boolean } {
@@ -27,6 +27,29 @@ async function settle(): Promise<void> {
 }
 
 describe('createAutosave', () => {
+  it('waits two seconds after the last change with the timer of the page', async () => {
+    vi.useFakeTimers();
+    try {
+      let saves = 0;
+      const autosave = createAutosave(
+        () => {
+          saves += 1;
+          return Promise.resolve();
+        },
+        () => undefined,
+      );
+      autosave.changed();
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS - 1);
+      autosave.changed();
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS - 1);
+      expect(saves).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(saves).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('saves once after the last of several changes', async () => {
     const timer = manualTimer();
     let saves = 0;

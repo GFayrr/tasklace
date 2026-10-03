@@ -2,6 +2,7 @@
   import type { AppState } from '../app/app-state.svelte';
   import { commandOf } from '../app/shortcuts';
   import ClosePrompt from './ClosePrompt.svelte';
+  import ReportDialog from './ReportDialog.svelte';
   import Notices from './Notices.svelte';
   import StatusBar from './StatusBar.svelte';
   import TaskDetails from './TaskDetails.svelte';
@@ -19,7 +20,12 @@
       target instanceof HTMLTextAreaElement ||
       (target instanceof HTMLElement && target.isContentEditable);
     const command = commandOf(event, isEditingText);
-    if (command === null) {
+    if (
+      command === null ||
+      app.closePrompt !== null ||
+      app.report !== null ||
+      app.detailsTaskId !== null
+    ) {
       return;
     }
     event.preventDefault();
@@ -34,13 +40,16 @@
 {:else}
   <div class="shell">
     <Toolbar {app} />
-    <Workspace {app} />
+    {#key app.openedCount}
+      <Workspace {app} project={app.project} />
+    {/key}
     <StatusBar {app} />
   </div>
-  <TaskDetails {app} />
+  <TaskDetails {app} project={app.project} />
 {/if}
 <Notices {app} />
 <ClosePrompt {app} />
+<ReportDialog {app} />
 
 <style>
   .shell {

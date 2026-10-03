@@ -1,9 +1,9 @@
-import type { FileFailureCode } from '../../preload/bridge-contract';
+import type { ActionFailure } from '../project/project-files';
 import type english from '../locales/en.json';
 
 export type Messages = typeof english;
 export type Language = 'en';
-export type ShownFailureCode = Exclude<FileFailureCode, 'CANCELLED'>;
+export type ShownFailureCode = Exclude<ActionFailure['code'], 'CANCELLED'>;
 
 export interface PluralMessage {
   readonly one: string;
@@ -22,7 +22,7 @@ export async function loadMessages(language: Language): Promise<Messages> {
 }
 
 /** Returns the message telling the user why a file action failed, a cancelled action needing none. */
-export function fileErrorMessage(messages: Messages, code: FileFailureCode): string | null {
+export function fileErrorMessage(messages: Messages, code: ActionFailure['code']): string | null {
   if (code === 'CANCELLED') {
     return null;
   }
@@ -32,8 +32,10 @@ export function fileErrorMessage(messages: Messages, code: FileFailureCode): str
 
 /** Replaces each named placeholder of a message with its value, leaving unknown placeholders as they are. */
 export function fillMessage(template: string, values: Readonly<Record<string, string>>): string {
-  return template.replace(PLACEHOLDER_PATTERN, (placeholder, name: string) =>
-    Object.hasOwn(values, name) ? (values[name] ?? placeholder) : placeholder,
+  return template.replace(
+    PLACEHOLDER_PATTERN,
+    (placeholder, name: string) =>
+      (Object.hasOwn(values, name) ? values[name] : undefined) ?? placeholder,
   );
 }
 
@@ -43,10 +45,11 @@ export function countMessage(message: PluralMessage, count: number, locale: stri
   return fillMessage(form, { count: new Intl.NumberFormat(locale).format(count) });
 }
 
-/** Returns the message telling the user why a change was refused, a general one for a reason without its own message. */
+/** Returns the message telling the user why a change was refused, the text of the problem found when the change has none of its own, and a general one for a reason without any text. */
 export function editErrorMessage(messages: Messages, code: string): string {
-  const known: Readonly<Record<string, string>> = messages.editErrors;
-  return Object.hasOwn(known, code)
-    ? (known[code] ?? messages.editErrors.NOT_POSSIBLE)
-    : messages.editErrors.NOT_POSSIBLE;
+  const edits: Readonly<Record<string, string>> = messages.editErrors;
+  const issues: Readonly<Record<string, string>> = messages.issues;
+  const own = Object.hasOwn(edits, code) ? edits[code] : undefined;
+  const found = Object.hasOwn(issues, code) ? issues[code] : undefined;
+  return own ?? found ?? messages.editErrors.NOT_POSSIBLE;
 }

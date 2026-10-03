@@ -15,6 +15,7 @@
     type EditableColumn,
   } from '../plan/cell-editing';
   import { groupIncoming, predecessorText, type PlanRow } from '../plan/plan-outline';
+  import { isPickerRefusal } from '../plan/table-dates';
   import { taskCells, type TableFormatters } from '../plan/table-format';
   import { indentTask, moveTask, outdentTask } from '../plan/task-commands';
   import { ROW_HEIGHT } from '../plan/timeline-geometry';
@@ -59,7 +60,6 @@
     calendar: app.calendar,
     incoming,
     wbsById: app.outline.wbsById,
-    format: app.regionalFormat,
   });
   const range = $derived(
     visibleRows({ left: 0, top: scrollTop, width: 0, height: viewportHeight }, rows.length),
@@ -128,12 +128,12 @@
     activeColumn = column;
     reveal(index);
     const initial = editorText(task, column, source);
-    const anchor =
-      column === 'tag'
-        ? (document.getElementById(cellId(taskId, column))?.getBoundingClientRect() ?? null)
-        : null;
-    editing = { taskId, column, initial, text: typed ?? initial, anchor };
+    editing = { taskId, column, initial, text: typed ?? initial, anchor: null };
     void tick().then(() => {
+      if (column === 'tag' && editing?.taskId === taskId && editing.column === 'tag') {
+        const cell = document.getElementById(cellId(taskId, column));
+        editing = { ...editing, anchor: cell?.getBoundingClientRect() ?? null };
+      }
       const input = grid?.querySelector<HTMLInputElement>('input.editor');
       if (input === undefined || input === null || document.activeElement === input) {
         return;
@@ -219,7 +219,10 @@
       picker.showPicker();
     } catch (error) {
       picking = null;
-      console.error(error);
+      if (!isPickerRefusal(error)) {
+        throw error;
+      }
+      app.reportPickerUnavailable(error);
     }
   }
 
@@ -269,6 +272,10 @@
       (event.key === 'ArrowRight' || event.key === 'ArrowLeft')
     ) {
       app.editSelected(event.key === 'ArrowRight' ? indentTask : outdentTask);
+      return true;
+    }
+    if (event.altKey && (event.key === 'ArrowRight' || event.key === 'ArrowLeft') && id !== null) {
+      app.setSummaryOpen(id, event.key === 'ArrowRight');
       return true;
     }
     if (event.altKey && event.key === 'Enter' && id !== null) {

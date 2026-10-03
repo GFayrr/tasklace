@@ -3,7 +3,12 @@ import { MAX_TASK_DURATION_HOURS } from '../limits';
 import { at, compileOrThrow, format } from '../testing/civil-time';
 import { END_PROJECT_HOUR } from '../time';
 import { TEST_CALENDAR } from '../testing/test-calendar';
-import { computeTaskSlots, type TaskPlacement, type TimeSlot } from './task-slots';
+import {
+  computeSegmentBounds,
+  computeTaskSlots,
+  type TaskPlacement,
+  type TimeSlot,
+} from './task-slots';
 
 const calendar = compileOrThrow(TEST_CALENDAR);
 
@@ -141,5 +146,39 @@ describe('computeTaskSlots', () => {
       placement({ start: at(2200, 12, 30, 9), durationHours: 100 }),
     );
     expect(result).toEqual({ ok: false, error: 'BEYOND_PLANNING_HORIZON' });
+  });
+});
+
+describe('slots across midnight and empty blocks', () => {
+  const ROUND_THE_CLOCK = compileOrThrow({
+    ...TEST_CALENDAR,
+    workingWeekdays: [0, 1, 2, 3, 4, 5, 6],
+    workingTimeRanges: [{ startHour: 0, endHour: 24 }],
+  });
+
+  it('joins the work of days that follow one another without a pause into one slot', () => {
+    const slots = computeTaskSlots(
+      ROUND_THE_CLOCK,
+      placement({ start: at(2026, 9, 28), durationHours: 48 }),
+    );
+    expect(slots.ok && formatSlots(slots.value)).toEqual(['2026-09-28 00:00 → 2026-09-30 00:00']);
+  });
+
+  it('refuses a block without duration', () => {
+    expect(computeSegmentBounds(calendar, placement({ durationHours: 0 }))).toEqual({
+      ok: false,
+      error: 'INVALID_DURATION',
+    });
+  });
+
+  it('gives the bounds of a block of one day, and of several days, as its slots would', () => {
+    for (const durationHours of [3, 7, 10.25, 30]) {
+      const slots = computeTaskSlots(calendar, placement({ durationHours }));
+      const bounds = computeSegmentBounds(calendar, placement({ durationHours }));
+      if (!slots.ok || !bounds.ok) {
+        throw new Error('Unexpected failure');
+      }
+      expect(bounds.value).toEqual({ start: slots.value[0]?.start, end: slots.value.at(-1)?.end });
+    }
   });
 });

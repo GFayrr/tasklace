@@ -33,7 +33,7 @@ export function createDefaultTags(createId: () => TagId): Tag[] {
   }));
 }
 
-/** Returns the palette color proposed for the tag created at a given position, cycling past the end. */
+/** Returns the palette color proposed for the tag created at a given position, cycling past the end, a position that is not a whole count giving the first color. */
 export function nextPaletteColor(tagCount: number): string {
   return TAG_PALETTE[tagCount % TAG_PALETTE.length] ?? TAG_PALETTE[0];
 }

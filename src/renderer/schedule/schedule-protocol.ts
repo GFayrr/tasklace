@@ -32,9 +32,12 @@ export function answerScheduleRequest(message: unknown): ScheduleResponse | null
   };
 }
 
-/** Tells whether a message is a schedule response of the current protocol version. */
+/** Tells whether a message is a schedule response of the current protocol version, whose result says whether it succeeded. */
 export function isScheduleResponse(message: unknown): message is ScheduleResponse {
-  return hasVersionAndGeneration(message) && 'result' in message;
+  if (!hasVersionAndGeneration(message) || !('result' in message)) {
+    return false;
+  }
+  return typeof Reflect.get(Object(message.result), 'ok') === 'boolean';
 }
 
 /** Tells whether a message is a schedule request of the current protocol version. */
