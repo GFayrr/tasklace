@@ -133,9 +133,11 @@ describe('opening projects', () => {
       },
     });
     expect(tasks).toEqual([{ kind: 'openProject', path }]);
-    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual([]);
+    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(success([]));
     expect(await request(IPC_CHANNELS.adoptProject, sender, DOCUMENT_ID)).toEqual(success(null));
-    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual([{ name: 'Thesis', folder }]);
+    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(
+      success([{ name: 'Thesis', folder }]),
+    );
     expect(trusted).toHaveBeenCalledTimes(4);
   });
 
@@ -178,14 +180,14 @@ describe('opening projects', () => {
     );
   });
 
-  it('opens a project even when the recent list cannot be read or written, logging why and listing none', async () => {
+  it('opens a project even when the recent list cannot be read or written, logging why and reporting the unreadable list', async () => {
     await mkdir(join(userData, 'recent-projects.json'));
     const opened = await quietly(() => openedIn(join(folder, 'Plan.tasklace')));
     expect(opened.logged).toEqual([
       ['The recent projects could not be recorded:', expect.objectContaining({ code: 'EISDIR' })],
     ]);
     const listed = await quietly(() => request(IPC_CHANNELS.recentProjects, {}));
-    expect(listed.answer).toEqual([]);
+    expect(listed.answer).toEqual(failure({ code: 'READ_FAILED' }));
     expect(listed.logged).toEqual([
       ['The recent projects could not be read:', expect.objectContaining({ code: 'EISDIR' })],
     ]);
@@ -320,7 +322,7 @@ describe('adopting projects', () => {
     await expect(request(IPC_CHANNELS.adoptProject, sender, '../escape')).rejects.toThrow(
       RefusedRequest,
     );
-    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual([]);
+    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(success([]));
   });
 });
 
@@ -362,7 +364,7 @@ describe('new and imported projects', () => {
     expect(await request(IPC_CHANNELS.adoptProject, sender, documentId)).toEqual(success(null));
     await request(IPC_CHANNELS.saveProject, sender, STATE);
     expect(tasks.at(-1)).toMatchObject({ kind: 'saveProject', path: null, documentId });
-    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual([]);
+    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(success([]));
     runTask.mockResolvedValue(success(LOADED));
     chooseToOpen(csv);
     await request(IPC_CHANNELS.importProject, {}, 'csv');
@@ -423,10 +425,12 @@ describe('saving projects', () => {
     expect(tasks.at(-1)).toMatchObject({ kind: 'saveProject', path: join(folder, 'New.tasklace') });
     await request(IPC_CHANNELS.saveProject, sender, STATE);
     expect(tasks.at(-1)).toMatchObject({ path: join(folder, 'New.tasklace') });
-    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual([
-      { name: 'New', folder },
-      { name: 'Old', folder },
-    ]);
+    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(
+      success([
+        { name: 'New', folder },
+        { name: 'Old', folder },
+      ]),
+    );
   });
 
   it('asks before replacing a file the added extension leads to, through the window when there is one', async () => {

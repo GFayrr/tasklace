@@ -52,6 +52,7 @@ import {
 } from './shared-operations';
 import {
   DOCUMENT_ID_CHANGED,
+  malformedUpdate,
   readSharedProject,
   repairDocumentProject,
   roundedProgress,
@@ -342,31 +343,36 @@ function mergeIntoSession(
   return merged;
 }
 
-/** Applies an update to the trial copy and checks and repairs it, collecting the repairs written there. */
+/** Applies an update to the trial copy and checks and repairs it, collecting the repairs written there, an exception raised by the bytes being a malformed update and one raised while repairing a failed repair. */
 function tryMerge(
   session: SessionState,
   update: Uint8Array,
   repairUpdates: Uint8Array[],
 ): Result<readonly SharedRepair[], MergeFailure> {
   const { shadow } = session;
+  let change: ShadowChange;
   try {
-    const change = applyToShadow(shadow, update);
-    if (shadow.store.pendingStructs !== null || shadow.store.pendingDs !== null) {
-      return failure({ kind: 'incompleteUpdate' });
-    }
-    if (readDocumentId(shadow) !== session.documentId) {
-      return failure({ kind: 'invalidProject', issues: [DOCUMENT_ID_CHANGED] });
-    }
-    const collect = (repairUpdate: Uint8Array): void => {
-      repairUpdates.push(repairUpdate);
-    };
-    shadow.on('update', collect);
+    change = applyToShadow(shadow, update);
+  } catch (error) {
+    return malformedUpdate(error);
+  }
+  if (shadow.store.pendingStructs !== null || shadow.store.pendingDs !== null) {
+    return failure({ kind: 'incompleteUpdate' });
+  }
+  if (readDocumentId(shadow) !== session.documentId) {
+    return failure({ kind: 'invalidProject', issues: [DOCUMENT_ID_CHANGED] });
+  }
+  const collect = (repairUpdate: Uint8Array): void => {
+    repairUpdates.push(repairUpdate);
+  };
+  shadow.on('update', collect);
+  try {
     const repairs = change.structural ? repairAll(session) : repairChanged(session, change);
-    shadow.off('update', collect);
     return repairs.ok ? repairs : failure({ kind: 'invalidProject', issues: repairs.error });
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return failure({ kind: 'malformedUpdate', reason });
+    return failure({ kind: 'repairFailed', error });
+  } finally {
+    shadow.off('update', collect);
   }
 }
 

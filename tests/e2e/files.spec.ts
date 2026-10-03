@@ -66,10 +66,10 @@ test('opens a project, saves it back to its file and lists it as recent', async 
   });
   expect(outcome).toEqual({
     name: 'Plan',
-    before: [],
+    before: { ok: true, value: [] },
     adopted: { ok: true, value: null },
     saved: { ok: true, value: { localCopySaved: true } },
-    recent: [{ name: 'Plan', folder }],
+    recent: { ok: true, value: [{ name: 'Plan', folder }] },
   });
   const copies = await readdir(join(userData, 'local-copies'));
   expect(copies.sort()).toEqual([`${TEST_DOCUMENT_ID}.tasklace`, 'index.json']);

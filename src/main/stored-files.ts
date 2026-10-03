@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, rename } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { MAX_FILE_PATH_LENGTH } from '../core/limits';
 
@@ -42,4 +42,18 @@ export function isMissingFile(error: unknown): boolean {
 /** Tells whether an error comes from the system, such as a missing file or a refused access, rather than from a fault of the program. */
 export function isSystemError(error: unknown): error is Error & { readonly code: string } {
   return error instanceof Error && typeof Reflect.get(error, 'code') === 'string';
+}
+
+/** Keeps a damaged store file under its name followed by the time in milliseconds, so that what it held can still be recovered, a file that cannot be moved being only logged since it is rewritten afterwards. */
+export async function setDamagedFileAside(path: string, now: Date, what: string): Promise<void> {
+  const asidePath = `${path}.damaged-${String(now.getTime())}`;
+  try {
+    await rename(path, asidePath);
+    console.error(`${what} was damaged and was kept as ${asidePath}.`);
+  } catch (error) {
+    if (!isSystemError(error)) {
+      throw error;
+    }
+    console.error(`${what} was damaged, could not be kept aside and is replaced:`, error);
+  }
 }

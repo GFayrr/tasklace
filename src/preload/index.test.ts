@@ -103,17 +103,30 @@ describe('the bridge exposed to the page', () => {
     expect(await bridge.newProject()).toBe('11111111-1111-4111-8111-111111111111');
   });
 
-  it('keeps only well-formed recent projects, and none from an answer that is not a list', async () => {
+  it('keeps only well-formed recent projects, none from a value that is not a list, and passes a failure through', async () => {
     const bridge = await loadBridge();
-    electron.invoke.mockResolvedValueOnce([
-      { name: 'Plan', folder: '/projects' },
-      { name: 3, folder: '/projects' },
-      { name: 'Other' },
-      null,
-    ]);
-    expect(await bridge.recentProjects()).toEqual([{ name: 'Plan', folder: '/projects' }]);
-    electron.invoke.mockResolvedValueOnce({ name: 'Plan', folder: '/projects' });
-    expect(await bridge.recentProjects()).toEqual([]);
+    electron.invoke.mockResolvedValueOnce({
+      ok: true,
+      value: [
+        { name: 'Plan', folder: '/projects' },
+        { name: 3, folder: '/projects' },
+        { name: 'Other' },
+        null,
+      ],
+    });
+    expect(await bridge.recentProjects()).toEqual({
+      ok: true,
+      value: [{ name: 'Plan', folder: '/projects' }],
+    });
+    electron.invoke.mockResolvedValueOnce({
+      ok: true,
+      value: { name: 'Plan', folder: '/projects' },
+    });
+    expect(await bridge.recentProjects()).toEqual({ ok: true, value: [] });
+    electron.invoke.mockResolvedValueOnce({ ok: false, error: { code: 'READ_FAILED' } });
+    expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'READ_FAILED' } });
+    electron.invoke.mockResolvedValueOnce([{ name: 'Plan', folder: '/projects' }]);
+    expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
   });
 
   it('gives the regional format, refusing an answer of another shape', async () => {

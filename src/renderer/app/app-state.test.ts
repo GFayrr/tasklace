@@ -873,6 +873,24 @@ describe('local copies and recent projects', () => {
     ]);
   });
 
+  it('keeps the previous recent projects and warns when the main process cannot read them', async () => {
+    const { app, control } = await withOpenPlan();
+    control.recent = [{ name: 'Thesis', folder: '/projects' }];
+    await app.loadRecentProjects();
+    control.recent = 'unreadable';
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await app.loadRecentProjects();
+      expect(logged).toHaveBeenCalledWith('The recent projects could not be loaded:', {
+        code: 'READ_FAILED',
+      });
+    } finally {
+      logged.mockRestore();
+    }
+    expect(app.recentProjects).toEqual([{ name: 'Thesis', folder: '/projects' }]);
+    expect(noticeTexts(app)).toEqual([english.notices.recentUnavailable]);
+  });
+
   it('keeps the previous recent projects and warns when they cannot be loaded, the save still succeeding', async () => {
     const { app, control } = await withOpenPlan();
     control.recent = [{ name: 'Thesis', folder: '/projects' }];

@@ -187,20 +187,24 @@ async function openRecent(
   return path === undefined ? failure({ code: 'READ_FAILED' }) : openPath(services, sender, path);
 }
 
-/** Lists the recent projects by name and folder, a list that cannot be read being logged and shown empty, since it only holds shortcuts. */
-async function listRecent(services: ProjectFileServices): Promise<RecentProject[]> {
+/** Lists the recent projects by name and folder, a list that cannot be read being logged and reported, so that the page keeps the list it shows and tells the user. */
+async function listRecent(
+  services: ProjectFileServices,
+): Promise<BridgeResult<readonly RecentProject[]>> {
   try {
     const paths = await readRecentProjects(recentStore(services));
-    return paths.map((path) => ({
-      name: projectNameFromPath(path, MESSAGES.projects.untitled),
-      folder: dirname(path),
-    }));
+    return success(
+      paths.map((path) => ({
+        name: projectNameFromPath(path, MESSAGES.projects.untitled),
+        folder: dirname(path),
+      })),
+    );
   } catch (error) {
     if (!isSystemError(error)) {
       throw error;
     }
     console.error('The recent projects could not be read:', error);
-    return [];
+    return failure({ code: 'READ_FAILED' });
   }
 }
 

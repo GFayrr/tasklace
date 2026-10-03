@@ -13,7 +13,13 @@ import { registerProjectFileHandlers } from './project-files';
 import { CONTENT_SECURITY_POLICY_HEADER, hardenContents, hardenSession } from './security';
 import { MESSAGES } from './messages';
 import { installApplicationMenu } from './platform/application-menu';
-import { captureConsole, createLogFile, logPageMessages, logWorkerErrors } from './log-file';
+import {
+  captureConsole,
+  createLogFile,
+  logPageMessages,
+  logProcessErrors,
+  logWorkerErrors,
+} from './log-file';
 import { createMainWindow } from './window';
 
 const NOT_FOUND = 404;
@@ -31,6 +37,7 @@ const log = createLogFile(
   reportLogFailure,
 );
 captureConsole(console, log);
+logProcessErrors(process);
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },

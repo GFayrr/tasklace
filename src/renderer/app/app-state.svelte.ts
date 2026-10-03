@@ -193,11 +193,16 @@ export class AppState {
   /** Loads the list of recent projects, a list that cannot be loaded leaving the previous one and a warning, so that the action that asked for it still succeeds. */
   async loadRecentProjects(): Promise<void> {
     try {
-      this.recentProjects = await this.#context.bridge.recentProjects();
+      const loaded = await this.#context.bridge.recentProjects();
+      if (loaded.ok) {
+        this.recentProjects = loaded.value;
+        return;
+      }
+      console.error('The recent projects could not be loaded:', loaded.error);
     } catch (error) {
       console.error('The recent projects could not be loaded:', error);
-      this.#notify('warning', this.messages.notices.recentUnavailable);
     }
+    this.#notify('warning', this.messages.notices.recentUnavailable);
   }
 
   /** Runs the action of a keyboard shortcut. */
@@ -523,7 +528,7 @@ export class AppState {
     return this.#fileActionRunning;
   }
 
-  /** Tells the repairs an undone or redone step needed, or that the step could not be applied and the project was left as it was. */
+  /** Tells the repairs an undone or redone step needed, or that the step could not be applied and the project was left as it was, logging why, a failed repair being an unexpected error. */
   #showHistoryStep(
     step: Result<readonly SharedRepair[], MergeFailure> | undefined,
     refusal: string,
@@ -531,11 +536,16 @@ export class AppState {
     if (step === undefined) {
       return;
     }
-    if (!step.ok) {
-      this.#notify('warning', refusal);
+    if (step.ok) {
+      this.#notifyRepairs(step.value);
       return;
     }
-    this.#notifyRepairs(step.value);
+    if (step.error.kind === 'repairFailed') {
+      this.reportUnexpectedError(step.error.error);
+      return;
+    }
+    console.error('The step could not be undone or redone:', step.error);
+    this.#notify('warning', refusal);
   }
 
   /** Saves at once what is not saved yet, before the window closes. */

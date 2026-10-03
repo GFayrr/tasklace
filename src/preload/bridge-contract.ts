@@ -78,7 +78,7 @@ export interface TasklaceBridge {
   readonly newProject: () => Promise<string>;
   readonly openProject: () => Promise<BridgeResult<OpenedProject>>;
   readonly openRecentProject: (index: number) => Promise<BridgeResult<OpenedProject>>;
-  readonly recentProjects: () => Promise<readonly RecentProject[]>;
+  readonly recentProjects: () => Promise<BridgeResult<readonly RecentProject[]>>;
   readonly importProject: (kind: ExchangeKind) => Promise<BridgeResult<OpenedProject>>;
   readonly adoptProject: (documentId: string) => Promise<BridgeResult<null>>;
   readonly saveProject: (state: Uint8Array) => Promise<BridgeResult<SavedProject>>;

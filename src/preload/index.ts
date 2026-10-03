@@ -25,9 +25,12 @@ const bridge: TasklaceBridge = {
   openProject: () => request(IPC_CHANNELS.openProject),
   openRecentProject: (index) => request(IPC_CHANNELS.openRecentProject, index),
   recentProjects: async () => {
-    const answer: unknown = await ipcRenderer.invoke(IPC_CHANNELS.recentProjects);
-    const projects: readonly unknown[] = Array.isArray(answer) ? answer : [];
-    return projects.filter(isRecentProject);
+    const answer = await request<unknown>(IPC_CHANNELS.recentProjects);
+    if (!answer.ok) {
+      return answer;
+    }
+    const projects: readonly unknown[] = Array.isArray(answer.value) ? answer.value : [];
+    return { ok: true, value: projects.filter(isRecentProject) };
   },
   importProject: (kind) => request(IPC_CHANNELS.importProject, kind),
   adoptProject: (documentId) => request(IPC_CHANNELS.adoptProject, documentId),

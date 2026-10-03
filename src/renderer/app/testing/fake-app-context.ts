@@ -34,7 +34,7 @@ export interface FakeBridgeControl {
   saveAsResult: BridgeResult<SavedProject>;
   exportResult: BridgeResult<ExportedFile>;
   adoptResult: BridgeResult<null>;
-  recent: readonly RecentProject[] | Error;
+  recent: readonly RecentProject[] | Error | 'unreadable';
   newDocumentId: string;
   readonly calls: string[];
   readonly adopted: string[];
@@ -98,7 +98,15 @@ export function fakeBridge(): {
     openRecentProject: () => called('openRecentProject', control.openResult),
     recentProjects: () => {
       const { recent } = control;
-      return recent instanceof Error ? Promise.reject(recent) : called('recentProjects', recent);
+      if (recent instanceof Error) {
+        return Promise.reject(recent);
+      }
+      return called(
+        'recentProjects',
+        recent === 'unreadable'
+          ? { ok: false, error: { code: 'READ_FAILED' } }
+          : { ok: true, value: recent },
+      );
     },
     importProject: (kind) => {
       control.imports.push(kind);

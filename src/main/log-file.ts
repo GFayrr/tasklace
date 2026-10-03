@@ -74,6 +74,21 @@ export function captureConsole(target: LogConsole, log: LogFile): void {
   };
 }
 
+export interface ProcessErrorSource {
+  on(event: 'uncaughtExceptionMonitor', listener: (error: Error, origin: string) => void): unknown;
+  on(event: 'unhandledRejection', listener: (reason: unknown) => void): unknown;
+}
+
+/** Logs the exceptions the main process does not catch and the promises it leaves rejected, without changing how the process reacts to them. */
+export function logProcessErrors(source: ProcessErrorSource): void {
+  source.on('uncaughtExceptionMonitor', (error, origin) => {
+    console.error(`Uncaught exception in the main process (${origin}):`, error);
+  });
+  source.on('unhandledRejection', (reason) => {
+    console.error('Unhandled rejection in the main process:', reason);
+  });
+}
+
 /** Copies into the log the errors and warnings a page writes to its console. */
 export function logPageMessages(contents: WebContents, log: LogFile): void {
   contents.on('console-message', ({ level, message, sourceId, lineNumber }) => {
