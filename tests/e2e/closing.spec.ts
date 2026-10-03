@@ -1,24 +1,21 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  _electron as electron,
-  expect,
-  test,
-  type ElectronApplication,
-  type Page,
-} from '@playwright/test';
-import { answerDialogs, closeDiscarding } from './dialogs';
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { closeDiscarding, launchApplication } from './application';
+import { answerDialogs } from './dialogs';
 
 let folder: string;
 let userData: string;
+const STARTING_CLOSE_ATTEMPTS = 3;
+
 let application: ElectronApplication;
 let page: Page;
 
 test.beforeEach(async () => {
   folder = await mkdtemp(join(tmpdir(), 'tasklace-e2e-closing-'));
   userData = await mkdtemp(join(tmpdir(), 'tasklace-e2e-data-'));
-  application = await electron.launch({ args: ['.', `--user-data-dir=${userData}`] });
+  application = await launchApplication(userData);
   page = await application.firstWindow();
   await expect(page.locator('#app')).toHaveAttribute('data-started', 'true');
   await page.getByRole('button', { name: /New project/ }).click();
@@ -84,4 +81,14 @@ test('asks before the window closes, keeping it open on cancel', async () => {
   await closeWindow();
   await prompt.getByRole('button', { name: "Don't save" }).click();
   await closed;
+});
+
+test('closes a window at once while its interface is still starting', async () => {
+  for (let attempt = 0; attempt < STARTING_CLOSE_ATTEMPTS; attempt += 1) {
+    const ownData = await mkdtemp(join(tmpdir(), 'tasklace-e2e-starting-'));
+    const starting = await launchApplication(ownData);
+    const window = await starting.firstWindow();
+    await closeDiscarding(starting, window);
+    await rm(ownData, { recursive: true, force: true });
+  }
 });

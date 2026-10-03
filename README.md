@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, but the task table and the timeline are still being built, and there is no downloadable release yet.
+> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, and plans tasks in a table and on a timeline; project settings, PDF export and collaboration are still to come, and there is no downloadable release yet.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -34,7 +34,7 @@ Tasklace is designed for students and professionals who want clear project plans
 Most Gantt tools are either heavyweight project-management suites or online services that keep your data on their servers. Tasklace aims for the middle ground:
 
 - **Strict Gantt rules**: tasks, milestones, summary tasks, the four dependency types, working calendars, progress and critical path.
-- **Hour-level precision**: durations are expressed in hours and spread over working days, with optional hours per day.
+- **Quarter-hour precision**: durations are expressed in hours and minutes, by quarter hours, and spread over working days, with optional hours per day.
 - **Collaboration without an account**: people join a project with a sharing code, on the local network, or through an optional end-to-end encrypted relay that any school or company can host.
 - **Offline first**: every member keeps a local copy and changes are merged when they reconnect.
 - **Lightweight exports**: vector PDF files with selectable text.

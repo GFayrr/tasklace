@@ -600,6 +600,7 @@ function toOperation(shape: OperationShape, current: Project, newId: string): Sh
               segments: Array.from({ length: shape.count }, (_unused, index) => ({
                 durationHours: 3,
                 gapDaysBefore: index === 0 ? 0 : 1,
+                startNoEarlierThan: null,
               })),
             },
           }
@@ -701,6 +702,8 @@ function playStep(
   }
 }
 
+const CONVERGENCE_RUNS = 150;
+
 describe('shared session properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
   it('takes exactly the decisions of the full validation and repair, and converges', () => {
     const counters = { edits: 0, repairs: 0 };
@@ -733,7 +736,7 @@ describe('shared session properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () 
           });
         },
       ),
-      { numRuns: 60 },
+      { numRuns: CONVERGENCE_RUNS },
     );
     expect(counters.edits).toBeGreaterThan(0);
     expect(counters.repairs).toBeGreaterThan(0);

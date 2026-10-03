@@ -9,15 +9,14 @@ import { lastWorkingHourEnd, subtractWorkingHours } from '../calendar/working-ti
 import { MAX_SEGMENTS_PER_TASK, MAX_SEGMENT_GAP_DAYS } from '../limits';
 import type { SchedulableTask, TaskSegment, WorkTask } from '../model/project';
 import { failure, success, type Result } from '../result';
+import { blockResumption } from './block-links';
 import {
   END_PROJECT_HOUR,
   MIN_PROJECT_HOUR,
   QUARTER_HOUR,
-  dayIndexOf,
   fromQuarters,
   isProjectHour,
   isQuarterHours,
-  startOfDay,
   toQuarters,
   type ProjectHour,
 } from '../time';
@@ -217,7 +216,7 @@ function isValidGap(gapDays: number, isFirstSegment: boolean): boolean {
   return Number.isInteger(gapDays) && gapDays >= 0 && gapDays <= MAX_SEGMENT_GAP_DAYS;
 }
 
-/** Places every block of a work task, each one resuming no earlier than its gap in days after the previous one, and never before it ends. */
+/** Places every block of a work task, each one resuming no earlier than its gap in days after the previous one, nor before its own start date, and never before the previous one ends. */
 function placeSegments(
   calendar: CompiledCalendar,
   task: WorkTask,
@@ -228,10 +227,7 @@ function placeSegments(
   for (const segment of task.segments) {
     const previous = segments.at(-1);
     if (previous !== undefined) {
-      resumeFrom = Math.max(
-        previous.end,
-        startOfDay(dayIndexOf(previous.end - QUARTER_HOUR) + segment.gapDaysBefore),
-      );
+      resumeFrom = blockResumption(previous.end, segment);
     }
     const placed = placeSegment(calendar, task, segment, resumeFrom);
     if (!placed.ok) {

@@ -148,10 +148,15 @@ describe('readProject: valid input', () => {
       hoursPerDay: 24,
       dailyStartHour: 0,
       segments: [
-        { durationHours: MAX_TASK_DURATION_HOURS - MAX_SEGMENTS_PER_TASK + 1, gapDaysBefore: 0 },
+        {
+          durationHours: MAX_TASK_DURATION_HOURS - MAX_SEGMENTS_PER_TASK + 1,
+          gapDaysBefore: 0,
+          startNoEarlierThan: null,
+        },
         ...Array.from({ length: MAX_SEGMENTS_PER_TASK - 1 }, () => ({
           durationHours: 1,
           gapDaysBefore: MAX_SEGMENT_GAP_DAYS,
+          startNoEarlierThan: null,
         })),
       ],
     };
@@ -384,6 +389,38 @@ describe('readProject: values', () => {
   });
 });
 
+describe('readProject: start dates of blocks', () => {
+  const blocks = (first: unknown, second: unknown) => [
+    { durationHours: 7, gapDaysBefore: 0, startNoEarlierThan: first },
+    { durationHours: 7, gapDaysBefore: 1, startNoEarlierThan: second },
+  ];
+
+  it('reads the start date of a later block, a missing one meaning none', () => {
+    const later = at(2026, 10, 6, 13);
+    const read = readProject(taskWith(1, { segments: blocks(null, later) }), STORED_VALUE_CODEC);
+    expect(read.ok && read.value.tasks[1]).toMatchObject({
+      segments: [{ startNoEarlierThan: null }, { startNoEarlierThan: later }],
+    });
+    const bare = [
+      { durationHours: 7, gapDaysBefore: 0 },
+      { durationHours: 7, gapDaysBefore: 1 },
+    ];
+    const missing = readProject(taskWith(1, { segments: bare }), STORED_VALUE_CODEC);
+    expect(missing.ok && missing.value.tasks[1]).toMatchObject({
+      segments: [{ startNoEarlierThan: null }, { startNoEarlierThan: null }],
+    });
+  });
+
+  it('refuses a start date on the first block, which the task start date stands for, and a wrong value', () => {
+    expect(issuesOf(taskWith(1, { segments: blocks(at(2026, 10, 6, 13), null) }))).toEqual(
+      issue('tasks[1].segments[0].startNoEarlierThan', 'OUT_OF_RANGE'),
+    );
+    expect(issuesOf(taskWith(1, { segments: blocks(null, 'soon') }))).toEqual(
+      issue('tasks[1].segments[1].startNoEarlierThan', 'WRONG_TYPE'),
+    );
+  });
+});
+
 describe('readProject: links to blocks', () => {
   it('reads a missing block reference as the whole task', () => {
     const { id, predecessorId, successorId, type, lagHours } = link('a', 'b');
@@ -415,14 +452,18 @@ describe('readProject: tasks', () => {
     [
       1,
       {
-        segments: new Array(MAX_SEGMENTS_PER_TASK + 1).fill({ durationHours: 1, gapDaysBefore: 1 }),
+        segments: new Array(MAX_SEGMENTS_PER_TASK + 1).fill({
+          durationHours: 1,
+          gapDaysBefore: 1,
+          startNoEarlierThan: null,
+        }),
       },
       'tasks[1].segments',
       'TOO_MANY_ITEMS',
     ],
     [
       1,
-      { segments: [{ durationHours: 1, gapDaysBefore: 1 }] },
+      { segments: [{ durationHours: 1, gapDaysBefore: 1, startNoEarlierThan: null }] },
       'tasks[1].segments[0].gapDaysBefore',
       'OUT_OF_RANGE',
     ],
@@ -430,8 +471,8 @@ describe('readProject: tasks', () => {
       1,
       {
         segments: [
-          { durationHours: 1, gapDaysBefore: 0 },
-          { durationHours: 1, gapDaysBefore: -1 },
+          { durationHours: 1, gapDaysBefore: 0, startNoEarlierThan: null },
+          { durationHours: 1, gapDaysBefore: -1, startNoEarlierThan: null },
         ],
       },
       'tasks[1].segments[1].gapDaysBefore',
@@ -441,8 +482,8 @@ describe('readProject: tasks', () => {
       1,
       {
         segments: [
-          { durationHours: 1, gapDaysBefore: 0 },
-          { durationHours: 1, gapDaysBefore: MAX_SEGMENT_GAP_DAYS + 1 },
+          { durationHours: 1, gapDaysBefore: 0, startNoEarlierThan: null },
+          { durationHours: 1, gapDaysBefore: MAX_SEGMENT_GAP_DAYS + 1, startNoEarlierThan: null },
         ],
       },
       'tasks[1].segments[1].gapDaysBefore',
@@ -450,13 +491,21 @@ describe('readProject: tasks', () => {
     ],
     [
       1,
-      { segments: [{ durationHours: 0, gapDaysBefore: 0 }] },
+      { segments: [{ durationHours: 0, gapDaysBefore: 0, startNoEarlierThan: null }] },
       'tasks[1].segments[0].durationHours',
       'OUT_OF_RANGE',
     ],
     [
       1,
-      { segments: [{ durationHours: MAX_TASK_DURATION_HOURS + 1, gapDaysBefore: 0 }] },
+      {
+        segments: [
+          {
+            durationHours: MAX_TASK_DURATION_HOURS + 1,
+            gapDaysBefore: 0,
+            startNoEarlierThan: null,
+          },
+        ],
+      },
       'tasks[1].segments[0].durationHours',
       'OUT_OF_RANGE',
     ],
@@ -685,8 +734,8 @@ describe('readProject: holes, totals and scheduling', () => {
 
   it('rejects blocks whose total duration exceeds the maximum task duration', () => {
     const segments = [
-      { durationHours: MAX_TASK_DURATION_HOURS, gapDaysBefore: 0 },
-      { durationHours: 1, gapDaysBefore: 1 },
+      { durationHours: MAX_TASK_DURATION_HOURS, gapDaysBefore: 0, startNoEarlierThan: null },
+      { durationHours: 1, gapDaysBefore: 1, startNoEarlierThan: null },
     ];
     expect(issuesOf(taskWith(1, { segments }))).toEqual(issue('tasks[1].segments', 'OUT_OF_RANGE'));
   });
@@ -701,10 +750,11 @@ describe('readProject: holes, totals and scheduling', () => {
       'blocks spread far beyond the planning period',
       taskWith(1, {
         segments: [
-          { durationHours: 1, gapDaysBefore: 0 },
+          { durationHours: 1, gapDaysBefore: 0, startNoEarlierThan: null },
           ...Array.from({ length: MAX_SEGMENTS_PER_TASK - 1 }, () => ({
             durationHours: 1,
             gapDaysBefore: MAX_SEGMENT_GAP_DAYS,
+            startNoEarlierThan: null,
           })),
         ],
       }),

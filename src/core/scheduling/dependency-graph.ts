@@ -82,7 +82,9 @@ export function blockTasksOf(task: SchedulableTask): SchedulableTask[] {
   }
   return task.segments.map((segment) => ({
     ...task,
-    segments: [{ durationHours: segment.durationHours, gapDaysBefore: 0 }],
+    segments: [
+      { durationHours: segment.durationHours, gapDaysBefore: 0, startNoEarlierThan: null },
+    ],
   }));
 }
 

@@ -43,9 +43,13 @@ describe('placeTask', () => {
   });
 
   it('places a one-block task like its time slots', () => {
-    expect(place(workTask('a', { segments: [{ durationHours: 10, gapDaysBefore: 0 }] }))).toEqual([
-      '2026-09-28 09:00 → 2026-09-29 12:00',
-    ]);
+    expect(
+      place(
+        workTask('a', {
+          segments: [{ durationHours: 10, gapDaysBefore: 0, startNoEarlierThan: null }],
+        }),
+      ),
+    ).toEqual(['2026-09-28 09:00 → 2026-09-29 12:00']);
   });
 
   it('resumes the second block the given number of days after the first one ends', () => {
@@ -57,6 +61,22 @@ describe('placeTask', () => {
         ]),
       ),
     ).toEqual(['2026-09-28 09:00 → 2026-09-28 17:00', '2026-10-19 09:00 → 2026-10-19 17:00']);
+  });
+
+  it('resumes a block no earlier than its own start date, which never brings it before the previous block ends', () => {
+    expect(
+      place(
+        splitTask('a', [
+          [7, 0],
+          [3, 0, at(2026, 9, 30, 14)],
+          [3, 0, at(2026, 9, 27, 9)],
+        ]),
+      ),
+    ).toEqual([
+      '2026-09-28 09:00 → 2026-09-28 17:00',
+      '2026-09-30 14:00 → 2026-09-30 17:00',
+      '2026-10-01 09:00 → 2026-10-01 12:00',
+    ]);
   });
 
   it('counts the gap from the last day of a block that spans several days', () => {
@@ -180,7 +200,9 @@ describe('placeTask', () => {
 });
 
 describe('placeTaskEarliest', () => {
-  const threeHours = workTask('a', { segments: [{ durationHours: 3, gapDaysBefore: 0 }] });
+  const threeHours = workTask('a', {
+    segments: [{ durationHours: 3, gapDaysBefore: 0, startNoEarlierThan: null }],
+  });
 
   it('keeps the earliest placement when it already ends late enough', () => {
     const result = placeTaskEarliest(calendar, threeHours, MONDAY_9, at(2026, 9, 28, 10));
@@ -214,7 +236,7 @@ describe('placeTaskEarliest', () => {
 
   it('propagates errors met while searching', () => {
     const oneHourPerDay = workTask('a', {
-      segments: [{ durationHours: 2, gapDaysBefore: 0 }],
+      segments: [{ durationHours: 2, gapDaysBefore: 0, startNoEarlierThan: null }],
       hoursPerDay: 1,
     });
     const result = placeTaskEarliest(
@@ -228,7 +250,9 @@ describe('placeTaskEarliest', () => {
 });
 
 describe('placeTaskLatest', () => {
-  const threeHours = workTask('a', { segments: [{ durationHours: 3, gapDaysBefore: 0 }] });
+  const threeHours = workTask('a', {
+    segments: [{ durationHours: 3, gapDaysBefore: 0, startNoEarlierThan: null }],
+  });
 
   it('ends a task at the last working hour before the end bound', () => {
     const tuesday9 = at(2026, 9, 29, 9);

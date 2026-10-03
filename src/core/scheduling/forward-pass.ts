@@ -3,7 +3,8 @@ import { compareStrings } from '../compare-strings';
 import { shiftWorkingHours } from '../calendar/working-time';
 import type { Dependency, SchedulableTask, TaskId } from '../model/project';
 import { failure, success, type Result } from '../result';
-import { dayIndexOf, QUARTER_HOUR, startOfDay, type ProjectHour } from '../time';
+import type { ProjectHour } from '../time';
+import { blockResumption } from './block-links';
 import type { DependencyGraph, ScheduleUnit, UnitDependency } from './dependency-graph';
 import {
   placeTaskEarliest,
@@ -97,10 +98,16 @@ export function constrainsSuccessorStart(dependency: Dependency): boolean {
   return dependency.type === 'finishToStart' || dependency.type === 'startToStart';
 }
 
-/** Returns the earliest instant a block may resume after the previous block of its task: right after it, and not before the start of the day its gap in days leads to. */
-export function resumeAfter(previous: ScheduledSegment, gapDays: number): ProjectHour {
-  const lastDay = dayIndexOf(previous.end - QUARTER_HOUR);
-  return Math.max(previous.end, startOfDay(lastDay + gapDays));
+/** Returns the earliest instant a later block of a work task may start after the previous one, or an error when the task has no such block. */
+function resumeAfterBlock(
+  task: SchedulableTask,
+  block: number,
+  previous: ScheduledSegment,
+): Result<ProjectHour, PlacementErrorCode> {
+  const segment = task.kind === 'task' ? task.segments[block] : undefined;
+  return segment === undefined
+    ? failure('INVALID_INSTANT')
+    : success(blockResumption(previous.end, segment));
 }
 
 /** Returns the gap in days a block of a work task keeps after the previous one. */
@@ -184,7 +191,7 @@ function scheduleUnit(
   return placeTaskLatest(context.calendar, alone, mustFinishOn, mustFinishOn);
 }
 
-/** Combines the project start and the task start date, or the resumption after the previous block, with every incoming dependency into bounds. */
+/** Combines the project start and the task start date, or the resumption after the previous block and the start date of the block, with every incoming dependency into bounds. */
 function computeBounds(
   context: SchedulingContext,
   unit: ScheduleUnit,
@@ -195,10 +202,16 @@ function computeBounds(
   if (unit.block > 0 && previous === undefined) {
     return failure('INVALID_INSTANT');
   }
-  let earliestStart =
+  const resumption =
     previous === undefined
-      ? Math.max(context.projectStart, unit.task.startNoEarlierThan ?? context.projectStart)
-      : resumeAfter(previous, gapBefore(unit.task, unit.block));
+      ? success(
+          Math.max(context.projectStart, unit.task.startNoEarlierThan ?? context.projectStart),
+        )
+      : resumeAfterBlock(unit.task, unit.block, previous);
+  if (!resumption.ok) {
+    return resumption;
+  }
+  let earliestStart = resumption.value;
   let earliestEnd: ProjectHour | null = null;
   for (const link of incoming) {
     const bound = dependencyBound(context, link, blocks);

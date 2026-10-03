@@ -11,7 +11,8 @@ import { PROPERTY_TEST_TIMEOUT_MS, instantArbitrary, unwrap } from '../testing/a
 import { interleavedProjectArbitrary, projectArbitrary } from '../testing/project-arbitrary';
 import type { ProjectHour } from '../time';
 import { blockTasksOf } from './dependency-graph';
-import { constrainsSuccessorStart, dependencyAnchor, resumeAfter } from './forward-pass';
+import { blockResumption } from './block-links';
+import { constrainsSuccessorStart, dependencyAnchor } from './forward-pass';
 import { scheduleProject, type Schedule } from './schedule-project';
 import { placeTask, type Placement } from './task-placement';
 
@@ -72,7 +73,7 @@ function actedBlock(
   return chosen === undefined ? placement : { ...chosen, segments: [chosen] };
 }
 
-/** Recomputes, independently from the scheduler, the bounds a block must respect: the project start, the start date of its task for its first block, the resumption after the previous block, and the dependencies acting on it. */
+/** Recomputes, independently from the scheduler, the bounds a block must respect: the project start, the start date of its task for its first block, the resumption after the previous block and its own start date for the others, and the dependencies acting on it. */
 function expectedBounds(
   input: Project,
   calendar: CompiledCalendar,
@@ -82,7 +83,8 @@ function expectedBounds(
   let start = Math.max(input.startDate, block === 0 ? (task.startNoEarlierThan ?? 0) : 0);
   const previous = placementOf(schedule, task.id).segments[block - 1];
   if (task.kind === 'task' && previous !== undefined) {
-    start = Math.max(start, resumeAfter(previous, task.segments[block]?.gapDaysBefore ?? 0));
+    const segment = task.segments[block] ?? { gapDaysBefore: 0, startNoEarlierThan: null };
+    start = Math.max(start, blockResumption(previous.end, segment));
   }
   let end: ProjectHour | null = null;
   const lastBlock = task.kind === 'task' ? task.segments.length - 1 : 0;

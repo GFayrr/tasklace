@@ -41,10 +41,10 @@ Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit
 ### 4c. `.tasklace` project file (done)
 
 - Container: 16-byte header (`TSKL` signature, format version, reserved flags, CRC-32 checksum, declared uncompressed size), then the compressed Yjs state, whose deleted content Yjs has already removed.
-- Compression is injected into the core; the real `node:zlib` implementation, with a capped output size, will live in `src/main/` (step 5).
+- Compression is injected into the core; the real `node:zlib` implementation, with a capped output size, lives in `src/main/` (done in 5b).
 - Defensive reading, in this order, before anything is loaded: maximum size, signature, version, flags, checksum, declared size, capped decompression against decompression bombs, guarded Yjs decoding, strict schema and complete validation (4a), without any repair.
 - Maximum sizes measured on the largest possible project, then fixed as powers of two above it: 128 MiB for a file, 512 MiB once decompressed.
-- Opening a file will run in a separate process with capped memory, so that a forged file can never bring the application down.
+- Opening a file runs in a separate process with capped memory, so that a forged file can never bring the application down (done in 5b).
 - Fast compression (zlib level 1): the file is slightly larger, but saving, which happens automatically, is much faster.
 - JSON export is compact, so that the largest possible project stays within the 256 Mi-unit import limit.
 - Test files generated in memory: random, truncated, altered, wrong version or flags, lying declared size, decompression bomb, hidden content.
@@ -97,9 +97,17 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 - Task table in WBS order (WBS, name, duration, start, end, progress, predecessors), drawing only the visible rows, with the WBS and name columns kept in view; summaries can be collapsed.
 - Canvas timeline: two-level time scale, hour, day, week and month zooms keeping the middle instant, shaded non-working periods, today line, split blocks, progress, milestone diamonds, summary bars, dependency arrows, tag colours and patterns, conflict outlines.
 - Editing from the toolbar, the keyboard and the table: add, delete, rename, indent (Alt+Shift+→) and outdent (Alt+Shift+←), reorder (Alt+↑ and Alt+↓), turn into a milestone, type a duration in hours or working days, a start date, a progress or predecessors in the notation of the CSV table.
-- On the timeline: move a bar to set its start date, stretch its end to change its duration, drag from the handle of the selected bar to another bar to link them; bars align to the hour at the hour zoom, to the day otherwise.
+- On the timeline: move a bar to set its start date, stretch its end to change its duration, drag from the handle of the selected bar to another bar to link them; bars align to the quarter hour at the hour zoom, to the day otherwise.
 - Every change is checked by the shared session as one step, undone in one step, and explained when refused; the zoom sits in the status bar.
 - 60 frames per second while scrolling 10,000 tasks; a change refreshes what the interface shows within a frame.
+
+### 5d, after testing: quarter hours, date picker, tags and task details (done)
+
+- Quarter-hour precision everywhere: durations shown in hours and minutes, typed in hours, minutes or working days; a task may last less than an hour.
+- Date and time picker built into the application for the start and end of a task; the end can be typed too.
+- A task placed before the project start moves that start, with a message that can be undone.
+- Tag column with a list of its own, and a task details panel (tag, blocks, hours per day, daily start time).
+- Messages fade away on their own; days off show as a thin pale band inside bars, the pause of a split task as a dotted line; the default menu of Electron is removed.
 
 ### 5d, after testing: split tasks linked block by block (done)
 
@@ -108,6 +116,15 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 - Notation `3#2` (block 2 of task 3) in the predecessors, and `+0d 3h after 2.1` in the Blocks column of the CSV table.
 - "Block n waits for" in the task details; one link handle per block on the timeline, and a link dropped on a block makes that block wait.
 - After review: a link is always written in its shortest form; no link is ever lost silently (exports and edits that would lose one are refused with an explanation); the details panel refuses to overwrite a task changed meanwhile; changing the blocks of a much-linked task stays linear.
+
+### 5d, after testing: block start dates and file names (done)
+
+- A later block of a split task can be given its own "do not start before" date and time, in the task details or by dragging it alone on the timeline; the blocks after it follow.
+- Saving and exporting add the missing extension, suggest the name of the project, and ask before replacing a file the added extension leads to; an export can never overwrite a project file.
+- Imports and exports say what they did; an untitled imported project takes the name of its file.
+- Failed application tests keep a trace, and a window that does not close is described instead of blocking the test run.
+- A window closed while its interface is still starting now closes at once (it used to stay open forever).
+- Moving a whole task moves the dates of its later blocks with it.
 
 ### 5e. Project settings and advanced options
 

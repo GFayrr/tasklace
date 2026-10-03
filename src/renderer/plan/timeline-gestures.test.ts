@@ -65,6 +65,13 @@ describe('gestureAt', () => {
     expect(gestureAt(SPLIT, 140, MIDDLE, null)?.kind).toBe('move');
   });
 
+  it('moves a later block alone, and the whole task from its first block or a pause', () => {
+    expect(gestureAt(SPLIT, 230, MIDDLE, null)).toMatchObject({ kind: 'move', block: 1 });
+    expect(gestureAt(SPLIT, 120, MIDDLE, null)).toMatchObject({ kind: 'move', block: null });
+    expect(gestureAt(SPLIT, 170, MIDDLE, null)).toMatchObject({ kind: 'move', block: null });
+    expect(gestureAt(TASK, 120, MIDDLE, null)).toMatchObject({ kind: 'move', block: null });
+  });
+
   it('drops a link on the nearest block, the first block standing for the whole task', () => {
     expect(targetBlockAt(SPLIT, 120)).toBeNull();
     expect(targetBlockAt(SPLIT, 230)).toBe(1);

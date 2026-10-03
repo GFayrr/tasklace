@@ -154,17 +154,25 @@ function baselineToJson(baseline: Baseline) {
   };
 }
 
-/** Converts a task into JSON-ready data with its date constraints in clear text. */
+/** Converts a task into JSON-ready data with its date constraints in clear text, a block writing its start date only when it has one. */
 function taskToJson(task: Task) {
   if (task.kind === 'summary') {
     return task;
   }
   const clearDate = (hour: ProjectHour | null): string | null =>
     hour === null ? null : formatDateTime(hour);
-  return {
-    ...task,
+  const dates = {
     startNoEarlierThan: clearDate(task.startNoEarlierThan),
     mustFinishOn: clearDate(task.mustFinishOn),
     deadline: clearDate(task.deadline),
   };
+  if (task.kind === 'milestone') {
+    return { ...task, ...dates };
+  }
+  const segments = task.segments.map(({ startNoEarlierThan, ...segment }) =>
+    startNoEarlierThan === null
+      ? segment
+      : { ...segment, startNoEarlierThan: clearDate(startNoEarlierThan) },
+  );
+  return { ...task, ...dates, segments };
 }

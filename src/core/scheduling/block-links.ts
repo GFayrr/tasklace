@@ -1,4 +1,5 @@
-import type { Dependency, Task, TaskId } from '../model/project';
+import type { Dependency, Task, TaskId, TaskSegment } from '../model/project';
+import { dayIndexOf, QUARTER_HOUR, startOfDay, type ProjectHour } from '../time';
 
 /** Returns the number of blocks a task is scheduled in: one per block of a work task, one for a milestone, none for a summary. */
 export function unitCountOf(task: Task): number {
@@ -76,4 +77,16 @@ export function blockPairKey(
 /** Returns a key naming one block of one task, or the whole task, the same for every participant. */
 export function blockKey(taskId: TaskId, block: number | null): string {
   return JSON.stringify([taskId, block]);
+}
+
+/** Returns the earliest instant a block may start once the previous block of its task ends: right after it, not before the start of the day its gap in days leads to, nor before its own start date. */
+export function blockResumption(
+  previousEnd: ProjectHour,
+  segment: Pick<TaskSegment, 'gapDaysBefore' | 'startNoEarlierThan'>,
+): ProjectHour {
+  const lastDay = dayIndexOf(previousEnd - QUARTER_HOUR);
+  const resumption = Math.max(previousEnd, startOfDay(lastDay + segment.gapDaysBefore));
+  return segment.startNoEarlierThan === null
+    ? resumption
+    : Math.max(resumption, segment.startNoEarlierThan);
 }

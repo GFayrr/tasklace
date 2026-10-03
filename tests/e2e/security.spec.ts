@@ -1,11 +1,6 @@
 import { readFileSync } from 'node:fs';
-import {
-  _electron as electron,
-  expect,
-  test,
-  type ElectronApplication,
-  type Page,
-} from '@playwright/test';
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { closeDiscarding, launchApplication } from './application';
 
 const ENTRY_URL = 'app://tasklace/index.html';
 const FOREIGN_URL = 'https://example.com/';
@@ -20,14 +15,14 @@ const version: unknown = Reflect.get(
 let application: ElectronApplication;
 let page: Page;
 
-test.beforeAll(async () => {
-  application = await electron.launch({ args: ['.'] });
+test.beforeEach(async () => {
+  application = await launchApplication();
   page = await application.firstWindow();
   await page.waitForLoadState('domcontentloaded');
 });
 
-test.afterAll(async () => {
-  await application.close();
+test.afterEach(async () => {
+  await closeDiscarding(application, page);
 });
 
 test('loads the interface from the application scheme, its own script running', async () => {

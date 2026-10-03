@@ -624,14 +624,33 @@ function paintPreview(context: CanvasRenderingContext2D, scene: TimelineScene): 
     context.closePath();
     context.stroke();
   } else if (preview.shape.kind === 'task') {
-    const moving = preview.kind === 'move';
-    const start = preview.shape.start + (moving ? preview.offset : 0);
-    const end = Math.max(preview.shape.end + preview.offset, preview.shape.start + 1);
-    const width = moving ? preview.shape.end - preview.shape.start : end - start;
-    roundedRectangle(context, start, top + (ROW_HEIGHT - BAR_HEIGHT) / HALF, width, BAR_HEIGHT);
+    const span = previewSpan(preview.shape, preview);
+    roundedRectangle(
+      context,
+      span.start,
+      top + (ROW_HEIGHT - BAR_HEIGHT) / HALF,
+      span.width,
+      BAR_HEIGHT,
+    );
     context.stroke();
   }
   context.restore();
+}
+
+/** Returns where a dragged bar would go: the bar widened or narrowed when stretched, one of its blocks shifted when moved alone, the whole bar shifted otherwise. */
+export function previewSpan(
+  shape: Extract<RowShape, { kind: 'task' }>,
+  preview: Exclude<DragPreview, { kind: 'link' }>,
+): { readonly start: number; readonly width: number } {
+  if (preview.kind === 'stretch') {
+    const end = Math.max(shape.end + preview.offset, shape.start + 1);
+    return { start: shape.start, width: end - shape.start };
+  }
+  const block = preview.block === null ? undefined : shape.segments[preview.block];
+  if (block !== undefined) {
+    return { start: block.x + preview.offset, width: block.width };
+  }
+  return { start: shape.start + preview.offset, width: shape.end - shape.start };
 }
 
 /** Draws the vertical line of the current time. */

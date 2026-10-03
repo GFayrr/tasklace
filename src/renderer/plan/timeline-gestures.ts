@@ -24,7 +24,13 @@ export interface LinkHandle {
 }
 
 export type DragPreview =
-  | { readonly kind: 'move' | 'stretch'; readonly shape: RowShape; readonly offset: number }
+  | {
+      readonly kind: 'move';
+      readonly shape: RowShape;
+      readonly offset: number;
+      readonly block: number | null;
+    }
+  | { readonly kind: 'stretch'; readonly shape: RowShape; readonly offset: number }
   | {
       readonly kind: 'link';
       readonly shape: RowShape;
@@ -78,7 +84,7 @@ export function targetBlockAt(shape: RowShape, x: number): number | null {
   return nearest <= 0 ? null : nearest;
 }
 
-/** Finds what a pointer on the timeline would drag: a link handle of the selected task, the end of a work task bar to stretch it, or a bar or milestone to move it. */
+/** Finds what a pointer on the timeline would drag: a link handle of the selected task, the end of a work task bar to stretch it, a later block of a split task to move it alone, or a bar or milestone to move it. */
 export function gestureAt(
   shape: RowShape | null,
   x: number,
@@ -109,10 +115,21 @@ export function gestureAt(
   if (Math.abs(x - shape.end) <= STRETCH_ZONE) {
     return { kind: 'stretch', ...target };
   }
-  return x >= shape.start && x <= shape.end ? { kind: 'move', ...target } : null;
+  if (x < shape.start || x > shape.end) {
+    return null;
+  }
+  return { kind: 'move', ...target, block: grabbedBlock(shape, x) };
 }
 
-/** Aligns an instant to the hour at the hour zoom, or to midnight of the nearest day otherwise. */
+/** Returns the block of a split task grabbed at a position, the first block or a pause standing for the whole task. */
+function grabbedBlock(shape: Extract<RowShape, { kind: 'task' }>, x: number): number | null {
+  const block = shape.segments.findIndex(
+    (segment) => x >= segment.x && x <= segment.x + segment.width,
+  );
+  return block > 0 ? block : null;
+}
+
+/** Rounds an instant to the nearest multiple of a snap unit, such as the quarter hour or the day. */
 export function snapHour(hour: number, snap: number): ProjectHour {
   return Math.round(hour / snap) * snap;
 }

@@ -126,6 +126,7 @@ describe('growth of shared session operations with the size of the project', () 
         const segments = Array.from({ length: blockCount }, () => ({
           durationHours: HUB_BLOCK_HOURS,
           gapDaysBefore: 0,
+          startNoEarlierThan: null,
         }));
         expect(session.apply({ type: 'putTask', task: { ...hub, segments } }).ok).toBe(true);
       });

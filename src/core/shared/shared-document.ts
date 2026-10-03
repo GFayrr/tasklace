@@ -68,7 +68,9 @@ const HIDDEN_TASK_DEFAULTS: Omit<WorkTask, keyof SummaryTask> = {
   startNoEarlierThan: null,
   mustFinishOn: null,
   deadline: null,
-  segments: [{ durationHours: NEW_TASK_DURATION_HOURS, gapDaysBefore: 0 }],
+  segments: [
+    { durationHours: NEW_TASK_DURATION_HOURS, gapDaysBefore: 0, startNoEarlierThan: null },
+  ],
   hoursPerDay: null,
   dailyStartHour: null,
 };
