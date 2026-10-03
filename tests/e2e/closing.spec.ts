@@ -121,18 +121,11 @@ test('keeps the window open when the last save fails, until the user saves elsew
   ]);
 });
 
-/** Crashes the page of the window and waits until the main process knows it is gone. */
+/** Crashes the page of the window without waiting for what follows, since the main process may quit at once. */
 async function crashPage(): Promise<void> {
-  await application.evaluate(
-    ({ BrowserWindow }) =>
-      new Promise<void>((resolve) => {
-        const contents = BrowserWindow.getAllWindows()[0]?.webContents;
-        contents?.once('render-process-gone', () => {
-          resolve();
-        });
-        contents?.forcefullyCrashRenderer();
-      }),
-  );
+  await application.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.webContents.forcefullyCrashRenderer();
+  });
 }
 
 /** Waits for the process of the application to exit, giving its exit code, or a timeout message after a fixed delay. */

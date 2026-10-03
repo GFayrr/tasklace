@@ -21,6 +21,7 @@ const ipcMain = electronIpcMain as unknown as FakeIpcMain;
 const trusted = vi.fn();
 const FIRST_BUTTON = 0;
 const SECOND_BUTTON = 1;
+const MICROTASK_STEPS = 10;
 registerFlushHandler(trusted);
 
 let window: FakeWindow;
@@ -35,10 +36,13 @@ function answerQuestionWith(button: number): void {
   questions.show.mockResolvedValueOnce({ response: button });
 }
 
-/** Lets the questions shown and their answers settle. */
-function settle(): Promise<void> {
-  return new Promise((resolve) => {
+/** Lets the questions shown, their answers and the reloads they start settle. */
+async function settle(): Promise<void> {
+  await new Promise((resolve) => {
     setTimeout(resolve, 0);
+  });
+  await new Promise((resolve) => {
+    setImmediate(resolve);
   });
 }
 
@@ -121,15 +125,38 @@ describe('a page that crashes', () => {
     expect(questions.show).not.toHaveBeenCalled();
   });
 
-  it('offers to reload it, reloading and holding the next close again for the new page', async () => {
+  it('offers to reload it, letting the window close until the new page has loaded, then holding the close again', async () => {
     answerQuestionWith(FIRST_BUTTON);
     window.webContents.emit('render-process-gone');
     await settle();
     expect(questionsShown()).toEqual([en.pageProblems.crashedBody]);
     expect(window.webContents.reloads).toBe(1);
+    window.webContents.emit('did-finish-load');
     window.close();
     expect(window.closed).toBe(false);
     expect(window.webContents.sent).toEqual([IPC_CHANNELS.flushRequested]);
+  });
+
+  it('lets the window close when the reloaded page never loads', async () => {
+    answerQuestionWith(FIRST_BUTTON);
+    window.webContents.emit('render-process-gone');
+    await settle();
+    expect(window.webContents.reloads).toBe(1);
+    window.close();
+    expect(window.closed).toBe(true);
+    expect(window.webContents.sent).toEqual([]);
+  });
+
+  it('does not reload a window destroyed before the reload starts', async () => {
+    answerQuestionWith(FIRST_BUTTON);
+    window.webContents.emit('render-process-gone');
+    for (let step = 0; step < MICROTASK_STEPS; step += 1) {
+      await Promise.resolve();
+    }
+    expect(window.webContents.reloads).toBe(0);
+    window.destroy();
+    await settle();
+    expect(window.webContents.reloads).toBe(0);
   });
 
   it('offers to close its window instead, which then closes without asking the page', async () => {

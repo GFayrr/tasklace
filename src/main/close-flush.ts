@@ -32,7 +32,7 @@ export function registerFlushHandler(assertTrusted: TrustCheck): void {
   });
 }
 
-/** Holds the closing of a window until its page has saved its pending changes and agreed to close; a page that crashed lets its window close, or offers to reload it when nobody asked to close, and a page that stops responding while asked to save lets the user wait for it or close anyway. */
+/** Holds the closing of a window until its page has saved its pending changes and agreed to close; a page that crashed lets its window close until a new page has loaded, or offers to reload it when nobody asked to close, and a page that stops responding while asked to save lets the user wait for it or close anyway. */
 export function flushBeforeClosing(window: BrowserWindow): void {
   const contents = window.webContents;
   let requested = false;
@@ -75,7 +75,7 @@ export function flushBeforeClosing(window: BrowserWindow): void {
       requested = false;
     },
     startFailed: () => {
-      offerReload(window, MESSAGES.pageProblems.startFailedBody, () => undefined);
+      offerReload(window, MESSAGES.pageProblems.startFailedBody);
     },
   });
   window.on('close', (event) => {
@@ -98,9 +98,10 @@ export function flushBeforeClosing(window: BrowserWindow): void {
       closeNow();
       return;
     }
-    offerReload(window, MESSAGES.pageProblems.crashedBody, () => {
-      pageGone = false;
-    });
+    offerReload(window, MESSAGES.pageProblems.crashedBody);
+  });
+  contents.on('did-finish-load', () => {
+    pageGone = false;
   });
   window.on('unresponsive', () => {
     unresponsive = true;
@@ -113,8 +114,8 @@ export function flushBeforeClosing(window: BrowserWindow): void {
   });
 }
 
-/** Asks whether to reload a window whose page failed, or to close it, closing it when the question cannot be shown. */
-function offerReload(window: BrowserWindow, body: string, reloading: () => void): void {
+/** Asks whether to reload a window whose page failed, or to close it, reloading only once the failure has been handled and closing the window when the question cannot be shown. */
+function offerReload(window: BrowserWindow, body: string): void {
   askAfterPageFailure(window, body)
     .then((choice) => {
       if (window.isDestroyed()) {
@@ -124,8 +125,11 @@ function offerReload(window: BrowserWindow, body: string, reloading: () => void)
         window.close();
         return;
       }
-      reloading();
-      window.webContents.reload();
+      setImmediate(() => {
+        if (!window.isDestroyed()) {
+          window.webContents.reload();
+        }
+      });
     })
     .catch((error: unknown) => {
       console.error('The question about a failed page could not be shown:', error);
