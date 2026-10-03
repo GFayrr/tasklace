@@ -128,9 +128,10 @@ async function crashPage(): Promise<void> {
   });
 }
 
-/** Waits for the process of the application to exit, giving its exit code, or a timeout message after a fixed delay. */
-async function exitCode(exited: Promise<unknown>): Promise<unknown> {
-  return Promise.race([exited, delay(EXIT_LIMIT_MS, TIMED_OUT)]);
+/** Waits for the process of the application to exit and for Playwright to see the application closed, giving the exit code, or a timeout message after a fixed delay. */
+async function exitCode(exited: Promise<unknown>, closed: Promise<unknown>): Promise<unknown> {
+  const ended = Promise.all([exited, closed]).then(([code]) => code);
+  return Promise.race([ended, delay(EXIT_LIMIT_MS, TIMED_OUT)]);
 }
 
 test('offers to close a window whose page crashed before any close request, and closes it', async () => {
@@ -138,8 +139,13 @@ test('offers to close a window whose page crashed before any close request, and 
   await answerQuestions(application, { [english.pageProblems.reload]: english.pageProblems.close });
   const process = application.process();
   const exited = new Promise((resolve) => process.once('exit', resolve));
+  const closed = new Promise<void>((resolve) => {
+    application.once('close', () => {
+      resolve();
+    });
+  });
   await crashPage();
-  expect(await exitCode(exited)).toBe(0);
+  expect(await exitCode(exited, closed)).toBe(0);
 });
 
 test('offers to reload a window whose page crashed, which starts again with nothing open, checked through the main process since the crashed page cannot be driven any more', async () => {

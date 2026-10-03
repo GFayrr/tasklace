@@ -24,14 +24,13 @@ export async function launchApplication(userData?: string): Promise<ElectronAppl
   return application;
 }
 
-/** Closes the application unless a test already closed it, answering "Don't save" if it asks whether to save a project that has no file yet, keeping the trace of a failed test, and stopping the process with a description of its state when it does not close in time. */
+/** Closes the application unless a test already closed it (Playwright no longer gives the process of a closed application), answering "Don't save" if it asks whether to save a project that has no file yet, keeping the trace of a failed test, and stopping the process with a description of its state when it does not close in time. */
 export async function closeDiscarding(application: ElectronApplication, page: Page): Promise<void> {
+  if (closedApplications.has(application)) {
+    return;
+  }
   const process = application.process();
-  if (
-    closedApplications.has(application) ||
-    process.exitCode !== null ||
-    process.signalCode !== null
-  ) {
+  if (process.exitCode !== null || process.signalCode !== null) {
     return;
   }
   await keepTraceOfFailure(application);
