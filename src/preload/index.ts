@@ -31,22 +31,34 @@ const bridge: TasklaceBridge = {
   },
   importProject: (kind) => request(IPC_CHANNELS.importProject, kind),
   saveProject: (state) => request(IPC_CHANNELS.saveProject, state),
-  saveProjectAs: (state) => request(IPC_CHANNELS.saveProjectAs, state),
-  exportProject: (kind, text) => request(IPC_CHANNELS.exportProject, kind, text),
+  saveProjectAs: (state, suggestedName) =>
+    request(IPC_CHANNELS.saveProjectAs, state, suggestedName),
+  exportProject: (kind, text, suggestedName) =>
+    request(IPC_CHANNELS.exportProject, kind, text, suggestedName),
   onFlushRequested: (flush) => {
-    ipcRenderer.removeAllListeners(IPC_CHANNELS.flushRequested);
-    ipcRenderer.on(IPC_CHANNELS.flushRequested, () => {
-      flush().then(
-        (mayClose) => {
-          ipcRenderer.send(IPC_CHANNELS.flushDone, mayClose);
-        },
-        () => {
-          ipcRenderer.send(IPC_CHANNELS.flushDone, true);
-        },
-      );
-    });
+    pageFlush = flush;
   },
 };
+
+let pageFlush: (() => Promise<boolean>) | null = null;
+
+ipcRenderer.on(IPC_CHANNELS.flushRequested, answerCloseRequest);
+
+/** Answers a request to close the window: at once while the page has not started, since it holds nothing to save yet, otherwise once the page has saved and agreed. */
+function answerCloseRequest(): void {
+  if (pageFlush === null) {
+    ipcRenderer.send(IPC_CHANNELS.flushDone, true);
+    return;
+  }
+  pageFlush().then(
+    (mayClose) => {
+      ipcRenderer.send(IPC_CHANNELS.flushDone, mayClose);
+    },
+    () => {
+      ipcRenderer.send(IPC_CHANNELS.flushDone, true);
+    },
+  );
+}
 
 contextBridge.exposeInMainWorld(BRIDGE_NAME, bridge);
 

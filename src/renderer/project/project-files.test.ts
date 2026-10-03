@@ -36,13 +36,17 @@ function manualTimer(): Timer & { readonly fire: () => void } {
   };
 }
 
-/** A bridge answering from fixed results and recording the saves it receives. */
+/** A bridge answering from fixed results and recording the saves it receives with the names they suggest. */
 function fakeBridge(openResult: BridgeResult<OpenedProject>, saveResult = SAVED) {
   const saves: { readonly as: boolean; readonly documentId: string | null }[] = [];
-  const record = (as: boolean) => (state: Uint8Array) => {
+  const suggestedNames: string[] = [];
+  const record = (as: boolean) => (state: Uint8Array, name?: string) => {
     const document = new Y.Doc();
     Y.applyUpdate(document, state);
     saves.push({ as, documentId: readDocumentId(document) });
+    if (name !== undefined) {
+      suggestedNames.push(name);
+    }
     return Promise.resolve(saveResult);
   };
   const bridge: ProjectBridge = {
@@ -53,13 +57,13 @@ function fakeBridge(openResult: BridgeResult<OpenedProject>, saveResult = SAVED)
     saveProject: record(false),
     saveProjectAs: record(true),
   };
-  return { bridge, saves };
+  return { bridge, saves, suggestedNames };
 }
 
 /** Returns an opened project answer for a document. */
 function openedOf(documentId: string): BridgeResult<OpenedProject> {
   const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, documentId));
-  return { ok: true, value: { state, name: 'Plan', warnings: [] } };
+  return { ok: true, value: { state, name: 'Plan', fileName: 'Plan.tasklace', warnings: [] } };
 }
 
 /** Waits for pending promise callbacks to run. */
@@ -96,8 +100,8 @@ describe('createProjectFiles', () => {
     expect(saves).toHaveLength(1);
   });
 
-  it('asks where to save a project without file, then saves it to its file', async () => {
-    const { bridge, saves } = fakeBridge(openedOf(OTHER_ID));
+  it('asks where to save a project without file, suggesting its name, then saves it to its file', async () => {
+    const { bridge, saves, suggestedNames } = fakeBridge(openedOf(OTHER_ID));
     const files = createProjectFiles(bridge, QUIET, manualTimer());
     await files.create(SAMPLE);
     await files.save();
@@ -106,6 +110,7 @@ describe('createProjectFiles', () => {
     await files.importFile('csv');
     await files.save();
     expect(saves.map((save) => save.as)).toEqual([true, false, true]);
+    expect(suggestedNames).toEqual([SAMPLE.name, SAMPLE.name]);
   });
 
   it('reports a failed automatic save, and passes a failed opening through', async () => {
@@ -130,7 +135,10 @@ describe('createProjectFiles', () => {
     const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     document.getMap('project').delete('documentId');
     const state = Y.encodeStateAsUpdate(document);
-    const { bridge } = fakeBridge({ ok: true, value: { state, name: 'Plan', warnings: [] } });
+    const { bridge } = fakeBridge({
+      ok: true,
+      value: { state, name: 'Plan', fileName: 'Plan.tasklace', warnings: [] },
+    });
     const files = createProjectFiles(bridge, QUIET, manualTimer());
     expect(await files.open()).toEqual({
       ok: false,

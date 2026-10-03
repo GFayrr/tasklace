@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_CSV_TEXT_UTF16_UNITS, MAX_RECENT_PROJECTS } from '../core/limits';
+import {
+  MAX_CSV_TEXT_UTF16_UNITS,
+  MAX_PROJECT_NAME_LENGTH,
+  MAX_RECENT_PROJECTS,
+} from '../core/limits';
 import {
   readExchangeKind,
   readExportText,
   readProjectState,
   readRecentIndex,
+  readSuggestedName,
 } from './ipc-validators';
 
 describe('bridge message validators', () => {
@@ -37,5 +42,20 @@ describe('bridge message validators', () => {
     for (const value of [-1, MAX_RECENT_PROJECTS, 0.5, '0', null, Number.NaN]) {
       expect(readRecentIndex(value)).toBeNull();
     }
+  });
+
+  it('accepts a suggested name within the length of a project name only', () => {
+    expect(readSuggestedName('Plan')).toBe('Plan');
+    expect(readSuggestedName('é'.repeat(MAX_PROJECT_NAME_LENGTH))).toBe(
+      'é'.repeat(MAX_PROJECT_NAME_LENGTH),
+    );
+    expect(readSuggestedName('a'.repeat(MAX_PROJECT_NAME_LENGTH + 1))).toBeNull();
+    expect(readSuggestedName('a'.repeat(10_000_000))).toBeNull();
+    expect(readSuggestedName(42)).toBeNull();
+    expect(readSuggestedName('')).toBe('');
+    expect(readSuggestedName('🧩'.repeat(MAX_PROJECT_NAME_LENGTH))).toBe(
+      '🧩'.repeat(MAX_PROJECT_NAME_LENGTH),
+    );
+    expect(readSuggestedName('🧩'.repeat(MAX_PROJECT_NAME_LENGTH + 1))).toBeNull();
   });
 });

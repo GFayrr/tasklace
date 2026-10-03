@@ -26,6 +26,7 @@ export interface GeneratedProject {
 const blockArbitrary = fc.record({
   durationHours: quarterHoursArbitrary(QUARTER_HOUR, MAX_BLOCK_HOURS),
   gapDaysBefore: fc.integer({ min: 0, max: MAX_GAP_DAYS }),
+  startNoEarlierThan: fc.option(instantArbitrary),
 });
 
 const taskShapeArbitrary = fc.record({
@@ -65,6 +66,7 @@ function buildTask(index: number, shape: TaskShape, hoursPerWorkingDay: number):
   const segments = shape.blocks.map((block, blockIndex) => ({
     durationHours: block.durationHours,
     gapDaysBefore: blockIndex === 0 ? 0 : block.gapDaysBefore,
+    startNoEarlierThan: blockIndex === 0 ? null : block.startNoEarlierThan,
   }));
   const hoursPerDay =
     shape.hoursPerDayRatio === null || hoursPerWorkingDay < 1

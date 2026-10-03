@@ -90,7 +90,9 @@ describe('quarter hours in working time', () => {
 describe('quarter hours in schedules and exchanges', () => {
   const plan = project(
     [
-      workTask('a', { segments: [{ durationHours: 0.25, gapDaysBefore: 0 }] }),
+      workTask('a', {
+        segments: [{ durationHours: 0.25, gapDaysBefore: 0, startNoEarlierThan: null }],
+      }),
       splitTask('b', [
         [1.5, 0],
         [0.75, 1],
@@ -134,10 +136,12 @@ describe('quarter hours in schedules and exchanges', () => {
   });
 
   it('reads quarter hours in notations, and refuses other fractions', () => {
-    expect(formatBlocks([{ durationHours: 1.5, gapDaysBefore: 0 }], new Map())).toBe('1.5h');
+    expect(
+      formatBlocks([{ durationHours: 1.5, gapDaysBefore: 0, startNoEarlierThan: null }], new Map()),
+    ).toBe('1.5h');
     expect(unwrap(parseBlocks('1.25h; +2d 0.5h', 10, 10)).segments).toEqual([
-      { durationHours: 1.25, gapDaysBefore: 0 },
-      { durationHours: 0.5, gapDaysBefore: 2 },
+      { durationHours: 1.25, gapDaysBefore: 0, startNoEarlierThan: null },
+      { durationHours: 0.5, gapDaysBefore: 2, startNoEarlierThan: null },
     ]);
     expect(parseBlocks('1.3h', 10, 10).ok).toBe(false);
     expect(unwrap(parsePredecessors('1SS-0.75h', 10))).toEqual([
@@ -154,12 +158,12 @@ describe('quarter hours in person or team conflicts', () => {
       [
         workTask('a', {
           tagId: 'alex',
-          segments: [{ durationHours: 0.5, gapDaysBefore: 0 }],
+          segments: [{ durationHours: 0.5, gapDaysBefore: 0, startNoEarlierThan: null }],
           startNoEarlierThan: at(2026, 9, 28, 10),
         }),
         workTask('b', {
           tagId: 'alex',
-          segments: [{ durationHours: 0.5, gapDaysBefore: 0 }],
+          segments: [{ durationHours: 0.5, gapDaysBefore: 0, startNoEarlierThan: null }],
           startNoEarlierThan: at(2026, 9, 28, 10) + 0.25,
         }),
       ],

@@ -93,7 +93,13 @@ export function cellEdit(
     case 'duration':
       return setDuration(context, id, text);
     case 'start':
-      return setStart(context, id, text, format);
+      return setStart(
+        context,
+        id,
+        text,
+        format,
+        source.schedule?.placements.get(id)?.start ?? null,
+      );
     case 'end':
       return endEdit(context, id, text, source);
     case 'progress':

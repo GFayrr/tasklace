@@ -50,7 +50,7 @@ export function buildLargeProject(
       );
     }
     return workTask(idOf(index), {
-      segments: [{ durationHours, gapDaysBefore: 0 }],
+      segments: [{ durationHours, gapDaysBefore: 0, startNoEarlierThan: null }],
       tagId: tagOf(index),
     });
   });

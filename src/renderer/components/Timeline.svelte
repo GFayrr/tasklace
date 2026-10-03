@@ -28,7 +28,7 @@
     readonly scrolled: (top: number, left: number) => void;
     readonly resized: (width: number, height: number) => void;
     readonly select: (id: TaskId) => void;
-    readonly moved: (shape: RowShape, offset: number) => void;
+    readonly moved: (shape: RowShape, offset: number, block: number | null) => void;
     readonly stretched: (shape: RowShape, offset: number) => void;
     readonly linked: (from: LinkEnd, toRow: number, toBlock: number | null) => void;
     readonly opened: (id: TaskId) => void;
@@ -266,7 +266,10 @@
       };
       return;
     }
-    preview = { kind: target.kind, shape: target.shape, offset };
+    preview =
+      target.kind === 'move'
+        ? { kind: 'move', shape: target.shape, offset, block: target.block }
+        : { kind: 'stretch', shape: target.shape, offset };
   }
 
   /** Applies a finished drag. */
@@ -282,7 +285,7 @@
     const offset = point.x - finished.startX;
     const { target } = finished;
     if (target.kind === 'move') {
-      moved(target.shape, offset);
+      moved(target.shape, offset, target.block);
     } else if (target.kind === 'stretch') {
       stretched(target.shape, offset);
     } else if (shown?.kind === 'link' && shown.targetRow !== null) {

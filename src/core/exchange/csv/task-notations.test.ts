@@ -3,7 +3,8 @@ import fc from 'fast-check';
 import { MAX_HIERARCHY_DEPTH, MAX_SEGMENTS_PER_TASK } from '../../limits';
 import type { DependencyType } from '../../model/project';
 import { failure, success } from '../../result';
-import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../../testing/arbitraries';
+import { instantArbitrary, PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../../testing/arbitraries';
+import { at } from '../../testing/civil-time';
 import {
   compareWbsNumbers,
   formatBlocks,
@@ -148,8 +149,8 @@ describe('block notation', () => {
     expect(
       formatBlocks(
         [
-          { durationHours: 4, gapDaysBefore: 0 },
-          { durationHours: 3, gapDaysBefore: 2 },
+          { durationHours: 4, gapDaysBefore: 0, startNoEarlierThan: null },
+          { durationHours: 3, gapDaysBefore: 2, startNoEarlierThan: null },
         ],
         new Map(),
       ),
@@ -160,6 +161,7 @@ describe('block notation', () => {
     const later = fc.record({
       durationHours: fc.integer({ min: 1, max: 100_000 }),
       gapDaysBefore: fc.integer({ min: 0, max: 3_650 }),
+      startNoEarlierThan: fc.option(instantArbitrary),
     });
     const reference = fc.record({
       wbs: wbsArbitrary,
@@ -173,7 +175,10 @@ describe('block notation', () => {
         fc.array(later, { maxLength: MAX_COUNT - 1 }),
         fc.array(fc.tuple(fc.nat(), reference), { maxLength: 3 }),
         (first, rest, picked) => {
-          const segments = [{ durationHours: first, gapDaysBefore: 0 }, ...rest];
+          const segments = [
+            { durationHours: first, gapDaysBefore: 0, startNoEarlierThan: null },
+            ...rest,
+          ];
           const waits = picked
             .map(([block, wait]) => ({ block: block % segments.length, reference: wait }))
             .sort((left, right) => left.block - right.block);
@@ -193,8 +198,8 @@ describe('block notation', () => {
     expect(parseBlocks(' 4 H ,+ 2 D  3H', MAX_COUNT, MAX_COUNT)).toEqual(
       success({
         segments: [
-          { durationHours: 4, gapDaysBefore: 0 },
-          { durationHours: 3, gapDaysBefore: 2 },
+          { durationHours: 4, gapDaysBefore: 0, startNoEarlierThan: null },
+          { durationHours: 3, gapDaysBefore: 2, startNoEarlierThan: null },
         ],
         waits: [],
       }),
@@ -206,8 +211,8 @@ describe('block notation', () => {
       unwrap(parseBlocks('4h AFTER 1; +0d 3h after 2.1 & 3#2SS+1h', MAX_COUNT, MAX_COUNT)),
     ).toEqual({
       segments: [
-        { durationHours: 4, gapDaysBefore: 0 },
-        { durationHours: 3, gapDaysBefore: 0 },
+        { durationHours: 4, gapDaysBefore: 0, startNoEarlierThan: null },
+        { durationHours: 3, gapDaysBefore: 0, startNoEarlierThan: null },
       ],
       waits: [
         { block: 0, reference: { wbs: '1', block: null, type: 'finishToStart', lagHours: 0 } },
@@ -215,6 +220,43 @@ describe('block notation', () => {
         { block: 1, reference: { wbs: '3', block: 1, type: 'startToStart', lagHours: 1 } },
       ],
     });
+  });
+
+  it('reads the start date of a later block, written after "from", in the format of the JSON file', () => {
+    expect(
+      unwrap(parseBlocks('4h; +1d 3h FROM 2026-10-05t14:15 after 2', MAX_COUNT, MAX_COUNT))
+        .segments,
+    ).toEqual([
+      { durationHours: 4, gapDaysBefore: 0, startNoEarlierThan: null },
+      { durationHours: 3, gapDaysBefore: 1, startNoEarlierThan: at(2026, 10, 5, 14) + 0.25 },
+    ]);
+    expect(
+      formatBlocks(
+        [
+          { durationHours: 4, gapDaysBefore: 0, startNoEarlierThan: null },
+          { durationHours: 3, gapDaysBefore: 0, startNoEarlierThan: at(2026, 10, 5, 14) },
+        ],
+        new Map(),
+      ),
+    ).toBe('4h; +0d 3h from 2026-10-05T14:00');
+  });
+
+  it.each([
+    '4h from 2026-10-05T14:00',
+    '4h; +1d 3h from 2026-10-05',
+    '4h; +1d 3h from 05/10/2026 14:00',
+    '4h; +1d 3h after 2 from 2026-10-05T14:00',
+  ])('refuses a start date that is misplaced or not in the expected format: %j', (text) => {
+    expect(parseBlocks(text, MAX_COUNT, MAX_COUNT)).toEqual(failure('INVALID_NOTATION'));
+  });
+
+  it.each([
+    '4h; +1d 3h from 2026-02-30T14:00',
+    '4h; +1d 3h from 2026-10-05T24:00',
+    '4h; +1d 3h from 2026-10-05T14:10',
+    '4h; +1d 3h from 1999-10-05T14:00',
+  ])('refuses a well written start date that does not exist or is not supported: %j', (text) => {
+    expect(parseBlocks(text, MAX_COUNT, MAX_COUNT)).toEqual(failure('INVALID_DATE'));
   });
 
   it('refuses more waits than the budget left', () => {

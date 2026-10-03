@@ -47,6 +47,7 @@ function buildTasks(shapes: readonly TaskShape[]): Task[] {
       segments: shape.blocks.map((block, position) => ({
         durationHours: block.durationHours,
         gapDaysBefore: position === 0 ? 0 : block.gapDaysBefore,
+        startNoEarlierThan: null,
       })),
       hoursPerDay: shape.hoursPerDay,
       dailyStartHour: fitsAfternoon ? shape.dailyStartHour : null,

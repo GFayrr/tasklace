@@ -1,13 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  _electron as electron,
-  expect,
-  test,
-  type ElectronApplication,
-  type Page,
-} from '@playwright/test';
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
 import type { Project, Tag } from '../../src/core/model/project';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
@@ -22,7 +16,8 @@ import {
 } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 import { buildLargeProject } from '../fixtures/large-project';
-import { answerDialogs, closeDiscarding } from './dialogs';
+import { closeDiscarding, launchApplication } from './application';
+import { answerDialogs } from './dialogs';
 
 const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
 const DESIGN: Tag = {
@@ -48,7 +43,7 @@ const SAMPLE: Project = {
         sortKey: 'a',
         tagId: 'design',
         progressPercent: 100,
-        segments: [{ durationHours: 21, gapDaysBefore: 0 }],
+        segments: [{ durationHours: 21, gapDaysBefore: 0, startNoEarlierThan: null }],
       }),
       splitTask(
         'wireframes',
@@ -72,21 +67,21 @@ const SAMPLE: Project = {
         sortKey: 'a',
         tagId: 'alex',
         progressPercent: 20,
-        segments: [{ durationHours: 35, gapDaysBefore: 0 }],
+        segments: [{ durationHours: 35, gapDaysBefore: 0, startNoEarlierThan: null }],
       }),
       workTask('back', {
         name: 'Back-end',
         parentId: 'build',
         sortKey: 'b',
         tagId: 'alex',
-        segments: [{ durationHours: 28, gapDaysBefore: 0 }],
+        segments: [{ durationHours: 28, gapDaysBefore: 0, startNoEarlierThan: null }],
       }),
       workTask('integration', {
         name: 'Integration',
         parentId: 'build',
         sortKey: 'c',
         tagId: 'build',
-        segments: [{ durationHours: 14, gapDaysBefore: 0 }],
+        segments: [{ durationHours: 14, gapDaysBefore: 0, startNoEarlierThan: null }],
       }),
       milestone('launch', { name: 'Launch', sortKey: 'c' }),
     ],
@@ -112,7 +107,7 @@ let page: Page;
 test.beforeEach(async () => {
   folder = await mkdtemp(join(tmpdir(), 'tasklace-e2e-timeline-'));
   userData = await mkdtemp(join(tmpdir(), 'tasklace-e2e-data-'));
-  application = await electron.launch({ args: ['.', `--user-data-dir=${userData}`] });
+  application = await launchApplication(userData);
   page = await application.firstWindow();
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(page.locator('#app')).toHaveAttribute('data-started', 'true');

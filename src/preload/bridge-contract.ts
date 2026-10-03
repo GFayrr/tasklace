@@ -49,7 +49,12 @@ export interface ImportWarning {
 export interface OpenedProject {
   readonly state: Uint8Array;
   readonly name: string;
+  readonly fileName: string;
   readonly warnings: readonly ImportWarning[];
+}
+
+export interface ExportedFile {
+  readonly fileName: string;
 }
 
 export interface RecentProject {
@@ -67,8 +72,12 @@ export interface TasklaceBridge {
   readonly recentProjects: () => Promise<readonly RecentProject[]>;
   readonly importProject: (kind: ExchangeKind) => Promise<BridgeResult<OpenedProject>>;
   readonly saveProject: (state: Uint8Array) => Promise<BridgeResult<null>>;
-  readonly saveProjectAs: (state: Uint8Array) => Promise<BridgeResult<null>>;
-  readonly exportProject: (kind: ExchangeKind, text: string) => Promise<BridgeResult<null>>;
+  readonly saveProjectAs: (state: Uint8Array, suggestedName: string) => Promise<BridgeResult<null>>;
+  readonly exportProject: (
+    kind: ExchangeKind,
+    text: string,
+    suggestedName: string,
+  ) => Promise<BridgeResult<ExportedFile>>;
   readonly onFlushRequested: (flush: () => Promise<boolean>) => void;
 }
 

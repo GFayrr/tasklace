@@ -246,7 +246,9 @@ function taskOf(numbered: NumberedRow, kind: PlannedKind, links: TaskLinks): Tas
   if (kind === 'milestone') {
     return { ...dated, kind };
   }
-  const segments = row.blocks ?? [{ durationHours: row.durationHours ?? 0, gapDaysBefore: 0 }];
+  const segments = row.blocks ?? [
+    { durationHours: row.durationHours ?? 0, gapDaysBefore: 0, startNoEarlierThan: null },
+  ];
   return { ...dated, kind, segments, hoursPerDay: null, dailyStartHour: null };
 }
 

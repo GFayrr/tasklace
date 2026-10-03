@@ -11,6 +11,7 @@ import {
 } from '../../core/testing/project-builder';
 import {
   draftFromTask,
+  findUnreadableBlockStart,
   taskBasis,
   taskFromDraft,
   withAddedBlock,
@@ -46,8 +47,8 @@ describe('draftFromTask and taskFromDraft', () => {
       hoursPerDay: '4 h 30',
       dailyStart: '13:15',
       blocks: [
-        { duration: '7 h', gapDays: '0', origin: 0, waitsFor: '' },
-        { duration: '3 h 30', gapDays: '2', origin: 1, waitsFor: '' },
+        { duration: '7 h', gapDays: '0', start: '', origin: 0, waitsFor: '' },
+        { duration: '3 h 30', gapDays: '2', start: '', origin: 1, waitsFor: '' },
       ],
       basis: '',
     });
@@ -73,16 +74,18 @@ describe('draftFromTask and taskFromDraft', () => {
     const task = workTask('w');
     const added = withAddedBlock(draftFromTask(task, NO_WAITS, ''), 9);
     expect(added.blocks).toEqual([
-      { duration: '7 h', gapDays: '0', origin: 0, waitsFor: '' },
-      { duration: '9 h', gapDays: '1', origin: null, waitsFor: '' },
+      { duration: '7 h', gapDays: '0', start: '', origin: 0, waitsFor: '' },
+      { duration: '9 h', gapDays: '1', start: '', origin: null, waitsFor: '' },
     ]);
     const built = taskFromDraft(task, added, 9);
     expect(built.ok && built.value.kind === 'task' && built.value.segments).toEqual([
-      { durationHours: 7, gapDaysBefore: 0 },
-      { durationHours: 9, gapDaysBefore: 1 },
+      { durationHours: 7, gapDaysBefore: 0, startNoEarlierThan: null },
+      { durationHours: 9, gapDaysBefore: 1, startNoEarlierThan: null },
     ]);
     const first = withoutBlock(added, 0);
-    expect(first.blocks).toEqual([{ duration: '9 h', gapDays: '0', origin: null, waitsFor: '' }]);
+    expect(first.blocks).toEqual([
+      { duration: '9 h', gapDays: '0', start: '', origin: null, waitsFor: '' },
+    ]);
     expect(withoutBlock(first, 0)).toBe(first);
   });
 
@@ -97,6 +100,7 @@ describe('draftFromTask and taskFromDraft', () => {
     expect(built.ok && built.value.kind === 'task' && built.value.segments[1]).toEqual({
       durationHours: 3.5,
       gapDaysBefore: 0,
+      startNoEarlierThan: null,
     });
   });
 
@@ -132,7 +136,7 @@ describe('draftFromTask and taskFromDraft', () => {
     ['a daily start past midnight', { dailyStart: '24:00' }, 'INVALID_DAILY_START'],
     [
       'an empty block',
-      { blocks: [{ duration: '', gapDays: '0', origin: 0, waitsFor: '' }] },
+      { blocks: [{ duration: '', gapDays: '0', start: '', origin: 0, waitsFor: '' }] },
       'INVALID_BLOCK',
     ],
     ['no block at all', { blocks: [] }, 'INVALID_BLOCK'],
@@ -140,8 +144,8 @@ describe('draftFromTask and taskFromDraft', () => {
       'a gap that is not a whole number of days',
       {
         blocks: [
-          { duration: '1 h', gapDays: '0', origin: 0, waitsFor: '' },
-          { duration: '1 h', gapDays: '1.5', origin: 1, waitsFor: '' },
+          { duration: '1 h', gapDays: '0', start: '', origin: 0, waitsFor: '' },
+          { duration: '1 h', gapDays: '1.5', start: '', origin: 1, waitsFor: '' },
         ],
       },
       'INVALID_GAP',
@@ -151,6 +155,43 @@ describe('draftFromTask and taskFromDraft', () => {
       ok: false,
       error,
     });
+  });
+});
+
+describe('block start dates in the details panel', () => {
+  it('reads and writes the start date of a later block, and refuses one that cannot be read', () => {
+    const dated = splitTask('d', [
+      [7, 0],
+      [7, 1, at(2026, 10, 6, 13) + 0.25],
+    ]);
+    const draft = draftFromTask(dated, NO_WAITS, '');
+    expect(draft.blocks.map((block) => block.start)).toEqual(['', '2026-10-06T13:15']);
+    expect(taskFromDraft(dated, draft, 9)).toEqual({ ok: true, value: dated });
+    const unreadable = {
+      ...draft,
+      blocks: draft.blocks.map((block, index) =>
+        index === 1 ? { ...block, start: 'soon' } : block,
+      ),
+    };
+    expect(taskFromDraft(dated, unreadable, 9)).toEqual({ ok: false, error: 'INVALID_DATE' });
+    expect(findUnreadableBlockStart(unreadable)).toBe(1);
+    expect(findUnreadableBlockStart(draft)).toBeNull();
+  });
+
+  it('keeps for the task the later of its start date and that of the block that becomes the first', () => {
+    const dated = splitTask('d', [
+      [7, 0],
+      [7, 1, at(2026, 10, 6, 13)],
+    ]);
+    const draft = draftFromTask(dated, NO_WAITS, '');
+    const remaining = withoutBlock(draft, 0);
+    expect(remaining.start).toBe('2026-10-06T13:00');
+    expect(remaining.blocks).toEqual([
+      { duration: '7 h', gapDays: '0', start: '', origin: 1, waitsFor: '' },
+    ]);
+    expect(withoutBlock({ ...draft, start: '2026-10-05T09:00' }, 0).start).toBe('2026-10-06T13:00');
+    expect(withoutBlock({ ...draft, start: '2026-10-09T09:00' }, 0).start).toBe('2026-10-09T09:00');
+    expect(withoutBlock({ ...draft, start: 'soon' }, 0).start).toBe('soon');
   });
 });
 

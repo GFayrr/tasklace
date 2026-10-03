@@ -127,6 +127,10 @@
                   <span>{fillMessage(text.blockGap, { previous: String(index) })}</span>
                   <input inputmode="numeric" bind:value={block.gapDays} />
                 </label>
+                <label class="field start">
+                  <span>{fillMessage(text.blockStart, { number: String(index + 1) })}</span>
+                  <input type="datetime-local" step="900" bind:value={block.start} />
+                </label>
               {/if}
               <label class="field">
                 <span>{fillMessage(text.blockDuration, { number: String(index + 1) })}</span>
@@ -265,6 +269,7 @@
 
   .block {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-end;
     gap: var(--space-3);
   }
@@ -275,6 +280,10 @@
 
   .waits {
     flex: 1.4;
+  }
+
+  .start {
+    flex: 1.6;
   }
 
   .actions {

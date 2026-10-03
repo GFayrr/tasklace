@@ -20,6 +20,7 @@ import {
 type Data = Record<string, unknown>;
 
 const DEEP_NESTING = 100_000;
+const LONGEST_ENGINE_STRING = 2 ** 29 - 24;
 
 const SAMPLE_PROJECT: Project = project(
   [
@@ -127,6 +128,33 @@ describe('exportProjectJson', () => {
       deadline: null,
     });
     expect(second).toMatchObject({ startNoEarlierThan: null, deadline: '2026-11-02T12:00' });
+  });
+
+  it('writes the start date of a later block in clear text, leaves out an empty one, and refuses one written as a number', () => {
+    const dated = project([
+      splitTask('a', [
+        [7, 0],
+        [7, 1, at(2026, 10, 6, 13)],
+      ]),
+    ]);
+    const content = JSON.parse(exportProjectJson(dated)) as Data;
+    const [task] = (content['project'] as Data)['tasks'] as Data[];
+    expect(task?.['segments']).toEqual([
+      { durationHours: 7, gapDaysBefore: 0 },
+      { durationHours: 7, gapDaysBefore: 1, startNoEarlierThan: '2026-10-06T13:00' },
+    ]);
+    const segments = task?.['segments'] as Data[];
+    const numbered = { ...segments[1], startNoEarlierThan: at(2026, 10, 6, 13) };
+    const forged = {
+      ...content,
+      project: {
+        ...(content['project'] as Data),
+        tasks: [{ ...task, segments: [segments[0], numbered] }],
+      },
+    };
+    expect(importIssues(forged)).toEqual(
+      issue('project.tasks[0].segments[1].startNoEarlierThan', 'WRONG_TYPE'),
+    );
   });
 
   it('writes the extreme dates of the supported period', () => {
@@ -238,13 +266,9 @@ describe('importProjectJson: text and header', () => {
     },
   );
 
-  it('rejects a text longer than the maximum size before parsing it, and only then', () => {
-    expect(importIssues(' '.repeat(MAX_PROJECT_TEXT_UTF16_UNITS + 1))).toEqual(
-      issue('', 'TOO_LARGE'),
-    );
-    expect(importIssues(' '.repeat(MAX_PROJECT_TEXT_UTF16_UNITS))).toEqual(
-      issue('', 'INVALID_JSON'),
-    );
+  it('never refuses for its size a text the JavaScript engine can hold, its limit lying above the longest string', () => {
+    expect(MAX_PROJECT_TEXT_UTF16_UNITS).toBeGreaterThanOrEqual(LONGEST_ENGINE_STRING);
+    expect(importIssues(' '.repeat(LONGEST_ENGINE_STRING))).toEqual(issue('', 'INVALID_JSON'));
   });
 
   it.each(['[]', 'null', '42', '"tasklace"', 'true'])('rejects the document %s', (text) => {

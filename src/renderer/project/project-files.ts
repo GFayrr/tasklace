@@ -25,6 +25,7 @@ export type ProjectBridge = Pick<
 export interface OpenedSession {
   readonly session: SharedSession;
   readonly name: string;
+  readonly fileName: string;
   readonly warnings: readonly ImportWarning[];
 }
 
@@ -119,11 +120,17 @@ export function createProjectFiles(
     await replace(session.value, hasFile);
     return {
       ok: true,
-      value: { session: session.value, name: opened.value.name, warnings: opened.value.warnings },
+      value: {
+        session: session.value,
+        name: opened.value.name,
+        fileName: opened.value.fileName,
+        warnings: opened.value.warnings,
+      },
     };
   };
   const saveAs = async (): Promise<BridgeResult<null>> => {
-    const result = await trackSave(bridge.saveProjectAs);
+    const name = current?.session.project().name ?? '';
+    const result = await trackSave((state) => bridge.saveProjectAs(state, name));
     if (current !== null) {
       current.hasFile ||= result.ok;
     }

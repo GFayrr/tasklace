@@ -21,6 +21,7 @@ import { runFileTask, type FileTaskResult, type LoadedProject } from './file-tas
 import { parseLocalCopyIndex } from './local-copies';
 import { zlibCompressor } from './zlib-compressor';
 
+const NAMING = { untitled: 'Untitled project', fromFile: 'From the file' };
 const NEW_DOCUMENT_ID = '00000000-0000-4000-8000-00000000000f';
 const SAMPLE = project([workTask('a', { name: 'Écrire' }), workTask('b')], [link('a', 'b')]);
 const FRENCH = {
@@ -91,7 +92,12 @@ describe('file tasks', () => {
     const table = { ...SAMPLE, calendar: DEFAULT_CALENDAR };
     await writeFile(csvPath, unwrap(exportProjectCsv(table, scheduleOrThrow(table), FRENCH)));
     const json = loadedOf(
-      await runFileTask({ kind: 'importJson', path: jsonPath, documentId: NEW_DOCUMENT_ID }),
+      await runFileTask({
+        kind: 'importJson',
+        path: jsonPath,
+        documentId: NEW_DOCUMENT_ID,
+        naming: NAMING,
+      }),
     );
     expect(readDocumentId(documentOf(json.state))).toBe(NEW_DOCUMENT_ID);
     expect(unwrap(readSharedProject(documentOf(json.state))).tasks).toHaveLength(2);
@@ -101,6 +107,26 @@ describe('file tasks', () => {
     );
     expect(unwrap(readSharedProject(documentOf(csv.state))).name).toBe('Plan');
     expect(csv.warnings).toEqual([]);
+  });
+
+  it('names an imported JSON project after its file only while it bears the untitled name', async () => {
+    const untitledPath = join(folder, 'untitled.json');
+    const namedPath = join(folder, 'named.json');
+    await writeFile(untitledPath, exportProjectJson({ ...SAMPLE, name: NAMING.untitled }));
+    await writeFile(namedPath, exportProjectJson({ ...SAMPLE, name: 'Launch' }));
+    const nameOf = async (path: string) => {
+      const imported = loadedOf(
+        await runFileTask({
+          kind: 'importJson',
+          path,
+          documentId: NEW_DOCUMENT_ID,
+          naming: NAMING,
+        }),
+      );
+      return unwrap(readSharedProject(documentOf(imported.state))).name;
+    };
+    expect(await nameOf(untitledPath)).toBe(NAMING.fromFile);
+    expect(await nameOf(namedPath)).toBe('Launch');
   });
 
   it('reports a missing file, text that is not UTF-8, an invalid import and a forged project file', async () => {
@@ -118,13 +144,23 @@ describe('file tasks', () => {
       error: { code: 'READ_FAILED' },
     });
     expect(
-      await runFileTask({ kind: 'importJson', path: latin1, documentId: NEW_DOCUMENT_ID }),
+      await runFileTask({
+        kind: 'importJson',
+        path: latin1,
+        documentId: NEW_DOCUMENT_ID,
+        naming: NAMING,
+      }),
     ).toEqual({
       ok: false,
       error: { code: 'INVALID_ENCODING' },
     });
     expect(
-      await runFileTask({ kind: 'importJson', path: broken, documentId: NEW_DOCUMENT_ID }),
+      await runFileTask({
+        kind: 'importJson',
+        path: broken,
+        documentId: NEW_DOCUMENT_ID,
+        naming: NAMING,
+      }),
     ).toEqual({
       ok: false,
       error: { code: 'INVALID_IMPORT', issues: [{ path: '', code: 'INVALID_JSON' }] },

@@ -8,6 +8,7 @@ export type TagId = string;
 export interface TaskSegment {
   readonly durationHours: number;
   readonly gapDaysBefore: number;
+  readonly startNoEarlierThan: ProjectHour | null;
 }
 
 interface TaskBase {

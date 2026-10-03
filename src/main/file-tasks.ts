@@ -17,7 +17,12 @@ import { zlibCompressor } from './zlib-compressor';
 
 export type FileTask =
   | { readonly kind: 'openProject'; readonly path: string }
-  | { readonly kind: 'importJson'; readonly path: string; readonly documentId: DocumentId }
+  | {
+      readonly kind: 'importJson';
+      readonly path: string;
+      readonly documentId: DocumentId;
+      readonly naming: ImportNaming;
+    }
   | {
       readonly kind: 'importCsv';
       readonly path: string;
@@ -32,6 +37,11 @@ export type FileTask =
       readonly localCopyFolder: string;
       readonly savedAt: number;
     };
+
+export interface ImportNaming {
+  readonly untitled: string;
+  readonly fromFile: string;
+}
 
 export interface LoadedProject {
   readonly state: Uint8Array;
@@ -49,7 +59,7 @@ export async function runFileTask(task: FileTask): Promise<FileTaskResult> {
     case 'openProject':
       return openProject(task.path);
     case 'importJson':
-      return importText(task.path, (text) => importJsonText(text, task.documentId));
+      return importText(task.path, (text) => importJsonText(text, task.documentId, task.naming));
     case 'importCsv':
       return importText(task.path, (text) => importCsvText(text, task.documentId, task.options));
     case 'saveProject':
@@ -86,12 +96,19 @@ async function importText(
   return text === null ? failure({ code: 'INVALID_ENCODING' }) : importer(text);
 }
 
-/** Imports a JSON project into a new shared document. */
-function importJsonText(text: string, documentId: DocumentId): FileTaskResult {
+/** Imports a JSON project into a new shared document, a project still bearing the untitled name taking the name of its file. */
+function importJsonText(
+  text: string,
+  documentId: DocumentId,
+  naming: ImportNaming,
+): FileTaskResult {
   const project = importProjectJson(text);
-  return project.ok
-    ? success(loaded(project.value, documentId, []))
-    : failure({ code: 'INVALID_IMPORT', issues: project.error });
+  if (!project.ok) {
+    return failure({ code: 'INVALID_IMPORT', issues: project.error });
+  }
+  const untitled = project.value.name === naming.untitled;
+  const named = untitled ? { ...project.value, name: naming.fromFile } : project.value;
+  return success(loaded(named, documentId, []));
 }
 
 /** Imports a CSV task table into a new shared document, keeping its warnings. */

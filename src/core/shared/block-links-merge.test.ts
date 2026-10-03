@@ -8,7 +8,7 @@ import {
   TEST_DOCUMENT_ID,
   workTask,
 } from '../testing/project-builder';
-import { createSharedDocument, DEPENDENCIES_ROOT } from './shared-document';
+import { createSharedDocument, DEPENDENCIES_ROOT, TASKS_ROOT } from './shared-document';
 import type { SharedRepair } from './shared-project';
 import { openSharedSession, type SharedSession } from './shared-session';
 
@@ -16,7 +16,10 @@ const DEVELOPMENT = splitTask('dev', [
   [7, 0],
   [7, 0],
 ]);
-const ONE_BLOCK: WorkTask = { ...DEVELOPMENT, segments: [{ durationHours: 14, gapDaysBefore: 0 }] };
+const ONE_BLOCK: WorkTask = {
+  ...DEVELOPMENT,
+  segments: [{ durationHours: 14, gapDaysBefore: 0, startNoEarlierThan: null }],
+};
 const BASE: Project = project([DEVELOPMENT, workTask('test'), workTask('a')]);
 
 /** Opens two participants on the same project. */
@@ -185,6 +188,28 @@ describe('block links checked on a local change', () => {
         issues: [{ path: 'dependencies[0].predecessorBlock', code: 'OUT_OF_RANGE' }],
       },
     });
+    expect(alice.project()).toEqual(before);
+  });
+
+  it('refuses a received start date on the first block of a task, leaving the project intact', () => {
+    const [alice, bob] = openPair();
+    const tampered = new Y.Doc();
+    Y.applyUpdate(tampered, Y.encodeStateAsUpdate(bob.document));
+    tampered.clientID = 3;
+    const entry = tampered.getMap(TASKS_ROOT).get('dev');
+    if (!(entry instanceof Y.Map)) {
+      throw new Error('Missing task entry');
+    }
+    entry.set('segments', [
+      { durationHours: 7, gapDaysBefore: 0, startNoEarlierThan: 100 },
+      { durationHours: 7, gapDaysBefore: 0, startNoEarlierThan: null },
+    ]);
+    const before = alice.project();
+    const merged = alice.merge(
+      Y.encodeStateAsUpdate(tampered, Y.encodeStateVector(alice.document)),
+    );
+    expect(merged.ok).toBe(false);
+    expect(!merged.ok && merged.error.kind).toBe('invalidProject');
     expect(alice.project()).toEqual(before);
   });
 });

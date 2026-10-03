@@ -22,6 +22,7 @@ import {
   shortestLink,
   unitCountOf,
 } from '../../core/scheduling/block-links';
+import type { Placement } from '../../core/scheduling/task-placement';
 import { keyBetween, spreadKeys } from '../../core/shared/fractional-index';
 import type { SharedOperation } from '../../core/shared/shared-operations';
 import { dayIndexOf, QUARTER_HOUR, startOfDay, type ProjectHour } from '../../core/time';
@@ -89,7 +90,7 @@ export function insertTask(
     name,
     parentId,
     sortKey: '',
-    segments: [{ durationHours: context.dayHours, gapDaysBefore: 0 }],
+    segments: [{ durationHours: context.dayHours, gapDaysBefore: 0, startNoEarlierThan: null }],
     hoursPerDay: null,
     dailyStartHour: null,
     progressPercent: 0,
@@ -204,12 +205,13 @@ export function setDuration(context: EditContext, id: TaskId, text: string): Edi
   ]);
 }
 
-/** Sets the date a task may not start before, written in the regional format or as an ISO date, an empty text removing it. */
+/** Sets the date a task may not start before, written in the regional format or as an ISO date, an empty text removing it, the start dates of its later blocks moving by as much as the task when its scheduled start is known. */
 export function setStart(
   context: EditContext,
   id: TaskId,
   text: string,
   format: RegionalFormat,
+  scheduledStart: ProjectHour | null = null,
 ): Edit {
   const task = findTask(context, id);
   if (task === undefined || task.kind === 'summary') {
@@ -223,7 +225,7 @@ export function setStart(
     return failure('INVALID_DATE');
   }
   const hour = date.value.kind === 'dateTime' ? date.value.hour : startOfDay(date.value.day);
-  return success(startingAt(context, hour, [putTask({ ...task, startNoEarlierThan: hour })]));
+  return moveStart(context, id, hour, scheduledStart);
 }
 
 /** Sets the end of a work task, changing the duration of its last block, or moves a milestone to that instant; a date without time ends the task at the end of that day. */
@@ -462,13 +464,77 @@ export function toggleMilestone(context: EditContext, id: TaskId): Edit {
     : success([putTask(asWorkTask(task, dayHoursOf(context, task)))]);
 }
 
-/** Asks a task not to start before an instant, as when its bar is moved. */
-export function moveStart(context: EditContext, id: TaskId, hour: ProjectHour): Edit {
+/** Asks a task not to start before an instant, as when its bar is moved, the start dates of its later blocks moving by as much as the task when its scheduled start is known. */
+export function moveStart(
+  context: EditContext,
+  id: TaskId,
+  hour: ProjectHour,
+  scheduledStart: ProjectHour | null = null,
+): Edit {
   const task = findTask(context, id);
   if (task === undefined || task.kind === 'summary') {
     return failure('NOT_POSSIBLE');
   }
-  return success(startingAt(context, hour, [putTask({ ...task, startNoEarlierThan: hour })]));
+  const shift = scheduledStart === null ? 0 : hour - scheduledStart;
+  const moved = task.kind === 'task' ? withBlockStartsShifted(task, shift) : task;
+  return success(startingAt(context, hour, [putTask({ ...moved, startNoEarlierThan: hour })]));
+}
+
+/** Moves the start dates of the later blocks of a work task by a number of hours. */
+function withBlockStartsShifted(task: WorkTask, shift: number): WorkTask {
+  if (shift === 0) {
+    return task;
+  }
+  const segments = task.segments.map((segment) =>
+    segment.startNoEarlierThan === null
+      ? segment
+      : { ...segment, startNoEarlierThan: segment.startNoEarlierThan + shift },
+  );
+  return { ...task, segments };
+}
+
+/** Moves what was dragged on the timeline: a later block alone when one was grabbed, otherwise the whole task, the drop turning the scheduled start into the asked one, refusing a block or task the schedule no longer shows. */
+export function moveOnTimeline(
+  context: EditContext,
+  id: TaskId,
+  block: number | null,
+  placement: Placement | null,
+  dropped: (scheduledStart: ProjectHour) => ProjectHour,
+): Edit {
+  if (placement === null) {
+    return failure('NOT_POSSIBLE');
+  }
+  if (block === null) {
+    return moveStart(context, id, dropped(placement.start), placement.start);
+  }
+  const moved = placement.segments[block];
+  const previous = placement.segments[block - 1];
+  if (moved === undefined || previous === undefined) {
+    return failure('NOT_POSSIBLE');
+  }
+  return moveBlock(context, id, block, { start: dropped(moved.start), previousEnd: previous.end });
+}
+
+/** Asks a later block of a split task not to start before an instant, as when it is dragged alone, its gap in days becoming the number of days from the end of the previous block, a block dropped before that end staying right after it without a date of its own. */
+export function moveBlock(
+  context: EditContext,
+  id: TaskId,
+  block: number,
+  { start: hour, previousEnd }: { readonly start: ProjectHour; readonly previousEnd: ProjectHour },
+): Edit {
+  const task = findTask(context, id);
+  if (task?.kind !== 'task' || block < 1 || block >= task.segments.length) {
+    return failure('NOT_POSSIBLE');
+  }
+  const afterPrevious = hour > previousEnd;
+  const gapDaysBefore = afterPrevious
+    ? dayIndexOf(hour) - dayIndexOf(previousEnd - QUARTER_HOUR)
+    : 0;
+  const startNoEarlierThan = afterPrevious ? hour : null;
+  const segments = task.segments.map((segment, index) =>
+    index === block ? { ...segment, gapDaysBefore, startNoEarlierThan } : segment,
+  );
+  return success([putTask({ ...task, segments })]);
 }
 
 /** Changes the last block of a task so that it ends at an instant, as when its bar is stretched, keeping at least a quarter hour. */
@@ -629,7 +695,7 @@ function asWorkTask(task: Milestone, hours: number): WorkTask {
   return {
     ...task,
     kind: 'task',
-    segments: [{ durationHours: hours, gapDaysBefore: 0 }],
+    segments: [{ durationHours: hours, gapDaysBefore: 0, startNoEarlierThan: null }],
     hoursPerDay: null,
     dailyStartHour: null,
   };
