@@ -4,7 +4,7 @@ import * as Y from 'yjs';
 import { compareStrings } from '../compare-strings';
 import { MAX_HIERARCHY_DEPTH, MAX_TAGS } from '../limits';
 import type { DependencyType, Project, Tag, Task } from '../model/project';
-import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
+import { CONVERGENCE_TEST_TIMEOUT_MS, PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { hideListContent } from '../testing/hidden-list-content';
 import {
   link,
@@ -705,40 +705,46 @@ function playStep(
 const CONVERGENCE_RUNS = 150;
 
 describe('shared session properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
-  it('takes exactly the decisions of the full validation and repair, and converges', () => {
-    const counters = { edits: 0, repairs: 0 };
-    fc.assert(
-      fc.property(
-        fc
-          .integer({ min: 2, max: 3 })
-          .chain((peerCount) =>
-            fc.tuple(
-              fc.constant(peerCount),
-              fc.array(stepArbitrary(peerCount), { minLength: 15, maxLength: 35 }),
+  it(
+    'takes exactly the decisions of the full validation and repair, and converges',
+    {
+      timeout: CONVERGENCE_TEST_TIMEOUT_MS,
+    },
+    () => {
+      const counters = { edits: 0, repairs: 0 };
+      fc.assert(
+        fc.property(
+          fc
+            .integer({ min: 2, max: 3 })
+            .chain((peerCount) =>
+              fc.tuple(
+                fc.constant(peerCount),
+                fc.array(stepArbitrary(peerCount), { minLength: 15, maxLength: 35 }),
+              ),
             ),
-          ),
-        ([peerCount, steps]) => {
-          const sessions = openSessions(BASE_PROJECT, peerCount);
-          const updates: Uint8Array[] = [];
-          steps.forEach((step, index) => {
-            playStep(sessions, updates, step, index, counters);
-          });
-          for (let round = 0; round <= peerCount; round += 1) {
-            for (const [from, to] of sessions.flatMap((left) =>
-              sessions.filter((right) => right !== left).map((right) => [left, right] as const),
-            )) {
-              counters.repairs += syncBoth(from, to) ? 1 : 0;
+          ([peerCount, steps]) => {
+            const sessions = openSessions(BASE_PROJECT, peerCount);
+            const updates: Uint8Array[] = [];
+            steps.forEach((step, index) => {
+              playStep(sessions, updates, step, index, counters);
+            });
+            for (let round = 0; round <= peerCount; round += 1) {
+              for (const [from, to] of sessions.flatMap((left) =>
+                sessions.filter((right) => right !== left).map((right) => [left, right] as const),
+              )) {
+                counters.repairs += syncBoth(from, to) ? 1 : 0;
+              }
             }
-          }
-          const [first, ...others] = sessions.map((session) => readSharedData(session.document));
-          others.forEach((data) => {
-            expect(data).toEqual(first);
-          });
-        },
-      ),
-      { numRuns: CONVERGENCE_RUNS },
-    );
-    expect(counters.edits).toBeGreaterThan(0);
-    expect(counters.repairs).toBeGreaterThan(0);
-  });
+            const [first, ...others] = sessions.map((session) => readSharedData(session.document));
+            others.forEach((data) => {
+              expect(data).toEqual(first);
+            });
+          },
+        ),
+        { numRuns: CONVERGENCE_RUNS },
+      );
+      expect(counters.edits).toBeGreaterThan(0);
+      expect(counters.repairs).toBeGreaterThan(0);
+    },
+  );
 });

@@ -12,6 +12,7 @@ import {
 import { dayOf } from './civil-time';
 
 export const PROPERTY_TEST_TIMEOUT_MS = 30_000;
+export const CONVERGENCE_TEST_TIMEOUT_MS = 120_000;
 
 export const FIRST_TEST_DAY = dayOf(2026, 1, 1);
 const MAX_TEST_DURATION_HOURS = 300;
