@@ -159,11 +159,14 @@ async function crashReport(): Promise<string> {
   return `events: ${JSON.stringify(events)}; log: ${log}`;
 }
 
-/** Crashes the page of the window without waiting for what follows, since the main process may quit at once. */
+/** Kills the process of the page of the window, as the system would, without waiting for what follows since the main process may quit at once; asking the page to crash itself left it hanging on the Linux runners of the CI. */
 async function crashPage(): Promise<void> {
   await recordCrashEvents();
   await application.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.webContents.forcefullyCrashRenderer();
+    const pageProcess = BrowserWindow.getAllWindows()[0]?.webContents.getOSProcessId();
+    if (pageProcess !== undefined) {
+      process.kill(pageProcess, 'SIGKILL');
+    }
   });
 }
 
