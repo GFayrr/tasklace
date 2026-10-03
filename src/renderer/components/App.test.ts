@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Project } from '../../core/model/project';
 import { at } from '../../core/testing/civil-time';
 import { project, workTask } from '../../core/testing/project-builder';
+import type { BridgeResult, OpenedProject } from '../../preload/bridge-contract';
 import { AppState } from '../app/app-state.svelte';
 import english from '../locales/en.json';
 import { fakeAppContext, openedProjectOf, settle } from '../app/testing/fake-app-context';
@@ -69,6 +70,33 @@ describe('App', () => {
     await settle();
     expect(app.project?.name).toBe('Thesis');
     expect(press(window, 'q', { ctrlKey: true })).toBe(true);
+  });
+
+  it('makes the toolbar and the workspace inert and ignores the shortcuts while a file action runs', async () => {
+    const { app, root, control, context } = await renderApp(true);
+    const shell = single(root, '.shell');
+    expect(shell.inert).toBe(false);
+    expect(shell.getAttribute('aria-busy')).toBe('false');
+    let finish: (result: BridgeResult<OpenedProject>) => void = () => undefined;
+    Object.assign(context.bridge, {
+      openProject: () =>
+        new Promise<BridgeResult<OpenedProject>>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const opening = app.open();
+    await settle();
+    update();
+    expect(shell.inert).toBe(true);
+    expect(shell.getAttribute('aria-busy')).toBe('true');
+    expect(press(window, 'n', { ctrlKey: true })).toBe(true);
+    await settle();
+    expect(control.calls.filter((call) => call === 'newProject')).toEqual([]);
+    finish({ ok: false, error: { code: 'CANCELLED' } });
+    await opening;
+    update();
+    expect(shell.inert).toBe(false);
+    expect(shell.getAttribute('aria-busy')).toBe('false');
   });
 
   it('leaves the shortcuts alone while a dialog is open', async () => {

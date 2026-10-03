@@ -120,6 +120,7 @@ export class AppState {
   editRequest = $state<EditRequest | null>(null);
   detailsTaskId = $state<TaskId | null>(null);
   #closePrompt = $state.raw<ClosePrompt | null>(null);
+  #fileActionRunning = $state(false);
   #report = $state.raw<Report | null>(null);
   #lastQuestion: Promise<unknown> = Promise.resolve();
   collapsed = $state.raw<ReadonlySet<TaskId>>(NOTHING_COLLAPSED);
@@ -158,6 +159,9 @@ export class AppState {
       localCopyFailed: () => {
         this.#notify('warning', this.messages.notices.localCopyFailed);
       },
+      fileActionRunning: (running) => {
+        this.#fileActionRunning = running;
+      },
     });
     this.#scheduler = context.createScheduler({
       scheduled: (result, project) => {
@@ -173,6 +177,11 @@ export class AppState {
   /** Returns the question about closing a project shown to the user, or null. */
   get closePrompt(): ClosePrompt | null {
     return this.#closePrompt;
+  }
+
+  /** Tells whether a file action started by the user runs, during which the project cannot be changed. */
+  get fileActionRunning(): boolean {
+    return this.#fileActionRunning;
   }
 
   /** Returns the detailed list behind a message shown to the user, or null. */
@@ -342,11 +351,14 @@ export class AppState {
     this.#showResult(exported);
   }
 
-  /** Renames the project, telling whether the name was accepted and telling the user why when the project refuses it. */
+  /** Renames the project, telling whether the name was accepted and telling the user why when the project or a running file action refuses it. */
   rename(name: string): boolean {
     const trimmed = name.trim();
     const session = this.#session;
     if (session === null || trimmed === '' || trimmed === this.project?.name) {
+      return false;
+    }
+    if (this.#refuseWhileFileActionRuns()) {
       return false;
     }
     const renamed = session.apply({ type: 'updateProject', fields: { name: trimmed } });
@@ -378,7 +390,7 @@ export class AppState {
     return refusal === null;
   }
 
-  /** Applies a change built from the current project, returning why it was refused, or null once applied. */
+  /** Applies a change built from the current project, returning why it was refused, as while a file action runs, or null once applied. */
   tryEdit(
     build: (context: EditContext) => Result<readonly SharedOperation[], string>,
   ): string | null {
@@ -386,6 +398,9 @@ export class AppState {
     const project = this.project;
     if (session === null || project === null) {
       return editErrorMessage(this.messages, 'NOT_POSSIBLE');
+    }
+    if (this.#fileActionRunning) {
+      return this.messages.fileErrors.BUSY;
     }
     const edit = build(this.#editContext(project));
     if (!edit.ok) {
@@ -483,14 +498,28 @@ export class AppState {
     }
   }
 
-  /** Undoes the latest local change. */
+  /** Undoes the latest local change, unless a file action runs. */
   undo(): void {
+    if (this.#refuseWhileFileActionRuns()) {
+      return;
+    }
     this.#showHistoryStep(this.#session?.history.undo(), this.messages.notices.undoFailed);
   }
 
-  /** Redoes the latest undone change. */
+  /** Redoes the latest undone change, unless a file action runs. */
   redo(): void {
+    if (this.#refuseWhileFileActionRuns()) {
+      return;
+    }
     this.#showHistoryStep(this.#session?.history.redo(), this.messages.notices.redoFailed);
+  }
+
+  /** Tells the user that the project cannot change while a file action runs, telling whether one runs. */
+  #refuseWhileFileActionRuns(): boolean {
+    if (this.#fileActionRunning) {
+      this.#notify('error', this.messages.fileErrors.BUSY);
+    }
+    return this.#fileActionRunning;
   }
 
   /** Tells the repairs an undone or redone step needed, or that the step could not be applied and the project was left as it was. */

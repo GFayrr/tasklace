@@ -21,6 +21,7 @@ const QUIET: ProjectFilesListener = {
   failed: () => undefined,
   saveStatus: () => undefined,
   localCopyFailed: () => undefined,
+  fileActionRunning: () => undefined,
 };
 
 /** Returns a listener doing nothing but what a test gives it. */
@@ -218,6 +219,32 @@ describe('createProjectFiles', () => {
       ok: true,
       value: { fileName: 'Plan.csv' },
     });
+  });
+
+  it('tells when each file action starts and ends, even when it fails, and nothing for a refused one', async () => {
+    const running: boolean[] = [];
+    let finish: (result: BridgeResult<OpenedProject>) => void = () => undefined;
+    const slow = new Promise<BridgeResult<OpenedProject>>((resolve) => {
+      finish = resolve;
+    });
+    const { bridge } = fakeBridge(openedOf(OTHER_ID), SAVED, slow);
+    const files = createProjectFiles(
+      { ...bridge, saveProjectAs: () => Promise.reject(new Error('broken bridge')) },
+      listening({ fileActionRunning: (value) => running.push(value) }),
+      manualTimer(),
+    );
+    await createdOn(files);
+    expect(running).toEqual([true, false]);
+    const opening = files.open();
+    await settle();
+    expect(running).toEqual([true, false, true]);
+    expect(await files.save()).toEqual({ ok: false, error: { code: 'BUSY' } });
+    expect(running).toEqual([true, false, true]);
+    finish(openedOf(OTHER_ID));
+    await opening;
+    expect(running).toEqual([true, false, true, false]);
+    await expect(files.saveAs()).rejects.toThrow('broken bridge');
+    expect(running).toEqual([true, false, true, false, true, false]);
   });
 
   it('has nothing to save before a project is open', async () => {

@@ -758,6 +758,50 @@ describe('unexpected failures of the main process', () => {
 });
 
 describe('one file action at a time', () => {
+  it('keeps the open project unchanged while another one opens, then changes the new one again', async () => {
+    const { app, control, context } = await withOpenPlan();
+    await change(app, 'Before');
+    let finish: (result: BridgeResult<OpenedProject>) => void = () => undefined;
+    Object.assign(context.bridge, {
+      openProject: () =>
+        new Promise<BridgeResult<OpenedProject>>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const opening = app.open();
+    await settle();
+    expect(app.fileActionRunning).toBe(true);
+    const before = app.project;
+    expect(app.tryEdit((edit) => setStart(edit, 'a', '2026-09-29 10:00'))).toBe(
+      english.fileErrors.BUSY,
+    );
+    app.selectedTaskId = 'a';
+    app.addTask();
+    app.deleteSelected();
+    expect(app.rename('During')).toBe(false);
+    app.undo();
+    app.redo();
+    await settle();
+    expect(app.project).toBe(before);
+    expect(app.project?.name).toBe('Before');
+    expect(noticeTexts(app)).toEqual([english.fileErrors.BUSY]);
+    const savedBefore = control.calls.filter((call) => call === 'saveProject').length;
+    finish(openedProjectOf(project([workTask('z')], [], { name: 'Next' })));
+    await opening;
+    expect(app.fileActionRunning).toBe(false);
+    expect(app.project?.name).toBe('Next');
+    expect(control.calls.filter((call) => call === 'saveProject')).toHaveLength(savedBefore);
+    expect(app.rename('Next, renamed')).toBe(true);
+  });
+
+  it('lets the project change again once a file action fails', async () => {
+    const { app, control } = await withOpenPlan();
+    control.openResult = { ok: false, error: { code: 'READ_FAILED' } };
+    await app.open();
+    expect(app.fileActionRunning).toBe(false);
+    expect(app.rename('After a failure')).toBe(true);
+  });
+
   it('refuses an opening or an export asked while another opening runs, telling the user', async () => {
     const { app, control, context } = await withOpenPlan();
     const before = app.project;

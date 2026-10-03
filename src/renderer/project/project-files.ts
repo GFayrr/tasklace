@@ -46,6 +46,7 @@ export interface ProjectFilesListener {
   readonly failed: (error: unknown) => void;
   readonly saveStatus: (status: SaveStatus) => void;
   readonly localCopyFailed: () => void;
+  readonly fileActionRunning: (running: boolean) => void;
 }
 
 export interface ProjectFiles {
@@ -135,10 +136,12 @@ export function createProjectFiles(
       return { ok: false, error: { code: 'BUSY' } };
     }
     busy = true;
+    listener.fileActionRunning(true);
     try {
       return await action();
     } finally {
       busy = false;
+      listener.fileActionRunning(false);
     }
   };
   const saveBeforeSwitching = async (): Promise<ActionResult<null>> => {
