@@ -138,6 +138,8 @@ test('keeps the project from changing while another one is being opened', async 
     }
   });
   await expect(shell).toHaveAttribute('aria-busy', 'false');
+  await expect(rows).toHaveCount(rowsBefore);
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
   await page.getByRole('button', { name: 'Add task' }).click();
   await expect(rows).toHaveCount(rowsBefore + 1);
 });
@@ -155,7 +157,7 @@ test('explains why a file cannot be opened, until the message is dismissed', asy
   await expect(alert).toHaveCount(0);
 });
 
-test('offers both kinds of import from the welcome screen, and cancelling shows nothing', async () => {
+test('offers both kinds of import from the welcome screen, and canceling shows nothing', async () => {
   await answerDialogs(application, { open: null });
   await page.getByRole('button', { name: /Import…/ }).click();
   await page.getByRole('button', { name: 'JSON file…' }).click();

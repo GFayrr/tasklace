@@ -149,6 +149,12 @@ describe('TaskDetails', () => {
     expect(() => field(root, TEXT.dailyStart)).toThrow();
     type(field(root, TEXT.hoursPerDay), '4');
     expect(field(root, TEXT.dailyStart).value).toBe('');
+    type(field(root, TEXT.hoursPerDay), '7');
+    expect(() => field(root, TEXT.dailyStart)).toThrow();
+    type(field(root, TEXT.hoursPerDay), '6.75');
+    expect(field(root, TEXT.dailyStart).value).toBe('');
+    type(field(root, TEXT.hoursPerDay), 'not hours');
+    expect(() => field(root, TEXT.dailyStart)).toThrow();
   });
 
   it('adds and removes blocks, with their gap, start and waits once there are several', async () => {

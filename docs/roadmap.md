@@ -97,7 +97,8 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 - While a file is opened, imported, created, saved or exported, the whole window waits: no change, shortcut or other file action can slip in and be lost.
 - A schedule that cannot be computed says why, cause by cause, with the task, link or tag concerned.
 - Failures that used to pass unnoticed are reported or logged: a repair that fails while merging or undoing, an unreadable list of recent projects, a schedule worker that cannot start, a log that cannot be set aside, unexpected answers between the processes.
-- A change is refused rather than applied on guessed values: a calendar that cannot be compiled, or a bar dragged while the dates are still being updated after the last change.
+- A change is refused rather than applied on guessed values: a calendar that cannot be compiled, or a bar dragged or a date typed in the table while the dates are still being updated after the last change.
+- A file shortcut pressed while a cell is being edited keeps the typed value; a damaged list of recent projects keeps its valid entries; a failure to record a recent project never undoes an open or a save that succeeded.
 - Types now tie each channel of the bridge to its answer, each file task to its result and each refusal to its message, so that a mismatch no longer compiles.
 - Tests cover the session as the entry point of the network, the baseline plan in random projects, and every branch that only random tests reached before.
 
