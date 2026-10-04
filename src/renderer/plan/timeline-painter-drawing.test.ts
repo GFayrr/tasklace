@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Project } from '../../core/model/project';
 import { at, compileOrThrow } from '../../core/testing/civil-time';
+import type { ProjectHour } from '../../core/time';
 import {
   link,
   milestone,
@@ -176,7 +177,7 @@ describe('paintTimelineBody', () => {
     const strokes = callsOf(outlined, 'stroke').filter(
       (call) => call.strokeStyle === THEME.error && call.lineWidth === 2,
     );
-    expect(strokes.length).toBeGreaterThan(0);
+    expect(strokes).toHaveLength(1);
     const plain = paintBody();
     expect(callsOf(plain, 'stroke').some((call) => call.strokeStyle === THEME.error)).toBe(false);
   });
@@ -255,7 +256,18 @@ describe('paintTimelineBody', () => {
     const day = { ...VIEWPORT, left: xOf(FRAME, at(2026, 9, 28)), width: 24 * 4 };
     const calls = paintBody({ zoom: 'hour' }, day);
     const shaded = callsOf(calls, 'fillRect').filter((call) => call.fillStyle === THEME.nonWorking);
-    expect(shaded.length).toBeGreaterThan(1);
+    const span = (from: ProjectHour, to: ProjectHour) => [
+      xOf(FRAME, from),
+      0,
+      xOf(FRAME, to) - xOf(FRAME, from),
+      VIEWPORT.height,
+    ];
+    const hour = (value: number) => at(2026, 9, 28, value);
+    expect(shaded.map((call) => call.args)).toEqual([
+      span(hour(0), hour(9)),
+      span(hour(12), hour(13)),
+      span(hour(17), at(2026, 9, 29)),
+    ]);
   });
 });
 

@@ -246,6 +246,38 @@ describe('TaskTable', () => {
     expect(root.querySelector('[role="listbox"]')).toBeNull();
   });
 
+  it('lists the tags by name in the order of the language, whatever their order in the project', async () => {
+    const { app, root, grid } = await renderTable();
+    const tagOf = (id: string, name: string) => ({ ...DESIGN, id, name });
+    expect(
+      app.tryEdit(() => ({
+        ok: true,
+        value: [
+          { type: 'putTag', tag: tagOf('z', 'Zeta') },
+          { type: 'putTag', tag: tagOf('e', 'éclair') },
+          { type: 'putTag', tag: tagOf('b', 'beta') },
+        ],
+      })),
+    ).toBeNull();
+    await settle();
+    app.selectedTaskId = 'a';
+    update();
+    for (let step = 0; step < 6; step += 1) {
+      press(grid, 'ArrowRight');
+    }
+    press(grid, 'Enter');
+    await tick();
+    update();
+    const options = [...single(root, '[role="listbox"]').querySelectorAll('[role="option"]')];
+    expect(options.map((option) => option.textContent.trim())).toEqual([
+      english.table.noTag,
+      'beta',
+      'Design',
+      'éclair',
+      'Zeta',
+    ]);
+  });
+
   it('sets a date chosen on the calendar of the system, or says when the calendar cannot open', async () => {
     const { app, root, grid } = await renderTable();
     const picker = single(root, 'input.picker') as HTMLInputElement;
@@ -277,6 +309,37 @@ describe('TaskTable', () => {
       logged.mockRestore();
     }
     expect(app.notices.map((notice) => notice.text)).toEqual([english.notices.pickerUnavailable]);
+  });
+
+  it('lets an unexpected failure of the calendar of the system through, without calling it unavailable', async () => {
+    const { app, root, grid } = await renderTable();
+    const picker = single(root, 'input.picker');
+    const failure = new TypeError('calendar broken');
+    Object.assign(picker, {
+      showPicker: () => {
+        throw failure;
+      },
+    });
+    app.selectedTaskId = 'b';
+    update();
+    for (let step = 0; step < 3; step += 1) {
+      press(grid, 'ArrowRight');
+    }
+    const errors: unknown[] = [];
+    const listen = (event: ErrorEvent) => {
+      errors.push(event.error);
+      event.preventDefault();
+    };
+    window.addEventListener('error', listen);
+    try {
+      press(grid, 'ArrowDown', { altKey: true });
+    } catch (error) {
+      errors.push(error);
+    } finally {
+      window.removeEventListener('error', listen);
+    }
+    expect(errors).toEqual([failure]);
+    expect(app.notices).toEqual([]);
   });
 
   it('passes the wheel to the timeline, which scrolls both panes', async () => {

@@ -12,6 +12,11 @@ import {
 import { dayOf } from './civil-time';
 
 export const PROPERTY_TEST_TIMEOUT_MS = 30_000;
+
+/** Generates every order of a list, each item kept once, as a permutation fast-check can shrink. */
+export function permutationOf<T>(items: readonly T[]): fc.Arbitrary<T[]> {
+  return fc.shuffledSubarray([...items], { minLength: items.length, maxLength: items.length });
+}
 export const CONVERGENCE_TEST_TIMEOUT_MS = 120_000;
 
 export const FIRST_TEST_DAY = dayOf(2026, 1, 1);

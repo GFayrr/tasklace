@@ -159,6 +159,7 @@ describe('adding, deleting and reordering tasks', () => {
     applied(session, moveTask(context(), 'b', -1));
     expect(rowsOf(session).slice(0, 3)).toEqual(['1 s', '1.1 b', '1.2 a']);
     expect(moveTask(context(), 'b', -1)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    expect(moveTask(context(), 'missing', 1)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
     applied(session, moveTask(context(), 'd', 1));
     expect(rowsOf(session).slice(-2)).toEqual(['3 m', '4 d']);
     expect(moveTask(context(), 'd', 1)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
@@ -861,5 +862,10 @@ describe('any sequence of structural edits', () => {
         expect(outline.rows).toHaveLength(session.project().tasks.length);
       }),
     );
+  });
+
+  it('refuses to indent a task that is not in the project', () => {
+    const { context } = openPlan();
+    expect(indentTask(context(), 'missing')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
   });
 });

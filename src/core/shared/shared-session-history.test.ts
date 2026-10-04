@@ -102,9 +102,8 @@ describe('session history', () => {
     expect(bob.apply({ type: 'putDependency', dependency: reverse }).ok).toBe(true);
     sync(bob, alice);
     const undone = alice.history.undo();
-    expect(undone.ok && undone.value.length).toBe(1);
-    const kept = alice.project().dependencies;
-    expect(kept).toHaveLength(1);
+    expect(undone).toEqual({ ok: true, value: [{ code: 'DEPENDENCY_REMOVED', id: 'z-reverse' }] });
+    expect(alice.project().dependencies.map((dependency) => dependency.id)).toEqual(['a-b']);
     expectConsistent(alice);
     sync(alice, bob);
     expect(bob.project()).toEqual(alice.project());

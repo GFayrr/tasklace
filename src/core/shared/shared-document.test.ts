@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { project, TEST_DOCUMENT_ID } from '../testing/project-builder';
-import { createSharedDocument, isDocumentId, readDocumentId } from './shared-document';
+import { TASK_KEYS_BY_KIND } from '../validation/read-project';
+import {
+  createSharedDocument,
+  isDocumentId,
+  readDocumentId,
+  viewTaskFields,
+} from './shared-document';
 
 describe('document identifier', () => {
   it('is written once when the shared document is created', () => {
@@ -25,5 +31,19 @@ describe('document identifier', () => {
     null,
   ])('refuses %j', (value) => {
     expect(isDocumentId(value)).toBe(false);
+  });
+
+  it('shows only the fields of the kind of a task, leaving an entry of no known kind as it is', () => {
+    const entry = { kind: 'milestone', id: 'm', name: 'M', segments: [], hoursPerDay: 4 };
+    expect(viewTaskFields(entry)).toEqual(
+      Object.fromEntries(
+        TASK_KEYS_BY_KIND.milestone.map((key) => [key, Reflect.get(entry, key) as unknown]),
+      ),
+    );
+    expect(TASK_KEYS_BY_KIND.milestone).not.toContain('segments');
+    const unknownKind = { kind: 'other', segments: [] };
+    expect(viewTaskFields(unknownKind)).toBe(unknownKind);
+    expect(viewTaskFields(42)).toBe(42);
+    expect(viewTaskFields(null)).toBeNull();
   });
 });

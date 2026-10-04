@@ -59,7 +59,7 @@ describe('App', () => {
     const { app, root, control } = await renderApp(true);
     expect(press(window, 's', { ctrlKey: true })).toBe(false);
     await settle();
-    expect(control.calls).toContain('saveProject');
+    expect(control.saved).toEqual([{ as: false, name: 'Thesis' }]);
     app.rename('Changed');
     await settle();
     const name = single(root, 'input.name');
@@ -294,7 +294,8 @@ describe('Workspace', () => {
     const scroller = single(root, '.scroller');
     resize(scroller, 800, 400);
     expect(app.schedule).toBeNull();
-    expect(scroller.scrollLeft).toBeGreaterThan(0);
+    const frame = timelineFrame(PLAN.startDate, null, localHourOf(TODAY), pixelsPerHour('day'));
+    expect(scroller.scrollLeft).toBe(xOf(frame, PLAN.startDate - 48));
   });
 
   it('scrolls both panes together, from the wheel over the table or the scroll of the timeline', async () => {

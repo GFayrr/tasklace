@@ -7,8 +7,17 @@ import {
   subtractWorkingHours,
 } from '../calendar/working-time';
 import type { Project, SchedulableTask, WorkTask } from '../model/project';
-import { PROPERTY_TEST_TIMEOUT_MS, instantArbitrary, unwrap } from '../testing/arbitraries';
-import { interleavedProjectArbitrary, projectArbitrary } from '../testing/project-arbitrary';
+import {
+  instantArbitrary,
+  permutationOf,
+  PROPERTY_TEST_TIMEOUT_MS,
+  unwrap,
+} from '../testing/arbitraries';
+import {
+  interleavedProjectArbitrary,
+  projectArbitrary,
+  type GeneratedProject,
+} from '../testing/project-arbitrary';
 import type { ProjectHour } from '../time';
 import { blockTasksOf } from './dependency-graph';
 import { blockResumption } from './block-links';
@@ -117,6 +126,21 @@ function schedulableTasks(input: Project): SchedulableTask[] {
   return input.tasks.filter((task): task is SchedulableTask => task.kind !== 'summary');
 }
 
+/** Generates projects of an arbitrary together with the same project in another order of its tasks and dependencies. */
+function reorderedOf(arbitrary: fc.Arbitrary<GeneratedProject>) {
+  return arbitrary.chain(({ project: input }) =>
+    fc.record({
+      input: fc.constant(input),
+      reordered: fc
+        .record({
+          tasks: permutationOf(input.tasks),
+          dependencies: permutationOf(input.dependencies),
+        })
+        .map((lists) => ({ ...input, ...lists })),
+    }),
+  );
+}
+
 describe.each([
   ['generated projects', projectArbitrary],
   ['a task between two blocks', interleavedProjectArbitrary],
@@ -199,17 +223,7 @@ describe.each([
 
   it('computes the same schedule whatever the order of tasks and dependencies', () => {
     fc.assert(
-      fc.property(arbitrary, fc.nat(), ({ project: input }, seed) => {
-        const shuffle = <T>(items: readonly T[]): T[] =>
-          items
-            .map((item, index) => ({ item, key: (index * 7919 + seed) % 104_729 }))
-            .sort((left, right) => left.key - right.key)
-            .map(({ item }) => item);
-        const reordered = {
-          ...input,
-          tasks: shuffle(input.tasks),
-          dependencies: shuffle(input.dependencies),
-        };
+      fc.property(reorderedOf(arbitrary), ({ input, reordered }) => {
         const original = scheduleGenerated(input);
         const shuffled = scheduleGenerated(reordered);
         expect(new Map([...shuffled.placements].sort())).toEqual(

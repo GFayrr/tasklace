@@ -124,6 +124,25 @@ describe('TaskDetails', () => {
     expect(dialogIn(root).open).toBe(true);
   });
 
+  it('offers the tags by name in the order of the language, after the choice of no tag', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    fake.control.openResult = openedProjectOf({
+      ...PLAN,
+      tags: [{ ...DESIGN, id: 'z', name: 'Zeta' }, DESIGN, { ...DESIGN, id: 'b', name: 'beta' }],
+    });
+    await app.open();
+    const root = render(TaskDetails, { app, project: currentProject(app) });
+    openFor(app, 'a');
+    const options = [...field(root, TEXT.tag).querySelectorAll('option')];
+    expect(options.map((option) => option.textContent.trim())).toEqual([
+      TEXT.noTag,
+      'beta',
+      'Design',
+      'Zeta',
+    ]);
+  });
+
   it('asks for a daily start only for a task working part of the day', async () => {
     const { app, root } = await renderDetails();
     openFor(app, 'a');

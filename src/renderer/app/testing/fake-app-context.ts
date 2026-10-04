@@ -38,6 +38,8 @@ export interface FakeBridgeControl {
   newDocumentId: string;
   readonly calls: string[];
   readonly adopted: string[];
+  readonly saved: { readonly as: boolean; readonly name: string | null }[];
+  readonly openedRecent: number[];
   readonly imports: ExchangeKind[];
   readonly exports: { readonly kind: ExchangeKind; readonly text: string; readonly name: string }[];
 }
@@ -82,6 +84,8 @@ export function fakeBridge(): {
     newDocumentId: TEST_DOCUMENT_ID,
     calls: [],
     adopted: [],
+    saved: [],
+    openedRecent: [],
     imports: [],
     exports: [],
   };
@@ -95,7 +99,10 @@ export function fakeBridge(): {
     regionalFormat: () => called('regionalFormat', FRENCH_FORMAT),
     newProject: () => called('newProject', control.newDocumentId),
     openProject: () => called('openProject', control.openResult),
-    openRecentProject: () => called('openRecentProject', control.openResult),
+    openRecentProject: (index) => {
+      control.openedRecent.push(index);
+      return called('openRecentProject', control.openResult);
+    },
     recentProjects: () => {
       const { recent } = control;
       if (recent instanceof Error) {
@@ -116,13 +123,17 @@ export function fakeBridge(): {
       control.adopted.push(documentId);
       return called('adoptProject', control.adoptResult);
     },
-    saveProject: () => {
+    saveProject: (state) => {
+      control.saved.push({ as: false, name: projectNameIn(state) });
       const { saveResult } = control;
       return saveResult instanceof Error
         ? Promise.reject(saveResult)
         : called('saveProject', saveResult);
     },
-    saveProjectAs: () => called('saveProjectAs', control.saveAsResult),
+    saveProjectAs: (state) => {
+      control.saved.push({ as: true, name: projectNameIn(state) });
+      return called('saveProjectAs', control.saveAsResult);
+    },
     exportProject: (kind, text, name) => {
       control.exports.push({ kind, text, name });
       return called('exportProject', control.exportResult);
@@ -131,6 +142,14 @@ export function fakeBridge(): {
     reportStartFailure: () => undefined,
   };
   return { bridge, control };
+}
+
+/** Reads the name of the project a saved state holds, or null when it holds none. */
+function projectNameIn(state: Uint8Array): string | null {
+  const document = new Y.Doc();
+  Y.applyUpdate(document, state);
+  const name: unknown = document.getMap('project').get('name');
+  return typeof name === 'string' ? name : null;
 }
 
 /** Builds a scheduler that computes schedules at once, or only records requests when told to stop being automatic. */

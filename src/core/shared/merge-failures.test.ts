@@ -1,11 +1,11 @@
 import * as Y from 'yjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { project, TEST_DOCUMENT_ID, workTask } from '../testing/project-builder';
+import { link, project, TEST_DOCUMENT_ID, workTask } from '../testing/project-builder';
 import { createSharedDocument, readSharedData } from './shared-document';
 import { mergeSharedUpdate } from './shared-project';
 import { openSharedSession, type SharedSession } from './shared-session';
 
-const repairing = vi.hoisted(() => ({ broken: false }));
+const repairing = vi.hoisted(() => ({ broken: false, skipped: false }));
 
 vi.mock('./repair-project', async (importOriginal) => {
   const original = await importOriginal<typeof import('./repair-project')>();
@@ -14,6 +14,9 @@ vi.mock('./repair-project', async (importOriginal) => {
     repairProject: (...values: Parameters<typeof original.repairProject>) => {
       if (repairing.broken) {
         throw new Error('repair broken');
+      }
+      if (repairing.skipped) {
+        return { ok: true, value: { project: values[0], repairs: [] } };
       }
       return original.repairProject(...values);
     },
@@ -25,6 +28,7 @@ const MORNING_ONLY = [{ startHour: 9, endHour: 12 }];
 
 afterEach(() => {
   repairing.broken = false;
+  repairing.skipped = false;
 });
 
 /** Opens a session on a copy of a document, failing the test when it is refused. */
@@ -92,5 +96,23 @@ describe('a merge whose repair raises an exception', () => {
       ok: false,
       error: { kind: 'malformedUpdate' },
     });
+  });
+
+  it('refuses a full merge that the repair leaves invalid, leaving the document as it was', () => {
+    const origin = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    const alice = sessionOn(origin);
+    const bob = sessionOn(origin);
+    expect(alice.apply({ type: 'putDependency', dependency: link('a', 'b') }).ok).toBe(true);
+    const before = Y.encodeStateVector(bob.document);
+    expect(bob.apply({ type: 'putDependency', dependency: link('b', 'a') }).ok).toBe(true);
+    const update = Y.encodeStateAsUpdate(bob.document, before);
+    const data = readSharedData(alice.document);
+    repairing.skipped = true;
+    const merged = mergeSharedUpdate(alice.document, update);
+    expect(merged.ok || merged.error.kind).toBe('invalidProject');
+    expect(
+      merged.ok || ('issues' in merged.error && merged.error.issues.map((issue) => issue.code)),
+    ).toEqual(['DEPENDENCY_CYCLE', 'DEPENDENCY_CYCLE']);
+    expect(readSharedData(alice.document)).toEqual(data);
   });
 });

@@ -104,7 +104,7 @@ describe('Welcome', () => {
     expect(textsOf(root, '.recent-project')).toEqual(['Thesis /school', 'Thesis /work']);
     click(nth(root, '.recent-project', 1));
     await settle();
-    expect(control.calls).toContain('openRecentProject');
+    expect(control.openedRecent).toEqual([1]);
   });
 
   it('shows no recent section without recent projects', () => {
@@ -242,7 +242,8 @@ describe('Toolbar', () => {
     expect(app.project?.tasks).toHaveLength(4);
     click(button(root, english.toolbar.save));
     await settle();
-    expect(control.calls).toContain('saveProject');
+    expect(control.saved.at(-1)).toEqual({ as: false, name: app.project?.name });
+    expect(control.saved.filter((save) => !save.as)).toHaveLength(1);
   });
 
   it('offers new, open, recent, import and export through its menus', async () => {

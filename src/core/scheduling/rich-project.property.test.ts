@@ -4,7 +4,7 @@ import { compileCalendar } from '../calendar/compile-calendar';
 import { computeTaskSlots } from '../calendar/task-slots';
 import { countWorkingHours, lastWorkingHourEnd, shiftWorkingHours } from '../calendar/working-time';
 import type { Project, Task, TaskSegment } from '../model/project';
-import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
+import { permutationOf, PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { richProjectArbitrary } from '../testing/project-arbitrary';
 import { constrainsSuccessorStart, dependencyAnchor } from './forward-pass';
 import { scheduleProject, type Schedule } from './schedule-project';
@@ -58,17 +58,19 @@ function leavesOf(project: Project, id: string): Task[] {
     .flatMap((child) => (child.kind === 'summary' ? leavesOf(project, child.id) : [child]));
 }
 
-/** Reorders a list with a seeded shuffle, the same seed always giving the same order. */
-function shuffled<T>(items: readonly T[], seed: number): T[] {
-  const result = [...items];
-  let state = seed;
-  for (let index = result.length - 1; index > 0; index -= 1) {
-    state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
-    const other = state % (index + 1);
-    [result[index], result[other]] = [result[other] as T, result[index] as T];
-  }
-  return result;
-}
+/** Generates a rich project with the same project in another order of its tasks, links and tags. */
+const reorderedArbitrary = richProjectArbitrary.chain(({ project }) =>
+  fc.record({
+    project: fc.constant(project),
+    reordered: fc
+      .record({
+        tasks: permutationOf(project.tasks),
+        dependencies: permutationOf(project.dependencies),
+        tags: permutationOf(project.tags),
+      })
+      .map((lists) => ({ ...project, ...lists })),
+  }),
+);
 
 /** Lists, for each person or team tag, the tasks whose working slots overlap those of another task of the same tag, comparing every pair. */
 function overlappingTasksByTag(project: Project, schedule: Schedule): Map<string, string[]> {
@@ -329,13 +331,7 @@ describe('projects using every feature', () => {
 
   it('computes the same schedule whatever the order of the tasks, links and tags', options, () => {
     fc.assert(
-      fc.property(richProjectArbitrary, fc.nat(), ({ project }, seed) => {
-        const reordered = {
-          ...project,
-          tasks: shuffled(project.tasks, seed),
-          dependencies: shuffled(project.dependencies, seed + 1),
-          tags: shuffled(project.tags, seed + 2),
-        };
+      fc.property(reorderedArbitrary, ({ project, reordered }) => {
         const first = scheduled(project);
         const second = scheduled(reordered);
         expect(second.placements).toEqual(first.placements);

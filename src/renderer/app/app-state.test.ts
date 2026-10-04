@@ -112,7 +112,7 @@ describe('closing a project', () => {
     await settle();
     app.closePrompt?.answer('save');
     expect(await saving).toBe(true);
-    expect(control.calls).toContain('saveProjectAs');
+    expect(control.saved).toEqual([{ as: true, name: 'Changed' }]);
     expect(app.hasFile).toBe(true);
   });
 
@@ -326,10 +326,13 @@ describe('saving and exporting', () => {
   it('saves to its file, or asks where for a project without file, then lists the recent projects', async () => {
     const { app, control } = await withNewProject();
     await app.save();
-    expect(control.calls).toContain('saveProjectAs');
+    expect(control.saved).toEqual([{ as: true, name: english.projects.untitled }]);
     expect(app.hasFile).toBe(true);
     await app.save();
-    expect(control.calls).toContain('saveProject');
+    expect(control.saved).toEqual([
+      { as: true, name: english.projects.untitled },
+      { as: false, name: english.projects.untitled },
+    ]);
     control.saveResult = { ok: false, error: { code: 'WRITE_FAILED' } };
     await app.save();
     expect(noticeTexts(app)).toEqual([english.fileErrors.WRITE_FAILED]);
@@ -345,7 +348,7 @@ describe('saving and exporting', () => {
       ['csv', 'Thesis'],
     ]);
     expect(control.exports[1]?.text.startsWith('﻿')).toBe(true);
-    expect(control.calls).toContain('regionalFormat');
+    expect(control.calls.filter((call) => call === 'regionalFormat')).toHaveLength(1);
     expect(noticeTexts(app)).toEqual(['Exported to plan.json.', 'Exported to plan.csv.']);
   });
 

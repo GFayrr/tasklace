@@ -144,7 +144,10 @@ describe('block links checked on a local change', () => {
     );
     const before = alice.project();
     const refused = alice.apply({ type: 'putTask', task: ONE_BLOCK });
-    expect(!refused.ok && refused.error.map((issue) => issue.code)).toContain('DEPENDENCY_CYCLE');
+    expect(refused).toEqual({
+      ok: false,
+      error: [{ path: 'tasks.dev', code: 'DEPENDENCY_CYCLE' }],
+    });
     expect(alice.project()).toEqual(before);
   });
 
@@ -153,7 +156,7 @@ describe('block links checked on a local change', () => {
       project([DEVELOPMENT, workTask('test')], [blockLink('dev', 'test', { from: 1 })]),
     );
     const refused = alice.apply({ type: 'putTask', task: ONE_BLOCK });
-    expect(!refused.ok && refused.error.map((issue) => issue.code)).toContain('UNKNOWN_BLOCK');
+    expect(refused).toEqual({ ok: false, error: [{ path: 'tasks.dev', code: 'UNKNOWN_BLOCK' }] });
   });
 
   it('refuses a link to a block of a task that is not split', () => {
@@ -162,7 +165,10 @@ describe('block links checked on a local change', () => {
       type: 'putDependency',
       dependency: blockLink('dev', 'test', { to: 0 }),
     });
-    expect(!refused.ok && refused.error.map((issue) => issue.code)).toContain('UNKNOWN_BLOCK');
+    expect(refused).toEqual({
+      ok: false,
+      error: [{ path: 'dependencies.dev-test_0', code: 'UNKNOWN_BLOCK' }],
+    });
   });
 
   it('refuses a received link whose block number is not a valid number, leaving the project intact', () => {

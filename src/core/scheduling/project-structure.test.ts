@@ -61,7 +61,7 @@ describe('analyzeProjectStructure', () => {
       'PARENT_NOT_SUMMARY',
     ],
   ])('rejects %s', (_label, tasks, code) => {
-    expect(errorCodes(tasks)).toContain(code);
+    expect(errorCodes(tasks)).toEqual([code]);
   });
 
   it('rejects a summary that is its own parent', () => {
