@@ -243,25 +243,44 @@ function currentProject(session: SessionState): Project {
   return session.project;
 }
 
-/** Checks an operation on the indexed state and writes only what it touched to the document. */
+/** Checks an operation on the indexed state and writes only what it touched to the document, the state matching the document again when either raises. */
 function applyOperationToSession(
   session: SessionState,
   document: Y.Doc,
   operation: SharedOperation,
 ): Result<void, readonly ValidationIssue[]> {
-  const checked = applyToState(session.state, operation);
-  if (!checked.ok) {
-    return checked;
+  try {
+    const checked = applyToState(session.state, operation);
+    if (!checked.ok) {
+      return checked;
+    }
+    session.project = null;
+    document.transact(() => {
+      writeTouched(document, session.state, checked.value);
+    }, LOCAL_ORIGIN);
+    return success(undefined);
+  } catch (error) {
+    resetState(session, document);
+    throw error;
   }
-  session.project = null;
-  document.transact(() => {
-    writeTouched(document, session.state, checked.value);
-  }, LOCAL_ORIGIN);
-  return success(undefined);
 }
 
-/** Checks operations one after another on the indexed state and writes all they touched in one change, or nothing at all when one of them is refused. */
+/** Checks operations one after another on the indexed state and writes all they touched in one change, or nothing at all when one of them is refused or raises, the state then matching the document again. */
 function applyOperationsToSession(
+  session: SessionState,
+  document: Y.Doc,
+  operations: readonly SharedOperation[],
+): Result<void, readonly ValidationIssue[]> {
+  try {
+    return writeOperations(session, document, operations);
+  } catch (error) {
+    resetState(session, document);
+    throw error;
+  }
+}
+
+/** Applies operations to the indexed state, then writes what they touched to the document, putting the state back as the document holds it when one is refused. */
+function writeOperations(
   session: SessionState,
   document: Y.Doc,
   operations: readonly SharedOperation[],
@@ -275,9 +294,7 @@ function applyOperationsToSession(
   for (const operation of operations) {
     const checked = applyToState(session.state, operation);
     if (!checked.ok) {
-      session.stateChanged = true;
-      restoreState(session, document);
-      session.project = null;
+      resetState(session, document);
       return checked;
     }
     addTouched(all, checked.value);
@@ -287,6 +304,13 @@ function applyOperationsToSession(
     writeTouched(document, session.state, all);
   }, LOCAL_ORIGIN);
   return success(undefined);
+}
+
+/** Rebuilds the indexed state from the document after a change was refused or failed partway. */
+function resetState(session: SessionState, document: Y.Doc): void {
+  session.stateChanged = true;
+  restoreState(session, document);
+  session.project = null;
 }
 
 /** Adds the items one operation touched to those of the previous ones. */
@@ -669,15 +693,16 @@ function addDependencies(state: ProjectState, dependencies: readonly Dependency[
   return state.dependencies.size <= MAX_DEPENDENCIES;
 }
 
-/** Rebuilds the indexed state from a document after a refused merge left it half changed. */
+/** Rebuilds the indexed state from a document after a refused or failed change left it half changed, throwing when the document no longer holds a valid project. */
 function restoreState(session: SessionState, document: Y.Doc): void {
   if (!session.stateChanged) {
     return;
   }
   const read = readSharedProject(document);
-  if (read.ok) {
-    session.state = createProjectState(read.value);
+  if (!read.ok) {
+    throw new Error('The shared document of the session no longer holds a valid project.');
   }
+  session.state = createProjectState(read.value);
   session.stateChanged = false;
 }
 
