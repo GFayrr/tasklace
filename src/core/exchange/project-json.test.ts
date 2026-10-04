@@ -497,7 +497,7 @@ function dailyStartArbitrary(task: WorkTask, quartersOfDay: readonly number[]) {
 
 /** Adds random tags, date constraints, daily start hours and options to a generated project. */
 function enrichProject(input: Project): fc.Arbitrary<Project> {
-  const hoursOfDay = unwrap(compileCalendar(input.calendar)).workingQuartersOfDay;
+  const hoursOfDay = unwrap(compileCalendar(input.calendar)).workingQuarterStartHours;
   const tags = fc.uniqueArray(tagArbitrary, {
     maxLength: MAX_GENERATED_TAGS,
     selector: (tag) => tag.id,

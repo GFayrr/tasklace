@@ -21,7 +21,7 @@ const compiledCalendars = new Map<string, CompiledCalendar>();
 
 export interface CompiledCalendar {
   readonly workingHoursPerDay: number;
-  readonly workingQuartersOfDay: readonly [number, ...number[]];
+  readonly workingQuarterStartHours: readonly [number, ...number[]];
   readonly workingQuartersBeforeQuarterOfDay: readonly number[];
   readonly workingQuartersBeforeDay: Int32Array;
   readonly nextWorkingDayOffsets: Int32Array;
@@ -95,20 +95,24 @@ function compileUncached(
   if (firstQuarter === undefined) {
     return failure([{ code: 'NO_WORKING_TIME_RANGE' }]);
   }
-  const workingQuartersOfDay: [number, ...number[]] = [firstQuarter, ...otherQuarters];
+  const workingQuarterStartHours: [number, ...number[]] = [firstQuarter, ...otherQuarters];
   const workingQuartersBeforeDay = accumulateWorkingQuartersPerDay(
     buildWeekdayMask(calendar.workingWeekdays),
     calendar.nonWorkingPeriods,
-    workingQuartersOfDay.length,
+    workingQuarterStartHours.length,
   );
   return success({
-    workingHoursPerDay: fromQuarters(workingQuartersOfDay.length),
-    workingQuartersOfDay,
-    workingQuartersBeforeQuarterOfDay: countQuartersBeforeEachQuarterOfDay(workingQuartersOfDay),
+    workingHoursPerDay: fromQuarters(workingQuarterStartHours.length),
+    workingQuarterStartHours,
+    workingQuartersBeforeQuarterOfDay:
+      countQuartersBeforeEachQuarterOfDay(workingQuarterStartHours),
     workingQuartersBeforeDay,
     nextWorkingDayOffsets: linkWorkingDays(workingQuartersBeforeDay, 'next'),
     previousWorkingDayOffsets: linkWorkingDays(workingQuartersBeforeDay, 'previous'),
-    workingDayOffsetsByRank: listWorkingDays(workingQuartersBeforeDay, workingQuartersOfDay.length),
+    workingDayOffsetsByRank: listWorkingDays(
+      workingQuartersBeforeDay,
+      workingQuarterStartHours.length,
+    ),
   });
 }
 
@@ -260,12 +264,14 @@ function listWorkingQuarters(ranges: readonly TimeRange[]): number[] {
 }
 
 /** Counts, for each quarter hour of the day from the first to the end of the day, the working quarter hours that start before it. */
-function countQuartersBeforeEachQuarterOfDay(workingQuartersOfDay: readonly number[]): number[] {
+function countQuartersBeforeEachQuarterOfDay(
+  workingQuarterStartHours: readonly number[],
+): number[] {
   const counts: number[] = [];
   let before = 0;
   for (let quarter = 0; quarter <= QUARTERS_PER_DAY; quarter += 1) {
     counts.push(before);
-    before += workingQuartersOfDay.includes(fromQuarters(quarter)) ? 1 : 0;
+    before += workingQuarterStartHours.includes(fromQuarters(quarter)) ? 1 : 0;
   }
   return counts;
 }

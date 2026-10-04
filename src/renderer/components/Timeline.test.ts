@@ -49,7 +49,7 @@ function shapeOf(id: string): Extract<RowShape, { kind: 'task' }> {
 }
 
 /** Renders the timeline of the sample plan, sized, with recorded callbacks. */
-function renderTimeline(selectedTaskId: string | null = null, scrollTop = 0) {
+function renderTimeline(selectedTaskId: string | null = null, scrollTop = 0, plan: Project = PLAN) {
   const calls = {
     scrolled: vi.fn(),
     resized: vi.fn(),
@@ -63,14 +63,14 @@ function renderTimeline(selectedTaskId: string | null = null, scrollTop = 0) {
   const scene = {
     frame: FRAME,
     zoom: 'day' as const,
-    rows: OUTLINE.rows,
+    rows: plan === PLAN ? OUTLINE.rows : buildPlanOutline(plan.tasks, new Set()).rows,
     rowIndexById: OUTLINE.rowIndexById,
     schedule: SCHEDULE,
     dependencies: PLAN.dependencies,
     calendar: compileOrThrow(PLAN.calendar),
     nonWorkingPeriods: [],
     theme: SAND_GRAPHITE,
-    tagStyles: tagStylesOf(PLAN),
+    tagStyles: tagStylesOf(plan),
     conflictTaskIds: new Set<string>(),
     selectedTaskId,
     today: at(2026, 9, 28, 12),
@@ -98,7 +98,7 @@ describe('Timeline', () => {
     const { calls } = renderTimeline();
     expect(calls.resized).toHaveBeenCalledWith(800, 300);
     const drawing = drawFrames();
-    expect(drawing.filter((call) => call.name === 'roundRect').length).toBeGreaterThan(0);
+    expect(drawing.filter((call) => call.name === 'roundRect')).toHaveLength(4);
     expect(drawing.some((call) => call.name === 'fillText')).toBe(true);
     expect(drawFrames()).toEqual([]);
   });
@@ -159,7 +159,7 @@ describe('Timeline', () => {
     expect(calls.linked).not.toHaveBeenCalled();
   });
 
-  it('abandons a drag that is cancelled, and ignores buttons other than the main one', () => {
+  it('abandons a drag that is canceled, and ignores buttons other than the main one', () => {
     const { scroller, calls } = renderTimeline();
     const shape = shapeOf('b');
     pointer(scroller, 'pointerdown', shape.start + 4, middleOf(shape));
@@ -217,6 +217,34 @@ describe('Timeline drawing conditions', () => {
     resize(scroller, 0, 0);
     pointer(scroller, 'pointermove', 2, 2);
     expect(drawFrames()).toEqual([]);
+  });
+
+  it('tells when the patterns of the bars cannot be drawn, the bars staying plain', () => {
+    const design = {
+      id: 'design',
+      name: 'Design',
+      color: '#3366AA',
+      representsPersonOrTeam: false,
+    };
+    const patterned = project(
+      [
+        ...PLAN.tasks.filter((task) => task.id !== 'b'),
+        workTask('b', { sortKey: 'b', tagId: 'design' }),
+      ],
+      [],
+      {
+        tags: [design],
+        options: {
+          criticalPathEnabled: false,
+          dateConstraintsEnabled: false,
+          alwaysShowPatterns: true,
+        },
+      },
+    );
+    const { calls } = renderTimeline(null, 0, patterned);
+    drawFrames();
+    expect(calls.drawingFailed).toHaveBeenCalledWith('patterns');
+    expect(calls.drawingFailed).not.toHaveBeenCalledWith('timeline');
   });
 
   it('draws at the density of the screen, and skips a canvas without drawing context, telling so', () => {

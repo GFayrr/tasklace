@@ -42,14 +42,14 @@ describe('registerIpcHandlers', () => {
     expect(openExternal).toHaveBeenCalledTimes(1);
   });
 
-  it('answers nothing to a page that is not the application', async () => {
+  it('answers nothing to a page that is not the application', () => {
     trusted.mockImplementation(() => {
       throw new Error('Request refused');
     });
     expect(() => ipcMain.invoke(IPC_CHANNELS.appVersion, EVENT)).toThrow('Request refused');
-    await expect(
+    expect(() =>
       ipcMain.invoke(IPC_CHANNELS.openExternal, EVENT, 'https://github.com/GFayrr/tasklace'),
-    ).rejects.toThrow('Request refused');
+    ).toThrow('Request refused');
     expect(openExternal).not.toHaveBeenCalled();
   });
 });

@@ -28,13 +28,16 @@ describe('writeFileSafely', () => {
     const target = join(folder, 'taken');
     await mkdir(target);
     await writeFile(join(target, 'inside'), 'kept');
-    await expect(writeFileSafely(target, 'new')).rejects.toThrow();
+    await expect(writeFileSafely(target, 'new')).rejects.toHaveProperty('syscall', 'rename');
     expect(await readdir(folder)).toEqual(['taken']);
     expect(await readFile(join(target, 'inside'), 'utf8')).toBe('kept');
   });
 
   it('fails when the folder does not exist', async () => {
-    await expect(writeFileSafely(join(folder, 'missing', 'file'), 'x')).rejects.toThrow();
+    await expect(writeFileSafely(join(folder, 'missing', 'file'), 'x')).rejects.toHaveProperty(
+      'code',
+      'ENOENT',
+    );
   });
 });
 

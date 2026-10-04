@@ -41,7 +41,7 @@ Most Gantt tools are either heavyweight project-management suites or online serv
 
 ## Features
 
-What the core already supports:
+What Tasklace already supports:
 
 - Automatic scheduling from the project start date, task start dates, durations and dependencies.
 - Finish-to-start, start-to-start, finish-to-finish and start-to-finish dependencies, with lags and leads in working hours; dependency cycles are rejected.
@@ -60,6 +60,8 @@ What the core already supports:
 - A shared project model where concurrent edits always merge into the same valid project for everyone, and a frozen baseline plan.
 - A secure desktop shell: projects decoded in an isolated worker with capped memory, automatic saving to a temporary file then renamed, and a local copy of every project for offline work.
 - A sober, readable interface: light theme with WCAG AA contrasts checked by a test, undo and redo that never touch the changes of others, and scheduling in a background worker.
+- A task table and a timeline side by side: edit names, durations, dates, progress, predecessors and tags in the table, drag and stretch bars, link tasks or single blocks by dragging, and open the details of a task to edit its blocks and daily hours.
+- Safe file handling: one file action at a time with the window waiting meanwhile, automatic saving with a local copy, the last three projects at hand, clear messages for every failure and a log file for diagnosis.
 
 ## Roadmap
 
@@ -124,6 +126,7 @@ src/main/            Electron main process: window, security, files, file worker
 src/preload/         minimal typed bridge between the page and the main process
 src/renderer/        Svelte user interface: theme, messages, schedule worker, components
 docs/                roadmap and user documentation
+tests/e2e/           end-to-end journeys in the running application (Playwright)
 tests/file/          .tasklace files with real compression, decompression bombs
 tests/fixtures/      large test projects generated from fixed seeds
 tests/growth/        growth checks of key operations, run in CI

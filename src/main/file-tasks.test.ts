@@ -18,7 +18,7 @@ import {
   TEST_DOCUMENT_ID,
   workTask,
 } from '../core/testing/project-builder';
-import { runFileTask, type FileTaskResult, type LoadedProject } from './file-tasks';
+import { isResultOf, runFileTask, type FileTaskResult, type LoadedProject } from './file-tasks';
 import { readIndexText } from './local-copies';
 import { zlibCompressor } from './zlib-compressor';
 
@@ -345,5 +345,35 @@ describe('file tasks', () => {
     });
     await expect(readFile(path)).rejects.toThrow(/ENOENT/);
     await expect(readFile(join(folder, `${TEST_DOCUMENT_ID}.tasklace`))).rejects.toThrow(/ENOENT/);
+  });
+});
+
+describe('isResultOf', () => {
+  it('accepts a failure, and a success only of the kind its task gives', () => {
+    const opening = { kind: 'openProject', path: '/plan.tasklace' } as const;
+    const saving = {
+      kind: 'saveProject',
+      path: null,
+      state: Uint8Array.of(),
+      documentId: TEST_DOCUMENT_ID,
+      localCopyFolder: '/copies',
+      savedAt: 0,
+    } as const;
+    const loaded = { ok: true, value: { kind: 'loaded' } };
+    const saved = { ok: true, value: { kind: 'saved' } };
+    const failed = { ok: false, error: { code: 'TASK_FAILED' } };
+    expect([loaded, saved, failed].map((value) => isResultOf(opening, value))).toEqual([
+      true,
+      false,
+      true,
+    ]);
+    expect([loaded, saved, failed].map((value) => isResultOf(saving, value))).toEqual([
+      false,
+      true,
+      true,
+    ]);
+    expect(
+      [null, 'ok', { ok: 'yes' }, { ok: true }].map((value) => isResultOf(opening, value)),
+    ).toEqual([false, false, false, false]);
   });
 });

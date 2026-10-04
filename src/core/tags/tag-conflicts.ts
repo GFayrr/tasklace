@@ -72,7 +72,7 @@ export function detectTagConflicts(
   };
 }
 
-/** Returns the time a task really works: whole blocks when it works full days, since they then hold only its working hours, its exact slots otherwise. */
+/** Returns the time a task really works: whole blocks when it works full days, since they then hold only its working hours, its exact slots otherwise, throwing when they cannot be computed for a placement the schedule made. */
 function workIntervals(
   task: Task,
   placement: Placement | undefined,
@@ -85,7 +85,10 @@ function workIntervals(
     return placement.segments;
   }
   const slots = computePlacementSlots(calendar, task, placement);
-  return slots.ok ? slots.value.flat() : placement.segments;
+  if (!slots.ok) {
+    throw new Error(`The working slots of task ${task.id} could not be computed: ${slots.error}.`);
+  }
+  return slots.value.flat();
 }
 
 /** Joins the consecutive time slots of a task separated only by time without any working hour, which never changes the conflicts found. */

@@ -12,7 +12,7 @@
 
   let { app }: { app: AppState } = $props();
 
-  /** Runs the action of a keyboard shortcut, leaving undo and redo to a text field being edited. */
+  /** Runs the action of a keyboard shortcut, leaving undo and redo to a text field being edited and committing that field first for any other action, and runs none while a file action runs or a dialog is open. */
   function handleKey(event: KeyboardEvent): void {
     const target = event.target;
     const isEditingText =
@@ -22,6 +22,7 @@
     const command = commandOf(event, isEditingText);
     if (
       command === null ||
+      app.fileActionRunning ||
       app.closePrompt !== null ||
       app.report !== null ||
       app.detailsTaskId !== null
@@ -29,6 +30,9 @@
       return;
     }
     event.preventDefault();
+    if (isEditingText) {
+      target.blur();
+    }
     void app.run(command);
   }
 </script>
@@ -38,7 +42,7 @@
 {#if app.project === null}
   <Welcome {app} />
 {:else}
-  <div class="shell">
+  <div class="shell" inert={app.fileActionRunning} aria-busy={app.fileActionRunning}>
     <Toolbar {app} />
     {#key app.openedCount}
       <Workspace {app} project={app.project} />
@@ -56,5 +60,9 @@
     height: 100%;
     display: flex;
     flex-direction: column;
+  }
+
+  .shell[aria-busy='true'] {
+    cursor: progress;
   }
 </style>

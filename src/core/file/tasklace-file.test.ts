@@ -11,7 +11,7 @@ import {
   TAGS_ROOT,
   TASKS_ROOT,
 } from '../shared/shared-document';
-import { mergeSharedUpdate } from '../shared/shared-project';
+import { mergeSharedUpdate, readSharedProject } from '../shared/shared-project';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { at } from '../testing/civil-time';
 import { hideListContent } from '../testing/hidden-list-content';
@@ -423,6 +423,35 @@ describe('reading an untrusted tasklace file', () => {
             : bytes;
           expect(readTasklaceFile(candidate, storingCompressor).ok).toBe(false);
         }),
+      );
+    },
+  );
+});
+
+describe('reading a file whose content was altered behind a valid checksum', () => {
+  it(
+    'never throws, refusing the file or giving a valid project',
+    { timeout: PROPERTY_TEST_TIMEOUT_MS },
+    () => {
+      const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+      const file = encodeTasklaceState(state, storingCompressor);
+      fc.assert(
+        fc.property(
+          fc.nat({ max: state.length - 1 }),
+          fc.integer({ min: 0, max: 255 }),
+          (index, value) => {
+            const altered = Uint8Array.from(state);
+            altered[index] = value;
+            const payload = storedPayload(altered);
+            const read = readTasklaceFile(
+              rewritten(file, { payload, declaredSize: altered.length }),
+              storingCompressor,
+            );
+            if (read.ok) {
+              expect(readSharedProject(read.value).ok).toBe(true);
+            }
+          },
+        ),
       );
     },
   );

@@ -43,7 +43,7 @@ export function workingDayAfter(
   workingDay: DayIndex,
   count: number,
 ): DayIndex | null {
-  const quartersPerWorkingDay = calendar.workingQuartersOfDay.length;
+  const quartersPerWorkingDay = calendar.workingQuarterStartHours.length;
   const rank = workingQuartersBeforeDay(calendar, workingDay) / quartersPerWorkingDay + count;
   const offset = calendar.workingDayOffsetsByRank[rank];
   return offset === undefined ? null : MIN_DAY_INDEX + offset;
@@ -169,7 +169,7 @@ export function isIdleBetween(
 
 /** Lists the start of the worked quarter hours of the day that are at or after a time of day. */
 export function workingHoursFrom(calendar: CompiledCalendar, minimumHourOfDay: number): number[] {
-  return calendar.workingQuartersOfDay.filter((quarter) => quarter >= minimumHourOfDay);
+  return calendar.workingQuarterStartHours.filter((quarter) => quarter >= minimumHourOfDay);
 }
 
 /** Tells whether a number of hours is a whole number of quarter hours, non-negative and supported. */
@@ -209,7 +209,7 @@ function boundaryOfWorkingQuarter(
   }
   const day = dayOfWorkingQuarter(calendar, rank);
   const start = valueAt(
-    calendar.workingQuartersOfDay,
+    calendar.workingQuarterStartHours,
     rank - workingQuartersBeforeDay(calendar, day),
   );
   return success(startOfDay(day) + start + (boundary === 'end' ? QUARTER_HOUR : 0));
@@ -217,6 +217,6 @@ function boundaryOfWorkingQuarter(
 
 /** Returns the day containing the working quarter hour with a given rank, every working day having the same number of them. */
 function dayOfWorkingQuarter(calendar: CompiledCalendar, rank: number): DayIndex {
-  const dayRank = Math.floor(rank / calendar.workingQuartersOfDay.length);
+  const dayRank = Math.floor(rank / calendar.workingQuarterStartHours.length);
   return MIN_DAY_INDEX + valueAt(calendar.workingDayOffsetsByRank, dayRank);
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Project } from '../../core/model/project';
 import { at, compileOrThrow } from '../../core/testing/civil-time';
+import type { ProjectHour } from '../../core/time';
 import {
   link,
   milestone,
@@ -14,7 +15,7 @@ import { SAND_GRAPHITE } from '../theme/sand-graphite';
 import { buildPlanOutline } from './plan-outline';
 import { paleColor, tagStylesOf } from './tag-styles';
 import { callsOf, recordingCanvas, type CanvasCall } from './testing/recording-canvas';
-import type { DragPreview } from './timeline-gestures';
+import type { DragPreview, PlacedShape } from './timeline-gestures';
 import { linkHandles } from './timeline-gestures';
 import {
   BAR_HEIGHT,
@@ -106,6 +107,15 @@ function shapeOf(id: string): RowShape {
   return shape;
 }
 
+/** Returns the shape of a task or milestone, failing the test for a summary. */
+function placedShapeOf(id: string): PlacedShape {
+  const shape = shapeOf(id);
+  if (shape.kind === 'summary') {
+    throw new Error(`${id} is a summary`);
+  }
+  return shape;
+}
+
 /** Returns the work task shape of a task, failing the test for another kind. */
 function taskShapeOf(id: string): Extract<RowShape, { kind: 'task' }> {
   const shape = shapeOf(id);
@@ -176,7 +186,7 @@ describe('paintTimelineBody', () => {
     const strokes = callsOf(outlined, 'stroke').filter(
       (call) => call.strokeStyle === THEME.error && call.lineWidth === 2,
     );
-    expect(strokes.length).toBeGreaterThan(0);
+    expect(strokes).toHaveLength(1);
     const plain = paintBody();
     expect(callsOf(plain, 'stroke').some((call) => call.strokeStyle === THEME.error)).toBe(false);
   });
@@ -255,7 +265,18 @@ describe('paintTimelineBody', () => {
     const day = { ...VIEWPORT, left: xOf(FRAME, at(2026, 9, 28)), width: 24 * 4 };
     const calls = paintBody({ zoom: 'hour' }, day);
     const shaded = callsOf(calls, 'fillRect').filter((call) => call.fillStyle === THEME.nonWorking);
-    expect(shaded.length).toBeGreaterThan(1);
+    const span = (from: ProjectHour, to: ProjectHour) => [
+      xOf(FRAME, from),
+      0,
+      xOf(FRAME, to) - xOf(FRAME, from),
+      VIEWPORT.height,
+    ];
+    const hour = (value: number) => at(2026, 9, 28, value);
+    expect(shaded.map((call) => call.args)).toEqual([
+      span(hour(0), hour(9)),
+      span(hour(12), hour(13)),
+      span(hour(17), at(2026, 9, 29)),
+    ]);
   });
 });
 
@@ -279,21 +300,17 @@ describe('drag previews', () => {
     }
   });
 
-  it('outlines where a moved milestone would go, and draws nothing for a dragged summary', () => {
-    const milestoneShape = shapeOf('m');
-    const moved = dashed({ kind: 'move', shape: milestoneShape, offset: 12, block: null });
+  it('outlines where a moved milestone would go', () => {
+    const moved = dashed({ kind: 'move', shape: placedShapeOf('m'), offset: 12, block: null });
     expect(callsOf(moved, 'closePath')).toHaveLength(1);
-    const summaryMove = dashed({ kind: 'move', shape: shapeOf('s'), offset: 12, block: null });
-    expect(summaryMove.filter((call) => call.name !== 'save' && call.name !== 'restore')).toEqual(
-      [],
-    );
+    expect(callsOf(moved, 'strokeRect')).toEqual([]);
   });
 
   it('draws a dragged link to the pointer, framing the row and block it would be dropped on', () => {
     const target = taskShapeOf('b');
     const calls = dashed({
       kind: 'link',
-      shape: shapeOf('c'),
+      shape: placedShapeOf('c'),
       block: null,
       pointer: { x: 300, y: 50 },
       target: { row: target.row, end: { taskId: 'b', block: 1 } },
@@ -309,7 +326,7 @@ describe('drag previews', () => {
   it('frames only the row of a dragged link over a task without that block, and nothing without a row', () => {
     const over = dashed({
       kind: 'link',
-      shape: shapeOf('c'),
+      shape: placedShapeOf('c'),
       block: null,
       pointer: { x: 10, y: 10 },
       target: { row: shapeOf('m').row, end: { taskId: 'm', block: 0 } },
@@ -317,7 +334,7 @@ describe('drag previews', () => {
     expect(callsOf(over, 'strokeRect')).toHaveLength(1);
     const nowhere = dashed({
       kind: 'link',
-      shape: shapeOf('c'),
+      shape: placedShapeOf('c'),
       block: null,
       pointer: { x: 10, y: 10 },
       target: null,

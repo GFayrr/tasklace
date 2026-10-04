@@ -404,4 +404,44 @@ describe('scheduleProject: failures', () => {
       error: { kind: 'task', error: { code: 'BEYOND_PLANNING_HORIZON', taskId: 'b' } },
     });
   });
+
+  it('dates a summary from its dated children only, an empty summary after them adding nothing', () => {
+    const plan = project([
+      summary('outer', { sortKey: 'a' }),
+      workTask('work', { parentId: 'outer', sortKey: 'b' }),
+      summary('empty', { parentId: 'outer', sortKey: 'c' }),
+    ]);
+    const schedule = scheduleOrThrow(plan);
+    const work = schedule.placements.get('work');
+    expect(schedule.summaries.get('empty')).toEqual({
+      start: null,
+      end: null,
+      progressPercent: null,
+    });
+    expect(schedule.summaries.get('outer')).toEqual({
+      start: work?.start,
+      end: work?.end,
+      progressPercent: 0,
+    });
+  });
+
+  it('fails when only the critical path goes beyond the planning horizon, naming the task', () => {
+    const plan = project([workTask('a'), workTask('b')], [link('a', 'b', 'finishToStart', -60)], {
+      startDate: at(2200, 12, 26),
+      options: {
+        criticalPathEnabled: true,
+        dateConstraintsEnabled: false,
+        alwaysShowPatterns: false,
+      },
+    });
+    expect(scheduleProject(plan)).toEqual({
+      ok: false,
+      error: { kind: 'task', error: { code: 'BEYOND_PLANNING_HORIZON', taskId: 'a' } },
+    });
+    const withoutCriticalPath = {
+      ...plan,
+      options: { ...plan.options, criticalPathEnabled: false },
+    };
+    expect(scheduleProject(withoutCriticalPath).ok).toBe(true);
+  });
 });

@@ -13,7 +13,14 @@ import { registerProjectFileHandlers } from './project-files';
 import { CONTENT_SECURITY_POLICY_HEADER, hardenContents, hardenSession } from './security';
 import { MESSAGES } from './messages';
 import { installApplicationMenu } from './platform/application-menu';
-import { captureConsole, createLogFile, logPageMessages, logWorkerErrors } from './log-file';
+import {
+  captureConsole,
+  createLogFile,
+  logPageMessages,
+  logProcessErrors,
+  logWorkerErrors,
+} from './log-file';
+import { isMissingFile } from './stored-files';
 import { createMainWindow } from './window';
 
 const NOT_FOUND = 404;
@@ -31,6 +38,7 @@ const log = createLogFile(
   reportLogFailure,
 );
 captureConsole(console, log);
+logProcessErrors(process);
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -98,7 +106,12 @@ async function serveAppFile(request: Request): Promise<Response> {
   const headers = { 'Content-Type': file.contentType, [CONTENT_SECURITY_POLICY_HEADER]: policy };
   return readFile(file.path).then(
     (content) => new Response(content, { headers }),
-    () => new Response(null, { status: NOT_FOUND }),
+    (error: unknown) => {
+      if (!isMissingFile(error)) {
+        console.error('A file of the interface could not be read:', error);
+      }
+      return new Response(null, { status: NOT_FOUND });
+    },
   );
 }
 

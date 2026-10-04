@@ -371,6 +371,10 @@ describe('readProject: values', () => {
     );
   });
 
+  it('rejects a tag that is not an object', () => {
+    expect(issuesOf(projectWith({ tags: [42] }))).toEqual(issue('tags[0]', 'WRONG_TYPE'));
+  });
+
   it.each([
     [{ id: 'a/b' }, 'dependencies[0].id', 'INVALID_IDENTIFIER'],
     [{ predecessorId: '' }, 'dependencies[0].predecessorId', 'INVALID_IDENTIFIER'],

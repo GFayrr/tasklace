@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Project } from '../../core/model/project';
 import { at } from '../../core/testing/civil-time';
+import { scheduleProject } from '../../core/scheduling/schedule-project';
 import { project, workTask } from '../../core/testing/project-builder';
+import type { BridgeResult, OpenedProject } from '../../preload/bridge-contract';
 import { AppState } from '../app/app-state.svelte';
 import english from '../locales/en.json';
 import { fakeAppContext, openedProjectOf, settle } from '../app/testing/fake-app-context';
@@ -58,7 +60,7 @@ describe('App', () => {
     const { app, root, control } = await renderApp(true);
     expect(press(window, 's', { ctrlKey: true })).toBe(false);
     await settle();
-    expect(control.calls).toContain('saveProject');
+    expect(control.saved).toEqual([{ as: false, name: 'Thesis' }]);
     app.rename('Changed');
     await settle();
     const name = single(root, 'input.name');
@@ -69,6 +71,51 @@ describe('App', () => {
     await settle();
     expect(app.project?.name).toBe('Thesis');
     expect(press(window, 'q', { ctrlKey: true })).toBe(true);
+  });
+
+  it('commits the cell being edited before a file shortcut, so that the save holds the typed value', async () => {
+    const { app, root, control } = await renderApp(true);
+    const grid = single(root, '[role="grid"]');
+    app.selectedTaskId = 'a';
+    update();
+    press(grid, 'Enter');
+    await settle();
+    const input = single(root, 'input.editor') as HTMLInputElement;
+    input.focus();
+    input.value = 'Typed before saving';
+    expect(press(input, 's', { ctrlKey: true })).toBe(false);
+    await settle();
+    expect(app.project?.tasks.find((task) => task.id === 'a')?.name).toBe('Typed before saving');
+    expect(app.notices).toEqual([]);
+    expect(control.saved).toEqual([{ as: false, name: 'Thesis' }]);
+    expect(root.querySelector('input.editor')).toBeNull();
+  });
+
+  it('makes the toolbar and the workspace inert and ignores the shortcuts while a file action runs', async () => {
+    const { app, root, control, context } = await renderApp(true);
+    const shell = single(root, '.shell');
+    expect(shell.inert).toBe(false);
+    expect(shell.getAttribute('aria-busy')).toBe('false');
+    let finish: (result: BridgeResult<OpenedProject>) => void = () => undefined;
+    Object.assign(context.bridge, {
+      openProject: () =>
+        new Promise<BridgeResult<OpenedProject>>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const opening = app.open();
+    await settle();
+    update();
+    expect(shell.inert).toBe(true);
+    expect(shell.getAttribute('aria-busy')).toBe('true');
+    expect(press(window, 'n', { ctrlKey: true })).toBe(true);
+    await settle();
+    expect(control.calls.filter((call) => call === 'newProject')).toEqual([]);
+    finish({ ok: false, error: { code: 'CANCELLED' } });
+    await opening;
+    update();
+    expect(shell.inert).toBe(false);
+    expect(shell.getAttribute('aria-busy')).toBe('false');
   });
 
   it('leaves the shortcuts alone while a dialog is open', async () => {
@@ -229,6 +276,40 @@ describe('Workspace', () => {
     expect(app.project?.dependencies).toMatchObject([{ predecessorId: 'a', successorId: 'b' }]);
   });
 
+  it('refuses to move or stretch a bar while the dates shown are older than the latest change, then accepts once they are updated', async () => {
+    const { app, scroller, frame, scrollLeft, scheduler } = await renderSized();
+    const shape = shapeIn(app, frame, 'b');
+    const before = app.project?.tasks.find((task) => task.id === 'b');
+    scheduler.automatic = false;
+    expect(app.rename('Renamed')).toBe(true);
+    await settle();
+    expect(app.currentSchedule).toEqual({ ok: false, error: 'SCHEDULE_PENDING' });
+    expect(app.schedule).not.toBeNull();
+    const middle = shape.row * ROW_HEIGHT + ROW_HEIGHT / 2;
+    const x = shape.start + 4 - scrollLeft;
+    const dragTo = (from: number, to: number) => {
+      pointer(scroller, 'pointerdown', from, middle);
+      pointer(scroller, 'pointermove', to, middle);
+      pointer(scroller, 'pointerup', to, middle);
+    };
+    dragTo(x, x + 24 * pixelsPerHour('day'));
+    dragTo(shape.end - 1 - scrollLeft, shape.end + 24 * pixelsPerHour('day') - scrollLeft);
+    await settle();
+    expect(app.project?.tasks.find((task) => task.id === 'b')).toEqual(before);
+    expect(app.notices.map((notice) => notice.text)).toEqual([english.editErrors.SCHEDULE_PENDING]);
+    const latest = app.project;
+    if (latest === null) {
+      throw new Error('The project closed.');
+    }
+    scheduler.listener().scheduled(scheduleProject(latest), latest);
+    expect(app.currentSchedule).toEqual({ ok: true, value: app.schedule });
+    dragTo(x, x + 24 * pixelsPerHour('day'));
+    await settle();
+    expect(app.project?.tasks.find((task) => task.id === 'b')).toMatchObject({
+      startNoEarlierThan: at(2026, 9, 29),
+    });
+  });
+
   it('opens the details of a task double-clicked on the timeline', async () => {
     const { app, scroller } = await renderSized();
     scroller.dispatchEvent(
@@ -266,7 +347,8 @@ describe('Workspace', () => {
     const scroller = single(root, '.scroller');
     resize(scroller, 800, 400);
     expect(app.schedule).toBeNull();
-    expect(scroller.scrollLeft).toBeGreaterThan(0);
+    const frame = timelineFrame(PLAN.startDate, null, localHourOf(TODAY), pixelsPerHour('day'));
+    expect(scroller.scrollLeft).toBe(xOf(frame, PLAN.startDate - 48));
   });
 
   it('scrolls both panes together, from the wheel over the table or the scroll of the timeline', async () => {

@@ -14,15 +14,15 @@ function calendarWith(overrides: Partial<WorkingCalendar>): WorkingCalendar {
 }
 
 /** Returns the whole hours among the starts of the working quarter hours of a day. */
-function wholeHours(calendar: { readonly workingQuartersOfDay: readonly number[] }): number[] {
-  return calendar.workingQuartersOfDay.filter((quarter) => Number.isInteger(quarter));
+function wholeHours(calendar: { readonly workingQuarterStartHours: readonly number[] }): number[] {
+  return calendar.workingQuarterStartHours.filter((quarter) => Number.isInteger(quarter));
 }
 
 describe('compileCalendar', () => {
   it('compiles the test calendar into Monday–Friday, 09:00–12:00 and 13:00–17:00', () => {
     const calendar = compileOrThrow(TEST_CALENDAR);
     expect(wholeHours(calendar)).toEqual([9, 10, 11, 13, 14, 15, 16]);
-    expect(calendar.workingQuartersOfDay.slice(0, 5)).toEqual([9, 9.25, 9.5, 9.75, 10]);
+    expect(calendar.workingQuarterStartHours.slice(0, 5)).toEqual([9, 9.25, 9.5, 9.75, 10]);
     expect(calendar.workingHoursPerDay).toBe(7);
     const week = Array.from({ length: 7 }, (_value, offset) => dayOf(2026, 9, 27) + offset);
     expect(week.map((day) => isWorkingDay(calendar, day))).toEqual([
@@ -43,7 +43,7 @@ describe('compileCalendar', () => {
         workingTimeRanges: [{ startHour: 23, endHour: 24 }],
       }),
     );
-    expect(result.ok && result.value.workingQuartersOfDay).toEqual([23, 23.25, 23.5, 23.75]);
+    expect(result.ok && result.value.workingQuarterStartHours).toEqual([23, 23.25, 23.5, 23.75]);
   });
 
   it('accepts every day of the week and the whole day', () => {
@@ -74,7 +74,7 @@ describe('compileCalendar', () => {
     const quarter = compileCalendar(
       calendarWith({ workingTimeRanges: [{ startHour: 8.25, endHour: 9 }] }),
     );
-    expect(quarter.ok && quarter.value.workingQuartersOfDay).toEqual([8.25, 8.5, 8.75]);
+    expect(quarter.ok && quarter.value.workingQuarterStartHours).toEqual([8.25, 8.5, 8.75]);
     expect(quarter.ok && quarter.value.workingHoursPerDay).toBe(0.75);
     expect(
       compileCalendar(calendarWith({ workingTimeRanges: [{ startHour: 8.1, endHour: 9 }] })).ok,

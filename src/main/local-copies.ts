@@ -1,7 +1,7 @@
-import { mkdir, rename } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isDocumentId, type DocumentId } from '../core/shared/shared-document';
-import { isStoredPath, isSystemError, parseStoredJson, readStoredText } from './stored-files';
+import { isStoredPath, parseStoredJson, readStoredText, setDamagedFileAside } from './stored-files';
 import { writeFileSafely } from './safe-write';
 import { createSerialQueue } from './serial-queue';
 
@@ -57,7 +57,7 @@ export function formatLocalCopyIndex(index: LocalCopyIndex): string {
   return JSON.stringify({ version: INDEX_VERSION, copies: index });
 }
 
-/** Writes the local copy of a document, creating its folder when needed, and records where its file was saved and when, one index update at a time. */
+/** Writes the local copy of a document, creating its folder when needed, and records where its file was saved and when, one index update at a time within this process. */
 export async function saveLocalCopy(
   folder: string,
   documentId: DocumentId,
@@ -82,18 +82,8 @@ export async function saveLocalCopy(
 /** Reads the local copy index from its store, a missing index meaning no copy yet, and sets a damaged index aside under a name ending with the time in milliseconds before it is rewritten, so that what it held can still be recovered; an index that cannot be set aside is only logged and then rewritten with its well-formed entries. */
 async function readIndex(indexPath: string, now: Date): Promise<LocalCopyIndex> {
   const { index, damaged } = readIndexText(await readStoredText(indexPath));
-  if (!damaged) {
-    return index;
-  }
-  const asidePath = `${indexPath}.damaged-${String(now.getTime())}`;
-  try {
-    await rename(indexPath, asidePath);
-    console.error(`The local copy index was damaged and was kept as ${asidePath}.`);
-  } catch (error) {
-    if (!isSystemError(error)) {
-      throw error;
-    }
-    console.error('The damaged local copy index could not be kept aside and is replaced:', error);
+  if (damaged) {
+    await setDamagedFileAside(indexPath, now, 'The local copy index');
   }
   return index;
 }

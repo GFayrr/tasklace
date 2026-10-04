@@ -28,7 +28,7 @@ interface InFlight {
 
 export const MAX_SCHEDULE_RETRIES = 1;
 
-/** Computes schedules in a worker, one at a time, keeping only the latest project asked meanwhile, so that no result older than the latest change is ever shown; when the worker fails or sends an unreadable answer, it is replaced by a new one that is asked again for the latest project, and only a failure repeated past the retry limit is reported, the next change trying again. */
+/** Computes schedules in a worker started at the first request, one at a time, keeping only the latest project asked meanwhile, so that no result older than the latest change is ever shown; a worker that fails or sends an unreadable answer is replaced and asked again for the latest project, and a failure repeated past the retry limit, or a worker that cannot be started or sent a project, is reported, the next change trying again. */
 export function createScheduler(
   createPort: () => SchedulePort,
   listener: ScheduleListener,
@@ -37,11 +37,29 @@ export function createScheduler(
   let inFlight: InFlight | null = null;
   let pending: Project | null = null;
   let failures = 0;
-  let port = createPort();
+  let port: SchedulePort | null = null;
+  const closePort = (): void => {
+    if (port !== null) {
+      stop(port);
+      port = null;
+    }
+  };
+  const giveUp = (error: unknown): void => {
+    inFlight = null;
+    pending = null;
+    failures = 0;
+    closePort();
+    listener.failed(error);
+  };
   const send = (project: Project): void => {
     generation += 1;
     inFlight = { generation, project };
-    port.postMessage({ version: SCHEDULE_PROTOCOL_VERSION, generation, project });
+    try {
+      port ??= connect(createPort());
+      port.postMessage({ version: SCHEDULE_PROTOCOL_VERSION, generation, project });
+    } catch (error) {
+      giveUp(error);
+    }
   };
   const sendPending = (): boolean => {
     if (pending === null) {
@@ -56,10 +74,9 @@ export function createScheduler(
     const latest = pending ?? inFlight?.project ?? null;
     inFlight = null;
     pending = null;
-    stop(port);
-    port = connect(createPort());
+    closePort();
     if (latest === null) {
-      console.error('The idle schedule worker failed and was restarted:', error);
+      console.error('The idle schedule worker failed and is replaced at the next request:', error);
       return;
     }
     failures += 1;
@@ -97,7 +114,6 @@ export function createScheduler(
     };
     return created;
   };
-  port = connect(port);
   return {
     request: (project) => {
       if (inFlight === null) {
@@ -106,9 +122,7 @@ export function createScheduler(
       }
       pending = project;
     },
-    dispose: () => {
-      stop(port);
-    },
+    dispose: closePort,
   };
 }
 

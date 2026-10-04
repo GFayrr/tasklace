@@ -92,7 +92,10 @@ describe('computeTaskSlots', () => {
       calendar,
       placement({ start: at(2026, 1, 1), durationHours: MAX_TASK_DURATION_HOURS, hoursPerDay: 7 }),
     );
-    expect(result.ok && result.value.length).toBeGreaterThan(0);
+    const slots = result.ok ? result.value : [];
+    const hours = slots.reduce((total, slot) => total + (slot.end - slot.start), 0);
+    expect(hours).toBe(MAX_TASK_DURATION_HOURS);
+    expect(slots[0]?.start).toBe(at(2026, 1, 1, 9));
   });
 
   it.each([-1, 0.3, Number.NaN, MAX_TASK_DURATION_HOURS + 1])(

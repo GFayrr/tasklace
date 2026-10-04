@@ -225,6 +225,17 @@ function withTaskBetweenBlocks(
 }
 
 const MAX_RICH_TAGS = 6;
+const MAX_BASELINE_OFFSET_QUARTERS = 400;
+const GONE_TASK_ID = 'gone';
+
+const baselineShapeArbitrary = fc.option(
+  fc.record({
+    offset: fc.nat({ max: MAX_BASELINE_OFFSET_QUARTERS }),
+    length: fc.nat({ max: MAX_BASELINE_OFFSET_QUARTERS }),
+    withGoneTask: fc.boolean(),
+  }),
+  { nil: null },
+);
 const MAX_GENERATED_NAME = 20;
 const CONTROL_CHARACTER = /\p{Cc}/u;
 
@@ -250,12 +261,38 @@ function dailyStartOf(
   if (task.kind !== 'task' || task.hoursPerDay === null || pick === null) {
     return null;
   }
-  const starts = calendar.workingQuartersOfDay;
+  const starts = calendar.workingQuarterStartHours;
   const choices = starts.length - toQuarters(task.hoursPerDay) + 1;
   return starts[pick % Math.max(choices, 1)] ?? null;
 }
 
-/** Generates projects using every feature a file can hold: tags, some of them people or teams, date constraints enabled or not, daily start times, Unicode names and summaries nested up to the deepest allowed level. */
+/** Builds a baseline plan freezing every task of a project at the same dates, with an entry for a task deleted since when asked, or no baseline when no shape is given. */
+function baselineOf(
+  base: Project,
+  shape: {
+    readonly offset: number;
+    readonly length: number;
+    readonly withGoneTask: boolean;
+  } | null,
+): Project['baseline'] {
+  if (shape === null) {
+    return null;
+  }
+  const start = base.startDate + fromQuarters(shape.offset);
+  const end = start + fromQuarters(shape.length);
+  const ids = [...base.tasks.map((task) => task.id), ...(shape.withGoneTask ? [GONE_TASK_ID] : [])];
+  return {
+    takenAt: base.startDate,
+    entries: ids.map((taskId) => ({
+      taskId,
+      start,
+      end,
+      durationHours: fromQuarters(shape.length),
+    })),
+  };
+}
+
+/** Generates projects using every feature a file can hold: tags, some of them people or teams, date constraints enabled or not, daily start times, Unicode names, summaries nested up to the deepest allowed level and an optional baseline plan, sometimes with an entry for a deleted task. */
 export const richProjectArbitrary: fc.Arbitrary<GeneratedProject> = projectArbitrary.chain(
   ({ project: base }) =>
     fc
@@ -276,6 +313,7 @@ export const richProjectArbitrary: fc.Arbitrary<GeneratedProject> = projectArbit
         depth: fc.integer({ min: 0, max: MAX_HIERARCHY_DEPTH - 1 }),
         dateConstraintsEnabled: fc.boolean(),
         alwaysShowPatterns: fc.boolean(),
+        baseline: baselineShapeArbitrary,
       })
       .map((extra) => {
         const calendar = unwrap(compileCalendar(base.calendar));
@@ -318,6 +356,7 @@ export const richProjectArbitrary: fc.Arbitrary<GeneratedProject> = projectArbit
             name: extra.projectName,
             tags,
             tasks: [...chain, ...tasks],
+            baseline: baselineOf(base, extra.baseline),
             options: {
               criticalPathEnabled: true,
               dateConstraintsEnabled: extra.dateConstraintsEnabled,

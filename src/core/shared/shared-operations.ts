@@ -9,7 +9,12 @@ import {
   readProjectShape,
   STORED_VALUE_CODEC,
 } from '../validation/read-project';
-import type { ValidationIssue, ValidationIssueCode } from '../validation/validation-issues';
+import {
+  requireIssues,
+  type ValidationIssue,
+  type ValidationIssueCode,
+  type ValidationIssues,
+} from '../validation/validation-issues';
 import {
   countAncestors,
   dependenciesOf,
@@ -44,7 +49,7 @@ export interface TouchedItems {
   header: boolean;
 }
 
-type Check = Result<TouchedItems, readonly ValidationIssue[]>;
+type Check = Result<TouchedItems, ValidationIssues>;
 
 /** Applies an operation to a whole project, the reference that the incremental checks must agree with. */
 export function applyOperation(project: Project, operation: SharedOperation): Project {
@@ -133,7 +138,9 @@ function putTaskChecked(state: ProjectState, input: Task): Check {
   const [read] = shape.ok ? shape.value.tasks : [];
   const task = read === undefined ? undefined : withKnownTag(read, (id) => state.tags.has(id));
   if (task === undefined) {
-    return failure(relocate(shape.ok ? [] : shape.error, 'tasks[0]', `tasks.${input.id}`));
+    return failure(
+      requireIssues(relocate(shape.ok ? [] : shape.error, 'tasks[0]', `tasks.${input.id}`)),
+    );
   }
   const previous = state.tasks.get(task.id);
   if (previous === undefined && state.tasks.size >= MAX_TASKS) {
@@ -242,7 +249,9 @@ function putDependencyChecked(state: ProjectState, input: Dependency): Check {
   const [dependency] = shape.ok ? shape.value.dependencies : [];
   if (dependency === undefined) {
     return failure(
-      relocate(shape.ok ? [] : shape.error, 'dependencies[0]', `dependencies.${input.id}`),
+      requireIssues(
+        relocate(shape.ok ? [] : shape.error, 'dependencies[0]', `dependencies.${input.id}`),
+      ),
     );
   }
   const previous = state.dependencies.get(dependency.id);
@@ -294,7 +303,9 @@ function putTagChecked(state: ProjectState, input: Tag): Check {
   const shape = readItemShape(state.header, { tags: [input] });
   const [tag] = shape.ok ? shape.value.tags : [];
   if (tag === undefined) {
-    return failure(relocate(shape.ok ? [] : shape.error, 'tags[0]', `tags.${input.id}`));
+    return failure(
+      requireIssues(relocate(shape.ok ? [] : shape.error, 'tags[0]', `tags.${input.id}`)),
+    );
   }
   if (!state.tags.has(tag.id) && state.tags.size >= MAX_TAGS) {
     return refuse('tags', 'TOO_MANY_ITEMS');
@@ -330,7 +341,7 @@ function updateProjectChecked(state: ProjectState, fields: Partial<ProjectHeader
     STORED_VALUE_CODEC,
   );
   if (!read.ok) {
-    return failure(read.error);
+    return failure(requireIssues(read.error));
   }
   const previous = state.header;
   state.header = { ...read.value, baseline: header.baseline };

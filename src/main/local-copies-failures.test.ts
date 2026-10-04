@@ -45,7 +45,7 @@ describe('a damaged local copy index that cannot be kept aside', () => {
     try {
       await saveLocalCopy(folder, DOCUMENT, Uint8Array.from([1]), null, SAVED_AT);
       expect(logged).toHaveBeenCalledWith(
-        'The damaged local copy index could not be kept aside and is replaced:',
+        'The local copy index was damaged, could not be kept aside and is replaced:',
         refusal,
       );
     } finally {
