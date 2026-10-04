@@ -121,13 +121,15 @@ async function openProject(path: string): Promise<FileTaskResult> {
   if (!read.ok) {
     return failure(read.error);
   }
-  const { document, documentId } = read.value;
-  return success({
-    kind: 'loaded',
-    state: Y.encodeStateAsUpdate(document),
-    documentId,
-    warnings: [],
-  });
+  const { state, documentId } = read.value;
+  return success({ kind: 'loaded', state: ownBytes(state), documentId, warnings: [] });
+}
+
+/** Returns bytes that own their whole buffer, copying a view into a larger buffer, such as the pool a decompression writes into, into a new buffer since slicing a Node buffer gives another view, so that sending them never carries memory around them. */
+function ownBytes(bytes: Uint8Array): Uint8Array {
+  return bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+    ? bytes
+    : new Uint8Array(bytes);
 }
 
 /** Reads a text file strictly as UTF-8, keeping its byte order mark for the importer, and imports it. */

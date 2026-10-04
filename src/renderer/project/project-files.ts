@@ -1,11 +1,12 @@
 import * as Y from 'yjs';
 import type { Project } from '../../core/model/project';
+import { createSharedDocument, isDocumentId } from '../../core/shared/shared-document';
 import {
-  createSharedDocument,
-  isDocumentId,
-  readDocumentId,
-} from '../../core/shared/shared-document';
-import { openSharedSession, type SharedSession } from '../../core/shared/shared-session';
+  openSharedSession,
+  openSharedSessionFromState,
+  type SharedSession,
+  type StateOpeningFailure,
+} from '../../core/shared/shared-session';
 import type {
   BridgeResult,
   ExchangeKind,
@@ -160,22 +161,19 @@ export function createProjectFiles(
       return { ok: false, error: { code: 'UNSAVED_PROJECT', cause } };
     }
   };
-  const adopt = async (document: Y.Doc, hasFile: boolean): Promise<ActionResult<SharedSession>> => {
-    const documentId = readDocumentId(document);
-    const session = openSharedSession(document);
-    if (documentId === null || !session.ok) {
-      const issues = session.ok ? [] : session.error;
-      return { ok: false, error: { code: 'INVALID_PROJECT', issues } };
-    }
-    const adopted = await bridge.adoptProject(documentId);
+  const adopt = async (
+    session: SharedSession,
+    hasFile: boolean,
+  ): Promise<ActionResult<SharedSession>> => {
+    const adopted = await bridge.adoptProject(session.documentId);
     if (!adopted.ok) {
       return adopted;
     }
     current?.session.document.off('update', changed);
-    current = { session: session.value, hasFile };
-    session.value.document.on('update', changed);
+    current = { session, hasFile };
+    session.document.on('update', changed);
     listener.saveStatus('saved');
-    return session;
+    return { ok: true, value: session };
   };
   const load = async (
     opening: () => Promise<BridgeResult<OpenedProject>>,
@@ -189,16 +187,11 @@ export function createProjectFiles(
     if (!opened.ok) {
       return opened;
     }
-    const document = decodedDocument(opened.value.state);
-    if (document === null) {
-      return { ok: false, error: { code: 'INVALID_CONTENT' } };
+    const read = openedSession(opened.value);
+    if (!read.ok) {
+      return read;
     }
-    const held = readDocumentId(document);
-    if (held !== null && held !== opened.value.documentId) {
-      console.error('The opened project does not hold the document the main process announced.');
-      return { ok: false, error: { code: 'INVALID_CONTENT' } };
-    }
-    const session = await adopt(document, hasFile);
+    const session = await adopt(read.value, hasFile);
     if (!session.ok) {
       return session;
     }
@@ -215,7 +208,11 @@ export function createProjectFiles(
       console.error('The main process gave a new project an invalid identifier:', documentId);
       return { ok: false, error: { code: 'TASK_FAILED' } };
     }
-    return adopt(createSharedDocument(project, documentId), false);
+    const session = openSharedSession(createSharedDocument(project, documentId));
+    if (!session.ok) {
+      return { ok: false, error: { code: 'INVALID_PROJECT', issues: session.error } };
+    }
+    return adopt(session.value, false);
   };
   const saveAs = async (): Promise<ActionResult<SavedProject>> => {
     const name = current?.session.project().name ?? '';
@@ -241,16 +238,26 @@ export function createProjectFiles(
   };
 }
 
-/** Decodes the Yjs state of an opened project into a new document, or returns null when the state cannot be applied. */
-function decodedDocument(state: Uint8Array): Y.Doc | null {
-  const document = new Y.Doc();
-  try {
-    Y.applyUpdate(document, state);
-    return document;
-  } catch (error) {
-    console.error('The opened project could not be decoded:', error);
-    return null;
+/** Opens a session on the state of an opened project, refusing a state that cannot be read, an invalid project, or a document other than the one the main process announced, logging why when the content is at fault. */
+function openedSession(opened: OpenedProject): ActionResult<SharedSession> {
+  const session = openSharedSessionFromState(opened.state);
+  if (!session.ok) {
+    return { ok: false, error: openingFailure(session.error) };
   }
+  if (session.value.documentId !== opened.documentId) {
+    console.error('The opened project does not hold the document the main process announced.');
+    return { ok: false, error: { code: 'INVALID_CONTENT' } };
+  }
+  return session;
+}
+
+/** Tells why the state of an opened project could not be opened: unreadable content, logged, or the problems of an invalid project. */
+function openingFailure(failure: StateOpeningFailure): ActionFailure {
+  if (failure.kind === 'unreadableState') {
+    console.error('The opened project could not be decoded:', failure.error);
+    return { code: 'INVALID_CONTENT' };
+  }
+  return { code: 'INVALID_PROJECT', issues: failure.issues };
 }
 
 /** Returns the save status after a save: saved, or still unsaved when changes came during it or the user canceled, or failed. */

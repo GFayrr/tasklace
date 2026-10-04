@@ -2,7 +2,7 @@ import { compileCalendar } from '../../core/calendar/compile-calendar';
 import { exportProjectCsv } from '../../core/exchange/csv/project-csv-export';
 import { exportProjectJson } from '../../core/exchange/project-json';
 import type { Project, TaskId } from '../../core/model/project';
-import type { Result } from '../../core/result';
+import { success, type Result } from '../../core/result';
 import type { MergeFailure, SharedRepair } from '../../core/shared/shared-project';
 import { issueText, repairText, type ReportedIssue } from '../i18n/issue-text';
 import { scheduleFailureText } from '../i18n/schedule-failure-text';
@@ -816,9 +816,11 @@ export class AppState {
         });
   }
 
-  /** Computes the CSV table of a project in the regional format of the system. */
+  /** Computes the CSV table of a project in the regional format of the system, reusing the schedule already computed for that very project and computing it otherwise. */
   async #csvText(project: Project): Promise<string | null> {
-    const schedule = scheduleProject(project);
+    const computed = this.#computed;
+    const known = computed?.project === project ? computed.schedule : null;
+    const schedule = known === null ? scheduleProject(project) : success(known);
     if (!schedule.ok) {
       this.#showScheduleFailure(schedule.error, project);
       return null;

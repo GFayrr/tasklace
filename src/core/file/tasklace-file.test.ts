@@ -15,6 +15,7 @@ import { mergeSharedUpdate, readSharedProject } from '../shared/shared-project';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { at } from '../testing/civil-time';
 import { hideListContent } from '../testing/hidden-list-content';
+import { livedState, randomEditsArbitrary } from '../testing/lived-document';
 import { projectArbitrary, richProjectArbitrary } from '../testing/project-arbitrary';
 import {
   link,
@@ -80,6 +81,13 @@ const SAMPLE: Project = project(
 /** Writes a project as a .tasklace file with the stand-in compressor. */
 function fileOf(input: Project): Uint8Array {
   return encodeTasklaceFile(createSharedDocument(input, TEST_DOCUMENT_ID), storingCompressor);
+}
+
+/** Decodes a Yjs state into a new document. */
+function documentOf(state: Uint8Array): Y.Doc {
+  const document = new Y.Doc();
+  Y.applyUpdate(document, state);
+  return document;
 }
 
 /** Returns a copy of a file with some header fields or its payload replaced, and a recomputed checksum, as an attacker would. */
@@ -236,7 +244,7 @@ describe('tasklace file', () => {
       storingCompressor,
     );
     expect(read.ok && read.value.documentId).toBe(TEST_DOCUMENT_ID);
-    expect(read.ok && readSharedData(read.value.document)).toEqual(readSharedData(source));
+    expect(read.ok && readSharedData(documentOf(read.value.state))).toEqual(readSharedData(source));
     const anonymous = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     anonymous.getMap('project').delete('documentId');
     expect(
@@ -245,6 +253,33 @@ describe('tasklace file', () => {
       failure({ code: 'INVALID_PROJECT', issues: [{ path: 'documentId', code: 'MISSING_FIELD' }] }),
     );
   });
+
+  it(
+    'gives a validated state holding exactly the document the file opens, as its encoding would, for documents that lived',
+    { timeout: PROPERTY_TEST_TIMEOUT_MS },
+    () => {
+      fc.assert(
+        fc.property(
+          fc.oneof(projectArbitrary, richProjectArbitrary),
+          randomEditsArbitrary,
+          ({ project: generated }, edits) => {
+            const file = encodeTasklaceFile(
+              documentOf(livedState(generated, edits)),
+              storingCompressor,
+            );
+            const read = readTasklaceDocument(file, storingCompressor);
+            const opened = readTasklaceFile(file, storingCompressor);
+            if (!read.ok || !opened.ok) {
+              throw new Error('The file was refused.');
+            }
+            expect(Y.encodeStateAsUpdate(documentOf(read.value.state))).toEqual(
+              Y.encodeStateAsUpdate(opened.value),
+            );
+          },
+        ),
+      );
+    },
+  );
 
   it('opens a session knowing the identifier of the document', () => {
     const opened = openTasklaceFile(fileOf(SAMPLE), storingCompressor);
