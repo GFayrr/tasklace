@@ -25,7 +25,7 @@ const LINE_BREAKS = /\r\n|\r|\n/g;
 const LINE_SEPARATOR = ' | ';
 const ENCODER = new TextEncoder();
 
-/** Keeps a log file in a folder, appending one dated line per entry, one write at a time, and setting the log aside under another name once it would grow past its limit, a failure being reported on the error output and a log that cannot be set aside growing until the next attempt, a limit further. */
+/** Keeps a log file in a folder, appending one dated line per entry, one write at a time, and setting the log aside under another name once it would grow past its limit, a failure being reported on the error output and a log that cannot be set aside being tried again once another limit of entries is written. */
 export function createLogFile(
   folder: string,
   now: () => Date,
@@ -79,7 +79,7 @@ export interface ProcessErrorSource {
   on(event: 'unhandledRejection', listener: (reason: unknown) => void): unknown;
 }
 
-/** Logs the exceptions the main process does not catch and the promises it leaves rejected, without changing how the process reacts to them. */
+/** Logs the exceptions the main process does not catch, without changing how Electron reacts to them, and the promises it leaves rejected, on which Electron never stops. */
 export function logProcessErrors(source: ProcessErrorSource): void {
   source.on('uncaughtExceptionMonitor', (error, origin) => {
     console.error(`Uncaught exception in the main process (${origin}):`, error);

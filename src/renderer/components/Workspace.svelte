@@ -1,7 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { Project, TaskId } from '../../core/model/project';
-  import { failure } from '../../core/result';
   import type { AppState, DrawingPart } from '../app/app-state.svelte';
   import { createTableFormatters } from '../plan/table-format';
   import {
@@ -24,8 +23,13 @@
     stretchOnTimeline,
     type LinkEnd,
   } from '../plan/task-commands';
-  import { movedStart, stretchedEnd, type BarShape } from '../plan/timeline-gestures';
-  import { ROW_HEIGHT, timelineFrame, xOf, type RowShape } from '../plan/timeline-geometry';
+  import {
+    movedStart,
+    stretchedEnd,
+    type BarShape,
+    type PlacedShape,
+  } from '../plan/timeline-gestures';
+  import { ROW_HEIGHT, timelineFrame, xOf } from '../plan/timeline-geometry';
   import { tagStylesOf } from '../plan/tag-styles';
   import { localHourOf } from '../project/new-project';
   import { pixels } from './css-length';
@@ -145,36 +149,36 @@
   }
 
   /** Asks a dragged bar, or a later block of it, to start where it was dropped, aligned to the quarter hour or the day. */
-  function moveBar(shape: RowShape, offset: number, block: number | null): void {
-    const schedule = app.currentSchedule;
+  function moveBar(shape: PlacedShape, offset: number, block: number | null): void {
+    const current = app.currentSchedule;
     const snap = snapHours(app.zoom);
     app.edit((context) =>
-      schedule === null
-        ? failure('SCHEDULE_PENDING')
-        : moveOnTimeline(
+      current.ok
+        ? moveOnTimeline(
             context,
             shape.taskId,
             block,
-            schedule.placements.get(shape.taskId),
+            current.value?.placements.get(shape.taskId),
             (from) => movedStart(frame, from, offset, snap),
-          ),
+          )
+        : current,
     );
   }
 
   /** Changes the duration of a stretched bar so that it ends where it was dropped. */
   function stretchBar(shape: BarShape, offset: number): void {
-    const schedule = app.currentSchedule;
+    const current = app.currentSchedule;
     const calendar = app.calendar;
     const snap = snapHours(app.zoom);
     app.edit((context) =>
-      schedule === null
-        ? failure('SCHEDULE_PENDING')
-        : stretchOnTimeline(
+      current.ok
+        ? stretchOnTimeline(
             context,
             shape.taskId,
-            { placement: schedule.placements.get(shape.taskId), calendar },
+            { placement: current.value?.placements.get(shape.taskId), calendar },
             (end) => stretchedEnd(frame, end, offset, snap),
-          ),
+          )
+        : current,
     );
   }
 

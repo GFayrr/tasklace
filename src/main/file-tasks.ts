@@ -64,19 +64,30 @@ export interface SavedFiles {
 }
 
 export type FileTaskResult = Result<LoadedProject | SavedFiles, FileFailure>;
-export type TaskOutcome<T extends FileTask> = T extends { readonly kind: 'saveProject' }
-  ? SavedFiles
-  : LoadedProject;
-export type ResultOfTask<T extends FileTask> = Result<TaskOutcome<T>, FileFailure>;
+interface TaskOutcomes {
+  readonly openProject: LoadedProject;
+  readonly importJson: LoadedProject;
+  readonly importCsv: LoadedProject;
+  readonly saveProject: SavedFiles;
+}
 
-/** Tells whether a value has the shape of a result of a task: a failure, or a success of the kind the task gives, a saved file for a save and a loaded project otherwise. */
+export type ResultOfTask<T extends FileTask> = Result<TaskOutcomes[T['kind']], FileFailure>;
+
+const OUTCOME_KINDS = {
+  openProject: 'loaded',
+  importJson: 'loaded',
+  importCsv: 'loaded',
+  saveProject: 'saved',
+} as const satisfies { readonly [Kind in FileTask['kind']]: TaskOutcomes[Kind]['kind'] };
+
+/** Tells whether a value has the shape of a result of a task: a failure, or a success of the kind the task gives. */
 export function isResultOf<T extends FileTask>(task: T, value: unknown): value is ResultOfTask<T> {
   const ok: unknown = Reflect.get(Object(value), 'ok');
   if (ok !== true) {
     return ok === false;
   }
   const kind: unknown = Reflect.get(Object(Reflect.get(Object(value), 'value')), 'kind');
-  return kind === (task.kind === 'saveProject' ? 'saved' : 'loaded');
+  return kind === OUTCOME_KINDS[task.kind];
 }
 
 const READ_CHUNK_BYTES = 16 * UNITS_PER_MEBI;

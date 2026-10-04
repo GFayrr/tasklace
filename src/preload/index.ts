@@ -1,6 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { CSV_SEPARATORS } from '../core/exchange/csv/csv-text';
-import type { RegionalFormat } from '../core/exchange/csv/regional-format';
+import {
+  DATE_ORDERS,
+  DATE_SEPARATORS,
+  type RegionalFormat,
+} from '../core/exchange/csv/regional-format';
 import {
   BRIDGE_NAME,
   IPC_CHANNELS,
@@ -12,8 +16,8 @@ import {
 } from './bridge-contract';
 
 const LIST_SEPARATORS: readonly unknown[] = CSV_SEPARATORS;
-const DATE_ORDERS: readonly unknown[] = ['dayMonthYear', 'monthDayYear', 'yearMonthDay'];
-const DATE_SEPARATORS: readonly unknown[] = ['/', '.', '-'];
+const DATE_ORDER_VALUES: readonly unknown[] = DATE_ORDERS;
+const DATE_SEPARATOR_VALUES: readonly unknown[] = DATE_SEPARATORS;
 const UNEXPECTED_ANSWER: BridgeResult<never> = { ok: false, error: { code: 'TASK_FAILED' } };
 
 const bridge: TasklaceBridge = {
@@ -34,10 +38,14 @@ const bridge: TasklaceBridge = {
     if (!answer.ok) {
       return answer;
     }
-    const projects: readonly unknown[] = Array.isArray(answer.value) ? answer.value : [];
+    const projects: unknown = answer.value;
+    if (!Array.isArray(projects)) {
+      console.error('The main process sent recent projects that are not a list:', projects);
+      return UNEXPECTED_ANSWER;
+    }
     const recent = projects.filter(isRecentProject);
-    if (!Array.isArray(answer.value) || recent.length !== projects.length) {
-      console.error('The main process sent recent projects of an unexpected shape:', answer.value);
+    if (recent.length !== projects.length) {
+      console.error('The main process sent recent projects of an unexpected shape:', projects);
     }
     return { ok: true, value: recent };
   },
@@ -92,7 +100,7 @@ async function request<C extends ResultChannel>(
   return UNEXPECTED_ANSWER;
 }
 
-/** Tells whether an answer to a file request has the shape of a bridge result, the main process typing what each channel answers. */
+/** Tells whether an answer to a file request has the shape of a bridge result, checking only its outcome, the rest being trusted since the main process types what each channel answers. */
 function isAnswerOf<C extends ResultChannel>(
   _channel: C,
   value: unknown,
@@ -105,8 +113,8 @@ function isRegionalFormat(value: unknown): value is RegionalFormat {
   const field = (name: string): unknown => Reflect.get(Object(value), name);
   return (
     LIST_SEPARATORS.includes(field('listSeparator')) &&
-    DATE_ORDERS.includes(field('dateOrder')) &&
-    DATE_SEPARATORS.includes(field('dateSeparator')) &&
+    DATE_ORDER_VALUES.includes(field('dateOrder')) &&
+    DATE_SEPARATOR_VALUES.includes(field('dateSeparator')) &&
     typeof field('twelveHourClock') === 'boolean'
   );
 }

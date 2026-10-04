@@ -11,6 +11,7 @@
     targetBlockAt,
     type DragPreview,
     type BarShape,
+    type PlacedShape,
     type GestureTarget,
   } from '../plan/timeline-gestures';
   import { hourAt, ROW_HEIGHT, rowShape, xOf, type RowShape } from '../plan/timeline-geometry';
@@ -30,7 +31,7 @@
     readonly scrolled: (top: number, left: number) => void;
     readonly resized: (width: number, height: number) => void;
     readonly select: (id: TaskId) => void;
-    readonly moved: (shape: RowShape, offset: number, block: number | null) => void;
+    readonly moved: (shape: PlacedShape, offset: number, block: number | null) => void;
     readonly stretched: (shape: BarShape, offset: number) => void;
     readonly linked: (from: LinkEnd, to: LinkEnd) => void;
     readonly opened: (id: TaskId) => void;

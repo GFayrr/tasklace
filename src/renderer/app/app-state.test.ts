@@ -11,6 +11,7 @@ import {
   workTask,
 } from '../../core/testing/project-builder';
 import english from '../locales/en.json';
+import { issueText } from '../i18n/issue-text';
 import { draftFromTask } from '../plan/task-details';
 import { setStart } from '../plan/task-commands';
 import { AUTOSAVE_DELAY_MS } from '../project/autosave';
@@ -373,6 +374,7 @@ describe('saving and exporting', () => {
     const broken = project(
       [
         workTask('long', {
+          name: 'Long study',
           segments: [{ durationHours: 100_000, gapDaysBefore: 0, startNoEarlierThan: null }],
         }),
       ],
@@ -395,7 +397,7 @@ describe('saving and exporting', () => {
     expect(control.exports).toEqual([]);
     expect(app.notices.map((notice) => [notice.text, notice.report])).toEqual([
       [
-        english.scheduleFailures.task.replace('{name}', 'long'),
+        english.scheduleFailures.task.replace('{name}', 'Long study'),
         {
           title: english.report.scheduleFailed,
           entries: [english.issues.BEYOND_PLANNING_HORIZON],
@@ -858,7 +860,7 @@ describe('one file action at a time', () => {
   });
 
   it('refuses at once to replace a changed project without file while a file action runs, without asking about it', async () => {
-    const { app, context } = await withNewProject();
+    const { app, context, control } = await withNewProject();
     await change(app);
     let finish: (result: BridgeResult<ExportedFile>) => void = () => undefined;
     Object.assign(context.bridge, {
@@ -869,10 +871,18 @@ describe('one file action at a time', () => {
     });
     const exporting = app.exportFile('json');
     await settle();
-    for (const replace of [() => app.newProject(), () => app.open(), () => app.importFile('csv')]) {
+    const calls = [...control.calls];
+    for (const replace of [
+      () => app.newProject(),
+      () => app.open(),
+      () => app.openRecent(0),
+      () => app.importFile('csv'),
+    ]) {
       await replace();
       expect(app.closePrompt).toBeNull();
     }
+    expect(control.calls).toEqual(calls);
+    expect(control.openedRecent).toEqual([]);
     expect(noticeTexts(app)).toEqual([english.fileErrors.BUSY]);
     finish({ ok: true, value: { fileName: 'plan.json' } });
     await exporting;
@@ -891,7 +901,47 @@ describe('one file action at a time', () => {
       logged.mockRestore();
     }
     expect(app.project).toBe(before);
-    expect(noticeTexts(app)).toEqual([english.fileErrors.UNSAVED_PROJECT]);
+    expect(app.notices.map((notice) => [notice.text, notice.report])).toEqual([
+      [
+        english.fileErrors.UNSAVED_PROJECT,
+        { title: english.report.saveFailed, entries: [english.fileErrors.WRITE_FAILED] },
+      ],
+    ]);
+  });
+
+  it('lists the problems of a refused state as the cause of a project kept open', async () => {
+    const { app, control } = await withOpenPlan();
+    await change(app);
+    control.saveResult = {
+      ok: false,
+      error: { code: 'INVALID_STATE', issues: [{ path: 'name', code: 'EMPTY_TEXT' }] },
+    };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await app.newProject();
+    } finally {
+      logged.mockRestore();
+    }
+    expect(app.notices.map((notice) => notice.report?.entries)).toEqual([
+      [english.fileErrors.INVALID_STATE, issueText(english, { path: 'name', code: 'EMPTY_TEXT' })],
+    ]);
+  });
+
+  it('gives no details for a project kept open after an unexpected failure of its save', async () => {
+    const { app, context } = await withOpenPlan();
+    await change(app);
+    Object.assign(context.bridge, {
+      saveProject: () => Promise.reject(new Error('bridge gone')),
+    });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await app.newProject();
+    } finally {
+      logged.mockRestore();
+    }
+    expect(app.notices.map((notice) => [notice.text, notice.report])).toEqual([
+      [english.fileErrors.UNSAVED_PROJECT, null],
+    ]);
   });
 });
 
@@ -986,5 +1036,41 @@ describe('failures of automatic saves', () => {
       logged.mockRestore();
     }
     expect(noticeTexts(app)).toEqual([english.fileErrors.TASK_FAILED]);
+  });
+});
+
+describe('the schedule an edit relies on', () => {
+  it('is the latest computed for the project as it is, pending after a change, and stopped once the scheduler gives up until the next change', async () => {
+    const { app, scheduler } = await withOpenPlan();
+    expect(app.currentSchedule).toEqual({ ok: true, value: app.schedule });
+    scheduler.automatic = false;
+    await change(app, 'First');
+    expect(app.currentSchedule).toEqual({ ok: false, error: 'SCHEDULE_PENDING' });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      scheduler.listener().failed(new Error('worker gone'));
+    } finally {
+      logged.mockRestore();
+    }
+    expect(app.currentSchedule).toEqual({ ok: false, error: 'SCHEDULE_STOPPED' });
+    expect(app.schedule).not.toBeNull();
+    await change(app, 'Second');
+    expect(app.currentSchedule).toEqual({ ok: false, error: 'SCHEDULE_PENDING' });
+  });
+
+  it('is up to date without dates when the latest computation for the project failed', async () => {
+    const { app, scheduler } = await withOpenPlan();
+    const latest = app.project;
+    if (latest === null) {
+      throw new Error('The plan is not open.');
+    }
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      scheduler.listener().scheduled({ ok: false, error: { kind: 'startDate' } }, latest);
+    } finally {
+      logged.mockRestore();
+    }
+    expect(app.schedule).toBeNull();
+    expect(app.currentSchedule).toEqual({ ok: true, value: null });
   });
 });

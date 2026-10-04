@@ -5,7 +5,6 @@ import {
   app,
   BrowserWindow,
   dialog,
-  ipcMain,
   type FileFilter,
   type IpcMainInvokeEvent,
   type WebContents,
@@ -34,6 +33,7 @@ import {
   readRecentIndex,
   readSuggestedName,
 } from './ipc-validators';
+import { handleChannel, registerChannel, type ChannelHandler } from './ipc-channels';
 import { RefusedRequest, refuseMessage, type TrustCheck } from './ipc-trust';
 import { MESSAGES } from './messages';
 import {
@@ -85,29 +85,16 @@ const offered = new WeakMap<WebContents, WindowProject>();
 
 /** Answers the project file requests of the bridge: new, open, recent, import, adopt, save, save as and export, the main process alone choosing paths through dialogs and knowing the file and document of each window, which changes only once the page has accepted the project offered to it. */
 export function registerProjectFileHandlers(services: ProjectFileServices): void {
-  const register = (
-    channel: InvokeChannel,
-    answer: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown,
-  ): void => {
-    ipcMain.handle(channel, (event, ...values: unknown[]) => {
-      services.assertTrusted(event);
-      return answer(event, ...values);
-    });
-  };
-  const handle = <C extends InvokeChannel>(
-    channel: C,
-    answer: (
-      event: IpcMainInvokeEvent,
-      ...values: unknown[]
-    ) => ChannelAnswers[C] | Promise<ChannelAnswers[C]>,
-  ): void => {
-    register(channel, answer);
+  const handle = <C extends InvokeChannel>(channel: C, answer: ChannelHandler<C>): void => {
+    handleChannel(services.assertTrusted, channel, answer);
   };
   const handleFileAction = <C extends ResultChannel>(
     channel: C,
     answer: (event: IpcMainInvokeEvent, ...values: unknown[]) => Promise<ChannelAnswers[C]>,
   ): void => {
-    register(channel, (event, ...values) => answerOrFail(channel, () => answer(event, ...values)));
+    registerChannel(services.assertTrusted, channel, (event, ...values) =>
+      answerOrFail(channel, () => answer(event, ...values)),
+    );
   };
   handle(IPC_CHANNELS.regionalFormat, () => regionalFormatOf(app.getSystemLocale()));
   handle(IPC_CHANNELS.newProject, (event) => offerProject(event.sender, null, randomUUID()));
@@ -320,9 +307,6 @@ async function rememberRecentProject(services: ProjectFileServices, path: string
   try {
     await recordRecentProject(recentStore(services), path);
   } catch (error) {
-    if (!isSystemError(error)) {
-      throw error;
-    }
     console.error('The recent projects could not be recorded:', error);
   }
 }

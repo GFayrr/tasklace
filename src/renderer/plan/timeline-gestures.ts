@@ -26,14 +26,14 @@ export interface LinkHandle {
 export type DragPreview =
   | {
       readonly kind: 'move';
-      readonly shape: RowShape;
+      readonly shape: PlacedShape;
       readonly offset: number;
       readonly block: number | null;
     }
   | { readonly kind: 'stretch'; readonly shape: BarShape; readonly offset: number }
   | {
       readonly kind: 'link';
-      readonly shape: RowShape;
+      readonly shape: PlacedShape;
       readonly block: number | null;
       readonly pointer: Point;
       readonly target: LinkTarget | null;

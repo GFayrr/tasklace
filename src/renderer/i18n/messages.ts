@@ -8,6 +8,10 @@ export type Language = 'en';
 export type ShownFailureCode = Exclude<ActionFailure['code'], 'CANCELLED'>;
 export type EditRefusal = DetailsError | ValidationIssueCode;
 
+type KnownEditErrors = {
+  readonly [Key in keyof Messages['editErrors']]: Key extends EditRefusal ? string : never;
+};
+
 export interface PluralMessage {
   readonly one: string;
   readonly other: string;
@@ -48,9 +52,10 @@ export function countMessage(message: PluralMessage, count: number, locale: stri
   return fillMessage(form, { count: new Intl.NumberFormat(locale).format(count) });
 }
 
-/** Returns the message telling the user why a change was refused: its own text when the refusal has one, otherwise the text of the problem found, every code having a text checked at compile time. */
+/** Returns the message telling the user why a change was refused: its own text when the refusal has one, otherwise the text of the problem found, every code having a text and every text a code, both checked at compile time. */
 export function editErrorMessage(messages: Messages, code: EditRefusal): string {
-  const edits: Readonly<Record<DetailsError, string>> = messages.editErrors;
+  const edits: Readonly<Record<DetailsError, string>> =
+    messages.editErrors satisfies KnownEditErrors;
   const issues: Readonly<Record<ValidationIssueCode, string>> = messages.issues;
   return isDetailsError(edits, code) ? edits[code] : issues[code];
 }

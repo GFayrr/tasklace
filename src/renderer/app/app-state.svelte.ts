@@ -23,7 +23,7 @@ import {
   type EditRefusal,
   type Messages,
 } from '../i18n/messages';
-import type { EditableColumn } from '../plan/cell-editing';
+import type { CurrentSchedule, EditableColumn } from '../plan/cell-editing';
 import {
   buildPlanOutline,
   NOTHING_COLLAPSED,
@@ -50,6 +50,7 @@ import { buildNewProject } from '../project/new-project';
 import {
   createProjectFiles,
   FileActionError,
+  type ActionFailure,
   type ActionResult,
   type OpenedSession,
   type ProjectFiles,
@@ -76,6 +77,11 @@ export type ClosePrompt =
 
 type CloseQuestion =
   { readonly reason: 'unsaved' } | { readonly reason: 'saveFailed'; readonly detail: string };
+
+interface ComputedSchedule {
+  readonly project: Project;
+  readonly schedule: Schedule | null;
+}
 
 type CloseDecision = 'proceed' | 'discarded' | 'canceled';
 
@@ -110,8 +116,8 @@ export interface AppContext {
 /** Holds what the interface shows: the open project, its schedule, whether it is saved, what can be undone and the messages for the user. */
 export class AppState {
   #project = $state.raw<Project | null>(null);
-  #schedule = $state.raw<Schedule | null>(null);
-  #scheduledProject = $state.raw<Project | null>(null);
+  #computed = $state.raw<ComputedSchedule | null>(null);
+  #scheduleStopped = $state(false);
   #saveStatus = $state<SaveStatus>('saved');
   #hasFile = $state(false);
   #canUndo = $state(false);
@@ -172,6 +178,7 @@ export class AppState {
       },
       failed: (error) => {
         console.error('The schedule could not be computed:', error);
+        this.#scheduleStopped = true;
         this.#notify('error', this.messages.notices.scheduleStopped, null, true);
       },
     });
@@ -182,17 +189,21 @@ export class AppState {
     return this.#project;
   }
 
-  /** Returns the schedule of the open project, or null while none is computed. */
+  /** Returns the schedule shown, the latest computed for the open project even when older than its latest change, or null when none is computed or the latest computation failed. */
   get schedule(): Schedule | null {
-    return this.#schedule;
+    return this.#computed?.schedule ?? null;
   }
 
-  /** Returns the schedule computed for the project as it is now, or null while the schedule shown is older than the latest change, so that a gesture never relies on dates already out of date. */
-  get currentSchedule(): Schedule | null {
-    return this.#scheduledProject === this.#project ? this.#schedule : null;
+  /** Returns the schedule computed for the project as it is now, null when that computation failed, or why an edit relying on the dates must wait: the schedule is still being computed after the latest change, or it stopped and needs another change. */
+  get currentSchedule(): CurrentSchedule {
+    const computed = this.#computed;
+    if (computed?.project === this.#project) {
+      return { ok: true, value: computed.schedule };
+    }
+    return { ok: false, error: this.#scheduleStopped ? 'SCHEDULE_STOPPED' : 'SCHEDULE_PENDING' };
   }
 
-  /** Returns whether the open project is saved. */
+  /** Returns the save status of the open project. */
   get saveStatus(): SaveStatus {
     return this.#saveStatus;
   }
@@ -687,7 +698,7 @@ export class AppState {
   #attach(session: SharedSession): void {
     this.#session?.document.off('update', this.#queueRefresh);
     this.#session = session;
-    this.#schedule = null;
+    this.#computed = null;
     this.selectedTaskId = null;
     this.editRequest = null;
     this.detailsTaskId = null;
@@ -724,6 +735,7 @@ export class AppState {
     this.#hasFile = this.#files.hasFile();
     this.#canUndo = session.history.canUndo();
     this.#canRedo = session.history.canRedo();
+    this.#scheduleStopped = false;
     this.#scheduler.request(project);
     if (this.selectedTaskId !== null && !this.outline.wbsById.has(this.selectedTaskId)) {
       this.selectedTaskId = null;
@@ -735,13 +747,10 @@ export class AppState {
     if (project !== this.project) {
       return;
     }
+    this.#computed = { project, schedule: result.ok ? result.value : null };
     if (!result.ok) {
-      this.#schedule = null;
       this.#showScheduleFailure(result.error, project);
-      return;
     }
-    this.#schedule = result.value;
-    this.#scheduledProject = project;
   }
 
   /** Tells the user why the schedule of a project could not be computed, with each problem and the task it concerns, and logs the cause. */
@@ -832,10 +841,29 @@ export class AppState {
     if (text === null) {
       return;
     }
-    const issues = 'issues' in result.error ? result.error.issues : [];
-    const report =
-      issues.length === 0 ? null : this.#issueReport(this.messages.report.fileFailed, issues);
-    this.#notify('error', text, report);
+    this.#notify('error', text, this.#failureReport(result.error));
+  }
+
+  /** Lists why a file action failed: the problems found in a file, or for a project that could not be saved before another, the failure of that save and its problems, or null when there is nothing more to tell. */
+  #failureReport(failure: ActionFailure): Report | null {
+    if (failure.code === 'UNSAVED_PROJECT') {
+      return failure.cause === null ? null : this.#causeReport(failure.cause);
+    }
+    const issues = 'issues' in failure ? failure.issues : [];
+    return issues.length === 0 ? null : this.#issueReport(this.messages.report.fileFailed, issues);
+  }
+
+  /** Lists the failure of the save that kept the open project, then the problems it found. */
+  #causeReport(cause: ActionFailure): Report {
+    const issues = 'issues' in cause ? cause.issues : [];
+    const reason = fileErrorMessage(this.messages, cause.code);
+    return {
+      title: this.messages.report.saveFailed,
+      entries: [
+        ...(reason === null ? [] : [reason]),
+        ...issues.map((issue) => issueText(this.messages, issue)),
+      ],
+    };
   }
 
   /** Tells the user that the project now starts earlier, so that a task placed before it fits. */

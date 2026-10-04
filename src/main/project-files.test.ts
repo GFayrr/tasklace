@@ -18,6 +18,19 @@ const dialogs = vi.hoisted(() => ({
   window: { value: null as object | null },
 }));
 
+const recording = vi.hoisted((): { failure: Error | null } => ({ failure: null }));
+
+vi.mock('./recent-projects', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./recent-projects')>();
+  return {
+    ...original,
+    recordRecentProject: (...values: Parameters<typeof original.recordRecentProject>) =>
+      recording.failure === null
+        ? original.recordRecentProject(...values)
+        : Promise.reject(recording.failure),
+  };
+});
+
 vi.mock('electron', async () => {
   const fakes = await import('./testing/fake-electron');
   return {
@@ -194,6 +207,28 @@ describe('opening projects', () => {
     expect(listed.logged).toEqual([
       ['The recent projects could not be read:', expect.objectContaining({ code: 'EISDIR' })],
     ]);
+  });
+
+  it('keeps an adoption and a save that happened when recording the recent project fails unexpectedly, logging why', async () => {
+    const broken = new TypeError('recent list broken');
+    recording.failure = broken;
+    try {
+      let sender: object = {};
+      const opened = await quietly(async () => {
+        sender = await openedIn(join(folder, 'Plan.tasklace'));
+      });
+      expect(opened.logged).toEqual([['The recent projects could not be recorded:', broken]]);
+      chooseToSave(join(folder, 'Copy.tasklace'));
+      const saved = await quietly(() => request(IPC_CHANNELS.saveProjectAs, sender, STATE, 'Copy'));
+      expect(saved).toEqual({
+        answer: success({ localCopySaved: true }),
+        logged: [['The recent projects could not be recorded:', broken]],
+      });
+      await request(IPC_CHANNELS.saveProject, sender, STATE);
+      expect(tasks.at(-1)).toMatchObject({ path: join(folder, 'Copy.tasklace') });
+    } finally {
+      recording.failure = null;
+    }
   });
 
   it('turns an unexpected failure into a task failure, logging it, but lets a refusal through', async () => {

@@ -44,7 +44,9 @@ export type EditError =
   | 'LINKS_WOULD_MERGE'
   | 'WAITS_NEED_TWO_BLOCKS'
   | 'TASK_CHANGED'
-  | 'SCHEDULE_PENDING';
+  | ScheduleRefusal;
+
+export type ScheduleRefusal = 'SCHEDULE_PENDING' | 'SCHEDULE_STOPPED';
 
 export type Edit = Result<readonly SharedOperation[], EditError>;
 

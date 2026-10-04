@@ -12,7 +12,7 @@
 
   let { app }: { app: AppState } = $props();
 
-  /** Runs the action of a keyboard shortcut, leaving undo and redo to a text field being edited, and none while a file action or a dialog is open. */
+  /** Runs the action of a keyboard shortcut, leaving undo and redo to a text field being edited and committing that field first for any other action, and runs none while a file action runs or a dialog is open. */
   function handleKey(event: KeyboardEvent): void {
     const target = event.target;
     const isEditingText =
@@ -30,6 +30,9 @@
       return;
     }
     event.preventDefault();
+    if (isEditingText) {
+      target.blur();
+    }
     void app.run(command);
   }
 </script>

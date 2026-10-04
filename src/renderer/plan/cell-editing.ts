@@ -4,7 +4,7 @@ import { predecessorText } from './plan-outline';
 import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
 import { formatDateTime, parseDateTime } from '../../core/civil-format';
 import { formatTableDateTime } from './table-dates';
-import { failure } from '../../core/result';
+import { failure, type Result } from '../../core/result';
 import { MINUTES_PER_QUARTER, QUARTER_HOUR, type ProjectHour } from '../../core/time';
 import { durationEditorText } from './durations';
 import {
@@ -17,6 +17,7 @@ import {
   setStart,
   type Edit,
   type EditContext,
+  type ScheduleRefusal,
 } from './task-commands';
 
 const PICKER_PATTERN = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/;
@@ -34,8 +35,11 @@ export const EDITABLE_COLUMNS: readonly EditableColumn[] = [
   'tag',
 ];
 
+export type CurrentSchedule = Result<Schedule | null, ScheduleRefusal>;
+
 export interface CellSource {
   readonly schedule: Schedule | null;
+  readonly current: CurrentSchedule;
   readonly calendar: CompiledCalendar | null;
   readonly incoming: ReadonlyMap<TaskId, readonly Dependency[]>;
   readonly wbsById: ReadonlyMap<TaskId, string>;
@@ -90,7 +94,9 @@ export function cellEdit(
     case 'duration':
       return setDuration(context, id, text);
     case 'start':
-      return setStart(context, id, text, source.schedule?.placements.get(id)?.start ?? null);
+      return source.current.ok
+        ? setStart(context, id, text, source.current.value?.placements.get(id)?.start ?? null)
+        : source.current;
     case 'end':
       return endEdit(context, id, text, source);
     case 'progress':
@@ -110,7 +116,10 @@ export function nextColumn(column: EditableColumn, step: -1 | 1): EditableColumn
 
 /** Builds the change a typed end asks for, which needs the schedule to know where the last block starts. */
 function endEdit(context: EditContext, id: TaskId, text: string, source: CellSource): Edit {
-  const lastBlock = source.schedule?.placements.get(id)?.segments.at(-1);
+  if (!source.current.ok) {
+    return source.current;
+  }
+  const lastBlock = source.current.value?.placements.get(id)?.segments.at(-1);
   if (lastBlock === undefined || source.calendar === null) {
     return failure('NOT_POSSIBLE');
   }

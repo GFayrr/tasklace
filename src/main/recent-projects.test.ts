@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -86,6 +86,37 @@ describe('recent projects', () => {
     await recordRecentProject(store, B);
     expect(await readRecentProjects(store)).toEqual([B, A]);
     expect(await readdir(folder)).toEqual(['recent-projects.json']);
+  });
+
+  it('keeps a store with a malformed entry aside and writes its valid entries back at once, so that they stay listed', async () => {
+    const store = join(folder, 'recent-projects.json');
+    await writeFile(store, JSON.stringify({ version: 1, paths: [A, 'relative/plan.tasklace', B] }));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await readRecentProjects(store)).toEqual([A, B]);
+      expect(logged).toHaveBeenCalledTimes(1);
+    } finally {
+      logged.mockRestore();
+    }
+    expect(await readRecentProjects(store)).toEqual([A, B]);
+    expect(JSON.parse(await readFile(store, 'utf8'))).toEqual({ version: 1, paths: [A, B] });
+  });
+
+  it('logs a repaired list that cannot be written back, still giving its valid entries', async () => {
+    const store = join(folder, 'recent-projects.json');
+    await writeFile(store, JSON.stringify({ version: 1, paths: [A, 3] }));
+    await chmod(folder, 0o500);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await readRecentProjects(store)).toEqual([A]);
+      expect(logged.mock.calls.map((call): unknown => call[0])).toEqual([
+        'The list of recent projects was damaged, could not be kept aside and is replaced:',
+        'The repaired list of recent projects could not be written:',
+      ]);
+    } finally {
+      logged.mockRestore();
+      await chmod(folder, 0o700);
+    }
   });
 
   it('keeps a damaged store aside before it is rewritten, logging where', async () => {

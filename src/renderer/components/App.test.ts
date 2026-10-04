@@ -73,6 +73,24 @@ describe('App', () => {
     expect(press(window, 'q', { ctrlKey: true })).toBe(true);
   });
 
+  it('commits the cell being edited before a file shortcut, so that the save holds the typed value', async () => {
+    const { app, root, control } = await renderApp(true);
+    const grid = single(root, '[role="grid"]');
+    app.selectedTaskId = 'a';
+    update();
+    press(grid, 'Enter');
+    await settle();
+    const input = single(root, 'input.editor') as HTMLInputElement;
+    input.focus();
+    input.value = 'Typed before saving';
+    expect(press(input, 's', { ctrlKey: true })).toBe(false);
+    await settle();
+    expect(app.project?.tasks.find((task) => task.id === 'a')?.name).toBe('Typed before saving');
+    expect(app.notices).toEqual([]);
+    expect(control.saved).toEqual([{ as: false, name: 'Thesis' }]);
+    expect(root.querySelector('input.editor')).toBeNull();
+  });
+
   it('makes the toolbar and the workspace inert and ignores the shortcuts while a file action runs', async () => {
     const { app, root, control, context } = await renderApp(true);
     const shell = single(root, '.shell');
@@ -265,7 +283,7 @@ describe('Workspace', () => {
     scheduler.automatic = false;
     expect(app.rename('Renamed')).toBe(true);
     await settle();
-    expect(app.currentSchedule).toBeNull();
+    expect(app.currentSchedule).toEqual({ ok: false, error: 'SCHEDULE_PENDING' });
     expect(app.schedule).not.toBeNull();
     const middle = shape.row * ROW_HEIGHT + ROW_HEIGHT / 2;
     const x = shape.start + 4 - scrollLeft;
@@ -284,7 +302,7 @@ describe('Workspace', () => {
       throw new Error('The project closed.');
     }
     scheduler.listener().scheduled(scheduleProject(latest), latest);
-    expect(app.currentSchedule).toBe(app.schedule);
+    expect(app.currentSchedule).toEqual({ ok: true, value: app.schedule });
     dragTo(x, x + 24 * pixelsPerHour('day'));
     await settle();
     expect(app.project?.tasks.find((task) => task.id === 'b')).toMatchObject({

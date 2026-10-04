@@ -10,7 +10,7 @@ export interface RecentStoreReading {
 
 const STORE_VERSION = 1;
 
-/** Parses the untrusted text of the recent projects store, keeping only well-formed absolute paths, normalized and each once, and tells whether anything had to be dropped, an empty text, as read for a missing store, counting as undamaged. */
+/** Parses the untrusted text of the recent projects store, keeping only well-formed absolute paths, normalized and each once within the limit, and tells whether it was damaged, that is unreadable or holding a malformed entry, an empty text, as read for a missing store, counting as undamaged. */
 export function readRecentStore(text: string): RecentStoreReading {
   if (text === '') {
     return { paths: [], damaged: false };
@@ -42,11 +42,14 @@ export function formatRecentProjects(paths: readonly string[]): string {
   return JSON.stringify({ version: STORE_VERSION, paths });
 }
 
-/** Reads the recent projects from their store, a missing store meaning none, and sets a damaged store aside before it is rewritten. */
+/** Reads the recent projects from their store, a missing store meaning none, and sets a damaged store aside then writes its valid entries back at once, so that the next reading finds them, a failed write being only logged. */
 export async function readRecentProjects(storePath: string): Promise<string[]> {
   const { paths, damaged } = readRecentStore(await readStoredText(storePath));
   if (damaged) {
     await setDamagedFileAside(storePath, new Date(), 'The list of recent projects');
+    await writeFileSafely(storePath, formatRecentProjects(paths)).catch((error: unknown) => {
+      console.error('The repaired list of recent projects could not be written:', error);
+    });
   }
   return paths;
 }

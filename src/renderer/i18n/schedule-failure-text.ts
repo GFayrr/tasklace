@@ -69,7 +69,7 @@ function structureEntry(
   return fillMessage(places.placed, { place, reason });
 }
 
-/** Names a task by its name when it has one, or by its position. */
+/** Names a task by its name when it is found in the project, or by its position. */
 function namedTask(messages: Messages, name: string | null, number: string): string {
   const places = messages.issuePlaces;
   return name === null

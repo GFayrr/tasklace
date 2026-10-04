@@ -76,6 +76,7 @@ describe('isSystemError', () => {
     const coded = (code: unknown) => Object.assign(new Error('x'), { code });
     expect(isSystemError(coded('ENOENT'))).toBe(true);
     expect(isSystemError(coded('EACCES'))).toBe(true);
+    expect(isSystemError(coded('UNKNOWN'))).toBe(true);
     expect(isSystemError(coded('ERR_INVALID_ARG_TYPE'))).toBe(false);
     expect(isSystemError(coded('ERR_WORKER_OUT_OF_MEMORY'))).toBe(false);
     expect(isSystemError(coded(2))).toBe(false);

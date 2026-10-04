@@ -266,7 +266,7 @@ function dailyStartOf(
   return starts[pick % Math.max(choices, 1)] ?? null;
 }
 
-/** Builds a baseline plan freezing every task of a project at the same dates, with an entry for a task deleted since when asked, or none. */
+/** Builds a baseline plan freezing every task of a project at the same dates, with an entry for a task deleted since when asked, or no baseline when no shape is given. */
 function baselineOf(
   base: Project,
   shape: {
@@ -292,7 +292,7 @@ function baselineOf(
   };
 }
 
-/** Generates projects using every feature a file can hold: tags, some of them people or teams, date constraints enabled or not, daily start times, Unicode names, summaries nested up to the deepest allowed level and a baseline plan, some of whose entries name deleted tasks. */
+/** Generates projects using every feature a file can hold: tags, some of them people or teams, date constraints enabled or not, daily start times, Unicode names, summaries nested up to the deepest allowed level and an optional baseline plan, sometimes with an entry for a deleted task. */
 export const richProjectArbitrary: fc.Arbitrary<GeneratedProject> = projectArbitrary.chain(
   ({ project: base }) =>
     fc

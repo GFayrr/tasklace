@@ -1,13 +1,12 @@
-import type {
-  DateOrder,
-  DateSeparator,
-  RegionalFormat,
+import {
+  DATE_SEPARATORS,
+  type DateOrder,
+  type RegionalFormat,
 } from '../core/exchange/csv/regional-format';
 
 const SAMPLE_DATE = new Date(Date.UTC(2026, 9, 5, 14));
 const SAMPLE_DECIMAL = 1.5;
 const DECIMAL_COMMA = ',';
-const DATE_SEPARATORS: readonly DateSeparator[] = ['/', '.', '-'];
 const TWELVE_HOUR_CYCLES: readonly string[] = ['h11', 'h12'];
 const ORDERS: Readonly<Record<string, DateOrder>> = {
   'day,month,year': 'dayMonthYear',

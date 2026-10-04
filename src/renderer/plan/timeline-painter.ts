@@ -622,7 +622,7 @@ function paintPreview(context: CanvasRenderingContext2D, scene: TimelineScene): 
     context.lineTo(x - half, middle);
     context.closePath();
     context.stroke();
-  } else if (preview.shape.kind === 'task') {
+  } else {
     const span = previewSpan(preview.shape, preview);
     roundedRectangle(
       context,

@@ -103,7 +103,7 @@ describe('the bridge exposed to the page', () => {
     expect(await bridge.newProject()).toBe('11111111-1111-4111-8111-111111111111');
   });
 
-  it('keeps only well-formed recent projects, none from a value that is not a list, and passes a failure through, logging each unexpected answer', async () => {
+  it('keeps only well-formed recent projects, refuses a value that is not a list, and passes a failure through, logging each unexpected answer', async () => {
     const bridge = await loadBridge();
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
@@ -120,7 +120,7 @@ describe('the bridge exposed to the page', () => {
       });
       const single = { name: 'Plan', folder: '/projects' };
       electron.invoke.mockResolvedValueOnce({ ok: true, value: single });
-      expect(await bridge.recentProjects()).toEqual({ ok: true, value: [] });
+      expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
       electron.invoke.mockResolvedValueOnce({ ok: true, value: [single] });
       expect(await bridge.recentProjects()).toEqual({ ok: true, value: [single] });
       electron.invoke.mockResolvedValueOnce({ ok: false, error: { code: 'READ_FAILED' } });
@@ -129,7 +129,7 @@ describe('the bridge exposed to the page', () => {
       expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
       expect(logged.mock.calls).toEqual([
         ['The main process sent recent projects of an unexpected shape:', entries],
-        ['The main process sent recent projects of an unexpected shape:', single],
+        ['The main process sent recent projects that are not a list:', single],
         [
           `The main process answered ${IPC_CHANNELS.recentProjects} with an unexpected shape:`,
           [single],

@@ -32,7 +32,10 @@ export type ProjectBridge = Pick<
 
 export type PageFailureCode = 'BUSY' | 'UNSAVED_PROJECT';
 
-export type ActionFailure = FileFailure | { readonly code: PageFailureCode };
+export type ActionFailure =
+  | FileFailure
+  | { readonly code: 'BUSY' }
+  | { readonly code: 'UNSAVED_PROJECT'; readonly cause: ActionFailure | null };
 
 export type ActionResult<T> =
   { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: ActionFailure };
@@ -153,7 +156,8 @@ export function createProjectFiles(
       return { ok: true, value: null };
     } catch (error) {
       console.error('The open project could not be saved before another replaced it:', error);
-      return { ok: false, error: { code: 'UNSAVED_PROJECT' } };
+      const cause = error instanceof FileActionError ? error.failure : null;
+      return { ok: false, error: { code: 'UNSAVED_PROJECT', cause } };
     }
   };
   const adopt = async (document: Y.Doc, hasFile: boolean): Promise<ActionResult<SharedSession>> => {

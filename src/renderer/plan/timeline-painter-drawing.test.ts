@@ -15,7 +15,7 @@ import { SAND_GRAPHITE } from '../theme/sand-graphite';
 import { buildPlanOutline } from './plan-outline';
 import { paleColor, tagStylesOf } from './tag-styles';
 import { callsOf, recordingCanvas, type CanvasCall } from './testing/recording-canvas';
-import type { DragPreview } from './timeline-gestures';
+import type { DragPreview, PlacedShape } from './timeline-gestures';
 import { linkHandles } from './timeline-gestures';
 import {
   BAR_HEIGHT,
@@ -103,6 +103,15 @@ function shapeOf(id: string): RowShape {
   const shape = row === undefined ? null : rowShape(row, index, SCHEDULE, FRAME);
   if (shape === null) {
     throw new Error(`No shape for ${id}`);
+  }
+  return shape;
+}
+
+/** Returns the shape of a task or milestone, failing the test for a summary. */
+function placedShapeOf(id: string): PlacedShape {
+  const shape = shapeOf(id);
+  if (shape.kind === 'summary') {
+    throw new Error(`${id} is a summary`);
   }
   return shape;
 }
@@ -291,21 +300,17 @@ describe('drag previews', () => {
     }
   });
 
-  it('outlines where a moved milestone would go, and draws nothing for a dragged summary', () => {
-    const milestoneShape = shapeOf('m');
-    const moved = dashed({ kind: 'move', shape: milestoneShape, offset: 12, block: null });
+  it('outlines where a moved milestone would go', () => {
+    const moved = dashed({ kind: 'move', shape: placedShapeOf('m'), offset: 12, block: null });
     expect(callsOf(moved, 'closePath')).toHaveLength(1);
-    const summaryMove = dashed({ kind: 'move', shape: shapeOf('s'), offset: 12, block: null });
-    expect(summaryMove.filter((call) => call.name !== 'save' && call.name !== 'restore')).toEqual(
-      [],
-    );
+    expect(callsOf(moved, 'strokeRect')).toEqual([]);
   });
 
   it('draws a dragged link to the pointer, framing the row and block it would be dropped on', () => {
     const target = taskShapeOf('b');
     const calls = dashed({
       kind: 'link',
-      shape: shapeOf('c'),
+      shape: placedShapeOf('c'),
       block: null,
       pointer: { x: 300, y: 50 },
       target: { row: target.row, end: { taskId: 'b', block: 1 } },
@@ -321,7 +326,7 @@ describe('drag previews', () => {
   it('frames only the row of a dragged link over a task without that block, and nothing without a row', () => {
     const over = dashed({
       kind: 'link',
-      shape: shapeOf('c'),
+      shape: placedShapeOf('c'),
       block: null,
       pointer: { x: 10, y: 10 },
       target: { row: shapeOf('m').row, end: { taskId: 'm', block: 0 } },
@@ -329,7 +334,7 @@ describe('drag previews', () => {
     expect(callsOf(over, 'strokeRect')).toHaveLength(1);
     const nowhere = dashed({
       kind: 'link',
-      shape: shapeOf('c'),
+      shape: placedShapeOf('c'),
       block: null,
       pointer: { x: 10, y: 10 },
       target: null,

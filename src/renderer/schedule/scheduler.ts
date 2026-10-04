@@ -28,7 +28,7 @@ interface InFlight {
 
 export const MAX_SCHEDULE_RETRIES = 1;
 
-/** Computes schedules in a worker, one at a time, keeping only the latest project asked meanwhile, so that no result older than the latest change is ever shown; a worker that fails or sends an unreadable answer is replaced and asked again for the latest project, and a failure repeated past the retry limit, or a worker that cannot be started or sent a project, is reported, the next change trying again. */
+/** Computes schedules in a worker started at the first request, one at a time, keeping only the latest project asked meanwhile, so that no result older than the latest change is ever shown; a worker that fails or sends an unreadable answer is replaced and asked again for the latest project, and a failure repeated past the retry limit, or a worker that cannot be started or sent a project, is reported, the next change trying again. */
 export function createScheduler(
   createPort: () => SchedulePort,
   listener: ScheduleListener,
@@ -114,7 +114,6 @@ export function createScheduler(
     };
     return created;
   };
-  port = connect(createPort());
   return {
     request: (project) => {
       if (inFlight === null) {

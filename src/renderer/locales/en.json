@@ -31,7 +31,7 @@
     "WRONG_DOCUMENT": "The project was not saved because this window no longer matches its file. Export the project as JSON to keep your changes, then open it again.",
     "INVALID_STATE": "The project was not saved because it contains an error Tasklace could not repair. Export the project as JSON to keep your changes.",
     "BUSY": "Wait until the current file action is finished, then try again.",
-    "UNSAVED_PROJECT": "The open project could not be saved, so nothing else was opened. Save it under another name first."
+    "UNSAVED_PROJECT": "The open project could not be saved, so nothing else was opened. See the details, then save it again or under another name."
   },
   "app": {
     "name": "Tasklace",
@@ -174,6 +174,7 @@
     "WAITS_NEED_TWO_BLOCKS": "A task with a single block cannot wait apart from itself. Write what it waits for in Predecessors.",
     "TASK_CHANGED": "This task changed while its details were open. Close them and open them again.",
     "SCHEDULE_PENDING": "The dates are still being updated after the last change. Try again in a moment.",
+    "SCHEDULE_STOPPED": "The dates could not be updated after the last change. Change a value in the table to compute them again, then try again.",
     "UNKNOWN_TASK_NUMBER": "There is no task with this number.",
     "DEPENDENCY_CYCLE": "This link would make tasks wait for each other in a loop.",
     "SUMMARY_DEPENDENCY": "Summary tasks cannot be linked. Link the tasks inside them.",
@@ -187,8 +188,7 @@
     "INVALID_BLOCK": "Write the duration of each block, such as 4 h or 1 h 30.",
     "INVALID_GAP": "Write the days between two blocks as a whole number, 0 for the same day.",
     "INVALID_HOURS_PER_DAY": "Hours per day go from 1 hour to the length of a working day, by quarter hours.",
-    "INVALID_DAILY_START": "Write the daily start time as 13:30, on a quarter hour, leaving enough working hours after it.",
-    "DAILY_START_HOUR_CLEARED": "Write the daily start time as 13:30, on a quarter hour, leaving enough working hours after it."
+    "INVALID_DAILY_START": "Write the daily start time as 13:30, on a quarter hour, leaving enough working hours after it."
   },
   "durations": {
     "hours": "{hours} h",
@@ -380,6 +380,7 @@
   },
   "report": {
     "fileFailed": "Why the file could not be read",
+    "saveFailed": "Why the open project could not be saved",
     "importWarnings": "What changed during the import",
     "repairs": "What was adjusted",
     "close": "Close",

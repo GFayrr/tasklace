@@ -172,7 +172,10 @@ describe('createProjectFiles', () => {
     expect(failures).toEqual([new FileActionError({ code: 'WRITE_FAILED' })]);
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      expect(await files.open()).toEqual({ ok: false, error: { code: 'UNSAVED_PROJECT' } });
+      expect(await files.open()).toEqual({
+        ok: false,
+        error: { code: 'UNSAVED_PROJECT', cause: { code: 'WRITE_FAILED' } },
+      });
       expect(logged).toHaveBeenCalledWith(
         'The open project could not be saved before another replaced it:',
         new FileActionError({ code: 'WRITE_FAILED' }),
@@ -284,7 +287,7 @@ describe('createProjectFiles', () => {
     try {
       expect(await files.create(SAMPLE)).toEqual({
         ok: false,
-        error: { code: 'UNSAVED_PROJECT' },
+        error: { code: 'UNSAVED_PROJECT', cause: { code: 'WRITE_FAILED' } },
       });
       expect(logged).toHaveBeenCalledTimes(1);
     } finally {
@@ -364,10 +367,10 @@ describe('createProjectFiles', () => {
     finish(SAVED);
     await saving;
     expect(statuses.at(-1)).toBe('unsaved');
-    const cancelling = files.saveAs();
+    const canceling = files.saveAs();
     await settle();
     finish({ ok: false, error: { code: 'CANCELLED' } });
-    expect(await cancelling).toEqual({ ok: false, error: { code: 'CANCELLED' } });
+    expect(await canceling).toEqual({ ok: false, error: { code: 'CANCELLED' } });
     expect(statuses.at(-1)).toBe('unsaved');
     expect(files.hasFile()).toBe(true);
   });
@@ -438,7 +441,10 @@ describe('createProjectFiles', () => {
     const opening = files.open();
     await settle();
     fail({ ok: false, error: { code: 'WRITE_FAILED' } });
-    expect(await opening).toEqual({ ok: false, error: { code: 'UNSAVED_PROJECT' } });
+    expect(await opening).toEqual({
+      ok: false,
+      error: { code: 'UNSAVED_PROJECT', cause: { code: 'WRITE_FAILED' } },
+    });
     expect(events).toEqual(['adopt', 'save']);
     expect(files.session()).toBe(session);
     expect(failures).toEqual([new FileActionError({ code: 'WRITE_FAILED' })]);

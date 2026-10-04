@@ -241,7 +241,7 @@ function currentProject(session: SessionState): Project {
   return session.project;
 }
 
-/** Checks an operation on the indexed state and writes only what it touched to the document, the state matching the document again when either raises. */
+/** Checks an operation on the indexed state and writes only what it touched to the document, the state matching the document again when the check or the write raises. */
 function applyOperationToSession(
   session: SessionState,
   document: Y.Doc,
@@ -258,26 +258,42 @@ function applyOperationToSession(
     }, LOCAL_ORIGIN);
     return success(undefined);
   } catch (error) {
-    resetState(session, document);
-    throw error;
+    throwAfterReset(session, document, error);
   }
 }
 
-/** Checks operations one after another on the indexed state and writes all they touched in one change, or nothing at all when one of them is refused or raises, the state then matching the document again. */
+/** Checks operations one after another on the indexed state and writes all they touched in one change, or nothing at all when one of them is refused or raises before the writing, the state matching the document again whenever something raises. */
 function applyOperationsToSession(
   session: SessionState,
   document: Y.Doc,
   operations: readonly SharedOperation[],
 ): Result<void, ValidationIssues> {
+  let written: Result<void, ValidationIssues>;
   try {
-    return writeOperations(session, document, operations);
+    written = writeOperations(session, document, operations);
   } catch (error) {
-    resetState(session, document);
-    throw error;
+    throwAfterReset(session, document, error);
   }
+  if (!written.ok) {
+    resetState(session, document);
+  }
+  return written;
 }
 
-/** Applies operations to the indexed state, then writes what they touched to the document, putting the state back as the document holds it when one is refused. */
+/** Puts the indexed state back as the document holds it after a change raised, then raises that error again, or both errors together when the document no longer holds a valid project either. */
+function throwAfterReset(session: SessionState, document: Y.Doc, error: unknown): never {
+  try {
+    resetState(session, document);
+  } catch (resetError) {
+    throw new AggregateError(
+      [error, resetError],
+      'A change to the session failed, and its document could not be read back.',
+    );
+  }
+  throw error;
+}
+
+/** Applies operations to the indexed state, then writes what they touched to the document, stopping at the first one refused, the state then still holding the operations checked before it. */
 function writeOperations(
   session: SessionState,
   document: Y.Doc,
@@ -292,7 +308,6 @@ function writeOperations(
   for (const operation of operations) {
     const checked = applyToState(session.state, operation);
     if (!checked.ok) {
-      resetState(session, document);
       return checked;
     }
     addTouched(all, checked.value);
@@ -365,7 +380,7 @@ function mergeIntoSession(
   return merged;
 }
 
-/** Applies an update to the trial copy and checks and repairs it, collecting the repairs written there, an exception raised by the bytes being a malformed update and one raised while repairing a failed repair. */
+/** Applies an update to the trial copy and checks and repairs it, collecting the repairs written there, an exception raised by the bytes being a malformed update, and one raised during the repair a failed repair. */
 function tryMerge(
   session: SessionState,
   update: Uint8Array,

@@ -111,4 +111,23 @@ describe('a session whose change fails partway', () => {
       session.applyAll([adding('c', 'Valid'), { type: 'updateProject', fields: { name: '' } }]),
     ).toThrow('The shared document of the session no longer holds a valid project.');
   });
+
+  it('raises the error of the change and that of the reset together when the document no longer holds a valid project either', () => {
+    const session = openSession();
+    Y.transact(session.document, () => {
+      session.document.getMap('project').set('name', 42);
+    });
+    failing.name = EXPLODING;
+    let raised: unknown = null;
+    try {
+      session.apply(adding('c', EXPLODING));
+    } catch (error) {
+      raised = error;
+    }
+    expect(raised).toBeInstanceOf(AggregateError);
+    expect(raised instanceof AggregateError && raised.errors).toEqual([
+      new Error('operation broken'),
+      new Error('The shared document of the session no longer holds a valid project.'),
+    ]);
+  });
 });
