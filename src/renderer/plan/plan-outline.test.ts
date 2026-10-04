@@ -64,6 +64,9 @@ describe('buildPlanOutline', () => {
           grouped.set(task.parentId, [...(grouped.get(task.parentId) ?? []), task]);
         });
         expect(outline.wbsById).toEqual(computeWbsNumbers(grouped));
+        expect(outline.idByWbs).toEqual(
+          new Map([...outline.wbsById].map(([id, wbs]) => [wbs, id])),
+        );
         expect(outline.rows.map((row) => row.task.id)).toEqual(
           buildPlanOutline(TASKS, new Set()).rows.map((row) => row.task.id),
         );

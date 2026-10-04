@@ -121,13 +121,8 @@ async function openProject(path: string): Promise<FileTaskResult> {
   if (!read.ok) {
     return failure(read.error);
   }
-  const { document, documentId } = read.value;
-  return success({
-    kind: 'loaded',
-    state: Y.encodeStateAsUpdate(document),
-    documentId,
-    warnings: [],
-  });
+  const { state, documentId } = read.value;
+  return success({ kind: 'loaded', state, documentId, warnings: [] });
 }
 
 /** Reads a text file strictly as UTF-8, keeping its byte order mark for the importer, and imports it. */

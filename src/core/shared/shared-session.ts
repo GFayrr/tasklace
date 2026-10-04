@@ -122,23 +122,27 @@ const HISTORY_ROOTS = [PROJECT_ROOT, TASKS_ROOT, DEPENDENCIES_ROOT, TAGS_ROOT] a
 
 type SharedType = Y.Transaction['changed'] extends Map<infer Type, unknown> ? Type : never;
 
-/** Opens a session on a valid shared document, clearing and reporting references to missing tags, and keeps a validated, indexed copy of its project and a trial copy of the document. */
+/** Opens a session on a valid shared document, clearing and reporting references to missing tags, and keeps a validated, indexed copy of its project and a trial copy of the document, decoded from the state the document was just decoded from when one is given, which spares encoding it again. */
 export function openSharedSession(
   document: Y.Doc,
+  decodedFrom: Uint8Array | null = null,
 ): Result<SharedSession, readonly ValidationIssue[]> {
   const documentId = readDocumentId(document);
   if (documentId === null) {
     return failure([{ path: DOCUMENT_ID_KEY, code: 'MISSING_FIELD' }]);
   }
   const read = readSharedProject(document);
-  return read.ok ? success(openValidatedSession(document, read.value, documentId)) : read;
+  return read.ok
+    ? success(openValidatedSession(document, read.value, documentId, decodedFrom))
+    : read;
 }
 
-/** Opens a session on a shared document whose project was already read and validated, so that it is not validated twice. */
+/** Opens a session on a shared document whose project was already read and validated, so that it is not validated twice, its trial copy being decoded from the state the document was decoded from when one is given and nothing had to be cleared. */
 export function openValidatedSession(
   document: Y.Doc,
   project: Project,
   documentId: DocumentId,
+  decodedFrom: Uint8Array | null = null,
 ): SharedSession {
   const tagIds = new Set(project.tags.map((tag) => tag.id));
   const tasks = project.tasks.map((task) => withKnownTag(task, (id) => tagIds.has(id)));
@@ -152,7 +156,10 @@ export function openValidatedSession(
   const session: SessionState = {
     documentId,
     state: createProjectState(opened),
-    shadow: copyDocument(document, newRepairClientId(document)),
+    shadow:
+      decodedFrom === null || cleared.length > 0
+        ? copyDocument(document, newRepairClientId(document))
+        : documentFrom(decodedFrom, newRepairClientId(document)),
     project: opened,
     stateChanged: false,
   };
@@ -730,8 +737,13 @@ function sortRepairs(repairs: readonly SharedRepair[]): SharedRepair[] {
 
 /** Copies a document into a new one that writes under a given identity. */
 function copyDocument(document: Y.Doc, clientId: number): Y.Doc {
+  return documentFrom(Y.encodeStateAsUpdate(document), clientId);
+}
+
+/** Decodes a Yjs state into a new document writing under another identity. */
+function documentFrom(state: Uint8Array, clientId: number): Y.Doc {
   const copy = new Y.Doc();
-  Y.applyUpdate(copy, Y.encodeStateAsUpdate(document));
+  Y.applyUpdate(copy, state);
   copy.clientID = clientId;
   return copy;
 }

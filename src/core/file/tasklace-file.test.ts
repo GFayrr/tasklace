@@ -82,6 +82,13 @@ function fileOf(input: Project): Uint8Array {
   return encodeTasklaceFile(createSharedDocument(input, TEST_DOCUMENT_ID), storingCompressor);
 }
 
+/** Decodes a Yjs state into a new document. */
+function documentOf(state: Uint8Array): Y.Doc {
+  const document = new Y.Doc();
+  Y.applyUpdate(document, state);
+  return document;
+}
+
 /** Returns a copy of a file with some header fields or its payload replaced, and a recomputed checksum, as an attacker would. */
 function rewritten(
   file: Uint8Array,
@@ -236,7 +243,7 @@ describe('tasklace file', () => {
       storingCompressor,
     );
     expect(read.ok && read.value.documentId).toBe(TEST_DOCUMENT_ID);
-    expect(read.ok && readSharedData(read.value.document)).toEqual(readSharedData(source));
+    expect(read.ok && readSharedData(documentOf(read.value.state))).toEqual(readSharedData(source));
     const anonymous = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     anonymous.getMap('project').delete('documentId');
     expect(
@@ -245,6 +252,29 @@ describe('tasklace file', () => {
       failure({ code: 'INVALID_PROJECT', issues: [{ path: 'documentId', code: 'MISSING_FIELD' }] }),
     );
   });
+
+  it(
+    'gives a validated state holding exactly the document the file opens, as its encoding would',
+    { timeout: PROPERTY_TEST_TIMEOUT_MS },
+    () => {
+      fc.assert(
+        fc.property(fc.oneof(projectArbitrary, richProjectArbitrary), ({ project: generated }) => {
+          const file = encodeTasklaceFile(
+            createSharedDocument(generated, TEST_DOCUMENT_ID),
+            storingCompressor,
+          );
+          const read = readTasklaceDocument(file, storingCompressor);
+          const opened = readTasklaceFile(file, storingCompressor);
+          if (!read.ok || !opened.ok) {
+            throw new Error('The file was refused.');
+          }
+          expect(Y.encodeStateAsUpdate(documentOf(read.value.state))).toEqual(
+            Y.encodeStateAsUpdate(opened.value),
+          );
+        }),
+      );
+    },
+  );
 
   it('opens a session knowing the identifier of the document', () => {
     const opened = openTasklaceFile(fileOf(SAMPLE), storingCompressor);

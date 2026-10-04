@@ -160,9 +160,13 @@ export function createProjectFiles(
       return { ok: false, error: { code: 'UNSAVED_PROJECT', cause } };
     }
   };
-  const adopt = async (document: Y.Doc, hasFile: boolean): Promise<ActionResult<SharedSession>> => {
+  const adopt = async (
+    document: Y.Doc,
+    hasFile: boolean,
+    decodedFrom: Uint8Array | null,
+  ): Promise<ActionResult<SharedSession>> => {
     const documentId = readDocumentId(document);
-    const session = openSharedSession(document);
+    const session = openSharedSession(document, decodedFrom);
     if (documentId === null || !session.ok) {
       const issues = session.ok ? [] : session.error;
       return { ok: false, error: { code: 'INVALID_PROJECT', issues } };
@@ -198,7 +202,7 @@ export function createProjectFiles(
       console.error('The opened project does not hold the document the main process announced.');
       return { ok: false, error: { code: 'INVALID_CONTENT' } };
     }
-    const session = await adopt(document, hasFile);
+    const session = await adopt(document, hasFile, opened.value.state);
     if (!session.ok) {
       return session;
     }
@@ -215,7 +219,7 @@ export function createProjectFiles(
       console.error('The main process gave a new project an invalid identifier:', documentId);
       return { ok: false, error: { code: 'TASK_FAILED' } };
     }
-    return adopt(createSharedDocument(project, documentId), false);
+    return adopt(createSharedDocument(project, documentId), false, null);
   };
   const saveAs = async (): Promise<ActionResult<SavedProject>> => {
     const name = current?.session.project().name ?? '';
