@@ -20,6 +20,7 @@ import {
   logProcessErrors,
   logWorkerErrors,
 } from './log-file';
+import { isMissingFile } from './stored-files';
 import { createMainWindow } from './window';
 
 const NOT_FOUND = 404;
@@ -105,7 +106,12 @@ async function serveAppFile(request: Request): Promise<Response> {
   const headers = { 'Content-Type': file.contentType, [CONTENT_SECURITY_POLICY_HEADER]: policy };
   return readFile(file.path).then(
     (content) => new Response(content, { headers }),
-    () => new Response(null, { status: NOT_FOUND }),
+    (error: unknown) => {
+      if (!isMissingFile(error)) {
+        console.error('A file of the interface could not be read:', error);
+      }
+      return new Response(null, { status: NOT_FOUND });
+    },
   );
 }
 

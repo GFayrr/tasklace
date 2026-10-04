@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_FILE_PATH_LENGTH } from '../core/limits';
-import { isMissingFile, isStoredPath, parseStoredJson, readStoredText } from './stored-files';
+import {
+  isMissingFile,
+  isStoredPath,
+  isSystemError,
+  parseStoredJson,
+  readStoredText,
+} from './stored-files';
 
 let folder: string;
 
@@ -62,5 +68,18 @@ describe('isMissingFile', () => {
     expect(isMissingFile(Object.assign(new Error('gone'), { code: 'ENOENT' }))).toBe(true);
     expect(isMissingFile(Object.assign(new Error('busy'), { code: 'EBUSY' }))).toBe(false);
     expect(isMissingFile({ code: 'ENOENT' })).toBe(false);
+  });
+});
+
+describe('isSystemError', () => {
+  it('recognizes an error of the system by its code, not an error of the program', () => {
+    const coded = (code: unknown) => Object.assign(new Error('x'), { code });
+    expect(isSystemError(coded('ENOENT'))).toBe(true);
+    expect(isSystemError(coded('EACCES'))).toBe(true);
+    expect(isSystemError(coded('ERR_INVALID_ARG_TYPE'))).toBe(false);
+    expect(isSystemError(coded('ERR_WORKER_OUT_OF_MEMORY'))).toBe(false);
+    expect(isSystemError(coded(2))).toBe(false);
+    expect(isSystemError(new Error('no code'))).toBe(false);
+    expect(isSystemError({ code: 'ENOENT' })).toBe(false);
   });
 });

@@ -6,6 +6,7 @@ import type { Result } from '../../core/result';
 import type { MergeFailure, SharedRepair } from '../../core/shared/shared-project';
 import { issueText, repairText, type ReportedIssue } from '../i18n/issue-text';
 import { scheduleFailureText } from '../i18n/schedule-failure-text';
+import { parseDuration } from '../plan/durations';
 import {
   scheduleProject,
   type Schedule,
@@ -33,6 +34,7 @@ import {
   taskBasis,
   taskFromDraft,
   type TaskDraft,
+  withAddedBlock,
 } from '../plan/task-details';
 import {
   deleteTasks,
@@ -80,8 +82,6 @@ export interface EditRequest {
   readonly taskId: TaskId;
   readonly column: EditableColumn;
 }
-
-const DEFAULT_DAY_HOURS = 9;
 
 export interface Report {
   readonly title: string;
@@ -279,9 +279,14 @@ export class AppState {
     return asked;
   }
 
+  /** Tells whether the open project may be replaced: never while a file action runs, which is refused at once, and otherwise once the user agreed about a project without file. */
+  async #readyToReplace(): Promise<boolean> {
+    return !this.#refuseWhileFileActionRuns() && (await this.readyToClose());
+  }
+
   /** Starts a new empty project. */
   async newProject(): Promise<void> {
-    if (!(await this.readyToClose())) {
+    if (!(await this.#readyToReplace())) {
       return;
     }
     const { messages, createId, now } = this.#context;
@@ -296,21 +301,21 @@ export class AppState {
 
   /** Asks for a project file and opens it. */
   async open(): Promise<void> {
-    if (await this.readyToClose()) {
+    if (await this.#readyToReplace()) {
       await this.#load(this.#files.open());
     }
   }
 
   /** Opens one of the recent projects. */
   async openRecent(index: number): Promise<void> {
-    if (await this.readyToClose()) {
+    if (await this.#readyToReplace()) {
       await this.#load(this.#files.openRecent(index));
     }
   }
 
   /** Asks for a CSV or JSON file, imports it as a new project and tells how many tasks it brought. */
   async importFile(kind: ExchangeKind): Promise<void> {
-    if (!(await this.readyToClose())) {
+    if (!(await this.#readyToReplace())) {
       return;
     }
     const imported = await this.#load(this.#files.importFile(kind));
@@ -408,7 +413,11 @@ export class AppState {
     if (this.#fileActionRunning) {
       return this.messages.fileErrors.BUSY;
     }
-    const edit = build(this.#editContext(project));
+    const context = this.#editContext(project);
+    if (context === null) {
+      return editErrorMessage(this.messages, 'NOT_POSSIBLE');
+    }
+    const edit = build(context);
     if (!edit.ok) {
       return editErrorMessage(this.messages, edit.error);
     }
@@ -467,19 +476,16 @@ export class AppState {
 
   /** Adds a task after the selected one, selects it and asks the table to edit its name, telling the user when the project refuses it. */
   addTask(): void {
-    const session = this.#session;
-    const project = this.project;
-    if (session === null || project === null) {
-      return;
-    }
-    const inserted = insertTask(
-      this.#editContext(project),
-      this.selectedTaskId,
-      this.messages.table.newTask,
-    );
-    if (this.edit(() => ({ ok: true, value: inserted.operations }))) {
-      this.selectedTaskId = inserted.taskId;
-      this.editRequest = { taskId: inserted.taskId, column: 'name' };
+    const added: TaskId[] = [];
+    const applied = this.edit((context) => {
+      const inserted = insertTask(context, this.selectedTaskId, this.messages.table.newTask);
+      added.push(inserted.taskId);
+      return { ok: true, value: inserted.operations };
+    });
+    const [taskId] = added;
+    if (applied && taskId !== undefined) {
+      this.selectedTaskId = taskId;
+      this.editRequest = { taskId, column: 'name' };
     }
   }
 
@@ -611,13 +617,17 @@ export class AppState {
     return opened.value;
   }
 
-  /** Returns what the editing commands need to know about the open project. */
-  #editContext(project: Project): EditContext {
+  /** Returns what the editing commands need to know about the open project, or null, logged, when its calendar cannot be compiled, which the validation of every project rules out. */
+  #editContext(project: Project): EditContext | null {
+    if (this.calendar === null) {
+      console.error('The calendar of the open project cannot be compiled; the change is refused.');
+      return null;
+    }
     return {
       project,
       outline: this.outline,
       createId: this.#context.createId,
-      dayHours: this.calendar?.workingHoursPerDay ?? DEFAULT_DAY_HOURS,
+      dayHours: this.calendar.workingHoursPerDay,
     };
   }
 
@@ -697,6 +707,27 @@ export class AppState {
     this.#notify('error', text, report);
   }
 
+  /** Tells whether a draft of the details panel works fewer hours a day than the project, so that a daily start time makes sense. */
+  worksPartOfDay(draft: TaskDraft): boolean {
+    const dayHours = this.calendar?.workingHoursPerDay;
+    if (dayHours === undefined) {
+      return false;
+    }
+    const hours = parseDuration(draft.hoursPerDay.trim(), dayHours);
+    return hours !== null && hours < dayHours;
+  }
+
+  /** Returns a draft of the details panel with one more block of one working day, or the same draft, telling the user why, when the calendar of the project cannot be compiled. */
+  withAddedBlock(draft: TaskDraft): TaskDraft {
+    const project = this.project;
+    const context = project === null ? null : this.#editContext(project);
+    if (context === null) {
+      this.#notify('error', editErrorMessage(this.messages, 'NOT_POSSIBLE'));
+      return draft;
+    }
+    return withAddedBlock(draft, context.dayHours);
+  }
+
   /** Tells which block of the details panel has a start date that cannot be read or waits for a task or block that does not exist, or null. */
   #blockProblem(draft: TaskDraft): string | null {
     const project = this.project;
@@ -710,7 +741,11 @@ export class AppState {
         message: editErrorMessage(this.messages, 'INVALID_DATE'),
       });
     }
-    const problem = findBlockWaitProblem(this.#editContext(project), draft.blocks);
+    const context = this.#editContext(project);
+    if (context === null) {
+      return editErrorMessage(this.messages, 'NOT_POSSIBLE');
+    }
+    const problem = findBlockWaitProblem(context, draft.blocks);
     return problem === null
       ? null
       : fillMessage(this.messages.details.blockError, {
@@ -793,7 +828,7 @@ export class AppState {
       return;
     }
     this.#notify('error', this.messages.fileErrors.TASK_FAILED);
-    console.error(error);
+    console.error('A file action failed unexpectedly:', error);
   }
 
   /** Adds a message, replacing the same message already shown so that it is shown once, with its latest details; a message with details, or asked to last, stays until the user dismisses it. */

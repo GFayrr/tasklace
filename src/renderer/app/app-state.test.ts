@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Project } from '../../core/model/project';
-import type { BridgeResult, OpenedProject } from '../../preload/bridge-contract';
+import type { BridgeResult, ExportedFile, OpenedProject } from '../../preload/bridge-contract';
 import { scheduleProject } from '../../core/scheduling/schedule-project';
 import { at } from '../../core/testing/civil-time';
 import {
@@ -851,17 +851,41 @@ describe('one file action at a time', () => {
     expect(app.project?.name).toBe('Next');
   });
 
+  it('refuses at once to replace a changed project without file while a file action runs, without asking about it', async () => {
+    const { app, context } = await withNewProject();
+    await change(app);
+    let finish: (result: BridgeResult<ExportedFile>) => void = () => undefined;
+    Object.assign(context.bridge, {
+      exportProject: () =>
+        new Promise<BridgeResult<ExportedFile>>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const exporting = app.exportFile('json');
+    await settle();
+    for (const replace of [() => app.newProject(), () => app.open(), () => app.importFile('csv')]) {
+      await replace();
+      expect(app.closePrompt).toBeNull();
+    }
+    expect(noticeTexts(app)).toEqual([english.fileErrors.BUSY]);
+    finish({ ok: true, value: { fileName: 'plan.json' } });
+    await exporting;
+  });
+
   it('keeps the open project and tells why when it cannot be saved before a new one', async () => {
     const { app, control } = await withOpenPlan();
     await change(app);
     control.saveResult = { ok: false, error: { code: 'WRITE_FAILED' } };
     const before = app.project;
-    await app.newProject();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await app.newProject();
+      expect(logged).toHaveBeenCalledTimes(1);
+    } finally {
+      logged.mockRestore();
+    }
     expect(app.project).toBe(before);
-    expect(noticeTexts(app)).toEqual([
-      english.fileErrors.WRITE_FAILED,
-      english.fileErrors.UNSAVED_PROJECT,
-    ]);
+    expect(noticeTexts(app)).toEqual([english.fileErrors.UNSAVED_PROJECT]);
   });
 });
 
@@ -948,7 +972,10 @@ describe('failures of automatic saves', () => {
     try {
       expect(app.rename('Changed')).toBe(true);
       await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
-      expect(logged).toHaveBeenCalledWith(new Error('bridge gone'));
+      expect(logged).toHaveBeenCalledWith(
+        'A file action failed unexpectedly:',
+        new Error('bridge gone'),
+      );
     } finally {
       logged.mockRestore();
     }

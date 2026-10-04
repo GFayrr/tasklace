@@ -25,7 +25,7 @@ const LINE_BREAKS = /\r\n|\r|\n/g;
 const LINE_SEPARATOR = ' | ';
 const ENCODER = new TextEncoder();
 
-/** Keeps a log file in a folder, appending one dated line per entry, one write at a time, and setting the log aside under another name once it would grow past its limit, a failed write being reported on the error output. */
+/** Keeps a log file in a folder, appending one dated line per entry, one write at a time, and setting the log aside under another name once it would grow past its limit, a failure being reported on the error output and a log that cannot be set aside growing until the next attempt, a limit further. */
 export function createLogFile(
   folder: string,
   now: () => Date,
@@ -40,8 +40,8 @@ export function createLogFile(
     const bytes = ENCODER.encode(line).length;
     size ??= await prepare(folder, path);
     if (size + bytes > MAX_LOG_BYTES) {
-      await rename(path, previousPath);
       size = 0;
+      await rename(path, previousPath).catch(reportFailure);
     }
     await appendFile(path, line);
     size += bytes;

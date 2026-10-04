@@ -162,7 +162,11 @@ describe('opening projects', () => {
     runTask.mockResolvedValueOnce(failure({ code: 'CORRUPTED' }));
     expect(await request(IPC_CHANNELS.openProject, {})).toEqual(failure({ code: 'CORRUPTED' }));
     chooseToOpen(broken);
-    expect(await request(IPC_CHANNELS.openProject, {})).toEqual(failure({ code: 'TASK_FAILED' }));
+    runTask.mockResolvedValueOnce(success(SAVED));
+    expect(await quietly(() => request(IPC_CHANNELS.openProject, {}))).toEqual({
+      answer: failure({ code: 'TASK_FAILED' }),
+      logged: [['The file worker answered a loading with a saved result.']],
+    });
     expect(tasks).toHaveLength(2);
   });
 
@@ -305,19 +309,23 @@ describe('adopting projects', () => {
 
   it('refuses to adopt a document that was not offered, or twice, and refuses an identifier that is not one', async () => {
     const sender = {};
-    expect(await request(IPC_CHANNELS.adoptProject, sender, DOCUMENT_ID)).toEqual(
-      failure({ code: 'TASK_FAILED' }),
+    const notOffered = {
+      answer: failure({ code: 'TASK_FAILED' }),
+      logged: [['The page adopted a project that was not offered to it.']],
+    };
+    expect(await quietly(() => request(IPC_CHANNELS.adoptProject, sender, DOCUMENT_ID))).toEqual(
+      notOffered,
     );
     const documentId = await request(IPC_CHANNELS.newProject, sender);
-    expect(await request(IPC_CHANNELS.adoptProject, sender, OTHER_ID)).toEqual(
-      failure({ code: 'TASK_FAILED' }),
+    expect(await quietly(() => request(IPC_CHANNELS.adoptProject, sender, OTHER_ID))).toEqual(
+      notOffered,
     );
     expect(await request(IPC_CHANNELS.saveProject, sender, STATE)).toEqual(
       failure({ code: 'NO_PROJECT' }),
     );
     expect(await request(IPC_CHANNELS.adoptProject, sender, documentId)).toEqual(success(null));
-    expect(await request(IPC_CHANNELS.adoptProject, sender, documentId)).toEqual(
-      failure({ code: 'TASK_FAILED' }),
+    expect(await quietly(() => request(IPC_CHANNELS.adoptProject, sender, documentId))).toEqual(
+      notOffered,
     );
     await expect(request(IPC_CHANNELS.adoptProject, sender, '../escape')).rejects.toThrow(
       RefusedRequest,
@@ -465,12 +473,34 @@ describe('saving projects', () => {
     expect(tasks.at(-1)).toMatchObject({ path: join(folder, 'Kept.tasklace') });
   });
 
+  it('sends the saves of every window one after the other, so that two never update the local copy index at once', async () => {
+    const first = await openedIn(join(folder, 'First.tasklace'));
+    const second = await openedIn(join(folder, 'Second.tasklace'));
+    let finish: (result: FileTaskResult) => void = () => undefined;
+    runTask.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const savingFirst = request(IPC_CHANNELS.saveProject, first, STATE);
+    const savingSecond = request(IPC_CHANNELS.saveProject, second, STATE);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const saves = () => tasks.flatMap((task) => (task.kind === 'saveProject' ? [task.path] : []));
+    expect(saves()).toHaveLength(1);
+    finish(success(SAVED));
+    expect(await savingFirst).toEqual(success({ localCopySaved: true }));
+    expect(await savingSecond).toEqual(success({ localCopySaved: true }));
+    expect(saves()).toEqual([join(folder, 'First.tasklace'), join(folder, 'Second.tasklace')]);
+  });
+
   it('turns a save answered by something else than a save into a task failure', async () => {
     const sender = await openedIn(join(folder, 'Old.tasklace'));
     runTask.mockResolvedValueOnce(success(LOADED));
-    expect(await request(IPC_CHANNELS.saveProject, sender, STATE)).toEqual(
-      failure({ code: 'TASK_FAILED' }),
-    );
+    expect(await quietly(() => request(IPC_CHANNELS.saveProject, sender, STATE))).toEqual({
+      answer: failure({ code: 'TASK_FAILED' }),
+      logged: [['The file worker answered a save with a loaded result.']],
+    });
   });
 
   it('keeps the old file when the new one could not be written, or when the user cancels', async () => {

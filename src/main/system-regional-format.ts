@@ -22,9 +22,10 @@ export const DEFAULT_REGIONAL_FORMAT: RegionalFormat = {
   twelveHourClock: false,
 };
 
-/** Reads the regional format of a locale for CSV exchange: the list separator from its decimal mark, as spreadsheets do, the order and separator of its short dates, and its clock, the default format standing in for an unknown locale. */
+/** Reads the regional format of a locale for CSV exchange: the list separator from its decimal mark, as spreadsheets do, the order and separator of its short dates, and its clock, the default format standing in, with a warning, for an unknown locale. */
 export function regionalFormatOf(locale: string): RegionalFormat {
   if (!isKnownLocale(locale)) {
+    console.warn(`Unknown locale ${JSON.stringify(locale)}: CSV files use the ISO format.`);
     return DEFAULT_REGIONAL_FORMAT;
   }
   const decimal = new Intl.NumberFormat(locale)

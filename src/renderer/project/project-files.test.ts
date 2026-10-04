@@ -170,8 +170,17 @@ describe('createProjectFiles', () => {
     timer.fire();
     await settle();
     expect(failures).toEqual([new FileActionError({ code: 'WRITE_FAILED' })]);
-    expect(await files.open()).toEqual({ ok: false, error: { code: 'UNSAVED_PROJECT' } });
-    expect(failures).toHaveLength(2);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await files.open()).toEqual({ ok: false, error: { code: 'UNSAVED_PROJECT' } });
+      expect(logged).toHaveBeenCalledWith(
+        'The open project could not be saved before another replaced it:',
+        new FileActionError({ code: 'WRITE_FAILED' }),
+      );
+    } finally {
+      logged.mockRestore();
+    }
+    expect(failures).toHaveLength(1);
     expect(files.session()).toBe(session);
   });
 
@@ -271,9 +280,18 @@ describe('createProjectFiles', () => {
     );
     const first = await createdOn(files);
     first.apply({ type: 'updateProject', fields: { name: 'Unsaved' } });
-    expect(await files.create(SAMPLE)).toEqual({ ok: false, error: { code: 'UNSAVED_PROJECT' } });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await files.create(SAMPLE)).toEqual({
+        ok: false,
+        error: { code: 'UNSAVED_PROJECT' },
+      });
+      expect(logged).toHaveBeenCalledTimes(1);
+    } finally {
+      logged.mockRestore();
+    }
     expect(files.session()).toBe(first);
-    expect(failures).toEqual([new FileActionError({ code: 'WRITE_FAILED' })]);
+    expect(failures).toEqual([]);
   });
 
   it('refuses to create a project under an identifier the main process got wrong', async () => {
@@ -400,10 +418,7 @@ describe('createProjectFiles', () => {
     expect(await opening).toEqual({ ok: false, error: { code: 'UNSAVED_PROJECT' } });
     expect(events).toEqual(['adopt', 'save']);
     expect(files.session()).toBe(session);
-    expect(failures).toEqual([
-      new FileActionError({ code: 'WRITE_FAILED' }),
-      new FileActionError({ code: 'WRITE_FAILED' }),
-    ]);
+    expect(failures).toEqual([new FileActionError({ code: 'WRITE_FAILED' })]);
   });
 
   it('refuses a state that does not hold a valid shared project', async () => {

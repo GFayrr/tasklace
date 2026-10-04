@@ -44,6 +44,7 @@ export async function openInBrowser(url: string): Promise<boolean> {
     return true;
   } catch (error) {
     if (error instanceof Error) {
+      console.error('The browser could not open an address:', error);
       return false;
     }
     throw error;

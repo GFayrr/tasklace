@@ -30,7 +30,11 @@ const bridge: TasklaceBridge = {
       return answer;
     }
     const projects: readonly unknown[] = Array.isArray(answer.value) ? answer.value : [];
-    return { ok: true, value: projects.filter(isRecentProject) };
+    const recent = projects.filter(isRecentProject);
+    if (!Array.isArray(answer.value) || recent.length !== projects.length) {
+      console.error('The main process sent recent projects of an unexpected shape:', answer.value);
+    }
+    return { ok: true, value: recent };
   },
   importProject: (kind) => request(IPC_CHANNELS.importProject, kind),
   adoptProject: (documentId) => request(IPC_CHANNELS.adoptProject, documentId),
@@ -70,10 +74,14 @@ function answerCloseRequest(): void {
 
 contextBridge.exposeInMainWorld(BRIDGE_NAME, bridge);
 
-/** Sends a file request to the main process and gives back its result, an answer of any other shape counting as a failed task. */
+/** Sends a file request to the main process and gives back its result, an answer of any other shape being logged and counting as a failed task. */
 async function request<T>(channel: IpcChannel, ...values: unknown[]): Promise<BridgeResult<T>> {
   const result: unknown = await ipcRenderer.invoke(channel, ...values);
-  return isBridgeResult<T>(result) ? result : UNEXPECTED_ANSWER;
+  if (isBridgeResult<T>(result)) {
+    return result;
+  }
+  console.error(`The main process answered ${channel} with an unexpected shape:`, result);
+  return UNEXPECTED_ANSWER;
 }
 
 /** Tells whether an answer has the shape of a bridge result. */

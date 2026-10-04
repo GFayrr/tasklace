@@ -149,7 +149,7 @@ export function createProjectFiles(
       await autosave.flush();
       return { ok: true, value: null };
     } catch (error) {
-      listener.failed(error);
+      console.error('The open project could not be saved before another replaced it:', error);
       return { ok: false, error: { code: 'UNSAVED_PROJECT' } };
     }
   };

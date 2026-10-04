@@ -41,6 +41,7 @@ import {
 } from './project-names';
 import { readRecentProjects, recordRecentProject } from './recent-projects';
 import { writeFileSafely } from './safe-write';
+import { createSerialQueue } from './serial-queue';
 import { isSystemError } from './stored-files';
 import { regionalFormatOf } from './system-regional-format';
 
@@ -76,6 +77,7 @@ const CANCEL_BUTTON = 1;
 const FILE_PLACEHOLDER = '{file}';
 const LOCAL_COPY_FOLDER = 'local-copies';
 const projects = new WeakMap<WebContents, WindowProject>();
+const saveInOrder = createSerialQueue();
 const offered = new WeakMap<WebContents, WindowProject>();
 
 /** Answers the project file requests of the bridge: new, open, recent, import, adopt, save, save as and export, the main process alone choosing paths through dialogs and knowing the file and document of each window, which changes only once the page has accepted the project offered to it. */
@@ -157,6 +159,7 @@ async function adoptProject(
   const documentId = isDocumentId(value) ? value : refuseMessage();
   const project = offered.get(sender);
   if (project?.documentId !== documentId) {
+    console.error('The page adopted a project that was not offered to it.');
     return failure({ code: 'TASK_FAILED' });
   }
   offered.delete(sender);
@@ -280,18 +283,21 @@ async function saveProject(
     return failure({ code: 'CANCELLED' });
   }
   const { documentId } = project;
-  const saved = await services.runTask({
-    kind: 'saveProject',
-    path,
-    state,
-    documentId,
-    localCopyFolder: join(services.userDataFolder, LOCAL_COPY_FOLDER),
-    savedAt: Date.now(),
-  });
+  const saved = await saveInOrder(() =>
+    services.runTask({
+      kind: 'saveProject',
+      path,
+      state,
+      documentId,
+      localCopyFolder: join(services.userDataFolder, LOCAL_COPY_FOLDER),
+      savedAt: Date.now(),
+    }),
+  );
   if (!saved.ok) {
     return saved;
   }
   if (saved.value.kind !== 'saved') {
+    console.error(`The file worker answered a save with a ${saved.value.kind} result.`);
     return failure({ code: 'TASK_FAILED' });
   }
   if (path !== null && path !== project.path) {
@@ -359,7 +365,11 @@ async function loadedProject(task: Promise<FileTaskResult>): Promise<BridgeResul
   if (!result.ok) {
     return result;
   }
-  return result.value.kind === 'loaded' ? success(result.value) : failure({ code: 'TASK_FAILED' });
+  if (result.value.kind !== 'loaded') {
+    console.error(`The file worker answered a loading with a ${result.value.kind} result.`);
+    return failure({ code: 'TASK_FAILED' });
+  }
+  return success(result.value);
 }
 
 /** Describes a loaded project to the page. */

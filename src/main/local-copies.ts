@@ -57,7 +57,7 @@ export function formatLocalCopyIndex(index: LocalCopyIndex): string {
   return JSON.stringify({ version: INDEX_VERSION, copies: index });
 }
 
-/** Writes the local copy of a document, creating its folder when needed, and records where its file was saved and when, one index update at a time. */
+/** Writes the local copy of a document, creating its folder when needed, and records where its file was saved and when, one index update at a time within this process, the main process sending the saves of every window one after the other to the workers that run them. */
 export async function saveLocalCopy(
   folder: string,
   documentId: DocumentId,
