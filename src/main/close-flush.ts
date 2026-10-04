@@ -3,6 +3,7 @@ import { IPC_CHANNELS } from '../preload/bridge-contract';
 import type { TrustCheck } from './ipc-trust';
 import { MESSAGES } from './messages';
 import { askAfterPageFailure, askWhileUnresponsive } from './page-problems';
+import type { WindowProjectKind } from './project-files';
 
 interface PageWindow {
   readonly release: () => void;
@@ -11,6 +12,11 @@ interface PageWindow {
 }
 
 const answers = new WeakMap<WebContents, PageWindow>();
+const CRASHED_BODIES: Readonly<Record<WindowProjectKind, string>> = {
+  none: MESSAGES.pageProblems.crashedWithoutProjectBody,
+  withFile: MESSAGES.pageProblems.crashedBody,
+  withoutFile: MESSAGES.pageProblems.crashedWithoutFileBody,
+};
 
 /** Answers the page telling, once it saved what it had to, whether its window may close, an answer that is not a yes or a no being logged and keeping the window open so that the next close asks again, and offers to reload a page telling that it could not start. */
 export function registerFlushHandler(assertTrusted: TrustCheck): void {
@@ -38,7 +44,10 @@ export function registerFlushHandler(assertTrusted: TrustCheck): void {
 }
 
 /** Holds the closing of a window until its page has saved its pending changes and agreed to close; a page that crashed lets its window close until a new page has loaded, or offers to reload it when nobody asked to close, and a page that stops responding while asked to save lets the user wait for it or close anyway. */
-export function flushBeforeClosing(window: BrowserWindow): void {
+export function flushBeforeClosing(
+  window: BrowserWindow,
+  projectKind: (contents: WebContents) => WindowProjectKind,
+): void {
   const contents = window.webContents;
   let requested = false;
   let released = false;
@@ -103,7 +112,7 @@ export function flushBeforeClosing(window: BrowserWindow): void {
       closeNow();
       return;
     }
-    offerReload(window, MESSAGES.pageProblems.crashedBody);
+    offerReload(window, CRASHED_BODIES[projectKind(contents)]);
   });
   contents.on('did-finish-load', () => {
     pageGone = false;

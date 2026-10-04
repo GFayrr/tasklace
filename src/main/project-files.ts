@@ -54,6 +54,8 @@ export interface ProjectFileServices {
   readonly userDataFolder: string;
 }
 
+export type WindowProjectKind = 'none' | 'withFile' | 'withoutFile';
+
 interface WindowProject {
   readonly path: string | null;
   readonly documentId: DocumentId;
@@ -82,6 +84,15 @@ const LOCAL_COPY_FOLDER = 'local-copies';
 const projects = new WeakMap<WebContents, WindowProject>();
 const saveInOrder = createSerialQueue();
 const offered = new WeakMap<WebContents, WindowProject>();
+
+/** Tells what the window of a page holds: no project, a project saved to a file, or a project kept only on this computer. */
+export function windowProjectKind(sender: WebContents): WindowProjectKind {
+  const project = projects.get(sender);
+  if (project === undefined) {
+    return 'none';
+  }
+  return project.path === null ? 'withoutFile' : 'withFile';
+}
 
 /** Answers the project file requests of the bridge: new, open, recent, import, adopt, save, save as and export, the main process alone choosing paths through dialogs and knowing the file and document of each window, which changes only once the page has accepted the project offered to it. */
 export function registerProjectFileHandlers(services: ProjectFileServices): void {

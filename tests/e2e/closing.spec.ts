@@ -110,7 +110,7 @@ test('keeps the window open when the last save fails, until the user saves elsew
   await closeWindow();
   const failed = page.getByRole('dialog', { name: 'The project could not be saved' });
   await expect(failed).toBeVisible();
-  await expect(failed).toContainText('Check that the folder still exists');
+  await expect(failed).toContainText(english.fileErrors.WRITE_FAILED);
   await failed.getByRole('button', { name: 'Cancel' }).click();
   await expect(failed).toBeHidden();
   expect(application.windows()).toHaveLength(1);
@@ -201,7 +201,7 @@ test('offers to reload a window whose page crashed, which starts again with noth
   try {
     await expect
       .poll(() => askedDetails(application), { timeout: QUESTION_LIMIT_MS })
-      .toEqual([english.pageProblems.crashedBody]);
+      .toEqual([english.pageProblems.crashedWithoutFileBody]);
   } catch (error) {
     throw new Error(`${String(error)}\n${await crashReport()}`);
   }

@@ -1,14 +1,14 @@
 import { mkdir, mkdtemp, readFile, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ipcMain as electronIpcMain } from 'electron';
+import { ipcMain as electronIpcMain, type WebContents } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_FILE_BYTES } from '../core/limits';
 import { failure, success } from '../core/result';
 import { IPC_CHANNELS } from '../preload/bridge-contract';
 import { isResultOf, type FileTask, type FileTaskResult } from './file-tasks';
 import { RefusedRequest } from './ipc-trust';
-import { registerProjectFileHandlers } from './project-files';
+import { registerProjectFileHandlers, windowProjectKind } from './project-files';
 import type { FakeIpcMain } from './testing/fake-electron';
 
 const dialogs = vi.hoisted(() => ({
@@ -584,5 +584,19 @@ describe('regional format', () => {
       listSeparator: ';',
       dateOrder: 'dayMonthYear',
     });
+  });
+});
+
+describe('the kind of project a window holds', () => {
+  it('is none before any adoption, with a file once a file is adopted, and without file for a new project', async () => {
+    const empty = {};
+    expect(windowProjectKind(empty as WebContents)).toBe('none');
+    const opened = await openedIn(join(folder, 'Plan.tasklace'));
+    expect(windowProjectKind(opened as WebContents)).toBe('withFile');
+    const fresh = {};
+    const documentId = await request(IPC_CHANNELS.newProject, fresh);
+    expect(windowProjectKind(fresh as WebContents)).toBe('none');
+    await request(IPC_CHANNELS.adoptProject, fresh, documentId);
+    expect(windowProjectKind(fresh as WebContents)).toBe('withoutFile');
   });
 });

@@ -19,6 +19,8 @@ import { buildLargeProject } from '../fixtures/large-project';
 import { closeDiscarding, launchApplication } from './application';
 import { answerDialogs } from './dialogs';
 
+const DISPLAYED_FRAME_INTERVAL_LIMIT_MS = 1_000 / 30;
+
 const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
 const DESIGN: Tag = {
   id: 'design',
@@ -231,5 +233,5 @@ test('draws only the visible rows of a project of 10,000 tasks', async () => {
   await picture('timeline-large');
   const median = frames[Math.floor(frames.length / 2)] ?? Number.POSITIVE_INFINITY;
   console.info(`Median frame while scrolling 10,000 tasks: ${median.toFixed(1)} ms`);
-  expect(median).toBeLessThan(1_000 / 30);
+  expect(median).toBeLessThan(DISPLAYED_FRAME_INTERVAL_LIMIT_MS);
 });

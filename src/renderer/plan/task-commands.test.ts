@@ -17,7 +17,7 @@ import {
   TEST_DOCUMENT_ID,
   workTask,
 } from '../../core/testing/project-builder';
-import { buildPlanOutline, predecessorText } from './plan-outline';
+import { buildPlanOutline, predecessorText, taskIdOfNumber } from './plan-outline';
 import {
   deleteTasks,
   indentTask,
@@ -298,8 +298,8 @@ describe('editing cells', () => {
   it('links to a task hidden under a collapsed summary by its number', () => {
     const { session, context } = openPlan();
     const visible = context();
-    const summary = visible.outline.idByWbs.get('1');
-    const hidden = visible.outline.idByWbs.get('1.1');
+    const summary = taskIdOfNumber(visible.outline, '1');
+    const hidden = taskIdOfNumber(visible.outline, '1.1');
     if (summary === undefined || hidden === undefined) {
       throw new Error('The sample plan has no task 1.1 under a summary 1.');
     }

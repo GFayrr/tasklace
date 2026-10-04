@@ -415,6 +415,16 @@ describe('saving and exporting', () => {
     expect(noticeTexts(app)).toEqual([english.fileErrors.WRITE_FAILED]);
     expect(app.saveStatus).toBe('failed');
   });
+
+  it('tells that a project without file could not be kept on this computer when its local copy fails', async () => {
+    const { app, control } = await withNewProject();
+    vi.useFakeTimers();
+    control.saveResult = { ok: false, error: { code: 'LOCAL_COPY_FAILED' } };
+    expect(app.rename('Changed')).toBe(true);
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(noticeTexts(app)).toEqual([english.fileErrors.LOCAL_COPY_FAILED]);
+    expect(app.saveStatus).toBe('failed');
+  });
 });
 
 describe('editing', () => {
