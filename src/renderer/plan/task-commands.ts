@@ -28,7 +28,7 @@ import type { SharedOperation } from '../../core/shared/shared-operations';
 import { dayIndexOf, QUARTER_HOUR, startOfDay, type ProjectHour } from '../../core/time';
 import { relinkBlocks } from './block-links';
 import { parseDuration } from './durations';
-import { predecessorText, type PlanOutline } from './plan-outline';
+import { predecessorText, taskIdOfNumber, type PlanOutline } from './plan-outline';
 
 export type EditError =
   | 'NOT_POSSIBLE'
@@ -335,7 +335,7 @@ function resolveSource(
   block: number | null,
   type: DependencyType,
 ): Result<LinkEnd, EditError> {
-  const taskId = context.outline.idByWbs.get(wbs);
+  const taskId = taskIdOfNumber(context.outline, wbs);
   const task = taskId === undefined ? undefined : findTask(context, taskId);
   if (taskId === undefined || task === undefined) {
     return failure('UNKNOWN_TASK_NUMBER');

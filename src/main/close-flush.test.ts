@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IPC_CHANNELS } from '../preload/bridge-contract';
 import en from '../renderer/locales/en.json';
 import { flushBeforeClosing, registerFlushHandler } from './close-flush';
+import type { WindowProjectKind } from './project-files';
 import { FakeIpcMain, FakeWindow } from './testing/fake-electron';
 
 const questions = vi.hoisted(() => ({
@@ -51,9 +52,12 @@ function questionsShown(): string[] {
   return questions.show.mock.calls.map(([, options]) => options.detail);
 }
 
+const projectKind: { current: WindowProjectKind } = { current: 'withFile' };
+
 beforeEach(() => {
+  projectKind.current = 'withFile';
   window = new FakeWindow();
-  flushBeforeClosing(window as unknown as BrowserWindow);
+  flushBeforeClosing(window as unknown as BrowserWindow, () => projectKind.current);
   trusted.mockReset();
   questions.show.mockReset();
 });
@@ -110,7 +114,7 @@ describe('flushBeforeClosing', () => {
 
   it('closes only the window whose page agreed, and ignores an agreement that comes after a refusal', () => {
     const other = new FakeWindow();
-    flushBeforeClosing(other as unknown as BrowserWindow);
+    flushBeforeClosing(other as unknown as BrowserWindow, () => 'withFile');
     window.close();
     other.close();
     ipcMain.send(IPC_CHANNELS.flushDone, { sender: other.webContents }, true);
@@ -139,6 +143,18 @@ describe('a page that crashes', () => {
     window.webContents.emit('render-process-gone');
     expect(window.closed).toBe(true);
     expect(questions.show).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['withFile', en.pageProblems.crashedBody],
+    ['withoutFile', en.pageProblems.crashedWithoutFileBody],
+    ['none', en.pageProblems.crashedWithoutProjectBody],
+  ] as const)('tells what a crash loses for a window holding %s', async (kind, body) => {
+    projectKind.current = kind;
+    answerQuestionWith(FIRST_BUTTON);
+    window.webContents.emit('render-process-gone');
+    await settle();
+    expect(questionsShown()).toEqual([body]);
   });
 
   it('offers to reload it, letting the window close until the new page has loaded, then holding the close again', async () => {
@@ -198,7 +214,7 @@ describe('a page that crashes', () => {
     await settle();
     expect(window.webContents.reloads).toBe(0);
     const broken = new FakeWindow();
-    flushBeforeClosing(broken as unknown as BrowserWindow);
+    flushBeforeClosing(broken as unknown as BrowserWindow, () => 'withFile');
     questions.show.mockRejectedValueOnce(new Error('no dialog'));
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {

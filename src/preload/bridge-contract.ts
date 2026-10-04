@@ -31,6 +31,7 @@ export type FileFailureCode =
   | 'CANCELLED'
   | 'READ_FAILED'
   | 'WRITE_FAILED'
+  | 'LOCAL_COPY_FAILED'
   | 'TOO_COMPLEX'
   | 'INVALID_ENCODING'
   | 'INVALID_IMPORT'

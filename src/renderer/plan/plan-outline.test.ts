@@ -10,7 +10,13 @@ import {
   summary,
   workTask,
 } from '../../core/testing/project-builder';
-import { buildPlanOutline, groupIncoming, predecessorText, toggledSummary } from './plan-outline';
+import {
+  buildPlanOutline,
+  groupIncoming,
+  predecessorText,
+  taskIdOfNumber,
+  toggledSummary,
+} from './plan-outline';
 
 const TASKS = [
   summary('s', { sortKey: 'a' }),
@@ -68,9 +74,10 @@ describe('buildPlanOutline', () => {
             grouped.set(task.parentId, [...(grouped.get(task.parentId) ?? []), task]);
           });
           expect(outline.wbsById).toEqual(computeWbsNumbers(grouped));
-          expect(outline.idByWbs).toEqual(
-            new Map([...outline.wbsById].map(([id, wbs]) => [wbs, id])),
-          );
+          for (const [id, wbs] of outline.wbsById) {
+            expect(taskIdOfNumber(outline, wbs)).toBe(id);
+          }
+          expect(taskIdOfNumber(outline, '99')).toBeUndefined();
           expect(outline.rows.map((row) => row.task.id)).toEqual(
             buildPlanOutline(TASKS, new Set(collapsed)).rows.map((row) => row.task.id),
           );

@@ -183,7 +183,7 @@ function loaded(
   return { kind: 'loaded', state, documentId, warnings };
 }
 
-/** Checks the state to save, then writes the project file safely when it has one and its local copy in every case, so that a failed file still leaves a local copy: the save fails when the file, or for a project without file its local copy, could not be written, and otherwise tells whether the local copy was written. */
+/** Checks the state to save, then writes the project file safely when it has one and its local copy in every case, so that a failed file still leaves a local copy: the save fails when the file could not be written, or for a project without file when its local copy could not be, and otherwise tells whether the local copy was written. */
 async function saveProject(
   task: Extract<FileTask, { kind: 'saveProject' }>,
 ): Promise<FileTaskResult> {
@@ -198,8 +198,11 @@ async function saveProject(
   const localCopySaved = await attemptWrite('The local copy', () =>
     saveLocalCopy(task.localCopyFolder, task.documentId, file, path, new Date(task.savedAt)),
   );
-  if (!fileWritten || (path === null && !localCopySaved)) {
+  if (!fileWritten) {
     return failure({ code: 'WRITE_FAILED' });
+  }
+  if (path === null && !localCopySaved) {
+    return failure({ code: 'LOCAL_COPY_FAILED' });
   }
   return success({ kind: 'saved', localCopySaved });
 }
