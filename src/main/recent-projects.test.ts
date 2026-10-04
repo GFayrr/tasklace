@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +10,19 @@ import {
   recordRecentProject,
   withRecentProject,
 } from './recent-projects';
+
+const writing = vi.hoisted((): { failure: Error | null } => ({ failure: null }));
+
+vi.mock('./safe-write', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./safe-write')>();
+  return {
+    ...original,
+    writeFileSafely: (...values: Parameters<typeof original.writeFileSafely>) =>
+      writing.failure === null
+        ? original.writeFileSafely(...values)
+        : Promise.reject(writing.failure),
+  };
+});
 
 const A = resolve('/projects/a.tasklace');
 const B = resolve('/projects/b.tasklace');
@@ -105,18 +118,22 @@ describe('recent projects', () => {
   it('logs a repaired list that cannot be written back, still giving its valid entries', async () => {
     const store = join(folder, 'recent-projects.json');
     await writeFile(store, JSON.stringify({ version: 1, paths: [A, 3] }));
-    await chmod(folder, 0o500);
+    const refusal = Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+    writing.failure = refusal;
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       expect(await readRecentProjects(store)).toEqual([A]);
-      expect(logged.mock.calls.map((call): unknown => call[0])).toEqual([
-        'The list of recent projects was damaged, could not be kept aside and is replaced:',
-        'The repaired list of recent projects could not be written:',
+      expect(logged.mock.calls.slice(1)).toEqual([
+        ['The repaired list of recent projects could not be written:', refusal],
       ]);
+      expect(String(logged.mock.calls[0]?.[0])).toMatch(
+        /^The list of recent projects was damaged and was kept as .*\.damaged-\d+\.$/,
+      );
     } finally {
       logged.mockRestore();
-      await chmod(folder, 0o700);
+      writing.failure = null;
     }
+    expect(await readdir(folder)).toEqual([expect.stringMatching(/\.damaged-\d+$/)]);
   });
 
   it('keeps a damaged store aside before it is rewritten, logging where', async () => {
