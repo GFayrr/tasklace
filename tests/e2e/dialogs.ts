@@ -8,7 +8,7 @@ export interface ChosenPaths {
   readonly replace?: boolean;
 }
 
-/** Makes the open and save dialogs of the main process answer with given paths or be cancelled, records the path the save dialog suggests, and answers the question about replacing a file, refusing any other question. */
+/** Makes the open and save dialogs of the main process answer with given paths or be canceled, records the path the save dialog suggests, and answers the question about replacing a file, refusing any other question. */
 export async function answerDialogs(
   application: ElectronApplication,
   paths: ChosenPaths,

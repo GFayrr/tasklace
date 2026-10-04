@@ -159,7 +159,7 @@ describe('Timeline', () => {
     expect(calls.linked).not.toHaveBeenCalled();
   });
 
-  it('abandons a drag that is cancelled, and ignores buttons other than the main one', () => {
+  it('abandons a drag that is canceled, and ignores buttons other than the main one', () => {
     const { scroller, calls } = renderTimeline();
     const shape = shapeOf('b');
     pointer(scroller, 'pointerdown', shape.start + 4, middleOf(shape));

@@ -118,7 +118,7 @@ test('imports a CSV table into a project kept in its local copy until saved as a
   expect(Object.values(index)).toMatchObject([{ path: target }]);
 });
 
-test('refuses forged and oversized files without loading anything, and a cancelled dialog', async () => {
+test('refuses forged and oversized files without loading anything, and a canceled dialog', async () => {
   const forged = join(folder, 'forged.tasklace');
   const huge = join(folder, 'huge.tasklace');
   await writeFile(forged, 'not a project at all');

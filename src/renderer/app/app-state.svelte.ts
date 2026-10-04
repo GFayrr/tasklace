@@ -77,7 +77,7 @@ export type ClosePrompt =
 type CloseQuestion =
   { readonly reason: 'unsaved' } | { readonly reason: 'saveFailed'; readonly detail: string };
 
-type CloseDecision = 'proceed' | 'discarded' | 'cancelled';
+type CloseDecision = 'proceed' | 'discarded' | 'canceled';
 
 export interface EditRequest {
   readonly taskId: TaskId;
@@ -280,7 +280,7 @@ export class AppState {
 
   /** Asks whether to save a changed project that has no file yet before it is closed, telling whether it may be closed. */
   async readyToClose(): Promise<boolean> {
-    return (await this.#closeDecision()) !== 'cancelled';
+    return (await this.#closeDecision()) !== 'canceled';
   }
 
   /** Prepares the window to close: asks about a project without file, closing at once when the user chooses not to save it, then saves, and when that save fails keeps the window open unless the user saves elsewhere or chooses to close without saving. */
@@ -310,9 +310,9 @@ export class AppState {
     }
     const choice = await this.#ask({ reason: 'unsaved' });
     if (choice === 'save') {
-      return (await this.saveAs()) ? 'proceed' : 'cancelled';
+      return (await this.saveAs()) ? 'proceed' : 'canceled';
     }
-    return choice === 'discard' ? 'discarded' : 'cancelled';
+    return choice === 'discard' ? 'discarded' : 'canceled';
   }
 
   /** Shows a question about closing a project once the questions asked before it are answered, so that each question gets its own answer. */
@@ -823,7 +823,7 @@ export class AppState {
     return text.value;
   }
 
-  /** Tells the user why a file action failed, with the list of the problems found when there are any, a cancelled action needing no message. */
+  /** Tells the user why a file action failed, with the list of the problems found when there are any, a canceled action needing no message. */
   #showResult(result: ActionResult<unknown>): void {
     if (result.ok) {
       return;

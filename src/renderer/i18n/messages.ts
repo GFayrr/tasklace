@@ -24,7 +24,7 @@ export async function loadMessages(language: Language): Promise<Messages> {
   return loaded.default;
 }
 
-/** Returns the message telling the user why a file action failed, a cancelled action needing none. */
+/** Returns the message telling the user why a file action failed, a canceled action needing none. */
 export function fileErrorMessage(messages: Messages, code: ActionFailure['code']): string | null {
   if (code === 'CANCELLED') {
     return null;

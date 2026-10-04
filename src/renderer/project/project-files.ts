@@ -249,7 +249,7 @@ function decodedDocument(state: Uint8Array): Y.Doc | null {
   }
 }
 
-/** Returns the save status after a save: saved, or still unsaved when changes came during it or the user cancelled, or failed. */
+/** Returns the save status after a save: saved, or still unsaved when changes came during it or the user canceled, or failed. */
 function saveStatusAfter(result: ActionResult<SavedProject>, noChangeSince: boolean): SaveStatus {
   if (result.ok) {
     return noChangeSince ? 'saved' : 'unsaved';

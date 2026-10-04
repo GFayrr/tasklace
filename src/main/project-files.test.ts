@@ -520,7 +520,7 @@ describe('exporting projects', () => {
     expect(await readFile(join(folder, 'plan.json'), 'utf8')).toBe('{}');
   });
 
-  it('refuses an invalid request, and reports a cancelled or failed export', async () => {
+  it('refuses an invalid request, and reports a canceled or failed export', async () => {
     await expect(request(IPC_CHANNELS.exportProject, {}, 'xml', '{}', 'Plan')).rejects.toThrow(
       RefusedRequest,
     );

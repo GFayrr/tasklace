@@ -122,7 +122,7 @@ describe('closing a project', () => {
     expect(app.hasFile).toBe(true);
   });
 
-  it('keeps the project open when saving it before closing is cancelled', async () => {
+  it('keeps the project open when saving it before closing is canceled', async () => {
     const { app, control } = await withNewProject();
     await change(app);
     control.saveAsResult = { ok: false, error: { code: 'CANCELLED' } };
@@ -207,7 +207,7 @@ describe('closing a project', () => {
     expect(control.calls.filter((call) => call === 'saveProjectAs')).toHaveLength(1);
   });
 
-  it('keeps the window open when saving elsewhere after a failed save is cancelled or fails too', async () => {
+  it('keeps the window open when saving elsewhere after a failed save is canceled or fails too', async () => {
     const { app, control } = await withOpenPlan();
     await change(app);
     control.saveResult = { ok: false, error: { code: 'WRITE_FAILED' } };
@@ -236,7 +236,7 @@ describe('closing a project', () => {
     await expect(closing).rejects.toThrow('bridge gone');
   });
 
-  it('does not close when the question about a project without file is cancelled', async () => {
+  it('does not close when the question about a project without file is canceled', async () => {
     const { app } = await withNewProject();
     await change(app);
     const closing = app.prepareClose();

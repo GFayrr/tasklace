@@ -34,7 +34,7 @@ describe('fileErrorMessage', () => {
     expect(fileErrorMessage(messages, code)).toMatch(/^[A-Z].+\.$/);
   });
 
-  it('shows nothing for a cancelled action', () => {
+  it('shows nothing for a canceled action', () => {
     expect(fileErrorMessage(messages, 'CANCELLED')).toBeNull();
   });
 });

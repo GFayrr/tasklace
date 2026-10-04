@@ -70,7 +70,7 @@ function wholeTaskHandle(shape: RowShape): LinkHandle {
   return { block: null, center: { x: end + LINK_HANDLE_GAP, y: rowMiddle(shape.row) } };
 }
 
-/** Returns the centre of the handle of a block from which a link is dragged, the handle after the bar standing for the whole task and for a block the shape does not show. */
+/** Returns the center of the handle of a block from which a link is dragged, the handle after the bar standing for the whole task and for a block the shape does not show. */
 export function linkHandleCenter(shape: RowShape, block: number | null): Point {
   const handle = linkHandles(shape).find((candidate) => candidate.block === block);
   return (handle ?? wholeTaskHandle(shape)).center;
