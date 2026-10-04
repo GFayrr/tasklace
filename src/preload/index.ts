@@ -1,14 +1,23 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { RegionalFormat } from '../core/exchange/csv/regional-format';
+import { CSV_SEPARATORS } from '../core/exchange/csv/csv-text';
+import {
+  DATE_ORDERS,
+  DATE_SEPARATORS,
+  type RegionalFormat,
+} from '../core/exchange/csv/regional-format';
 import {
   BRIDGE_NAME,
   IPC_CHANNELS,
   type BridgeResult,
-  type IpcChannel,
+  type ChannelAnswers,
+  type ResultChannel,
   type RecentProject,
   type TasklaceBridge,
 } from './bridge-contract';
 
+const LIST_SEPARATORS: readonly unknown[] = CSV_SEPARATORS;
+const DATE_ORDER_VALUES: readonly unknown[] = DATE_ORDERS;
+const DATE_SEPARATOR_VALUES: readonly unknown[] = DATE_SEPARATORS;
 const UNEXPECTED_ANSWER: BridgeResult<never> = { ok: false, error: { code: 'TASK_FAILED' } };
 
 const bridge: TasklaceBridge = {
@@ -25,9 +34,20 @@ const bridge: TasklaceBridge = {
   openProject: () => request(IPC_CHANNELS.openProject),
   openRecentProject: (index) => request(IPC_CHANNELS.openRecentProject, index),
   recentProjects: async () => {
-    const answer: unknown = await ipcRenderer.invoke(IPC_CHANNELS.recentProjects);
-    const projects: readonly unknown[] = Array.isArray(answer) ? answer : [];
-    return projects.filter(isRecentProject);
+    const answer: BridgeResult<unknown> = await request(IPC_CHANNELS.recentProjects);
+    if (!answer.ok) {
+      return answer;
+    }
+    const projects: unknown = answer.value;
+    if (!Array.isArray(projects)) {
+      console.error('The main process sent recent projects that are not a list:', projects);
+      return UNEXPECTED_ANSWER;
+    }
+    const recent = projects.filter(isRecentProject);
+    if (recent.length !== projects.length) {
+      console.error('The main process sent recent projects of an unexpected shape:', projects);
+    }
+    return { ok: true, value: recent };
   },
   importProject: (kind) => request(IPC_CHANNELS.importProject, kind),
   adoptProject: (documentId) => request(IPC_CHANNELS.adoptProject, documentId),
@@ -67,21 +87,36 @@ function answerCloseRequest(): void {
 
 contextBridge.exposeInMainWorld(BRIDGE_NAME, bridge);
 
-/** Sends a file request to the main process and gives back its result, an answer of any other shape counting as a failed task. */
-async function request<T>(channel: IpcChannel, ...values: unknown[]): Promise<BridgeResult<T>> {
+/** Sends a file request to the main process and gives back its result, an answer of any other shape being logged and counting as a failed task. */
+async function request<C extends ResultChannel>(
+  channel: C,
+  ...values: unknown[]
+): Promise<ChannelAnswers[C] | BridgeResult<never>> {
   const result: unknown = await ipcRenderer.invoke(channel, ...values);
-  return isBridgeResult<T>(result) ? result : UNEXPECTED_ANSWER;
+  if (isAnswerOf(channel, result)) {
+    return result;
+  }
+  console.error(`The main process answered ${channel} with an unexpected shape:`, result);
+  return UNEXPECTED_ANSWER;
 }
 
-/** Tells whether an answer has the shape of a bridge result. */
-function isBridgeResult<T>(value: unknown): value is BridgeResult<T> {
+/** Tells whether an answer to a file request has the shape of a bridge result, checking only its outcome, the rest being trusted since the main process types what each channel answers. */
+function isAnswerOf<C extends ResultChannel>(
+  _channel: C,
+  value: unknown,
+): value is ChannelAnswers[C] {
   return typeof Reflect.get(Object(value), 'ok') === 'boolean';
 }
 
-/** Tells whether an answer has the shape of a regional format. */
+/** Tells whether an answer is a regional format, each field holding one of its allowed values. */
 function isRegionalFormat(value: unknown): value is RegionalFormat {
-  const fields = ['listSeparator', 'dateOrder', 'dateSeparator', 'twelveHourClock'];
-  return typeof value === 'object' && value !== null && fields.every((field) => field in value);
+  const field = (name: string): unknown => Reflect.get(Object(value), name);
+  return (
+    LIST_SEPARATORS.includes(field('listSeparator')) &&
+    DATE_ORDER_VALUES.includes(field('dateOrder')) &&
+    DATE_SEPARATOR_VALUES.includes(field('dateSeparator')) &&
+    typeof field('twelveHourClock') === 'boolean'
+  );
 }
 
 /** Tells whether an answer has the shape of a recent project. */

@@ -135,7 +135,7 @@ export function nonWorkingIntervals(
     if (!isWorkingDay(calendar, day)) {
       intervals.push({ start: dayStart, end: dayStart + HOURS_PER_DAY });
     } else if (zoom === 'hour') {
-      intervals.push(...offHours(calendar.workingQuartersOfDay, dayStart));
+      intervals.push(...offHours(calendar.workingQuarterStartHours, dayStart));
     }
   }
   return mergeIntervals(intervals);
@@ -622,7 +622,7 @@ function paintPreview(context: CanvasRenderingContext2D, scene: TimelineScene): 
     context.lineTo(x - half, middle);
     context.closePath();
     context.stroke();
-  } else if (preview.shape.kind === 'task') {
+  } else {
     const span = previewSpan(preview.shape, preview);
     roundedRectangle(
       context,

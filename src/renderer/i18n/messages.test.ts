@@ -34,7 +34,7 @@ describe('fileErrorMessage', () => {
     expect(fileErrorMessage(messages, code)).toMatch(/^[A-Z].+\.$/);
   });
 
-  it('shows nothing for a cancelled action', () => {
+  it('shows nothing for a canceled action', () => {
     expect(fileErrorMessage(messages, 'CANCELLED')).toBeNull();
   });
 });
@@ -59,10 +59,12 @@ describe('countMessage', () => {
 });
 
 describe('editErrorMessage', () => {
-  it('explains a known reason, and falls back to a general sentence', () => {
-    expect(editErrorMessage(messages, 'DEPENDENCY_CYCLE')).toMatch(/loop/);
-    expect(editErrorMessage(messages, 'SOMETHING_ELSE')).toBe(messages.editErrors.NOT_POSSIBLE);
-    expect(editErrorMessage(messages, 'toString')).toBe(messages.editErrors.NOT_POSSIBLE);
+  it('explains a reason with its own text first, even when the problem found has one too', () => {
+    expect(editErrorMessage(messages, 'DEPENDENCY_CYCLE')).toBe(
+      messages.editErrors.DEPENDENCY_CYCLE,
+    );
+    expect(messages.editErrors.DEPENDENCY_CYCLE).not.toBe(messages.issues.DEPENDENCY_CYCLE);
+    expect(editErrorMessage(messages, 'NOT_POSSIBLE')).toBe(messages.editErrors.NOT_POSSIBLE);
   });
 
   it('gives the text of the problem found for a reason that has no edit message of its own', () => {

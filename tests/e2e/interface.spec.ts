@@ -110,6 +110,40 @@ test('opens a project from the Open menu and shows its schedule', async () => {
   await expect(page.getByText('All changes saved')).toBeVisible();
 });
 
+test('keeps the project from changing while another one is being opened', async () => {
+  await page.getByRole('button', { name: /New project/ }).click();
+  const rows = page.getByRole('grid', { name: 'Tasks' }).getByRole('row');
+  const rowsBefore = await rows.count();
+  await application.evaluate(({ dialog }) => {
+    dialog.showOpenDialog = () =>
+      new Promise((resolve) => {
+        Object.assign(globalThis, {
+          cancelOpening: () => {
+            resolve({ canceled: true, filePaths: [] });
+          },
+        });
+      });
+  });
+  await page.getByRole('button', { name: 'Open' }).click();
+  await page.getByRole('menuitem', { name: 'Open a file…' }).click();
+  const shell = page.locator('.shell');
+  await expect(shell).toHaveAttribute('aria-busy', 'true');
+  await page.getByRole('button', { name: 'Add task' }).click({ force: true });
+  await page.keyboard.press('Control+z');
+  await expect(rows).toHaveCount(rowsBefore);
+  await application.evaluate(() => {
+    const cancel: unknown = Reflect.get(globalThis, 'cancelOpening');
+    if (typeof cancel === 'function') {
+      Reflect.apply(cancel, undefined, []);
+    }
+  });
+  await expect(shell).toHaveAttribute('aria-busy', 'false');
+  await expect(rows).toHaveCount(rowsBefore);
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Add task' }).click();
+  await expect(rows).toHaveCount(rowsBefore + 1);
+});
+
 test('explains why a file cannot be opened, until the message is dismissed', async () => {
   const forged = join(folder, 'forged.tasklace');
   await writeFile(forged, 'not a project at all');
@@ -123,7 +157,7 @@ test('explains why a file cannot be opened, until the message is dismissed', asy
   await expect(alert).toHaveCount(0);
 });
 
-test('offers both kinds of import from the welcome screen, and cancelling shows nothing', async () => {
+test('offers both kinds of import from the welcome screen, and canceling shows nothing', async () => {
   await answerDialogs(application, { open: null });
   await page.getByRole('button', { name: /Import…/ }).click();
   await page.getByRole('button', { name: 'JSON file…' }).click();

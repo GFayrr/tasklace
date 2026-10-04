@@ -5,6 +5,8 @@ import type { Project, TaskId } from '../../core/model/project';
 import type { Result } from '../../core/result';
 import type { MergeFailure, SharedRepair } from '../../core/shared/shared-project';
 import { issueText, repairText, type ReportedIssue } from '../i18n/issue-text';
+import { scheduleFailureText } from '../i18n/schedule-failure-text';
+import { parseDuration } from '../plan/durations';
 import {
   scheduleProject,
   type Schedule,
@@ -18,9 +20,10 @@ import {
   editErrorMessage,
   fileErrorMessage,
   fillMessage,
+  type EditRefusal,
   type Messages,
 } from '../i18n/messages';
-import type { EditableColumn } from '../plan/cell-editing';
+import type { CurrentSchedule, EditableColumn } from '../plan/cell-editing';
 import {
   buildPlanOutline,
   NOTHING_COLLAPSED,
@@ -32,6 +35,7 @@ import {
   taskBasis,
   taskFromDraft,
   type TaskDraft,
+  withAddedBlock,
 } from '../plan/task-details';
 import {
   deleteTasks,
@@ -46,6 +50,7 @@ import { buildNewProject } from '../project/new-project';
 import {
   createProjectFiles,
   FileActionError,
+  type ActionFailure,
   type ActionResult,
   type OpenedSession,
   type ProjectFiles,
@@ -73,14 +78,17 @@ export type ClosePrompt =
 type CloseQuestion =
   { readonly reason: 'unsaved' } | { readonly reason: 'saveFailed'; readonly detail: string };
 
-type CloseDecision = 'proceed' | 'discarded' | 'cancelled';
+interface ComputedSchedule {
+  readonly project: Project;
+  readonly schedule: Schedule | null;
+}
+
+type CloseDecision = 'proceed' | 'discarded' | 'canceled';
 
 export interface EditRequest {
   readonly taskId: TaskId;
   readonly column: EditableColumn;
 }
-
-const DEFAULT_DAY_HOURS = 9;
 
 export interface Report {
   readonly title: string;
@@ -107,23 +115,25 @@ export interface AppContext {
 
 /** Holds what the interface shows: the open project, its schedule, whether it is saved, what can be undone and the messages for the user. */
 export class AppState {
-  project = $state.raw<Project | null>(null);
-  schedule = $state.raw<Schedule | null>(null);
-  saveStatus = $state<SaveStatus>('saved');
-  hasFile = $state(false);
-  canUndo = $state(false);
-  canRedo = $state(false);
-  recentProjects = $state.raw<readonly RecentProject[]>([]);
-  notices = $state.raw<readonly Notice[]>([]);
+  #project = $state.raw<Project | null>(null);
+  #computed = $state.raw<ComputedSchedule | null>(null);
+  #scheduleStopped = $state(false);
+  #saveStatus = $state<SaveStatus>('saved');
+  #hasFile = $state(false);
+  #canUndo = $state(false);
+  #canRedo = $state(false);
+  #recentProjects = $state.raw<readonly RecentProject[]>([]);
+  #notices = $state.raw<readonly Notice[]>([]);
   zoom = $state<ZoomLevel>('day');
   selectedTaskId = $state<TaskId | null>(null);
   editRequest = $state<EditRequest | null>(null);
   detailsTaskId = $state<TaskId | null>(null);
   #closePrompt = $state.raw<ClosePrompt | null>(null);
+  #fileActionRunning = $state(false);
   #report = $state.raw<Report | null>(null);
   #lastQuestion: Promise<unknown> = Promise.resolve();
   collapsed = $state.raw<ReadonlySet<TaskId>>(NOTHING_COLLAPSED);
-  openedCount = $state(0);
+  #openedCount = $state(0);
   readonly outline = $derived(buildPlanOutline(this.project?.tasks ?? [], this.collapsed));
   readonly calendar = $derived.by(() => {
     const compiled = this.project === null ? null : compileCalendar(this.project.calendar);
@@ -153,10 +163,13 @@ export class AppState {
         this.#reportError(error);
       },
       saveStatus: (status) => {
-        this.saveStatus = status;
+        this.#saveStatus = status;
       },
       localCopyFailed: () => {
         this.#notify('warning', this.messages.notices.localCopyFailed);
+      },
+      fileActionRunning: (running) => {
+        this.#fileActionRunning = running;
       },
     });
     this.#scheduler = context.createScheduler({
@@ -165,14 +178,74 @@ export class AppState {
       },
       failed: (error) => {
         console.error('The schedule could not be computed:', error);
+        this.#scheduleStopped = true;
         this.#notify('error', this.messages.notices.scheduleStopped, null, true);
       },
     });
   }
 
+  /** Returns the open project, or null. */
+  get project(): Project | null {
+    return this.#project;
+  }
+
+  /** Returns the schedule shown, the latest computed for the open project even when older than its latest change, or null when none is computed or the latest computation failed. */
+  get schedule(): Schedule | null {
+    return this.#computed?.schedule ?? null;
+  }
+
+  /** Returns the schedule computed for the project as it is now, null when that computation failed, or why an edit relying on the dates must wait: the schedule is still being computed after the latest change, or it stopped and needs another change. */
+  get currentSchedule(): CurrentSchedule {
+    const computed = this.#computed;
+    if (computed?.project === this.#project) {
+      return { ok: true, value: computed.schedule };
+    }
+    return { ok: false, error: this.#scheduleStopped ? 'SCHEDULE_STOPPED' : 'SCHEDULE_PENDING' };
+  }
+
+  /** Returns the save status of the open project. */
+  get saveStatus(): SaveStatus {
+    return this.#saveStatus;
+  }
+
+  /** Returns whether the open project has a file. */
+  get hasFile(): boolean {
+    return this.#hasFile;
+  }
+
+  /** Returns whether a change can be undone. */
+  get canUndo(): boolean {
+    return this.#canUndo;
+  }
+
+  /** Returns whether an undone change can be redone. */
+  get canRedo(): boolean {
+    return this.#canRedo;
+  }
+
+  /** Returns the recent projects. */
+  get recentProjects(): readonly RecentProject[] {
+    return this.#recentProjects;
+  }
+
+  /** Returns the messages shown to the user. */
+  get notices(): readonly Notice[] {
+    return this.#notices;
+  }
+
+  /** Returns how many projects were opened, so that views start afresh for each. */
+  get openedCount(): number {
+    return this.#openedCount;
+  }
+
   /** Returns the question about closing a project shown to the user, or null. */
   get closePrompt(): ClosePrompt | null {
     return this.#closePrompt;
+  }
+
+  /** Tells whether a file action started by the user runs, during which the project cannot be changed. */
+  get fileActionRunning(): boolean {
+    return this.#fileActionRunning;
   }
 
   /** Returns the detailed list behind a message shown to the user, or null. */
@@ -183,11 +256,16 @@ export class AppState {
   /** Loads the list of recent projects, a list that cannot be loaded leaving the previous one and a warning, so that the action that asked for it still succeeds. */
   async loadRecentProjects(): Promise<void> {
     try {
-      this.recentProjects = await this.#context.bridge.recentProjects();
+      const loaded = await this.#context.bridge.recentProjects();
+      if (loaded.ok) {
+        this.#recentProjects = loaded.value;
+        return;
+      }
+      console.error('The recent projects could not be loaded:', loaded.error);
     } catch (error) {
       console.error('The recent projects could not be loaded:', error);
-      this.#notify('warning', this.messages.notices.recentUnavailable);
     }
+    this.#notify('warning', this.messages.notices.recentUnavailable);
   }
 
   /** Runs the action of a keyboard shortcut. */
@@ -213,7 +291,7 @@ export class AppState {
 
   /** Asks whether to save a changed project that has no file yet before it is closed, telling whether it may be closed. */
   async readyToClose(): Promise<boolean> {
-    return (await this.#closeDecision()) !== 'cancelled';
+    return (await this.#closeDecision()) !== 'canceled';
   }
 
   /** Prepares the window to close: asks about a project without file, closing at once when the user chooses not to save it, then saves, and when that save fails keeps the window open unless the user saves elsewhere or chooses to close without saving. */
@@ -243,9 +321,9 @@ export class AppState {
     }
     const choice = await this.#ask({ reason: 'unsaved' });
     if (choice === 'save') {
-      return (await this.saveAs()) ? 'proceed' : 'cancelled';
+      return (await this.saveAs()) ? 'proceed' : 'canceled';
     }
-    return choice === 'discard' ? 'discarded' : 'cancelled';
+    return choice === 'discard' ? 'discarded' : 'canceled';
   }
 
   /** Shows a question about closing a project once the questions asked before it are answered, so that each question gets its own answer. */
@@ -264,9 +342,14 @@ export class AppState {
     return asked;
   }
 
+  /** Tells whether the open project may be replaced: never while a file action runs, which is refused at once, and otherwise once the user agreed about a project without file. */
+  async #readyToReplace(): Promise<boolean> {
+    return !this.#refuseWhileFileActionRuns() && (await this.readyToClose());
+  }
+
   /** Starts a new empty project. */
   async newProject(): Promise<void> {
-    if (!(await this.readyToClose())) {
+    if (!(await this.#readyToReplace())) {
       return;
     }
     const { messages, createId, now } = this.#context;
@@ -281,21 +364,21 @@ export class AppState {
 
   /** Asks for a project file and opens it. */
   async open(): Promise<void> {
-    if (await this.readyToClose()) {
+    if (await this.#readyToReplace()) {
       await this.#load(this.#files.open());
     }
   }
 
   /** Opens one of the recent projects. */
   async openRecent(index: number): Promise<void> {
-    if (await this.readyToClose()) {
+    if (await this.#readyToReplace()) {
       await this.#load(this.#files.openRecent(index));
     }
   }
 
   /** Asks for a CSV or JSON file, imports it as a new project and tells how many tasks it brought. */
   async importFile(kind: ExchangeKind): Promise<void> {
-    if (!(await this.readyToClose())) {
+    if (!(await this.#readyToReplace())) {
       return;
     }
     const imported = await this.#load(this.#files.importFile(kind));
@@ -309,7 +392,7 @@ export class AppState {
   /** Saves the project to its file, asking where for a project that has none yet. */
   async save(): Promise<void> {
     this.#showResult(await this.#files.save());
-    this.hasFile = this.#files.hasFile();
+    this.#hasFile = this.#files.hasFile();
     await this.loadRecentProjects();
   }
 
@@ -317,7 +400,7 @@ export class AppState {
   async saveAs(): Promise<boolean> {
     const saved = await this.#files.saveAs();
     this.#showResult(saved);
-    this.hasFile = this.#files.hasFile();
+    this.#hasFile = this.#files.hasFile();
     await this.loadRecentProjects();
     return saved.ok;
   }
@@ -342,16 +425,19 @@ export class AppState {
     this.#showResult(exported);
   }
 
-  /** Renames the project, telling whether the name was accepted and telling the user why when the project refuses it. */
+  /** Renames the project, telling whether the name was accepted and telling the user why when the project or a running file action refuses it. */
   rename(name: string): boolean {
     const trimmed = name.trim();
     const session = this.#session;
     if (session === null || trimmed === '' || trimmed === this.project?.name) {
       return false;
     }
+    if (this.#refuseWhileFileActionRuns()) {
+      return false;
+    }
     const renamed = session.apply({ type: 'updateProject', fields: { name: trimmed } });
     if (!renamed.ok) {
-      this.#notify('error', editErrorMessage(this.messages, renamed.error[0]?.code ?? ''));
+      this.#notify('error', editErrorMessage(this.messages, renamed.error[0].code));
     }
     return renamed.ok;
   }
@@ -378,22 +464,29 @@ export class AppState {
     return refusal === null;
   }
 
-  /** Applies a change built from the current project, returning why it was refused, or null once applied. */
+  /** Applies a change built from the current project, returning why it was refused, as while a file action runs, or null once applied. */
   tryEdit(
-    build: (context: EditContext) => Result<readonly SharedOperation[], string>,
+    build: (context: EditContext) => Result<readonly SharedOperation[], EditRefusal>,
   ): string | null {
     const session = this.#session;
     const project = this.project;
     if (session === null || project === null) {
       return editErrorMessage(this.messages, 'NOT_POSSIBLE');
     }
-    const edit = build(this.#editContext(project));
+    if (this.#fileActionRunning) {
+      return this.messages.fileErrors.BUSY;
+    }
+    const context = this.#editContext(project);
+    if (context === null) {
+      return editErrorMessage(this.messages, 'NOT_POSSIBLE');
+    }
+    const edit = build(context);
     if (!edit.ok) {
       return editErrorMessage(this.messages, edit.error);
     }
     const applied = session.applyAll(edit.value);
     if (!applied.ok) {
-      return editErrorMessage(this.messages, applied.error[0]?.code ?? '');
+      return editErrorMessage(this.messages, applied.error[0].code);
     }
     this.#refresh();
     this.#notifyStartMove(project.startDate);
@@ -446,19 +539,16 @@ export class AppState {
 
   /** Adds a task after the selected one, selects it and asks the table to edit its name, telling the user when the project refuses it. */
   addTask(): void {
-    const session = this.#session;
-    const project = this.project;
-    if (session === null || project === null) {
-      return;
-    }
-    const inserted = insertTask(
-      this.#editContext(project),
-      this.selectedTaskId,
-      this.messages.table.newTask,
-    );
-    if (this.edit(() => ({ ok: true, value: inserted.operations }))) {
-      this.selectedTaskId = inserted.taskId;
-      this.editRequest = { taskId: inserted.taskId, column: 'name' };
+    const added: TaskId[] = [];
+    const applied = this.edit((context) => {
+      const inserted = insertTask(context, this.selectedTaskId, this.messages.table.newTask);
+      added.push(inserted.taskId);
+      return { ok: true, value: inserted.operations };
+    });
+    const [taskId] = added;
+    if (applied && taskId !== undefined) {
+      this.selectedTaskId = taskId;
+      this.editRequest = { taskId, column: 'name' };
     }
   }
 
@@ -483,17 +573,31 @@ export class AppState {
     }
   }
 
-  /** Undoes the latest local change. */
+  /** Undoes the latest local change, unless a file action runs. */
   undo(): void {
+    if (this.#refuseWhileFileActionRuns()) {
+      return;
+    }
     this.#showHistoryStep(this.#session?.history.undo(), this.messages.notices.undoFailed);
   }
 
-  /** Redoes the latest undone change. */
+  /** Redoes the latest undone change, unless a file action runs. */
   redo(): void {
+    if (this.#refuseWhileFileActionRuns()) {
+      return;
+    }
     this.#showHistoryStep(this.#session?.history.redo(), this.messages.notices.redoFailed);
   }
 
-  /** Tells the repairs an undone or redone step needed, or that the step could not be applied and the project was left as it was. */
+  /** Tells the user that the project cannot change while a file action runs, telling whether one runs. */
+  #refuseWhileFileActionRuns(): boolean {
+    if (this.#fileActionRunning) {
+      this.#notify('error', this.messages.fileErrors.BUSY);
+    }
+    return this.#fileActionRunning;
+  }
+
+  /** Tells the repairs an undone or redone step needed, or that the step could not be applied and the project was left as it was, logging why, a failed repair being an unexpected error. */
   #showHistoryStep(
     step: Result<readonly SharedRepair[], MergeFailure> | undefined,
     refusal: string,
@@ -501,11 +605,16 @@ export class AppState {
     if (step === undefined) {
       return;
     }
-    if (!step.ok) {
-      this.#notify('warning', refusal);
+    if (step.ok) {
+      this.#notifyRepairs(step.value);
       return;
     }
-    this.#notifyRepairs(step.value);
+    if (step.error.kind === 'repairFailed') {
+      this.reportUnexpectedError(step.error.error);
+      return;
+    }
+    console.error('The step could not be undone or redone:', step.error);
+    this.#notify('warning', refusal);
   }
 
   /** Saves at once what is not saved yet, before the window closes. */
@@ -547,7 +656,7 @@ export class AppState {
 
   /** Removes a message. */
   dismiss(id: number): void {
-    this.notices = this.notices.filter((notice) => notice.id !== id);
+    this.#notices = this.notices.filter((notice) => notice.id !== id);
   }
 
   /** Shows a project read from a file, with its warnings and repairs, and returns it, or tells why it could not be read and returns null. */
@@ -571,13 +680,17 @@ export class AppState {
     return opened.value;
   }
 
-  /** Returns what the editing commands need to know about the open project. */
-  #editContext(project: Project): EditContext {
+  /** Returns what the editing commands need to know about the open project, or null, logged, when its calendar cannot be compiled, which the validation of every project rules out. */
+  #editContext(project: Project): EditContext | null {
+    if (this.calendar === null) {
+      console.error('The calendar of the open project cannot be compiled; the change is refused.');
+      return null;
+    }
     return {
       project,
       outline: this.outline,
       createId: this.#context.createId,
-      dayHours: this.calendar?.workingHoursPerDay ?? DEFAULT_DAY_HOURS,
+      dayHours: this.calendar.workingHoursPerDay,
     };
   }
 
@@ -585,13 +698,13 @@ export class AppState {
   #attach(session: SharedSession): void {
     this.#session?.document.off('update', this.#queueRefresh);
     this.#session = session;
-    this.schedule = null;
+    this.#computed = null;
     this.selectedTaskId = null;
     this.editRequest = null;
     this.detailsTaskId = null;
     this.#changedSinceOpened = false;
     this.collapsed = NOTHING_COLLAPSED;
-    this.openedCount += 1;
+    this.#openedCount += 1;
     session.document.on('update', this.#queueRefresh);
     this.#refresh();
   }
@@ -618,10 +731,11 @@ export class AppState {
     if (project === this.project) {
       return;
     }
-    this.project = project;
-    this.hasFile = this.#files.hasFile();
-    this.canUndo = session.history.canUndo();
-    this.canRedo = session.history.canRedo();
+    this.#project = project;
+    this.#hasFile = this.#files.hasFile();
+    this.#canUndo = session.history.canUndo();
+    this.#canRedo = session.history.canRedo();
+    this.#scheduleStopped = false;
     this.#scheduler.request(project);
     if (this.selectedTaskId !== null && !this.outline.wbsById.has(this.selectedTaskId)) {
       this.selectedTaskId = null;
@@ -633,12 +747,47 @@ export class AppState {
     if (project !== this.project) {
       return;
     }
+    this.#computed = { project, schedule: result.ok ? result.value : null };
     if (!result.ok) {
-      this.schedule = null;
-      this.#notify('error', this.messages.notices.scheduleFailed);
-      return;
+      this.#showScheduleFailure(result.error, project);
     }
-    this.schedule = result.value;
+  }
+
+  /** Tells the user why the schedule of a project could not be computed, with each problem and the task it concerns, and logs the cause. */
+  #showScheduleFailure(failure: SchedulingFailure, project: Project): void {
+    console.error('The schedule could not be computed:', failure);
+    const names: Readonly<Record<string, string>> = Object.fromEntries(
+      project.tasks.map((task) => [task.id, task.name]),
+    );
+    const { text, entries } = scheduleFailureText(
+      this.messages,
+      failure,
+      (id) => (Object.hasOwn(names, id) ? names[id] : undefined) ?? null,
+    );
+    const report =
+      entries.length === 0 ? null : { title: this.messages.report.scheduleFailed, entries };
+    this.#notify('error', text, report);
+  }
+
+  /** Tells whether a draft of the details panel works fewer hours a day than the project, so that a daily start time makes sense. */
+  worksPartOfDay(draft: TaskDraft): boolean {
+    const dayHours = this.calendar?.workingHoursPerDay;
+    if (dayHours === undefined) {
+      return false;
+    }
+    const hours = parseDuration(draft.hoursPerDay.trim(), dayHours);
+    return hours !== null && hours < dayHours;
+  }
+
+  /** Returns a draft of the details panel with one more block of one working day, or the same draft, telling the user why, when the calendar of the project cannot be compiled. */
+  withAddedBlock(draft: TaskDraft): TaskDraft {
+    const project = this.project;
+    const context = project === null ? null : this.#editContext(project);
+    if (context === null) {
+      this.#notify('error', editErrorMessage(this.messages, 'NOT_POSSIBLE'));
+      return draft;
+    }
+    return withAddedBlock(draft, context.dayHours);
   }
 
   /** Tells which block of the details panel has a start date that cannot be read or waits for a task or block that does not exist, or null. */
@@ -654,7 +803,11 @@ export class AppState {
         message: editErrorMessage(this.messages, 'INVALID_DATE'),
       });
     }
-    const problem = findBlockWaitProblem(this.#editContext(project), draft.blocks);
+    const context = this.#editContext(project);
+    if (context === null) {
+      return editErrorMessage(this.messages, 'NOT_POSSIBLE');
+    }
+    const problem = findBlockWaitProblem(context, draft.blocks);
     return problem === null
       ? null
       : fillMessage(this.messages.details.blockError, {
@@ -667,7 +820,7 @@ export class AppState {
   async #csvText(project: Project): Promise<string | null> {
     const schedule = scheduleProject(project);
     if (!schedule.ok) {
-      this.#notify('error', this.messages.notices.scheduleFailed);
+      this.#showScheduleFailure(schedule.error, project);
       return null;
     }
     const format = await this.#context.bridge.regionalFormat();
@@ -679,7 +832,7 @@ export class AppState {
     return text.value;
   }
 
-  /** Tells the user why a file action failed, with the list of the problems found when there are any, a cancelled action needing no message. */
+  /** Tells the user why a file action failed, with the list of the problems found when there are any, a canceled action needing no message. */
   #showResult(result: ActionResult<unknown>): void {
     if (result.ok) {
       return;
@@ -688,10 +841,29 @@ export class AppState {
     if (text === null) {
       return;
     }
-    const issues = 'issues' in result.error ? result.error.issues : [];
-    const report =
-      issues.length === 0 ? null : this.#issueReport(this.messages.report.fileFailed, issues);
-    this.#notify('error', text, report);
+    this.#notify('error', text, this.#failureReport(result.error));
+  }
+
+  /** Lists why a file action failed: the problems found in a file, or for a project that could not be saved before another, the failure of that save and its problems, or null when there is nothing more to tell. */
+  #failureReport(failure: ActionFailure): Report | null {
+    if (failure.code === 'UNSAVED_PROJECT') {
+      return failure.cause === null ? null : this.#causeReport(failure.cause);
+    }
+    const issues = 'issues' in failure ? failure.issues : [];
+    return issues.length === 0 ? null : this.#issueReport(this.messages.report.fileFailed, issues);
+  }
+
+  /** Lists the failure of the save that kept the open project, then the problems it found. */
+  #causeReport(cause: ActionFailure): Report {
+    const issues = 'issues' in cause ? cause.issues : [];
+    const reason = fileErrorMessage(this.messages, cause.code);
+    return {
+      title: this.messages.report.saveFailed,
+      entries: [
+        ...(reason === null ? [] : [reason]),
+        ...issues.map((issue) => issueText(this.messages, issue)),
+      ],
+    };
   }
 
   /** Tells the user that the project now starts earlier, so that a task placed before it fits. */
@@ -737,7 +909,7 @@ export class AppState {
       return;
     }
     this.#notify('error', this.messages.fileErrors.TASK_FAILED);
-    console.error(error);
+    console.error('A file action failed unexpectedly:', error);
   }
 
   /** Adds a message, replacing the same message already shown so that it is shown once, with its latest details; a message with details, or asked to last, stays until the user dismisses it. */
@@ -749,6 +921,6 @@ export class AppState {
   ): void {
     this.#nextNoticeId += 1;
     const others = this.notices.filter((notice) => notice.text !== text);
-    this.notices = [...others, { id: this.#nextNoticeId, kind, text, report, lasting }];
+    this.#notices = [...others, { id: this.#nextNoticeId, kind, text, report, lasting }];
   }
 }

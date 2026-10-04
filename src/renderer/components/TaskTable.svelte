@@ -57,6 +57,7 @@
   );
   const source: CellSource = $derived({
     schedule: app.schedule,
+    current: app.currentSchedule,
     calendar: app.calendar,
     incoming,
     wbsById: app.outline.wbsById,

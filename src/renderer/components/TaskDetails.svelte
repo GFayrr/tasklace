@@ -2,20 +2,13 @@
   import type { Project } from '../../core/model/project';
   import type { AppState } from '../app/app-state.svelte';
   import { fillMessage } from '../i18n/messages';
-  import {
-    draftFromTask,
-    withAddedBlock,
-    withoutBlock,
-    type TaskDraft,
-  } from '../plan/task-details';
-  import { parseDuration } from '../plan/durations';
+  import { draftFromTask, withoutBlock, type TaskDraft } from '../plan/task-details';
   import Icon from './Icon.svelte';
 
   let { app, project }: { app: AppState; project: Project } = $props();
 
   const text = $derived(app.messages.details);
   const task = $derived(project.tasks.find((candidate) => candidate.id === app.detailsTaskId));
-  const dayHours = $derived(app.calendar?.workingHoursPerDay ?? 0);
   const tags = $derived(
     [...project.tags].sort((left, right) => left.name.localeCompare(right.name, app.locale)),
   );
@@ -43,12 +36,6 @@
     refusal = null;
     dialog.showModal();
   });
-
-  /** Tells whether a draft works fewer hours a day than the project, so that a daily start time makes sense. */
-  function worksPartOfDay(written: TaskDraft): boolean {
-    const hours = parseDuration(written.hoursPerDay.trim(), dayHours);
-    return hours !== null && hours < dayHours;
-  }
 
   /** Applies the panel, keeping it open with the reason when the change is refused. */
   function save(event: SubmitEvent, current: TaskDraft): void {
@@ -112,7 +99,7 @@
             <input bind:value={draft.hoursPerDay} />
             <small>{text.hoursPerDayHint}</small>
           </label>
-          {#if worksPartOfDay(current)}
+          {#if app.worksPartOfDay(current)}
             <label class="field">
               <span>{text.dailyStart}</span>
               <input type="time" step="900" bind:value={draft.dailyStart} />
@@ -161,7 +148,7 @@
             type="button"
             class="button"
             onclick={() => {
-              draft = withAddedBlock(current, dayHours);
+              draft = app.withAddedBlock(current);
             }}
           >
             <Icon name="plus" />

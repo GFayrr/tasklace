@@ -23,8 +23,13 @@
     stretchOnTimeline,
     type LinkEnd,
   } from '../plan/task-commands';
-  import { movedStart, stretchedEnd } from '../plan/timeline-gestures';
-  import { ROW_HEIGHT, timelineFrame, xOf, type RowShape } from '../plan/timeline-geometry';
+  import {
+    movedStart,
+    stretchedEnd,
+    type BarShape,
+    type PlacedShape,
+  } from '../plan/timeline-gestures';
+  import { ROW_HEIGHT, timelineFrame, xOf } from '../plan/timeline-geometry';
   import { tagStylesOf } from '../plan/tag-styles';
   import { localHourOf } from '../project/new-project';
   import { pixels } from './css-length';
@@ -144,27 +149,36 @@
   }
 
   /** Asks a dragged bar, or a later block of it, to start where it was dropped, aligned to the quarter hour or the day. */
-  function moveBar(shape: RowShape, offset: number, block: number | null): void {
-    const placement = app.schedule?.placements.get(shape.taskId);
+  function moveBar(shape: PlacedShape, offset: number, block: number | null): void {
+    const current = app.currentSchedule;
     const snap = snapHours(app.zoom);
     app.edit((context) =>
-      moveOnTimeline(context, shape.taskId, block, placement, (from) =>
-        movedStart(frame, from, offset, snap),
-      ),
+      current.ok
+        ? moveOnTimeline(
+            context,
+            shape.taskId,
+            block,
+            current.value?.placements.get(shape.taskId),
+            (from) => movedStart(frame, from, offset, snap),
+          )
+        : current,
     );
   }
 
   /** Changes the duration of a stretched bar so that it ends where it was dropped. */
-  function stretchBar(shape: RowShape, offset: number): void {
-    const placed = {
-      placement: app.schedule?.placements.get(shape.taskId),
-      calendar: app.calendar,
-    };
+  function stretchBar(shape: BarShape, offset: number): void {
+    const current = app.currentSchedule;
+    const calendar = app.calendar;
     const snap = snapHours(app.zoom);
     app.edit((context) =>
-      stretchOnTimeline(context, shape.taskId, placed, (end) =>
-        stretchedEnd(frame, end, offset, snap),
-      ),
+      current.ok
+        ? stretchOnTimeline(
+            context,
+            shape.taskId,
+            { placement: current.value?.placements.get(shape.taskId), calendar },
+            (end) => stretchedEnd(frame, end, offset, snap),
+          )
+        : current,
     );
   }
 

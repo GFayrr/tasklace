@@ -38,8 +38,10 @@ const PLAN = project(
   [link('a', 'b'), link('b', 'm', 'startToStart', 3)],
 );
 const OUTLINE = buildPlanOutline(PLAN.tasks, new Set());
+const SCHEDULE = scheduleOrThrow(PLAN);
 const SOURCE: CellSource = {
-  schedule: scheduleOrThrow(PLAN),
+  schedule: SCHEDULE,
+  current: { ok: true, value: SCHEDULE },
   calendar: compileOrThrow(TEST_CALENDAR),
   incoming: groupIncoming(PLAN.dependencies),
   wbsById: OUTLINE.wbsById,
@@ -82,11 +84,25 @@ describe('editorText', () => {
       const edit = cellEdit(context, 'b', column, editorText(taskOf('b'), column, SOURCE), SOURCE);
       expect(edit.ok && edit.value).toEqual([{ type: 'putTask', task: taskOf('b') }]);
     }
-    const noSchedule = { ...SOURCE, schedule: null };
+    const noSchedule = { ...SOURCE, schedule: null, current: { ok: true, value: null } } as const;
     expect(cellEdit(context, 'b', 'end', 'x', noSchedule)).toEqual({
       ok: false,
       error: 'NOT_POSSIBLE',
     });
+  });
+
+  it('refuses a typed start or end while the schedule shown is older than the latest change, telling why', () => {
+    const context = { project: PLAN, outline: OUTLINE, createId: () => 'new', dayHours: 7 };
+    for (const error of ['SCHEDULE_PENDING', 'SCHEDULE_STOPPED'] as const) {
+      const waiting: CellSource = { ...SOURCE, current: { ok: false, error } };
+      for (const column of ['start', 'end'] as const) {
+        expect(cellEdit(context, 'b', column, '2026-10-01 10:00', waiting)).toEqual({
+          ok: false,
+          error,
+        });
+      }
+      expect(cellEdit(context, 'b', 'name', 'Renamed', waiting).ok).toBe(true);
+    }
   });
 });
 
@@ -94,7 +110,13 @@ describe('tags and dates in cells', () => {
   const tagged = project([workTask('t', { tagId: 'design' }), workTask('u')], [], {
     tags: [{ id: 'design', name: 'Design', color: '#3366AA', representsPersonOrTeam: false }],
   });
-  const source: CellSource = { ...SOURCE, schedule: null, incoming: new Map(), wbsById: new Map() };
+  const source: CellSource = {
+    ...SOURCE,
+    schedule: null,
+    current: { ok: true, value: null },
+    incoming: new Map(),
+    wbsById: new Map(),
+  };
   const context = {
     project: tagged,
     outline: buildPlanOutline(tagged.tasks, new Set()),
@@ -190,7 +212,7 @@ describe('typing the start of a split task', () => {
       createId: () => 'new',
       dayHours: 7,
     };
-    const source = { ...SOURCE, schedule };
+    const source: CellSource = { ...SOURCE, schedule, current: { ok: true, value: schedule } };
     const edit = cellEdit(context, 'd', 'start', '2026-09-30 09:00', source);
     const operation = edit.ok
       ? edit.value.find((candidate) => candidate.type === 'putTask')

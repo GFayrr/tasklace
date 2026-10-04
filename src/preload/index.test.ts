@@ -103,17 +103,41 @@ describe('the bridge exposed to the page', () => {
     expect(await bridge.newProject()).toBe('11111111-1111-4111-8111-111111111111');
   });
 
-  it('keeps only well-formed recent projects, and none from an answer that is not a list', async () => {
+  it('keeps only well-formed recent projects, refuses a value that is not a list, and passes a failure through, logging each unexpected answer', async () => {
     const bridge = await loadBridge();
-    electron.invoke.mockResolvedValueOnce([
-      { name: 'Plan', folder: '/projects' },
-      { name: 3, folder: '/projects' },
-      { name: 'Other' },
-      null,
-    ]);
-    expect(await bridge.recentProjects()).toEqual([{ name: 'Plan', folder: '/projects' }]);
-    electron.invoke.mockResolvedValueOnce({ name: 'Plan', folder: '/projects' });
-    expect(await bridge.recentProjects()).toEqual([]);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const entries = [
+        { name: 'Plan', folder: '/projects' },
+        { name: 3, folder: '/projects' },
+        { name: 'Other' },
+        null,
+      ];
+      electron.invoke.mockResolvedValueOnce({ ok: true, value: entries });
+      expect(await bridge.recentProjects()).toEqual({
+        ok: true,
+        value: [{ name: 'Plan', folder: '/projects' }],
+      });
+      const single = { name: 'Plan', folder: '/projects' };
+      electron.invoke.mockResolvedValueOnce({ ok: true, value: single });
+      expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
+      electron.invoke.mockResolvedValueOnce({ ok: true, value: [single] });
+      expect(await bridge.recentProjects()).toEqual({ ok: true, value: [single] });
+      electron.invoke.mockResolvedValueOnce({ ok: false, error: { code: 'READ_FAILED' } });
+      expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'READ_FAILED' } });
+      electron.invoke.mockResolvedValueOnce([single]);
+      expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
+      expect(logged.mock.calls).toEqual([
+        ['The main process sent recent projects of an unexpected shape:', entries],
+        ['The main process sent recent projects that are not a list:', single],
+        [
+          `The main process answered ${IPC_CHANNELS.recentProjects} with an unexpected shape:`,
+          [single],
+        ],
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it('gives the regional format, refusing an answer of another shape', async () => {
@@ -124,6 +148,15 @@ describe('the bridge exposed to the page', () => {
     await expect(bridge.regionalFormat()).rejects.toThrow('Unexpected regional format');
     electron.invoke.mockResolvedValueOnce(null);
     await expect(bridge.regionalFormat()).rejects.toThrow('Unexpected regional format');
+    for (const changed of [
+      { listSeparator: '|' },
+      { dateOrder: 'yearDayMonth' },
+      { dateSeparator: ' ' },
+      { twelveHourClock: 'no' },
+    ]) {
+      electron.invoke.mockResolvedValueOnce({ ...FORMAT, ...changed });
+      await expect(bridge.regionalFormat()).rejects.toThrow('Unexpected regional format');
+    }
   });
 });
 

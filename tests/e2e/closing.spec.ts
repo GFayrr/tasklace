@@ -40,7 +40,7 @@ async function rename(name: string): Promise<void> {
   await expect(field).toHaveValue(name);
 }
 
-test('asks before replacing a changed project that has no file, and cancelling keeps it', async () => {
+test('asks before replacing a changed project that has no file, and canceling keeps it', async () => {
   await rename('Thesis');
   await page.getByRole('button', { name: 'New', exact: true }).click();
   const prompt = page.getByRole('dialog', { name: 'Save this project?' });

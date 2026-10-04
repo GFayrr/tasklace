@@ -84,12 +84,28 @@ describe('flushBeforeClosing', () => {
     ]);
   });
 
-  it('ignores an answer that is not a yes or a no, and an agreement nobody asked for', () => {
+  it('ignores an agreement nobody asked for, and keeps the window open after an answer that is not a yes or a no, asking again on the next close', () => {
     answer(true);
     expect(window.closed).toBe(false);
     window.close();
-    answer('yes');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      answer('yes');
+      expect(logged).toHaveBeenCalledWith(
+        'The page answered a close request with something else than yes or no:',
+        'yes',
+      );
+    } finally {
+      logged.mockRestore();
+    }
     expect(window.closed).toBe(false);
+    window.close();
+    expect(window.webContents.sent).toEqual([
+      IPC_CHANNELS.flushRequested,
+      IPC_CHANNELS.flushRequested,
+    ]);
+    answer(true);
+    expect(window.closed).toBe(true);
   });
 
   it('closes only the window whose page agreed, and ignores an agreement that comes after a refusal', () => {

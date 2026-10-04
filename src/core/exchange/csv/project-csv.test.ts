@@ -770,6 +770,11 @@ describe('importProjectCsv refusing a table', () => {
     ],
     ['an empty name', ['1; ;;;7'], [{ path: 'rows[2].name', code: 'EMPTY_TEXT' }]],
     [
+      'an unreadable progress',
+      ['1;A;;;7;half'],
+      [{ path: 'rows[2].progress', code: 'INVALID_NUMBER' }],
+    ],
+    [
       'a progress beyond 100',
       ['1;A;;;7;150'],
       [{ path: 'rows[2].progress', code: 'OUT_OF_RANGE' }],

@@ -21,6 +21,7 @@ const QUIET: ProjectFilesListener = {
   failed: () => undefined,
   saveStatus: () => undefined,
   localCopyFailed: () => undefined,
+  fileActionRunning: () => undefined,
 };
 
 /** Returns a listener doing nothing but what a test gives it. */
@@ -94,7 +95,7 @@ function openedOf(documentId: string): BridgeResult<OpenedProject> {
   const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, documentId));
   return {
     ok: true,
-    value: { state, documentId, name: 'Plan', fileName: 'Plan.tasklace', warnings: [] },
+    value: { state, documentId, fileName: 'Plan.tasklace', warnings: [] },
   };
 }
 
@@ -135,7 +136,7 @@ describe('createProjectFiles', () => {
     const opened = await files.open();
     expect(saves).toEqual([{ as: false, documentId: TEST_DOCUMENT_ID }]);
     expect(opened.ok && opened.value.session.documentId).toBe(OTHER_ID);
-    expect(opened.ok && opened.value.name).toBe('Plan');
+    expect(opened.ok && opened.value.fileName).toBe('Plan.tasklace');
     first.apply({ type: 'updateProject', fields: { name: 'Stale' } });
     await files.flush();
     expect(saves).toHaveLength(1);
@@ -169,8 +170,20 @@ describe('createProjectFiles', () => {
     timer.fire();
     await settle();
     expect(failures).toEqual([new FileActionError({ code: 'WRITE_FAILED' })]);
-    expect(await files.open()).toEqual({ ok: false, error: { code: 'UNSAVED_PROJECT' } });
-    expect(failures).toHaveLength(2);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await files.open()).toEqual({
+        ok: false,
+        error: { code: 'UNSAVED_PROJECT', cause: { code: 'WRITE_FAILED' } },
+      });
+      expect(logged).toHaveBeenCalledWith(
+        'The open project could not be saved before another replaced it:',
+        new FileActionError({ code: 'WRITE_FAILED' }),
+      );
+    } finally {
+      logged.mockRestore();
+    }
+    expect(failures).toHaveLength(1);
     expect(files.session()).toBe(session);
   });
 
@@ -220,6 +233,32 @@ describe('createProjectFiles', () => {
     });
   });
 
+  it('tells when each file action starts and ends, even when it fails, and nothing for a refused one', async () => {
+    const running: boolean[] = [];
+    let finish: (result: BridgeResult<OpenedProject>) => void = () => undefined;
+    const slow = new Promise<BridgeResult<OpenedProject>>((resolve) => {
+      finish = resolve;
+    });
+    const { bridge } = fakeBridge(openedOf(OTHER_ID), SAVED, slow);
+    const files = createProjectFiles(
+      { ...bridge, saveProjectAs: () => Promise.reject(new Error('broken bridge')) },
+      listening({ fileActionRunning: (value) => running.push(value) }),
+      manualTimer(),
+    );
+    await createdOn(files);
+    expect(running).toEqual([true, false]);
+    const opening = files.open();
+    await settle();
+    expect(running).toEqual([true, false, true]);
+    expect(await files.save()).toEqual({ ok: false, error: { code: 'BUSY' } });
+    expect(running).toEqual([true, false, true]);
+    finish(openedOf(OTHER_ID));
+    await opening;
+    expect(running).toEqual([true, false, true, false]);
+    await expect(files.saveAs()).rejects.toThrow('broken bridge');
+    expect(running).toEqual([true, false, true, false, true, false]);
+  });
+
   it('has nothing to save before a project is open', async () => {
     const { bridge, saves } = fakeBridge(openedOf(OTHER_ID));
     const files = createProjectFiles(bridge, QUIET, manualTimer());
@@ -244,9 +283,18 @@ describe('createProjectFiles', () => {
     );
     const first = await createdOn(files);
     first.apply({ type: 'updateProject', fields: { name: 'Unsaved' } });
-    expect(await files.create(SAMPLE)).toEqual({ ok: false, error: { code: 'UNSAVED_PROJECT' } });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await files.create(SAMPLE)).toEqual({
+        ok: false,
+        error: { code: 'UNSAVED_PROJECT', cause: { code: 'WRITE_FAILED' } },
+      });
+      expect(logged).toHaveBeenCalledTimes(1);
+    } finally {
+      logged.mockRestore();
+    }
     expect(files.session()).toBe(first);
-    expect(failures).toEqual([new FileActionError({ code: 'WRITE_FAILED' })]);
+    expect(failures).toEqual([]);
   });
 
   it('refuses to create a project under an identifier the main process got wrong', async () => {
@@ -256,9 +304,33 @@ describe('createProjectFiles', () => {
       QUIET,
       manualTimer(),
     );
-    const created = await files.create(SAMPLE);
-    expect(created.ok).toBe(false);
-    expect(!created.ok && created.error.code).toBe('INVALID_PROJECT');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await files.create(SAMPLE)).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
+      expect(logged.mock.calls).toEqual([
+        ['The main process gave a new project an invalid identifier:', 'not an identifier'],
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
+    expect(files.session()).toBeNull();
+  });
+
+  it('refuses an opened state holding another document than the one announced, logging it', async () => {
+    const opened = openedOf(OTHER_ID);
+    const { bridge } = fakeBridge(
+      opened.ok ? { ok: true, value: { ...opened.value, documentId: TEST_DOCUMENT_ID } } : opened,
+    );
+    const files = createProjectFiles(bridge, QUIET, manualTimer());
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await files.open()).toEqual({ ok: false, error: { code: 'INVALID_CONTENT' } });
+      expect(logged.mock.calls).toEqual([
+        ['The opened project does not hold the document the main process announced.'],
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
     expect(files.session()).toBeNull();
   });
 
@@ -295,10 +367,10 @@ describe('createProjectFiles', () => {
     finish(SAVED);
     await saving;
     expect(statuses.at(-1)).toBe('unsaved');
-    const cancelling = files.saveAs();
+    const canceling = files.saveAs();
     await settle();
     finish({ ok: false, error: { code: 'CANCELLED' } });
-    expect(await cancelling).toEqual({ ok: false, error: { code: 'CANCELLED' } });
+    expect(await canceling).toEqual({ ok: false, error: { code: 'CANCELLED' } });
     expect(statuses.at(-1)).toBe('unsaved');
     expect(files.hasFile()).toBe(true);
   });
@@ -328,7 +400,6 @@ describe('createProjectFiles', () => {
       value: {
         state: Uint8Array.of(255),
         documentId: OTHER_ID,
-        name: 'Plan',
         fileName: 'Plan.tasklace',
         warnings: [],
       },
@@ -370,13 +441,13 @@ describe('createProjectFiles', () => {
     const opening = files.open();
     await settle();
     fail({ ok: false, error: { code: 'WRITE_FAILED' } });
-    expect(await opening).toEqual({ ok: false, error: { code: 'UNSAVED_PROJECT' } });
+    expect(await opening).toEqual({
+      ok: false,
+      error: { code: 'UNSAVED_PROJECT', cause: { code: 'WRITE_FAILED' } },
+    });
     expect(events).toEqual(['adopt', 'save']);
     expect(files.session()).toBe(session);
-    expect(failures).toEqual([
-      new FileActionError({ code: 'WRITE_FAILED' }),
-      new FileActionError({ code: 'WRITE_FAILED' }),
-    ]);
+    expect(failures).toEqual([new FileActionError({ code: 'WRITE_FAILED' })]);
   });
 
   it('refuses a state that does not hold a valid shared project', async () => {
@@ -388,7 +459,6 @@ describe('createProjectFiles', () => {
       value: {
         state,
         documentId: TEST_DOCUMENT_ID,
-        name: 'Plan',
         fileName: 'Plan.tasklace',
         warnings: [],
       },
@@ -446,7 +516,6 @@ describe('createProjectFiles', () => {
       value: {
         state: Uint8Array.from([255, 255, 255]),
         documentId: TEST_DOCUMENT_ID,
-        name: 'Plan',
         fileName: 'Plan.tasklace',
         warnings: [],
       },

@@ -1,15 +1,17 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import type { WebContents } from 'electron';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_LOG_BYTES, MAX_LOG_ENTRY_LENGTH } from '../core/limits';
 import {
   captureConsole,
   createLogFile,
   logLine,
   logPageMessages,
+  logProcessErrors,
   logWorkerErrors,
   type LogConsole,
   type LogFile,
@@ -123,6 +125,25 @@ describe('captureConsole', () => {
       ['warn', 'Careful', 3],
     ]);
     expect(log.entries).toEqual(["error: Failed: { code: 'EACCES' }", 'warning: Careful 3']);
+  });
+});
+
+describe('logProcessErrors', () => {
+  it('logs the uncaught exceptions and unhandled rejections of the main process with their cause', () => {
+    const source = new EventEmitter();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      logProcessErrors(source);
+      const error = new Error('uncaught');
+      source.emit('uncaughtExceptionMonitor', error, 'uncaughtException');
+      source.emit('unhandledRejection', 'refused');
+      expect(logged.mock.calls).toEqual([
+        ['Uncaught exception in the main process (uncaughtException):', error],
+        ['Unhandled rejection in the main process:', 'refused'],
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
   });
 });
 

@@ -51,4 +51,11 @@ describe('parseDuration', () => {
       }),
     );
   });
+
+  it('writes whole hours, minutes alone, and hours with minutes for the editor', () => {
+    expect(durationEditorText(3)).toBe('3 h');
+    expect(durationEditorText(0.5)).toBe('30 min');
+    expect(durationEditorText(1.25)).toBe('1 h 15');
+    expect(durationEditorText(0)).toBe('0 h');
+  });
 });

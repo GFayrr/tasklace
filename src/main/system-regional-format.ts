@@ -1,13 +1,12 @@
-import type {
-  DateOrder,
-  DateSeparator,
-  RegionalFormat,
+import {
+  DATE_SEPARATORS,
+  type DateOrder,
+  type RegionalFormat,
 } from '../core/exchange/csv/regional-format';
 
 const SAMPLE_DATE = new Date(Date.UTC(2026, 9, 5, 14));
 const SAMPLE_DECIMAL = 1.5;
 const DECIMAL_COMMA = ',';
-const DATE_SEPARATORS: readonly DateSeparator[] = ['/', '.', '-'];
 const TWELVE_HOUR_CYCLES: readonly string[] = ['h11', 'h12'];
 const ORDERS: Readonly<Record<string, DateOrder>> = {
   'day,month,year': 'dayMonthYear',
@@ -22,9 +21,10 @@ export const DEFAULT_REGIONAL_FORMAT: RegionalFormat = {
   twelveHourClock: false,
 };
 
-/** Reads the regional format of a locale for CSV exchange: the list separator from its decimal mark, as spreadsheets do, the order and separator of its short dates, and its clock, the default format standing in for an unknown locale. */
+/** Reads the regional format of a locale for CSV exchange: the list separator from its decimal mark, as spreadsheets do, the order and separator of its short dates, and its clock, the default format standing in, with a warning, for an unknown locale. */
 export function regionalFormatOf(locale: string): RegionalFormat {
   if (!isKnownLocale(locale)) {
+    console.warn(`Unknown locale ${JSON.stringify(locale)}: CSV files use the ISO format.`);
     return DEFAULT_REGIONAL_FORMAT;
   }
   const decimal = new Intl.NumberFormat(locale)

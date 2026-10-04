@@ -18,11 +18,11 @@ describe('runInFileWorker', () => {
   it('gives back the result the worker sends', async () => {
     const result = await runInFileWorker(
       workerRunning(
-        "const { parentPort } = require('node:worker_threads'); parentPort.once('message', () => parentPort.postMessage({ ok: true, value: null }));",
+        "const { parentPort } = require('node:worker_threads'); parentPort.once('message', () => parentPort.postMessage({ ok: true, value: { kind: 'loaded' } }));",
       ),
       TASK,
     );
-    expect(result).toEqual({ ok: true, value: null });
+    expect(result).toEqual({ ok: true, value: { kind: 'loaded' } });
   });
 
   it('reports a worker that runs out of memory as too complex, the caller surviving', async () => {
@@ -39,6 +39,14 @@ describe('runInFileWorker', () => {
     [
       'answers something else',
       "require('node:worker_threads').parentPort.postMessage('nonsense');",
+    ],
+    [
+      'answers an opening with a saved file',
+      "require('node:worker_threads').parentPort.postMessage({ ok: true, value: { kind: 'saved' } });",
+    ],
+    [
+      'answers with a success without value',
+      "require('node:worker_threads').parentPort.postMessage({ ok: true });",
     ],
   ])('reports a worker that %s as a task failure', async (_label, code) => {
     expect(await runInFileWorker(workerRunning(code), TASK)).toEqual({

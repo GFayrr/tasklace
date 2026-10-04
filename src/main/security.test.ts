@@ -103,8 +103,15 @@ describe('openInBrowser', () => {
   it('tells whether the system could open the address', async () => {
     openExternal.mockResolvedValueOnce();
     expect(await openInBrowser(ALLOWED)).toBe(true);
-    openExternal.mockRejectedValueOnce(new Error('no browser'));
-    expect(await openInBrowser(ALLOWED)).toBe(false);
+    const refusal = new Error('no browser');
+    openExternal.mockRejectedValueOnce(refusal);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await openInBrowser(ALLOWED)).toBe(false);
+      expect(logged.mock.calls).toEqual([['The browser could not open an address:', refusal]]);
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it('lets a failure that is not an error through', async () => {

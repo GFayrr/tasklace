@@ -12,7 +12,7 @@ interface PageWindow {
 
 const answers = new WeakMap<WebContents, PageWindow>();
 
-/** Answers the page telling, once it saved what it had to, whether its window may close, an answer that is not a yes or a no being ignored, and offers to reload a page telling that it could not start. */
+/** Answers the page telling, once it saved what it had to, whether its window may close, an answer that is not a yes or a no being logged and keeping the window open so that the next close asks again, and offers to reload a page telling that it could not start. */
 export function registerFlushHandler(assertTrusted: TrustCheck): void {
   ipcMain.on(IPC_CHANNELS.pageStartFailed, (event) => {
     assertTrusted(event);
@@ -20,10 +20,15 @@ export function registerFlushHandler(assertTrusted: TrustCheck): void {
   });
   ipcMain.on(IPC_CHANNELS.flushDone, (event, mayClose: unknown) => {
     assertTrusted(event);
+    const answer = answers.get(event.sender);
     if (typeof mayClose !== 'boolean') {
+      console.error(
+        'The page answered a close request with something else than yes or no:',
+        mayClose,
+      );
+      answer?.keepOpen();
       return;
     }
-    const answer = answers.get(event.sender);
     if (mayClose) {
       answer?.release();
     } else {

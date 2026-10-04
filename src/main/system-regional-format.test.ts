@@ -67,7 +67,18 @@ describe('regionalFormatOf', () => {
     }
   });
 
-  it.each(['', 'not a locale', '12345'])('falls back to the default format for %j', (locale) => {
-    expect(regionalFormatOf(locale)).toEqual(DEFAULT_REGIONAL_FORMAT);
-  });
+  it.each(['', 'not a locale', '12345'])(
+    'falls back to the default format for %j, with a warning',
+    (locale) => {
+      const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(regionalFormatOf(locale)).toEqual(DEFAULT_REGIONAL_FORMAT);
+        expect(warned.mock.calls).toEqual([
+          [`Unknown locale ${JSON.stringify(locale)}: CSV files use the ISO format.`],
+        ]);
+      } finally {
+        warned.mockRestore();
+      }
+    },
+  );
 });

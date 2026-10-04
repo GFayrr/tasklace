@@ -5,7 +5,7 @@ import { MAX_DEPENDENCIES, MAX_TAGS, MAX_TASKS } from '../limits';
 import type { Dependency, Project, Tag, Task, TaskId } from '../model/project';
 import { failure, success, type Result } from '../result';
 import { readProject, STORED_VALUE_CODEC } from '../validation/read-project';
-import type { ValidationIssue } from '../validation/validation-issues';
+import type { ValidationIssue, ValidationIssues } from '../validation/validation-issues';
 import {
   createProjectState,
   putDependency,
@@ -52,6 +52,7 @@ import {
 } from './shared-operations';
 import {
   DOCUMENT_ID_CHANGED,
+  malformedUpdate,
   readSharedProject,
   repairDocumentProject,
   roundedProgress,
@@ -65,10 +66,8 @@ export interface SharedSession {
   readonly documentId: DocumentId;
   readonly openingRepairs: readonly SharedRepair[];
   readonly project: () => Project;
-  readonly apply: (operation: SharedOperation) => Result<void, readonly ValidationIssue[]>;
-  readonly applyAll: (
-    operations: readonly SharedOperation[],
-  ) => Result<void, readonly ValidationIssue[]>;
+  readonly apply: (operation: SharedOperation) => Result<void, ValidationIssues>;
+  readonly applyAll: (operations: readonly SharedOperation[]) => Result<void, ValidationIssues>;
   readonly merge: (update: Uint8Array) => Result<readonly SharedRepair[], MergeFailure>;
   readonly history: SessionHistory;
 }
@@ -242,29 +241,64 @@ function currentProject(session: SessionState): Project {
   return session.project;
 }
 
-/** Checks an operation on the indexed state and writes only what it touched to the document. */
+/** Checks an operation on the indexed state and writes only what it touched to the document, the state matching the document again when the check or the write raises. */
 function applyOperationToSession(
   session: SessionState,
   document: Y.Doc,
   operation: SharedOperation,
-): Result<void, readonly ValidationIssue[]> {
-  const checked = applyToState(session.state, operation);
-  if (!checked.ok) {
-    return checked;
+): Result<void, ValidationIssues> {
+  try {
+    const checked = applyToState(session.state, operation);
+    if (!checked.ok) {
+      return checked;
+    }
+    session.project = null;
+    document.transact(() => {
+      writeTouched(document, session.state, checked.value);
+    }, LOCAL_ORIGIN);
+    return success(undefined);
+  } catch (error) {
+    throwAfterReset(session, document, error);
   }
-  session.project = null;
-  document.transact(() => {
-    writeTouched(document, session.state, checked.value);
-  }, LOCAL_ORIGIN);
-  return success(undefined);
 }
 
-/** Checks operations one after another on the indexed state and writes all they touched in one change, or nothing at all when one of them is refused. */
+/** Checks operations one after another on the indexed state and writes all they touched in one change, or nothing at all when one of them is refused or raises before the writing, the state matching the document again whenever something raises. */
 function applyOperationsToSession(
   session: SessionState,
   document: Y.Doc,
   operations: readonly SharedOperation[],
-): Result<void, readonly ValidationIssue[]> {
+): Result<void, ValidationIssues> {
+  let written: Result<void, ValidationIssues>;
+  try {
+    written = writeOperations(session, document, operations);
+  } catch (error) {
+    throwAfterReset(session, document, error);
+  }
+  if (!written.ok) {
+    resetState(session, document);
+  }
+  return written;
+}
+
+/** Puts the indexed state back as the document holds it after a change raised, then raises that error again, or both errors together when the document no longer holds a valid project either. */
+function throwAfterReset(session: SessionState, document: Y.Doc, error: unknown): never {
+  try {
+    resetState(session, document);
+  } catch (resetError) {
+    throw new AggregateError(
+      [error, resetError],
+      'A change to the session failed, and its document could not be read back.',
+    );
+  }
+  throw error;
+}
+
+/** Applies operations to the indexed state, then writes what they touched to the document, stopping at the first one refused, the state then still holding the operations checked before it. */
+function writeOperations(
+  session: SessionState,
+  document: Y.Doc,
+  operations: readonly SharedOperation[],
+): Result<void, ValidationIssues> {
   const all: TouchedItems = {
     tasks: new Set(),
     dependencies: new Set(),
@@ -274,9 +308,6 @@ function applyOperationsToSession(
   for (const operation of operations) {
     const checked = applyToState(session.state, operation);
     if (!checked.ok) {
-      session.stateChanged = true;
-      restoreState(session, document);
-      session.project = null;
       return checked;
     }
     addTouched(all, checked.value);
@@ -286,6 +317,13 @@ function applyOperationsToSession(
     writeTouched(document, session.state, all);
   }, LOCAL_ORIGIN);
   return success(undefined);
+}
+
+/** Rebuilds the indexed state from the document after a change was refused or failed partway. */
+function resetState(session: SessionState, document: Y.Doc): void {
+  session.stateChanged = true;
+  restoreState(session, document);
+  session.project = null;
 }
 
 /** Adds the items one operation touched to those of the previous ones. */
@@ -342,31 +380,36 @@ function mergeIntoSession(
   return merged;
 }
 
-/** Applies an update to the trial copy and checks and repairs it, collecting the repairs written there. */
+/** Applies an update to the trial copy and checks and repairs it, collecting the repairs written there, an exception raised by the bytes being a malformed update, and one raised during the repair a failed repair. */
 function tryMerge(
   session: SessionState,
   update: Uint8Array,
   repairUpdates: Uint8Array[],
 ): Result<readonly SharedRepair[], MergeFailure> {
   const { shadow } = session;
+  let change: ShadowChange;
   try {
-    const change = applyToShadow(shadow, update);
-    if (shadow.store.pendingStructs !== null || shadow.store.pendingDs !== null) {
-      return failure({ kind: 'incompleteUpdate' });
-    }
-    if (readDocumentId(shadow) !== session.documentId) {
-      return failure({ kind: 'invalidProject', issues: [DOCUMENT_ID_CHANGED] });
-    }
-    const collect = (repairUpdate: Uint8Array): void => {
-      repairUpdates.push(repairUpdate);
-    };
-    shadow.on('update', collect);
+    change = applyToShadow(shadow, update);
+  } catch (error) {
+    return malformedUpdate(error);
+  }
+  if (shadow.store.pendingStructs !== null || shadow.store.pendingDs !== null) {
+    return failure({ kind: 'incompleteUpdate' });
+  }
+  if (readDocumentId(shadow) !== session.documentId) {
+    return failure({ kind: 'invalidProject', issues: [DOCUMENT_ID_CHANGED] });
+  }
+  const collect = (repairUpdate: Uint8Array): void => {
+    repairUpdates.push(repairUpdate);
+  };
+  shadow.on('update', collect);
+  try {
     const repairs = change.structural ? repairAll(session) : repairChanged(session, change);
-    shadow.off('update', collect);
     return repairs.ok ? repairs : failure({ kind: 'invalidProject', issues: repairs.error });
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return failure({ kind: 'malformedUpdate', reason });
+    return failure({ kind: 'repairFailed', error });
+  } finally {
+    shadow.off('update', collect);
   }
 }
 
@@ -663,15 +706,16 @@ function addDependencies(state: ProjectState, dependencies: readonly Dependency[
   return state.dependencies.size <= MAX_DEPENDENCIES;
 }
 
-/** Rebuilds the indexed state from a document after a refused merge left it half changed. */
+/** Rebuilds the indexed state from a document after a refused or failed change left it half changed, throwing when the document no longer holds a valid project. */
 function restoreState(session: SessionState, document: Y.Doc): void {
   if (!session.stateChanged) {
     return;
   }
   const read = readSharedProject(document);
-  if (read.ok) {
-    session.state = createProjectState(read.value);
+  if (!read.ok) {
+    throw new Error('The shared document of the session no longer holds a valid project.');
   }
+  session.state = createProjectState(read.value);
   session.stateChanged = false;
 }
 

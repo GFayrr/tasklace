@@ -173,8 +173,10 @@ describe('createScheduler', () => {
     });
     expect(record.failures).toEqual([new Error('crashed')]);
     expect(crash.defaultPrevented).toBe(true);
-    expect(pool.latest().received).toEqual([]);
+    expect(pool.created).toHaveLength(MAX_SCHEDULE_RETRIES + 1);
+    expect(pool.created.every((worker) => worker.isTerminated())).toBe(true);
     scheduler.request(SECOND);
+    expect(pool.created).toHaveLength(MAX_SCHEDULE_RETRIES + 2);
     pool.latest().answerNext();
     expect(record.scheduled).toEqual([SECOND]);
   });
@@ -207,25 +209,75 @@ describe('createScheduler', () => {
     expect(record.failures).toEqual([cause]);
   });
 
-  it('replaces an idle worker that fails without telling the user', () => {
+  it('replaces an idle worker that fails without telling the user, at the next request', () => {
     const pool = workerPool();
     const record = recorder();
     const scheduler = createScheduler(pool.create, record.listener);
+    scheduler.request(FIRST);
+    pool.latest().answerNext();
     const logged = quietly(() => {
       pool.latest().port.onerror?.(workerError('idle', undefined));
     });
     expect(logged).toEqual([
-      ['The idle schedule worker failed and was restarted:', new Error('idle')],
+      ['The idle schedule worker failed and is replaced at the next request:', new Error('idle')],
     ]);
     expect(record.failures).toEqual([]);
-    scheduler.request(FIRST);
+    expect(pool.created).toHaveLength(1);
+    scheduler.request(SECOND);
+    expect(pool.created).toHaveLength(2);
     pool.latest().answerNext();
-    expect(record.scheduled).toEqual([FIRST]);
+    expect(record.scheduled).toEqual([FIRST, SECOND]);
   });
 
-  it('stops the worker when disposed', () => {
+  it('starts no worker before the first request, reports one that cannot be started, and tries again with the next change', () => {
+    const pool = workerPool();
+    const record = recorder();
+    let refuse = true;
+    const scheduler = createScheduler(() => {
+      if (refuse) {
+        throw new Error('no worker');
+      }
+      return pool.create();
+    }, record.listener);
+    expect(record.failures).toEqual([]);
+    scheduler.request(FIRST);
+    expect(record.failures).toEqual([new Error('no worker')]);
+    refuse = false;
+    scheduler.request(SECOND);
+    pool.latest().answerNext();
+    expect(record.scheduled).toEqual([SECOND]);
+  });
+
+  it('reports a project that cannot be sent to the worker, and sends the next change', () => {
+    const pool = workerPool();
+    const record = recorder();
+    const scheduler = createScheduler(() => {
+      const port = pool.create();
+      if (pool.created.length === 1) {
+        Object.assign(port, {
+          postMessage: () => {
+            throw new DOMException('Cannot clone', 'DataCloneError');
+          },
+        });
+      }
+      return port;
+    }, record.listener);
+    scheduler.request(FIRST);
+    expect(record.failures).toEqual([new DOMException('Cannot clone', 'DataCloneError')]);
+    expect(pool.latest().isTerminated()).toBe(true);
+    scheduler.request(SECOND);
+    expect(pool.created).toHaveLength(2);
+    pool.latest().answerNext();
+    expect(record.scheduled).toEqual([SECOND]);
+  });
+
+  it('stops the worker when disposed, and starts none when disposed before any request', () => {
     const pool = workerPool();
     createScheduler(pool.create, recorder().listener).dispose();
+    expect(pool.created).toEqual([]);
+    const scheduler = createScheduler(pool.create, recorder().listener);
+    scheduler.request(FIRST);
+    scheduler.dispose();
     const worker = pool.latest();
     expect(worker.isTerminated()).toBe(true);
     expect(worker.port.onmessage).toBeNull();

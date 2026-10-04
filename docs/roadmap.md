@@ -14,53 +14,6 @@ Tasklace is built in nine steps. Each step, or sub-step, is developed on its own
 | 8    | End-to-end encrypted relay                                 | Planned     |
 | 9    | Distribution                                               | Planned     |
 
-## Step 4: shared model, project file, validation, JSON and CSV
-
-Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit and pull request.
-
-### 4a. Project validation and JSON exchange (done)
-
-- Hand-written validator that turns unknown data into a safe `Project`, or returns every problem with its location (for example `tasks[12].segments[0].durationHours`): types and required fields, value ranges, text lengths and valid Unicode, references between objects, calendar, daily working pattern and structure (cycles).
-- Versioned JSON export and import, with dates in clear text (`2026-09-28T09:00`); the export is compact since 4c.
-- A single UTF-8 byte order mark is removed at the very start of imported text; JSON export never writes one.
-
-### 4b. Shared Yjs model and baseline plan (done)
-
-- Two-way mapping between `Project` and the Yjs document (name, start date, calendar, options, baseline, tasks, dependencies, tags), with changes grouped in transactions.
-- Task order by hand-written fractional indices, so that two simultaneous insertions at the same place never contradict each other.
-- Deterministic repair of merged data that became invalid, run as soon as updates are merged and before anything is saved; running it again changes nothing, and the user is informed. For example:
-  - a task pointing at a deleted tag loses its tag;
-  - in a dependency cycle, the dependency with the greatest identifier is removed;
-  - in a hierarchy loop, the task of the loop with the smallest identifier is moved to the root.
-- Baseline plan: a single frozen snapshot per project, stored as one Yjs value with the time it was taken.
-- Property-based tests: random concurrent edits and merges always end in the same valid state for every participant.
-- Every received update is first tried on a copy: an update that arrives before the one it depends on is held back, and an update that is unreadable, breaks the document schema or would leave an invalid project is refused, the document staying untouched.
-- Adds the `yjs` dependency; `y-protocols` comes with the network protocol in step 7.
-- A shared session keeps a validated, indexed copy of the project: local edits and received updates are checked and repaired only where they change things, falling back to the whole repair when a structural rule is broken, so that editing and merging stay far below one frame on 10,000 tasks.
-
-### 4c. `.tasklace` project file (done)
-
-- Container: 16-byte header (`TSKL` signature, format version, reserved flags, CRC-32 checksum, declared uncompressed size), then the compressed Yjs state, whose deleted content Yjs has already removed.
-- Compression is injected into the core; the real `node:zlib` implementation, with a capped output size, lives in `src/main/` (done in 5b).
-- Defensive reading, in this order, before anything is loaded: maximum size, signature, version, flags, checksum, declared size, capped decompression against decompression bombs, guarded Yjs decoding, strict schema and complete validation (4a), without any repair.
-- Maximum sizes measured on the largest possible project, then fixed as powers of two above it: 128 MiB for a file, 512 MiB once decompressed.
-- Opening a file runs in a separate process with capped memory, so that a forged file can never bring the application down (done in 5b).
-- Fast compression (zlib level 1): the file is slightly larger, but saving, which happens automatically, is much faster.
-- JSON export is compact, so that the largest possible project stays within the import limit (512 Mi UTF-16 units since block start dates were added).
-- Test files generated in memory: random, truncated, altered, wrong version or flags, lying declared size, decompression bomb, hidden content.
-
-### 4d. CSV import and export (done)
-
-- Export of the task table for Excel or LibreOffice, in WBS order: WBS, name, start, end, duration in hours, progress, predecessors, tag and blocks (filled only for split tasks, such as `4h; +2d 3h`). UTF-8 with a byte order mark so that Excel reads accents correctly; separator, date order and clock taken from the regional settings.
-- Import creates a new project with the default calendar, starting at the earliest start of the table. Only the name column is required; columns may come in any order, and a row holding only a name is a section heading.
-- A start date becomes a "not before" constraint only where the schedule would otherwise start the task earlier; end dates are recomputed, and each start, end or summary progress the schedule does not follow gets its own warning.
-- Unknown tags are created with the next palette color. Dates are read in the regional date order or in ISO form. A duration or progress column counted in another unit (days, minutes…) is refused rather than misread.
-- Line-by-line validation with the same complete checks as JSON; each error gives its row, and its column when a single cell is at fault. Limits on rows, predecessors and blocks are checked before anything is built, so that an oversized file is refused without exhausting memory. The separator is detected automatically, and a single leading byte order mark is removed.
-- Predecessors are imported and exported as `1.2FS+2h`: WBS number, dependency type (FS, SS, FF, SF) and lag.
-- Protection against formula injection: a cell starting with `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed with an apostrophe on export, which the import removes.
-- Import limited to 256 Mi UTF-16 units, above the export of the largest allowed project (raised from 128 Mi when block start dates were added).
-- Faster import and export (step 4 follow-up): one scheduling pass per import, keeping only the start dates the schedule needs; dates parsed and formatted once each; blank lines and unknown columns skipped without building their cells.
-
 ## Step 5: secure Electron shell and Svelte user interface
 
 Step 5 turns the core into a desktop application. It is developed on a single branch, one sub-step after the other, each ending with its own commit. The sub-steps that do not shape the look of the application come first.
@@ -86,7 +39,7 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 ### 5c. Interface foundations (done)
 
 - Svelte 5 interface, with its compiler, type checker, formatter and linter; no inline style or script, so the strict content security policy is kept.
-- Sober light theme "Sand & Graphite" (warm neutrals, graphite actions, so that the task bars carry the colour): every colour is a style variable, ready for custom themes, and a test checks the WCAG AA contrasts. Jost font embedded with its licence (Latin and Latin Extended).
+- Sober light theme "Sand & Graphite" (warm neutrals, graphite actions, so that the task bars carry the color): every color is a style variable, ready for custom themes, and a test checks the WCAG AA contrasts. Jost font embedded with its license (Latin and Latin Extended).
 - Translation structure: typed keys in `en.json`, loaded on demand; a test refuses any visible text written directly in a component. Dates and numbers follow the regional format.
 - Scheduling in a Web Worker, one computation at a time, the latest change only, so that no older result is ever shown.
 - Undo and redo local to each user, never undoing the changes of others; an undone step made invalid by them is repaired like a received update.
@@ -95,7 +48,7 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 ### 5d. Task table and timeline (done)
 
 - Task table in WBS order (WBS, name, duration, start, end, progress, predecessors), drawing only the visible rows, with the WBS and name columns kept in view; summaries can be collapsed.
-- Canvas timeline: two-level time scale, hour, day, week and month zooms keeping the middle instant, shaded non-working periods, today line, split blocks, progress, milestone diamonds, summary bars, dependency arrows, tag colours and patterns, conflict outlines.
+- Canvas timeline: two-level time scale, hour, day, week and month zooms keeping the middle instant, shaded non-working periods, today line, split blocks, progress, milestone diamonds, summary bars, dependency arrows, tag colors and patterns, conflict outlines.
 - Editing from the toolbar, the keyboard and the table: add, delete, rename, indent (Alt+Shift+→) and outdent (Alt+Shift+←), reorder (Alt+↑ and Alt+↓), turn into a milestone, type a duration in hours or working days, a start date, a progress or predecessors in the notation of the CSV table.
 - On the timeline: move a bar to set its start date, stretch its end to change its duration, drag from the handle of the selected bar to another bar to link them; bars align to the quarter hour at the hour zoom, to the day otherwise.
 - Every change is checked by the shared session as one step, undone in one step, and explained when refused; the zoom sits in the status bar.
@@ -139,6 +92,16 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 - Recent projects are listed once per path, with their folder; summaries fold and unfold with Alt+Left / Alt+Right.
 - Every file of `src/` except the entry points and workers, which the end-to-end tests cover, is unit tested to at least 90 % of its lines, branches, functions and statements, Svelte components included; new property tests (date constraints turned off, weighted progress, tag conflicts, order of the data); new end-to-end journeys (automatic save, keyboard outline, dragging a block, crashed page, shortcuts during a dialog, unexpected errors) and an opening benchmark (under 2 s for 10,000 tasks).
 
+### 5d, after the full analysis: blocked file actions, explained failures and stricter types (done)
+
+- While a file is opened, imported, created, saved or exported, the whole window waits: no change, shortcut or other file action can slip in and be lost.
+- A schedule that cannot be computed says why, cause by cause, with the task, link or tag concerned.
+- Failures that used to pass unnoticed are reported or logged: a repair that fails while merging or undoing, an unreadable list of recent projects, a schedule worker that cannot start, a log that cannot be set aside, unexpected answers between the processes.
+- A change is refused rather than applied on guessed values: a calendar that cannot be compiled, or a bar dragged or a date typed in the table while the dates are still being updated after the last change.
+- A file shortcut pressed while a cell is being edited keeps the typed value; a damaged list of recent projects keeps its valid entries; a failure to record a recent project never undoes an open or a save that succeeded.
+- Types now tie each channel of the bridge to its answer, each file task to its result and each refusal to its message, so that a mismatch no longer compiles.
+- Tests cover the session as the entry point of the network, the baseline plan in random projects, and every branch that only random tests reached before.
+
 ### 5e. Project settings and advanced options
 
 - Project name and start date, working calendar editor, tag management.
@@ -149,5 +112,5 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 
 - Custom themes: a documented theme template, so that a school or a company can apply its own visual identity to the application. To be considered only once the project is finished.
   - A `themes` folder, easy to open from the application, where a theme file is simply dropped.
-  - A theme is a plain data file (colours only, never code or style sheets), validated like any untrusted file.
-  - Official themes must pass WCAG AA contrasts. A custom theme whose contrasts fail is still accepted, with a warning: its authors remain responsible for their colours.
+  - A theme is a plain data file (colors only, never code or style sheets), validated like any untrusted file.
+  - Official themes must pass WCAG AA contrasts. A custom theme whose contrasts fail is still accepted, with a warning: its authors remain responsible for their colors.

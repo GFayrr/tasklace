@@ -8,9 +8,13 @@ import {
 } from '../../time';
 import type { CsvSeparator } from './csv-text';
 
-export type DateOrder = 'dayMonthYear' | 'monthDayYear' | 'yearMonthDay';
+export const DATE_ORDERS = ['dayMonthYear', 'monthDayYear', 'yearMonthDay'] as const;
 
-export type DateSeparator = '/' | '.' | '-';
+export type DateOrder = (typeof DATE_ORDERS)[number];
+
+export const DATE_SEPARATORS = ['/', '.', '-'] as const;
+
+export type DateSeparator = (typeof DATE_SEPARATORS)[number];
 
 export interface RegionalFormat {
   readonly listSeparator: CsvSeparator;
