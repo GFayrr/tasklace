@@ -816,7 +816,7 @@ export class AppState {
         });
   }
 
-  /** Computes the CSV table of a project in the regional format of the system, reusing the schedule already computed for that very project. */
+  /** Computes the CSV table of a project in the regional format of the system, reusing the schedule already computed for that very project and computing it otherwise. */
   async #csvText(project: Project): Promise<string | null> {
     const computed = this.#computed;
     const known = computed?.project === project ? computed.schedule : null;

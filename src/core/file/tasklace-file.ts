@@ -109,7 +109,7 @@ export function readTasklaceFile(
   return read.ok ? success(read.value.document) : read;
 }
 
-/** Reads an untrusted .tasklace file as readTasklaceFile does, giving the Yjs state it validated, which holds exactly its shared document, with the identifier the validation found in it. */
+/** Reads an untrusted .tasklace file as readTasklaceFile does, giving the decompressed Yjs state it validated and the document identifier found in it. */
 export function readTasklaceDocument(
   file: Uint8Array,
   compressor: Compressor,
@@ -118,7 +118,7 @@ export function readTasklaceDocument(
   return read.ok ? success({ state: read.value.state, documentId: read.value.documentId }) : read;
 }
 
-/** Reads and checks an untrusted .tasklace file, returning its shared document with the project it validated. */
+/** Reads and checks an untrusted .tasklace file, returning the state it decompressed, the shared document decoded from it, the project it validated and its identifier. */
 function readValidatedFile(
   file: Uint8Array,
   compressor: Compressor,

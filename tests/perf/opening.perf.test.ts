@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import * as Y from 'yjs';
 import { encodeTasklaceFile, readTasklaceDocument } from '../../src/core/file/tasklace-file';
 import { scheduleProject } from '../../src/core/scheduling/schedule-project';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
-import { openSharedSession } from '../../src/core/shared/shared-session';
+import { openSharedSessionFromState } from '../../src/core/shared/shared-session';
 import { TEST_DOCUMENT_ID } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 import { buildLargeProject } from '../fixtures/large-project';
@@ -11,15 +10,13 @@ import { buildLargeProject } from '../fixtures/large-project';
 const TARGET_MILLISECONDS = 2_000;
 const MEASURED_RUNS = 3;
 
-/** Opens a project file the way the application does: the worker reads and checks it, giving the state it validated, then the page decodes that state, opens its session from it and asks for its first schedule. */
+/** Opens a project file the way the application does: the worker reads and checks it, giving the state it validated, then the page opens its session from that state and asks for its first schedule. */
 function openFile(file: Uint8Array): void {
   const read = readTasklaceDocument(file, zlibCompressor);
   if (!read.ok) {
     throw new Error('File refused');
   }
-  const document = new Y.Doc();
-  Y.applyUpdate(document, read.value.state);
-  const session = openSharedSession(document, read.value.state);
+  const session = openSharedSessionFromState(read.value.state);
   if (!session.ok || !scheduleProject(session.value.project()).ok) {
     throw new Error('Project refused');
   }

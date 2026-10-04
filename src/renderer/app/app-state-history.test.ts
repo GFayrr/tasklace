@@ -13,8 +13,10 @@ vi.mock('../../core/shared/shared-session', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../core/shared/shared-session')>();
   return {
     ...original,
-    openSharedSession: (...values: Parameters<typeof original.openSharedSession>) => {
-      const opened = original.openSharedSession(...values);
+    openSharedSessionFromState: (
+      ...values: Parameters<typeof original.openSharedSessionFromState>
+    ) => {
+      const opened = original.openSharedSessionFromState(...values);
       if (!opened.ok) {
         return opened;
       }

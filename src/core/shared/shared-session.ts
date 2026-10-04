@@ -117,32 +117,68 @@ const FAST_REPAIR_ORDER: readonly SharedRepairCode[] = [
   'DAILY_START_HOUR_CLEARED',
 ];
 
+export type StateOpeningFailure =
+  | { readonly kind: 'unreadableState'; readonly error: unknown }
+  | { readonly kind: 'invalidProject'; readonly issues: readonly ValidationIssue[] };
+
+const INCOMPLETE_STATE = 'The state depends on updates it does not hold.';
 const UNDO_CAPTURE_TIMEOUT_MS = 0;
 const HISTORY_ROOTS = [PROJECT_ROOT, TASKS_ROOT, DEPENDENCIES_ROOT, TAGS_ROOT] as const;
 
 type SharedType = Y.Transaction['changed'] extends Map<infer Type, unknown> ? Type : never;
 
-/** Opens a session on a valid shared document, clearing and reporting references to missing tags, and keeps a validated, indexed copy of its project and a trial copy of the document, decoded from the state the document was just decoded from when one is given, which spares encoding it again. */
+/** Opens a session on a valid shared document, clearing and reporting references to missing tags, and keeps a validated, indexed copy of its project and a trial copy of the document. */
 export function openSharedSession(
   document: Y.Doc,
-  decodedFrom: Uint8Array | null = null,
+): Result<SharedSession, readonly ValidationIssue[]> {
+  return openSession(document, null);
+}
+
+/** Decodes a Yjs state into a new document and opens a session on it, the trial copy being decoded from the same state rather than from the document encoded again, refusing a state that cannot be read or that depends on updates it does not hold. */
+export function openSharedSessionFromState(
+  state: Uint8Array,
+): Result<SharedSession, StateOpeningFailure> {
+  const document = new Y.Doc();
+  try {
+    Y.applyUpdate(document, state);
+  } catch (error) {
+    return failure({ kind: 'unreadableState', error });
+  }
+  if (document.store.pendingStructs !== null || document.store.pendingDs !== null) {
+    return failure({ kind: 'unreadableState', error: new Error(INCOMPLETE_STATE) });
+  }
+  const opened = openSession(document, state);
+  return opened.ok ? opened : failure({ kind: 'invalidProject', issues: opened.error });
+}
+
+/** Opens a session on a valid shared document, its trial copy decoded from the state the document was just decoded from when one is given. */
+function openSession(
+  document: Y.Doc,
+  decodedFrom: Uint8Array | null,
 ): Result<SharedSession, readonly ValidationIssue[]> {
   const documentId = readDocumentId(document);
   if (documentId === null) {
     return failure([{ path: DOCUMENT_ID_KEY, code: 'MISSING_FIELD' }]);
   }
   const read = readSharedProject(document);
-  return read.ok
-    ? success(openValidatedSession(document, read.value, documentId, decodedFrom))
-    : read;
+  return read.ok ? success(validatedSession(document, read.value, documentId, decodedFrom)) : read;
 }
 
-/** Opens a session on a shared document whose project was already read and validated, so that it is not validated twice, its trial copy being decoded from the state the document was decoded from when one is given and nothing had to be cleared. */
+/** Opens a session on a shared document whose project was already read and validated, so that it is not validated twice. */
 export function openValidatedSession(
   document: Y.Doc,
   project: Project,
   documentId: DocumentId,
-  decodedFrom: Uint8Array | null = null,
+): SharedSession {
+  return validatedSession(document, project, documentId, null);
+}
+
+/** Opens a session on a shared document whose project was validated, its trial copy decoded from the unchanged state the document was just decoded from when one is given and the opening cleared nothing, and copied from the document otherwise. */
+function validatedSession(
+  document: Y.Doc,
+  project: Project,
+  documentId: DocumentId,
+  decodedFrom: Uint8Array | null,
 ): SharedSession {
   const tagIds = new Set(project.tags.map((tag) => tag.id));
   const tasks = project.tasks.map((task) => withKnownTag(task, (id) => tagIds.has(id)));
@@ -740,7 +776,7 @@ function copyDocument(document: Y.Doc, clientId: number): Y.Doc {
   return documentFrom(Y.encodeStateAsUpdate(document), clientId);
 }
 
-/** Decodes a Yjs state into a new document writing under another identity. */
+/** Decodes a Yjs state into a new document that writes under a given identity. */
 function documentFrom(state: Uint8Array, clientId: number): Y.Doc {
   const copy = new Y.Doc();
   Y.applyUpdate(copy, state);

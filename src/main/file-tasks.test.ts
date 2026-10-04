@@ -32,6 +32,7 @@ const FRENCH = {
   twelveHourClock: false,
 } as const;
 const SAVED_AT = Date.UTC(2026, 8, 30, 10);
+const LARGE_STATE_TASKS = 2_000;
 
 let folder: string;
 
@@ -94,6 +95,8 @@ describe('file tasks', () => {
     ).toEqual(SAVED_WITH_COPY);
     const opened = loadedOf(await runFileTask({ kind: 'openProject', path }));
     expect(opened.documentId).toBe(TEST_DOCUMENT_ID);
+    expect(opened.state.byteOffset).toBe(0);
+    expect(opened.state.buffer.byteLength).toBe(opened.state.byteLength);
     expect(readSharedProject(documentOf(opened.state))).toEqual(readSharedProject(source));
     expect(await readFile(join(copies, `${TEST_DOCUMENT_ID}.tasklace`))).toEqual(
       await readFile(path),
@@ -375,5 +378,23 @@ describe('isResultOf', () => {
     expect(
       [null, 'ok', { ok: 'yes' }, { ok: true }].map((value) => isResultOf(opening, value)),
     ).toEqual([false, false, false, false]);
+  });
+});
+
+describe('the state an opening sends', () => {
+  it('owns exactly its buffer, small or large, so that nothing around it leaves the worker', async () => {
+    for (const count of [1, LARGE_STATE_TASKS]) {
+      const tasks = Array.from({ length: count }, (_, index) =>
+        workTask(`t${String(index)}`, { name: `Task number ${String(index)} of a large plan` }),
+      );
+      const path = join(folder, `plan-${String(count)}.tasklace`);
+      await writeFile(
+        path,
+        encodeTasklaceFile(createSharedDocument(project(tasks), TEST_DOCUMENT_ID), zlibCompressor),
+      );
+      const { state } = loadedOf(await runFileTask({ kind: 'openProject', path }));
+      expect([state.byteOffset, state.buffer.byteLength]).toEqual([0, state.byteLength]);
+      expect(readSharedProject(documentOf(state))).toMatchObject({ ok: true });
+    }
   });
 });

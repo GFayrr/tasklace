@@ -28,7 +28,7 @@ interface Level {
   next: number;
 }
 
-/** Lists the tasks in the order of the task tree, numbered as in the WBS both ways, the descendants of collapsed summaries being numbered but not shown. */
+/** Lists the tasks in the order of the task tree with their WBS numbers, mapped from task to number and back, the descendants of collapsed summaries being numbered but not shown. */
 export function buildPlanOutline(
   tasks: readonly Task[],
   collapsed: ReadonlySet<TaskId>,

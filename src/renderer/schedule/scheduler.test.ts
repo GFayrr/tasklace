@@ -125,6 +125,17 @@ describe('createScheduler', () => {
     [{ version: SCHEDULE_PROTOCOL_VERSION, generation: 1, result: null }],
     [{ version: SCHEDULE_PROTOCOL_VERSION, generation: 1, result: { ok: 'yes' } }],
     [{ version: SCHEDULE_PROTOCOL_VERSION + 1, generation: 1, result: { ok: true } }],
+    [{ version: SCHEDULE_PROTOCOL_VERSION, generation: 1, result: { ok: true, value: {} } }],
+    [
+      {
+        version: SCHEDULE_PROTOCOL_VERSION,
+        generation: 1,
+        result: {
+          ok: true,
+          value: { placements: new Map(), summaries: new Map(), wbsNumbers: {} },
+        },
+      },
+    ],
   ])(
     'replaces a worker that sends the unreadable answer %j, asking the new one for the latest project',
     (data) => {
