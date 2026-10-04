@@ -15,6 +15,7 @@ import { mergeSharedUpdate, readSharedProject } from '../shared/shared-project';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { at } from '../testing/civil-time';
 import { hideListContent } from '../testing/hidden-list-content';
+import { livedState, randomEditsArbitrary } from '../testing/lived-document';
 import { projectArbitrary, richProjectArbitrary } from '../testing/project-arbitrary';
 import {
   link,
@@ -254,24 +255,28 @@ describe('tasklace file', () => {
   });
 
   it(
-    'gives a validated state holding exactly the document the file opens, as its encoding would',
+    'gives a validated state holding exactly the document the file opens, as its encoding would, for documents that lived',
     { timeout: PROPERTY_TEST_TIMEOUT_MS },
     () => {
       fc.assert(
-        fc.property(fc.oneof(projectArbitrary, richProjectArbitrary), ({ project: generated }) => {
-          const file = encodeTasklaceFile(
-            createSharedDocument(generated, TEST_DOCUMENT_ID),
-            storingCompressor,
-          );
-          const read = readTasklaceDocument(file, storingCompressor);
-          const opened = readTasklaceFile(file, storingCompressor);
-          if (!read.ok || !opened.ok) {
-            throw new Error('The file was refused.');
-          }
-          expect(Y.encodeStateAsUpdate(documentOf(read.value.state))).toEqual(
-            Y.encodeStateAsUpdate(opened.value),
-          );
-        }),
+        fc.property(
+          fc.oneof(projectArbitrary, richProjectArbitrary),
+          randomEditsArbitrary,
+          ({ project: generated }, edits) => {
+            const file = encodeTasklaceFile(
+              documentOf(livedState(generated, edits)),
+              storingCompressor,
+            );
+            const read = readTasklaceDocument(file, storingCompressor);
+            const opened = readTasklaceFile(file, storingCompressor);
+            if (!read.ok || !opened.ok) {
+              throw new Error('The file was refused.');
+            }
+            expect(Y.encodeStateAsUpdate(documentOf(read.value.state))).toEqual(
+              Y.encodeStateAsUpdate(opened.value),
+            );
+          },
+        ),
       );
     },
   );

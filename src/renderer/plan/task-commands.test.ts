@@ -295,6 +295,28 @@ describe('editing cells', () => {
     expect(setProgress(context(), 's', '10')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
   });
 
+  it('links to a task hidden under a collapsed summary by its number', () => {
+    const { session, context } = openPlan();
+    const visible = context();
+    const summary = visible.outline.idByWbs.get('1');
+    const hidden = visible.outline.idByWbs.get('1.1');
+    if (summary === undefined || hidden === undefined) {
+      throw new Error('The sample plan has no task 1.1 under a summary 1.');
+    }
+    const collapsed = {
+      ...visible,
+      outline: buildPlanOutline(visible.project.tasks, new Set([summary])),
+    };
+    expect(collapsed.outline.rowIndexById.has(hidden)).toBe(false);
+    applied(session, setPredecessors(collapsed, 'c', '1.1FS'));
+    expect(
+      session
+        .project()
+        .dependencies.filter((dependency) => dependency.successorId === 'c')
+        .map((dependency) => dependency.predecessorId),
+    ).toEqual([hidden]);
+  });
+
   it('replaces predecessors, keeping the identifiers of the links that stay', () => {
     const { session, context } = openPlan();
     applied(session, setPredecessors(context(), 'c', '1.1SS+2h, 1.2'));
