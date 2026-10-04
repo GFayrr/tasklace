@@ -261,7 +261,7 @@ function dailyStartOf(
   if (task.kind !== 'task' || task.hoursPerDay === null || pick === null) {
     return null;
   }
-  const starts = calendar.workingQuartersOfDay;
+  const starts = calendar.workingQuarterStartHours;
   const choices = starts.length - toQuarters(task.hoursPerDay) + 1;
   return starts[pick % Math.max(choices, 1)] ?? null;
 }

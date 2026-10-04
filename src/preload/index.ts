@@ -1,14 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import { CSV_SEPARATORS } from '../core/exchange/csv/csv-text';
 import type { RegionalFormat } from '../core/exchange/csv/regional-format';
 import {
   BRIDGE_NAME,
   IPC_CHANNELS,
   type BridgeResult,
-  type IpcChannel,
+  type ChannelAnswers,
+  type ResultChannel,
   type RecentProject,
   type TasklaceBridge,
 } from './bridge-contract';
 
+const LIST_SEPARATORS: readonly unknown[] = CSV_SEPARATORS;
+const DATE_ORDERS: readonly unknown[] = ['dayMonthYear', 'monthDayYear', 'yearMonthDay'];
+const DATE_SEPARATORS: readonly unknown[] = ['/', '.', '-'];
 const UNEXPECTED_ANSWER: BridgeResult<never> = { ok: false, error: { code: 'TASK_FAILED' } };
 
 const bridge: TasklaceBridge = {
@@ -25,7 +30,7 @@ const bridge: TasklaceBridge = {
   openProject: () => request(IPC_CHANNELS.openProject),
   openRecentProject: (index) => request(IPC_CHANNELS.openRecentProject, index),
   recentProjects: async () => {
-    const answer = await request<unknown>(IPC_CHANNELS.recentProjects);
+    const answer: BridgeResult<unknown> = await request(IPC_CHANNELS.recentProjects);
     if (!answer.ok) {
       return answer;
     }
@@ -75,24 +80,35 @@ function answerCloseRequest(): void {
 contextBridge.exposeInMainWorld(BRIDGE_NAME, bridge);
 
 /** Sends a file request to the main process and gives back its result, an answer of any other shape being logged and counting as a failed task. */
-async function request<T>(channel: IpcChannel, ...values: unknown[]): Promise<BridgeResult<T>> {
+async function request<C extends ResultChannel>(
+  channel: C,
+  ...values: unknown[]
+): Promise<ChannelAnswers[C] | BridgeResult<never>> {
   const result: unknown = await ipcRenderer.invoke(channel, ...values);
-  if (isBridgeResult<T>(result)) {
+  if (isAnswerOf(channel, result)) {
     return result;
   }
   console.error(`The main process answered ${channel} with an unexpected shape:`, result);
   return UNEXPECTED_ANSWER;
 }
 
-/** Tells whether an answer has the shape of a bridge result. */
-function isBridgeResult<T>(value: unknown): value is BridgeResult<T> {
+/** Tells whether an answer to a file request has the shape of a bridge result, the main process typing what each channel answers. */
+function isAnswerOf<C extends ResultChannel>(
+  _channel: C,
+  value: unknown,
+): value is ChannelAnswers[C] {
   return typeof Reflect.get(Object(value), 'ok') === 'boolean';
 }
 
-/** Tells whether an answer has the shape of a regional format. */
+/** Tells whether an answer is a regional format, each field holding one of its allowed values. */
 function isRegionalFormat(value: unknown): value is RegionalFormat {
-  const fields = ['listSeparator', 'dateOrder', 'dateSeparator', 'twelveHourClock'];
-  return typeof value === 'object' && value !== null && fields.every((field) => field in value);
+  const field = (name: string): unknown => Reflect.get(Object(value), name);
+  return (
+    LIST_SEPARATORS.includes(field('listSeparator')) &&
+    DATE_ORDERS.includes(field('dateOrder')) &&
+    DATE_SEPARATORS.includes(field('dateSeparator')) &&
+    typeof field('twelveHourClock') === 'boolean'
+  );
 }
 
 /** Tells whether an answer has the shape of a recent project. */

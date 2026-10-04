@@ -62,10 +62,16 @@ test('opens a project, saves it back to its file and lists it as recent', async 
     const before = await api?.recentProjects();
     const adopted = await api?.adoptProject(opened.value.documentId);
     const saved = await api?.saveProject(opened.value.state);
-    return { name: opened.value.name, before, adopted, saved, recent: await api?.recentProjects() };
+    return {
+      fileName: opened.value.fileName,
+      before,
+      adopted,
+      saved,
+      recent: await api?.recentProjects(),
+    };
   });
   expect(outcome).toEqual({
-    name: 'Plan',
+    fileName: 'Plan.tasklace',
     before: { ok: true, value: [] },
     adopted: { ok: true, value: null },
     saved: { ok: true, value: { localCopySaved: true } },
@@ -97,10 +103,10 @@ test('imports a CSV table into a project kept in its local copy until saved as a
     await api?.adoptProject(imported.value.documentId);
     const kept = await api?.saveProject(imported.value.state);
     const savedAs = await api?.saveProjectAs(imported.value.state, 'Tasks');
-    return { name: imported.value.name, warnings: imported.value.warnings, kept, savedAs };
+    return { fileName: imported.value.fileName, warnings: imported.value.warnings, kept, savedAs };
   });
   expect(outcome).toEqual({
-    name: 'Tasks',
+    fileName: 'Tasks.csv',
     warnings: [],
     kept: { ok: true, value: { localCopySaved: true } },
     savedAs: { ok: true, value: { localCopySaved: true } },

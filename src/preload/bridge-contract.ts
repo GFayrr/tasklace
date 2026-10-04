@@ -1,3 +1,4 @@
+import type { CsvWarning } from '../core/exchange/csv/csv-rows';
 import type { RegionalFormat } from '../core/exchange/csv/regional-format';
 import type { FileError, StateCheckError } from '../core/file/tasklace-file';
 import type { ValidationIssue } from '../core/validation/validation-issues';
@@ -45,15 +46,11 @@ export type FileFailure =
 export type BridgeResult<T> =
   { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: FileFailure };
 
-export interface ImportWarning {
-  readonly path: string;
-  readonly code: string;
-}
+export type ImportWarning = CsvWarning;
 
 export interface OpenedProject {
   readonly state: Uint8Array;
   readonly documentId: string;
-  readonly name: string;
   readonly fileName: string;
   readonly warnings: readonly ImportWarning[];
 }
@@ -94,5 +91,25 @@ export interface TasklaceBridge {
   readonly onFlushRequested: (flush: () => Promise<boolean>) => void;
   readonly reportStartFailure: () => void;
 }
+
+export interface ChannelAnswers {
+  readonly [IPC_CHANNELS.appVersion]: string;
+  readonly [IPC_CHANNELS.openExternal]: boolean;
+  readonly [IPC_CHANNELS.regionalFormat]: RegionalFormat;
+  readonly [IPC_CHANNELS.newProject]: string;
+  readonly [IPC_CHANNELS.openProject]: BridgeResult<OpenedProject>;
+  readonly [IPC_CHANNELS.openRecentProject]: BridgeResult<OpenedProject>;
+  readonly [IPC_CHANNELS.recentProjects]: BridgeResult<readonly RecentProject[]>;
+  readonly [IPC_CHANNELS.importProject]: BridgeResult<OpenedProject>;
+  readonly [IPC_CHANNELS.adoptProject]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.saveProject]: BridgeResult<SavedProject>;
+  readonly [IPC_CHANNELS.saveProjectAs]: BridgeResult<SavedProject>;
+  readonly [IPC_CHANNELS.exportProject]: BridgeResult<ExportedFile>;
+}
+
+export type InvokeChannel = keyof ChannelAnswers;
+export type ResultChannel = {
+  [C in InvokeChannel]: ChannelAnswers[C] extends BridgeResult<unknown> ? C : never;
+}[InvokeChannel];
 
 export const BRIDGE_NAME = 'tasklace';

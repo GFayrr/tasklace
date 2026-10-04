@@ -1,6 +1,10 @@
 import * as Y from 'yjs';
 import type { Project } from '../../core/model/project';
-import { createSharedDocument, readDocumentId } from '../../core/shared/shared-document';
+import {
+  createSharedDocument,
+  isDocumentId,
+  readDocumentId,
+} from '../../core/shared/shared-document';
 import { openSharedSession, type SharedSession } from '../../core/shared/shared-session';
 import type {
   BridgeResult,
@@ -35,7 +39,6 @@ export type ActionResult<T> =
 
 export interface OpenedSession {
   readonly session: SharedSession;
-  readonly name: string;
   readonly fileName: string;
   readonly warnings: readonly ImportWarning[];
 }
@@ -186,19 +189,29 @@ export function createProjectFiles(
     if (document === null) {
       return { ok: false, error: { code: 'INVALID_CONTENT' } };
     }
+    const held = readDocumentId(document);
+    if (held !== null && held !== opened.value.documentId) {
+      console.error('The opened project does not hold the document the main process announced.');
+      return { ok: false, error: { code: 'INVALID_CONTENT' } };
+    }
     const session = await adopt(document, hasFile);
     if (!session.ok) {
       return session;
     }
-    const { name, fileName, warnings } = opened.value;
-    return { ok: true, value: { session: session.value, name, fileName, warnings } };
+    const { fileName, warnings } = opened.value;
+    return { ok: true, value: { session: session.value, fileName, warnings } };
   };
   const create = async (project: Project): Promise<ActionResult<SharedSession>> => {
     const saved = await saveBeforeSwitching();
     if (!saved.ok) {
       return saved;
     }
-    return adopt(createSharedDocument(project, await bridge.newProject()), false);
+    const documentId = await bridge.newProject();
+    if (!isDocumentId(documentId)) {
+      console.error('The main process gave a new project an invalid identifier:', documentId);
+      return { ok: false, error: { code: 'TASK_FAILED' } };
+    }
+    return adopt(createSharedDocument(project, documentId), false);
   };
   const saveAs = async (): Promise<ActionResult<SavedProject>> => {
     const name = current?.session.project().name ?? '';

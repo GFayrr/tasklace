@@ -43,7 +43,8 @@ export type EditError =
   | 'UNKNOWN_BLOCK'
   | 'LINKS_WOULD_MERGE'
   | 'WAITS_NEED_TWO_BLOCKS'
-  | 'TASK_CHANGED';
+  | 'TASK_CHANGED'
+  | 'SCHEDULE_PENDING';
 
 export type Edit = Result<readonly SharedOperation[], EditError>;
 

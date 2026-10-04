@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Project } from '../../core/model/project';
 import { at } from '../../core/testing/civil-time';
+import { scheduleProject } from '../../core/scheduling/schedule-project';
 import { project, workTask } from '../../core/testing/project-builder';
 import type { BridgeResult, OpenedProject } from '../../preload/bridge-contract';
 import { AppState } from '../app/app-state.svelte';
@@ -255,6 +256,40 @@ describe('Workspace', () => {
     pointer(scroller, 'pointerup', target.start + 5 - scrollLeft, targetMiddle);
     await settle();
     expect(app.project?.dependencies).toMatchObject([{ predecessorId: 'a', successorId: 'b' }]);
+  });
+
+  it('refuses to move or stretch a bar while the dates shown are older than the latest change, then accepts once they are updated', async () => {
+    const { app, scroller, frame, scrollLeft, scheduler } = await renderSized();
+    const shape = shapeIn(app, frame, 'b');
+    const before = app.project?.tasks.find((task) => task.id === 'b');
+    scheduler.automatic = false;
+    expect(app.rename('Renamed')).toBe(true);
+    await settle();
+    expect(app.currentSchedule).toBeNull();
+    expect(app.schedule).not.toBeNull();
+    const middle = shape.row * ROW_HEIGHT + ROW_HEIGHT / 2;
+    const x = shape.start + 4 - scrollLeft;
+    const dragTo = (from: number, to: number) => {
+      pointer(scroller, 'pointerdown', from, middle);
+      pointer(scroller, 'pointermove', to, middle);
+      pointer(scroller, 'pointerup', to, middle);
+    };
+    dragTo(x, x + 24 * pixelsPerHour('day'));
+    dragTo(shape.end - 1 - scrollLeft, shape.end + 24 * pixelsPerHour('day') - scrollLeft);
+    await settle();
+    expect(app.project?.tasks.find((task) => task.id === 'b')).toEqual(before);
+    expect(app.notices.map((notice) => notice.text)).toEqual([english.editErrors.SCHEDULE_PENDING]);
+    const latest = app.project;
+    if (latest === null) {
+      throw new Error('The project closed.');
+    }
+    scheduler.listener().scheduled(scheduleProject(latest), latest);
+    expect(app.currentSchedule).toBe(app.schedule);
+    dragTo(x, x + 24 * pixelsPerHour('day'));
+    await settle();
+    expect(app.project?.tasks.find((task) => task.id === 'b')).toMatchObject({
+      startNoEarlierThan: at(2026, 9, 29),
+    });
   });
 
   it('opens the details of a task double-clicked on the timeline', async () => {

@@ -1,5 +1,6 @@
 import { open, type FileHandle } from 'node:fs/promises';
 import * as Y from 'yjs';
+import type { CsvWarning } from '../core/exchange/csv/csv-rows';
 import { importProjectCsv, type CsvImportOptions } from '../core/exchange/csv/project-csv-import';
 import { importProjectJson } from '../core/exchange/project-json';
 import {
@@ -54,7 +55,7 @@ export interface LoadedProject {
   readonly kind: 'loaded';
   readonly state: Uint8Array;
   readonly documentId: DocumentId;
-  readonly warnings: readonly { readonly path: string; readonly code: string }[];
+  readonly warnings: readonly CsvWarning[];
 }
 
 export interface SavedFiles {
@@ -63,6 +64,20 @@ export interface SavedFiles {
 }
 
 export type FileTaskResult = Result<LoadedProject | SavedFiles, FileFailure>;
+export type TaskOutcome<T extends FileTask> = T extends { readonly kind: 'saveProject' }
+  ? SavedFiles
+  : LoadedProject;
+export type ResultOfTask<T extends FileTask> = Result<TaskOutcome<T>, FileFailure>;
+
+/** Tells whether a value has the shape of a result of a task: a failure, or a success of the kind the task gives, a saved file for a save and a loaded project otherwise. */
+export function isResultOf<T extends FileTask>(task: T, value: unknown): value is ResultOfTask<T> {
+  const ok: unknown = Reflect.get(Object(value), 'ok');
+  if (ok !== true) {
+    return ok === false;
+  }
+  const kind: unknown = Reflect.get(Object(Reflect.get(Object(value), 'value')), 'kind');
+  return kind === (task.kind === 'saveProject' ? 'saved' : 'loaded');
+}
 
 const READ_CHUNK_BYTES = 16 * UNITS_PER_MEBI;
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });

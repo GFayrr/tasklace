@@ -48,6 +48,17 @@ export interface ValidationIssue {
   readonly code: ValidationIssueCode;
 }
 
+export type ValidationIssues = readonly [ValidationIssue, ...ValidationIssue[]];
+
+/** Returns issues as a list that is never empty, throwing when a refusal holds none, since every refusal has a reason. */
+export function requireIssues(issues: readonly ValidationIssue[]): ValidationIssues {
+  const [first, ...others] = issues;
+  if (first === undefined) {
+    throw new Error('A refusal holds no issue.');
+  }
+  return [first, ...others];
+}
+
 export interface IssueList {
   readonly issues: readonly ValidationIssue[];
   readonly add: (path: string, code: ValidationIssueCode) => void;

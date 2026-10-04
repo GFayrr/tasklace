@@ -1,20 +1,20 @@
 import type { Worker } from 'node:worker_threads';
 import { failure } from '../core/result';
-import type { FileTask, FileTaskResult } from './file-tasks';
+import { isResultOf, type FileTask, type ResultOfTask } from './file-tasks';
 
 export type FileWorkerFactory = () => Worker;
 
 const OUT_OF_MEMORY_CODE = 'ERR_WORKER_OUT_OF_MEMORY';
 
-/** Runs one file task in its own worker, stopped afterwards, turning a worker that runs out of memory into a "too complex" failure and any other stop into a task failure, whose cause is logged. */
-export function runInFileWorker(
+/** Runs one file task in its own worker, stopped afterwards, turning a worker that runs out of memory into a "too complex" failure, and any other stop or an answer that is not a result of this task into a task failure, whose cause is logged. */
+export function runInFileWorker<T extends FileTask>(
   createWorker: FileWorkerFactory,
-  task: FileTask,
-): Promise<FileTaskResult> {
+  task: T,
+): Promise<ResultOfTask<T>> {
   return new Promise((resolve) => {
     const worker = createWorker();
     let settled = false;
-    const finish = (result: FileTaskResult, cause: unknown = null): void => {
+    const finish = (result: ResultOfTask<T>, cause: unknown = null): void => {
       if (settled) {
         return;
       }
@@ -26,7 +26,7 @@ export function runInFileWorker(
       void worker.terminate();
     };
     worker.once('message', (result: unknown) => {
-      if (isFileTaskResult(result)) {
+      if (isResultOf(task, result)) {
         finish(result);
         return;
       }
@@ -45,9 +45,4 @@ export function runInFileWorker(
 /** Tells whether a worker stopped because it reached its memory limit. */
 function isOutOfMemory(error: unknown): boolean {
   return error instanceof Error && Reflect.get(error, 'code') === OUT_OF_MEMORY_CODE;
-}
-
-/** Tells whether a message from the worker has the shape of a task result. */
-function isFileTaskResult(value: unknown): value is FileTaskResult {
-  return typeof Reflect.get(Object(value), 'ok') === 'boolean';
 }

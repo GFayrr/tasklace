@@ -254,7 +254,7 @@ describe('shared session edge cases', () => {
     const session = openOne();
     const result = session.apply(operation);
     expect(result.ok).toBe(false);
-    expect(!result.ok && result.error[0]?.path).toMatch(/^(dependencies|tags)\.(c-m|red)\./);
+    expect(!result.ok && result.error[0].path).toMatch(/^(dependencies|tags)\.(c-m|red)\./);
     expect(applyBoth(openOne(), operation)).toBe(false);
   });
 

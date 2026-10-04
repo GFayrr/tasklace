@@ -38,7 +38,7 @@ async function renderTable() {
     scrollBy,
     reveal,
   });
-  return { app, root, grid: single(root, '[role="grid"]'), scrollBy, reveal };
+  return { app, root, grid: single(root, '[role="grid"]'), scrollBy, reveal, fake };
 }
 
 /** Returns the text of the cells of the row of a task, by column. */
@@ -411,12 +411,15 @@ describe('TaskTable edge cases', () => {
   });
 
   it('opens the calendar on the end of a task, and leaves it empty before the schedule is known', async () => {
-    const { app, root, grid } = await renderTable();
+    const { app, root, grid, fake } = await renderTable();
     const picker = single(root, 'input.picker') as HTMLInputElement;
     Object.assign(picker, { showPicker: vi.fn() });
     click(button(root, 'Choose the end of Read on a calendar'));
     expect(picker.value).toBe('2026-09-28T17:00');
-    app.schedule = null;
+    fake.scheduler.automatic = false;
+    fake.control.openResult = openedProjectOf(PLAN);
+    await app.open();
+    expect(app.schedule).toBeNull();
     update();
     app.selectedTaskId = 'b';
     update();

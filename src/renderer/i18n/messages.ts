@@ -1,9 +1,12 @@
+import type { ValidationIssueCode } from '../../core/validation/validation-issues';
+import type { DetailsError } from '../plan/task-details';
 import type { ActionFailure } from '../project/project-files';
 import type english from '../locales/en.json';
 
 export type Messages = typeof english;
 export type Language = 'en';
 export type ShownFailureCode = Exclude<ActionFailure['code'], 'CANCELLED'>;
+export type EditRefusal = DetailsError | ValidationIssueCode;
 
 export interface PluralMessage {
   readonly one: string;
@@ -45,11 +48,17 @@ export function countMessage(message: PluralMessage, count: number, locale: stri
   return fillMessage(form, { count: new Intl.NumberFormat(locale).format(count) });
 }
 
-/** Returns the message telling the user why a change was refused, the text of the problem found when the change has none of its own, and a general one for a reason without any text. */
-export function editErrorMessage(messages: Messages, code: string): string {
-  const edits: Readonly<Record<string, string>> = messages.editErrors;
-  const issues: Readonly<Record<string, string>> = messages.issues;
-  const own = Object.hasOwn(edits, code) ? edits[code] : undefined;
-  const found = Object.hasOwn(issues, code) ? issues[code] : undefined;
-  return own ?? found ?? messages.editErrors.NOT_POSSIBLE;
+/** Returns the message telling the user why a change was refused: its own text when the refusal has one, otherwise the text of the problem found, every code having a text checked at compile time. */
+export function editErrorMessage(messages: Messages, code: EditRefusal): string {
+  const edits: Readonly<Record<DetailsError, string>> = messages.editErrors;
+  const issues: Readonly<Record<ValidationIssueCode, string>> = messages.issues;
+  return isDetailsError(edits, code) ? edits[code] : issues[code];
+}
+
+/** Tells whether a refusal has a text of its own among the edit errors. */
+function isDetailsError(
+  edits: Readonly<Record<DetailsError, string>>,
+  code: EditRefusal,
+): code is DetailsError {
+  return Object.hasOwn(edits, code);
 }

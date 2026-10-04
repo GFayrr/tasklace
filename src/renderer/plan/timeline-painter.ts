@@ -135,7 +135,7 @@ export function nonWorkingIntervals(
     if (!isWorkingDay(calendar, day)) {
       intervals.push({ start: dayStart, end: dayStart + HOURS_PER_DAY });
     } else if (zoom === 'hour') {
-      intervals.push(...offHours(calendar.workingQuartersOfDay, dayStart));
+      intervals.push(...offHours(calendar.workingQuarterStartHours, dayStart));
     }
   }
   return mergeIntervals(intervals);

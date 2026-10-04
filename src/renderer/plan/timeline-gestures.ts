@@ -10,14 +10,13 @@ import {
   type TimelineFrame,
 } from './timeline-geometry';
 
-export type GestureKind = 'move' | 'stretch' | 'link';
+export type BarShape = Extract<RowShape, { kind: 'task' }>;
+export type PlacedShape = Exclude<RowShape, { kind: 'summary' }>;
 
-export interface GestureTarget {
-  readonly kind: GestureKind;
-  readonly taskId: TaskId;
-  readonly shape: RowShape;
-  readonly block: number | null;
-}
+export type GestureTarget =
+  | { readonly kind: 'move'; readonly shape: PlacedShape; readonly block: number | null }
+  | { readonly kind: 'stretch'; readonly shape: BarShape }
+  | { readonly kind: 'link'; readonly shape: PlacedShape; readonly block: number | null };
 
 export interface LinkHandle {
   readonly block: number | null;
@@ -31,7 +30,7 @@ export type DragPreview =
       readonly offset: number;
       readonly block: number | null;
     }
-  | { readonly kind: 'stretch'; readonly shape: RowShape; readonly offset: number }
+  | { readonly kind: 'stretch'; readonly shape: BarShape; readonly offset: number }
   | {
       readonly kind: 'link';
       readonly shape: RowShape;
@@ -107,27 +106,28 @@ export function gestureAt(
         )
       : undefined;
   if (handle !== undefined) {
-    return { kind: 'link', taskId: shape.taskId, shape, block: handle.block };
+    return { kind: 'link', shape, block: handle.block };
   }
   const middle = rowMiddle(shape.row);
   if (Math.abs(y - middle) > Math.max(BAR_HEIGHT, MILESTONE_SIZE) / HALF) {
     return null;
   }
-  const target = { taskId: shape.taskId, shape, block: null };
   if (shape.kind === 'milestone') {
-    return Math.abs(x - shape.x) <= MILESTONE_SIZE / HALF ? { kind: 'move', ...target } : null;
+    return Math.abs(x - shape.x) <= MILESTONE_SIZE / HALF
+      ? { kind: 'move', shape, block: null }
+      : null;
   }
   if (Math.abs(x - shape.end) <= STRETCH_ZONE) {
-    return { kind: 'stretch', ...target };
+    return { kind: 'stretch', shape };
   }
   if (x < shape.start || x > shape.end) {
     return null;
   }
-  return { kind: 'move', ...target, block: grabbedBlock(shape, x) };
+  return { kind: 'move', shape, block: grabbedBlock(shape, x) };
 }
 
 /** Returns the block of a split task grabbed at a position, the first block or a pause standing for the whole task. */
-function grabbedBlock(shape: Extract<RowShape, { kind: 'task' }>, x: number): number | null {
+function grabbedBlock(shape: BarShape, x: number): number | null {
   const block = shape.segments.findIndex(
     (segment) => x >= segment.x && x <= segment.x + segment.width,
   );

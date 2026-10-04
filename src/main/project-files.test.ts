@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_FILE_BYTES } from '../core/limits';
 import { failure, success } from '../core/result';
 import { IPC_CHANNELS } from '../preload/bridge-contract';
-import type { FileTask, FileTaskResult } from './file-tasks';
+import { isResultOf, type FileTask, type FileTaskResult } from './file-tasks';
 import { RefusedRequest } from './ipc-trust';
 import { registerProjectFileHandlers } from './project-files';
 import type { FakeIpcMain } from './testing/fake-electron';
@@ -46,9 +46,13 @@ let userData: string;
 
 registerProjectFileHandlers({
   assertTrusted: trusted,
-  runTask: (task) => {
+  runTask: async (task) => {
     tasks.push(task);
-    return runTask(task);
+    const result = await runTask(task);
+    if (!isResultOf(task, result)) {
+      throw new Error(`The test answered the task ${task.kind} with a result of another kind.`);
+    }
+    return result;
   },
   get userDataFolder() {
     return userData;
@@ -121,15 +125,16 @@ describe('opening projects', () => {
     const sender = {};
     await writeFile(path, 'project');
     chooseToOpen(path);
-    runTask.mockResolvedValueOnce(success({ ...LOADED, warnings: [{ path: '', code: 'X' }] }));
+    runTask.mockResolvedValueOnce(
+      success({ ...LOADED, warnings: [{ path: '', code: 'UNKNOWN_COLUMN' }] }),
+    );
     expect(await request(IPC_CHANNELS.openProject, sender)).toEqual({
       ok: true,
       value: {
         state: STATE,
         documentId: DOCUMENT_ID,
-        name: 'Thesis',
         fileName: 'Thesis.tasklace',
-        warnings: [{ path: '', code: 'X' }],
+        warnings: [{ path: '', code: 'UNKNOWN_COLUMN' }],
       },
     });
     expect(tasks).toEqual([{ kind: 'openProject', path }]);
@@ -161,13 +166,7 @@ describe('opening projects', () => {
     chooseToOpen(broken);
     runTask.mockResolvedValueOnce(failure({ code: 'CORRUPTED' }));
     expect(await request(IPC_CHANNELS.openProject, {})).toEqual(failure({ code: 'CORRUPTED' }));
-    chooseToOpen(broken);
-    runTask.mockResolvedValueOnce(success(SAVED));
-    expect(await quietly(() => request(IPC_CHANNELS.openProject, {}))).toEqual({
-      answer: failure({ code: 'TASK_FAILED' }),
-      logged: [['The file worker answered a loading with a saved result.']],
-    });
-    expect(tasks).toHaveLength(2);
+    expect(tasks).toHaveLength(1);
   });
 
   it('opens a recent project by its position, refusing a position that is not a whole number', async () => {
@@ -365,7 +364,7 @@ describe('new and imported projects', () => {
     chooseToOpen(json);
     expect(await request(IPC_CHANNELS.importProject, sender, 'json')).toMatchObject({
       ok: true,
-      value: { name: 'Launch', fileName: 'Launch.json' },
+      value: { fileName: 'Launch.json' },
     });
     const imported = tasks.at(-1);
     const documentId = imported?.kind === 'importJson' ? imported.documentId : '';
@@ -492,15 +491,6 @@ describe('saving projects', () => {
     expect(await savingFirst).toEqual(success({ localCopySaved: true }));
     expect(await savingSecond).toEqual(success({ localCopySaved: true }));
     expect(saves()).toEqual([join(folder, 'First.tasklace'), join(folder, 'Second.tasklace')]);
-  });
-
-  it('turns a save answered by something else than a save into a task failure', async () => {
-    const sender = await openedIn(join(folder, 'Old.tasklace'));
-    runTask.mockResolvedValueOnce(success(LOADED));
-    expect(await quietly(() => request(IPC_CHANNELS.saveProject, sender, STATE))).toEqual({
-      answer: failure({ code: 'TASK_FAILED' }),
-      logged: [['The file worker answered a save with a loaded result.']],
-    });
   });
 
   it('keeps the old file when the new one could not be written, or when the user cancels', async () => {

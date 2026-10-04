@@ -148,6 +148,15 @@ describe('the bridge exposed to the page', () => {
     await expect(bridge.regionalFormat()).rejects.toThrow('Unexpected regional format');
     electron.invoke.mockResolvedValueOnce(null);
     await expect(bridge.regionalFormat()).rejects.toThrow('Unexpected regional format');
+    for (const changed of [
+      { listSeparator: '|' },
+      { dateOrder: 'yearDayMonth' },
+      { dateSeparator: ' ' },
+      { twelveHourClock: 'no' },
+    ]) {
+      electron.invoke.mockResolvedValueOnce({ ...FORMAT, ...changed });
+      await expect(bridge.regionalFormat()).rejects.toThrow('Unexpected regional format');
+    }
   });
 });
 

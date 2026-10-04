@@ -10,7 +10,7 @@
     gestureAt,
     targetBlockAt,
     type DragPreview,
-    type GestureKind,
+    type BarShape,
     type GestureTarget,
   } from '../plan/timeline-gestures';
   import { hourAt, ROW_HEIGHT, rowShape, xOf, type RowShape } from '../plan/timeline-geometry';
@@ -31,7 +31,7 @@
     readonly resized: (width: number, height: number) => void;
     readonly select: (id: TaskId) => void;
     readonly moved: (shape: RowShape, offset: number, block: number | null) => void;
-    readonly stretched: (shape: RowShape, offset: number) => void;
+    readonly stretched: (shape: BarShape, offset: number) => void;
     readonly linked: (from: LinkEnd, to: LinkEnd) => void;
     readonly opened: (id: TaskId) => void;
     readonly drawingFailed: (part: DrawingPart) => void;
@@ -66,7 +66,7 @@
   }: Props = $props();
 
   const HEADER_HEIGHT = 48;
-  const CURSORS: Readonly<Record<GestureKind | 'none', string>> = {
+  const CURSORS: Readonly<Record<GestureTarget['kind'] | 'none', string>> = {
     move: 'grab',
     stretch: 'ew-resize',
     link: 'crosshair',
@@ -261,7 +261,9 @@
       const row = Math.floor(point.y / ROW_HEIGHT);
       const candidate = scene.rows[row]?.task;
       const linkable =
-        candidate !== undefined && candidate.kind !== 'summary' && candidate.id !== target.taskId;
+        candidate !== undefined &&
+        candidate.kind !== 'summary' &&
+        candidate.id !== target.shape.taskId;
       const targetShape = linkable ? shapeAtY(point.y) : null;
       preview = {
         kind: 'link',
@@ -302,7 +304,7 @@
     } else if (target.kind === 'stretch') {
       stretched(target.shape, offset);
     } else if (shown?.kind === 'link' && shown.target !== null) {
-      linked({ taskId: target.taskId, block: target.block }, shown.target.end);
+      linked({ taskId: target.shape.taskId, block: target.block }, shown.target.end);
     }
   }
 

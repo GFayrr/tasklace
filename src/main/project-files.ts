@@ -17,13 +17,16 @@ import { MIN_PROJECT_HOUR } from '../core/time';
 import {
   IPC_CHANNELS,
   type BridgeResult,
+  type ChannelAnswers,
   type ExchangeKind,
+  type InvokeChannel,
   type ExportedFile,
   type OpenedProject,
   type RecentProject,
+  type ResultChannel,
   type SavedProject,
 } from '../preload/bridge-contract';
-import type { FileTask, FileTaskResult, LoadedProject } from './file-tasks';
+import type { FileTask, ResultOfTask, LoadedProject } from './file-tasks';
 import {
   readExchangeKind,
   readExportText,
@@ -47,7 +50,7 @@ import { regionalFormatOf } from './system-regional-format';
 
 export interface ProjectFileServices {
   readonly assertTrusted: TrustCheck;
-  readonly runTask: (task: FileTask) => Promise<FileTaskResult>;
+  readonly runTask: <T extends FileTask>(task: T) => Promise<ResultOfTask<T>>;
   readonly userDataFolder: string;
 }
 
@@ -82,8 +85,8 @@ const offered = new WeakMap<WebContents, WindowProject>();
 
 /** Answers the project file requests of the bridge: new, open, recent, import, adopt, save, save as and export, the main process alone choosing paths through dialogs and knowing the file and document of each window, which changes only once the page has accepted the project offered to it. */
 export function registerProjectFileHandlers(services: ProjectFileServices): void {
-  const handle = (
-    channel: string,
+  const register = (
+    channel: InvokeChannel,
     answer: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown,
   ): void => {
     ipcMain.handle(channel, (event, ...values: unknown[]) => {
@@ -91,11 +94,20 @@ export function registerProjectFileHandlers(services: ProjectFileServices): void
       return answer(event, ...values);
     });
   };
-  const handleFileAction = (
-    channel: string,
-    answer: (event: IpcMainInvokeEvent, ...values: unknown[]) => Promise<BridgeResult<unknown>>,
+  const handle = <C extends InvokeChannel>(
+    channel: C,
+    answer: (
+      event: IpcMainInvokeEvent,
+      ...values: unknown[]
+    ) => ChannelAnswers[C] | Promise<ChannelAnswers[C]>,
   ): void => {
-    handle(channel, (event, ...values) => answerOrFail(channel, () => answer(event, ...values)));
+    register(channel, answer);
+  };
+  const handleFileAction = <C extends ResultChannel>(
+    channel: C,
+    answer: (event: IpcMainInvokeEvent, ...values: unknown[]) => Promise<ChannelAnswers[C]>,
+  ): void => {
+    register(channel, (event, ...values) => answerOrFail(channel, () => answer(event, ...values)));
   };
   handle(IPC_CHANNELS.regionalFormat, () => regionalFormatOf(app.getSystemLocale()));
   handle(IPC_CHANNELS.newProject, (event) => offerProject(event.sender, null, randomUUID()));
@@ -221,7 +233,7 @@ async function openPath(
   if (tooLarge !== null) {
     return tooLarge;
   }
-  const loaded = await loadedProject(services.runTask({ kind: 'openProject', path }));
+  const loaded = await services.runTask({ kind: 'openProject', path });
   if (!loaded.ok) {
     return loaded;
   }
@@ -251,11 +263,11 @@ async function importProject(
     fallbackStart: localProjectHour(new Date(), MIN_PROJECT_HOUR),
   };
   const naming = { untitled: MESSAGES.projects.untitled, fromFile: options.projectName };
-  const task: FileTask =
+  const task: Extract<FileTask, { kind: 'importJson' | 'importCsv' }> =
     kind === 'json'
       ? { kind: 'importJson', path, documentId, naming }
       : { kind: 'importCsv', path, documentId, options };
-  const loaded = await loadedProject(services.runTask(task));
+  const loaded = await services.runTask(task);
   if (!loaded.ok) {
     return loaded;
   }
@@ -295,10 +307,6 @@ async function saveProject(
   );
   if (!saved.ok) {
     return saved;
-  }
-  if (saved.value.kind !== 'saved') {
-    console.error(`The file worker answered a save with a ${saved.value.kind} result.`);
-    return failure({ code: 'TASK_FAILED' });
   }
   if (path !== null && path !== project.path) {
     projects.set(sender, { path, documentId });
@@ -359,25 +367,11 @@ async function checkSize(path: string, kind: FileKind): Promise<BridgeResult<nev
   }
 }
 
-/** Waits for a loading task and requires it to have loaded a project. */
-async function loadedProject(task: Promise<FileTaskResult>): Promise<BridgeResult<LoadedProject>> {
-  const result = await task;
-  if (!result.ok) {
-    return result;
-  }
-  if (result.value.kind !== 'loaded') {
-    console.error(`The file worker answered a loading with a ${result.value.kind} result.`);
-    return failure({ code: 'TASK_FAILED' });
-  }
-  return success(result.value);
-}
-
 /** Describes a loaded project to the page. */
 function openedProject(loaded: LoadedProject, path: string): OpenedProject {
   return {
     state: loaded.state,
     documentId: loaded.documentId,
-    name: projectNameFromPath(path, MESSAGES.projects.untitled),
     fileName: basename(path),
     warnings: loaded.warnings,
   };

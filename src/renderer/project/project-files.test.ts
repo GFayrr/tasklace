@@ -95,7 +95,7 @@ function openedOf(documentId: string): BridgeResult<OpenedProject> {
   const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, documentId));
   return {
     ok: true,
-    value: { state, documentId, name: 'Plan', fileName: 'Plan.tasklace', warnings: [] },
+    value: { state, documentId, fileName: 'Plan.tasklace', warnings: [] },
   };
 }
 
@@ -136,7 +136,7 @@ describe('createProjectFiles', () => {
     const opened = await files.open();
     expect(saves).toEqual([{ as: false, documentId: TEST_DOCUMENT_ID }]);
     expect(opened.ok && opened.value.session.documentId).toBe(OTHER_ID);
-    expect(opened.ok && opened.value.name).toBe('Plan');
+    expect(opened.ok && opened.value.fileName).toBe('Plan.tasklace');
     first.apply({ type: 'updateProject', fields: { name: 'Stale' } });
     await files.flush();
     expect(saves).toHaveLength(1);
@@ -301,9 +301,33 @@ describe('createProjectFiles', () => {
       QUIET,
       manualTimer(),
     );
-    const created = await files.create(SAMPLE);
-    expect(created.ok).toBe(false);
-    expect(!created.ok && created.error.code).toBe('INVALID_PROJECT');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await files.create(SAMPLE)).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
+      expect(logged.mock.calls).toEqual([
+        ['The main process gave a new project an invalid identifier:', 'not an identifier'],
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
+    expect(files.session()).toBeNull();
+  });
+
+  it('refuses an opened state holding another document than the one announced, logging it', async () => {
+    const opened = openedOf(OTHER_ID);
+    const { bridge } = fakeBridge(
+      opened.ok ? { ok: true, value: { ...opened.value, documentId: TEST_DOCUMENT_ID } } : opened,
+    );
+    const files = createProjectFiles(bridge, QUIET, manualTimer());
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await files.open()).toEqual({ ok: false, error: { code: 'INVALID_CONTENT' } });
+      expect(logged.mock.calls).toEqual([
+        ['The opened project does not hold the document the main process announced.'],
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
     expect(files.session()).toBeNull();
   });
 
@@ -373,7 +397,6 @@ describe('createProjectFiles', () => {
       value: {
         state: Uint8Array.of(255),
         documentId: OTHER_ID,
-        name: 'Plan',
         fileName: 'Plan.tasklace',
         warnings: [],
       },
@@ -430,7 +453,6 @@ describe('createProjectFiles', () => {
       value: {
         state,
         documentId: TEST_DOCUMENT_ID,
-        name: 'Plan',
         fileName: 'Plan.tasklace',
         warnings: [],
       },
@@ -488,7 +510,6 @@ describe('createProjectFiles', () => {
       value: {
         state: Uint8Array.from([255, 255, 255]),
         documentId: TEST_DOCUMENT_ID,
-        name: 'Plan',
         fileName: 'Plan.tasklace',
         warnings: [],
       },

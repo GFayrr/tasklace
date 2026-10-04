@@ -145,7 +145,7 @@ export function computePlacementSlots(
 
 /** Tells whether a task works every working hour of its working days, so that each block covers all working time between its bounds. */
 export function worksFullDays(calendar: CompiledCalendar, task: WorkTask): boolean {
-  const [firstWorkingHour] = calendar.workingQuartersOfDay;
+  const [firstWorkingHour] = calendar.workingQuarterStartHours;
   return (
     (task.hoursPerDay === null || task.hoursPerDay === calendar.workingHoursPerDay) &&
     (task.dailyStartHour === null || task.dailyStartHour <= firstWorkingHour)

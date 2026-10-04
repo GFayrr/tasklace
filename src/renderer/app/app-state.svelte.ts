@@ -20,6 +20,7 @@ import {
   editErrorMessage,
   fileErrorMessage,
   fillMessage,
+  type EditRefusal,
   type Messages,
 } from '../i18n/messages';
 import type { EditableColumn } from '../plan/cell-editing';
@@ -108,14 +109,15 @@ export interface AppContext {
 
 /** Holds what the interface shows: the open project, its schedule, whether it is saved, what can be undone and the messages for the user. */
 export class AppState {
-  project = $state.raw<Project | null>(null);
-  schedule = $state.raw<Schedule | null>(null);
-  saveStatus = $state<SaveStatus>('saved');
-  hasFile = $state(false);
-  canUndo = $state(false);
-  canRedo = $state(false);
-  recentProjects = $state.raw<readonly RecentProject[]>([]);
-  notices = $state.raw<readonly Notice[]>([]);
+  #project = $state.raw<Project | null>(null);
+  #schedule = $state.raw<Schedule | null>(null);
+  #scheduledProject = $state.raw<Project | null>(null);
+  #saveStatus = $state<SaveStatus>('saved');
+  #hasFile = $state(false);
+  #canUndo = $state(false);
+  #canRedo = $state(false);
+  #recentProjects = $state.raw<readonly RecentProject[]>([]);
+  #notices = $state.raw<readonly Notice[]>([]);
   zoom = $state<ZoomLevel>('day');
   selectedTaskId = $state<TaskId | null>(null);
   editRequest = $state<EditRequest | null>(null);
@@ -125,7 +127,7 @@ export class AppState {
   #report = $state.raw<Report | null>(null);
   #lastQuestion: Promise<unknown> = Promise.resolve();
   collapsed = $state.raw<ReadonlySet<TaskId>>(NOTHING_COLLAPSED);
-  openedCount = $state(0);
+  #openedCount = $state(0);
   readonly outline = $derived(buildPlanOutline(this.project?.tasks ?? [], this.collapsed));
   readonly calendar = $derived.by(() => {
     const compiled = this.project === null ? null : compileCalendar(this.project.calendar);
@@ -155,7 +157,7 @@ export class AppState {
         this.#reportError(error);
       },
       saveStatus: (status) => {
-        this.saveStatus = status;
+        this.#saveStatus = status;
       },
       localCopyFailed: () => {
         this.#notify('warning', this.messages.notices.localCopyFailed);
@@ -173,6 +175,56 @@ export class AppState {
         this.#notify('error', this.messages.notices.scheduleStopped, null, true);
       },
     });
+  }
+
+  /** Returns the open project, or null. */
+  get project(): Project | null {
+    return this.#project;
+  }
+
+  /** Returns the schedule of the open project, or null while none is computed. */
+  get schedule(): Schedule | null {
+    return this.#schedule;
+  }
+
+  /** Returns the schedule computed for the project as it is now, or null while the schedule shown is older than the latest change, so that a gesture never relies on dates already out of date. */
+  get currentSchedule(): Schedule | null {
+    return this.#scheduledProject === this.#project ? this.#schedule : null;
+  }
+
+  /** Returns whether the open project is saved. */
+  get saveStatus(): SaveStatus {
+    return this.#saveStatus;
+  }
+
+  /** Returns whether the open project has a file. */
+  get hasFile(): boolean {
+    return this.#hasFile;
+  }
+
+  /** Returns whether a change can be undone. */
+  get canUndo(): boolean {
+    return this.#canUndo;
+  }
+
+  /** Returns whether an undone change can be redone. */
+  get canRedo(): boolean {
+    return this.#canRedo;
+  }
+
+  /** Returns the recent projects. */
+  get recentProjects(): readonly RecentProject[] {
+    return this.#recentProjects;
+  }
+
+  /** Returns the messages shown to the user. */
+  get notices(): readonly Notice[] {
+    return this.#notices;
+  }
+
+  /** Returns how many projects were opened, so that views start afresh for each. */
+  get openedCount(): number {
+    return this.#openedCount;
   }
 
   /** Returns the question about closing a project shown to the user, or null. */
@@ -195,7 +247,7 @@ export class AppState {
     try {
       const loaded = await this.#context.bridge.recentProjects();
       if (loaded.ok) {
-        this.recentProjects = loaded.value;
+        this.#recentProjects = loaded.value;
         return;
       }
       console.error('The recent projects could not be loaded:', loaded.error);
@@ -329,7 +381,7 @@ export class AppState {
   /** Saves the project to its file, asking where for a project that has none yet. */
   async save(): Promise<void> {
     this.#showResult(await this.#files.save());
-    this.hasFile = this.#files.hasFile();
+    this.#hasFile = this.#files.hasFile();
     await this.loadRecentProjects();
   }
 
@@ -337,7 +389,7 @@ export class AppState {
   async saveAs(): Promise<boolean> {
     const saved = await this.#files.saveAs();
     this.#showResult(saved);
-    this.hasFile = this.#files.hasFile();
+    this.#hasFile = this.#files.hasFile();
     await this.loadRecentProjects();
     return saved.ok;
   }
@@ -374,7 +426,7 @@ export class AppState {
     }
     const renamed = session.apply({ type: 'updateProject', fields: { name: trimmed } });
     if (!renamed.ok) {
-      this.#notify('error', editErrorMessage(this.messages, renamed.error[0]?.code ?? ''));
+      this.#notify('error', editErrorMessage(this.messages, renamed.error[0].code));
     }
     return renamed.ok;
   }
@@ -403,7 +455,7 @@ export class AppState {
 
   /** Applies a change built from the current project, returning why it was refused, as while a file action runs, or null once applied. */
   tryEdit(
-    build: (context: EditContext) => Result<readonly SharedOperation[], string>,
+    build: (context: EditContext) => Result<readonly SharedOperation[], EditRefusal>,
   ): string | null {
     const session = this.#session;
     const project = this.project;
@@ -423,7 +475,7 @@ export class AppState {
     }
     const applied = session.applyAll(edit.value);
     if (!applied.ok) {
-      return editErrorMessage(this.messages, applied.error[0]?.code ?? '');
+      return editErrorMessage(this.messages, applied.error[0].code);
     }
     this.#refresh();
     this.#notifyStartMove(project.startDate);
@@ -593,7 +645,7 @@ export class AppState {
 
   /** Removes a message. */
   dismiss(id: number): void {
-    this.notices = this.notices.filter((notice) => notice.id !== id);
+    this.#notices = this.notices.filter((notice) => notice.id !== id);
   }
 
   /** Shows a project read from a file, with its warnings and repairs, and returns it, or tells why it could not be read and returns null. */
@@ -635,13 +687,13 @@ export class AppState {
   #attach(session: SharedSession): void {
     this.#session?.document.off('update', this.#queueRefresh);
     this.#session = session;
-    this.schedule = null;
+    this.#schedule = null;
     this.selectedTaskId = null;
     this.editRequest = null;
     this.detailsTaskId = null;
     this.#changedSinceOpened = false;
     this.collapsed = NOTHING_COLLAPSED;
-    this.openedCount += 1;
+    this.#openedCount += 1;
     session.document.on('update', this.#queueRefresh);
     this.#refresh();
   }
@@ -668,10 +720,10 @@ export class AppState {
     if (project === this.project) {
       return;
     }
-    this.project = project;
-    this.hasFile = this.#files.hasFile();
-    this.canUndo = session.history.canUndo();
-    this.canRedo = session.history.canRedo();
+    this.#project = project;
+    this.#hasFile = this.#files.hasFile();
+    this.#canUndo = session.history.canUndo();
+    this.#canRedo = session.history.canRedo();
     this.#scheduler.request(project);
     if (this.selectedTaskId !== null && !this.outline.wbsById.has(this.selectedTaskId)) {
       this.selectedTaskId = null;
@@ -684,11 +736,12 @@ export class AppState {
       return;
     }
     if (!result.ok) {
-      this.schedule = null;
+      this.#schedule = null;
       this.#showScheduleFailure(result.error, project);
       return;
     }
-    this.schedule = result.value;
+    this.#schedule = result.value;
+    this.#scheduledProject = project;
   }
 
   /** Tells the user why the schedule of a project could not be computed, with each problem and the task it concerns, and logs the cause. */
@@ -840,6 +893,6 @@ export class AppState {
   ): void {
     this.#nextNoticeId += 1;
     const others = this.notices.filter((notice) => notice.text !== text);
-    this.notices = [...others, { id: this.#nextNoticeId, kind, text, report, lasting }];
+    this.#notices = [...others, { id: this.#nextNoticeId, kind, text, report, lasting }];
   }
 }

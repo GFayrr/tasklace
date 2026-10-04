@@ -61,7 +61,6 @@ export function openedProjectOf(
     value: {
       state,
       documentId: OPENED_DOCUMENT_ID,
-      name: project.name,
       fileName: `${project.name}.tasklace`,
       warnings: [],
       ...overrides,

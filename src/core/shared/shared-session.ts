@@ -5,7 +5,7 @@ import { MAX_DEPENDENCIES, MAX_TAGS, MAX_TASKS } from '../limits';
 import type { Dependency, Project, Tag, Task, TaskId } from '../model/project';
 import { failure, success, type Result } from '../result';
 import { readProject, STORED_VALUE_CODEC } from '../validation/read-project';
-import type { ValidationIssue } from '../validation/validation-issues';
+import type { ValidationIssue, ValidationIssues } from '../validation/validation-issues';
 import {
   createProjectState,
   putDependency,
@@ -66,10 +66,8 @@ export interface SharedSession {
   readonly documentId: DocumentId;
   readonly openingRepairs: readonly SharedRepair[];
   readonly project: () => Project;
-  readonly apply: (operation: SharedOperation) => Result<void, readonly ValidationIssue[]>;
-  readonly applyAll: (
-    operations: readonly SharedOperation[],
-  ) => Result<void, readonly ValidationIssue[]>;
+  readonly apply: (operation: SharedOperation) => Result<void, ValidationIssues>;
+  readonly applyAll: (operations: readonly SharedOperation[]) => Result<void, ValidationIssues>;
   readonly merge: (update: Uint8Array) => Result<readonly SharedRepair[], MergeFailure>;
   readonly history: SessionHistory;
 }
@@ -248,7 +246,7 @@ function applyOperationToSession(
   session: SessionState,
   document: Y.Doc,
   operation: SharedOperation,
-): Result<void, readonly ValidationIssue[]> {
+): Result<void, ValidationIssues> {
   try {
     const checked = applyToState(session.state, operation);
     if (!checked.ok) {
@@ -270,7 +268,7 @@ function applyOperationsToSession(
   session: SessionState,
   document: Y.Doc,
   operations: readonly SharedOperation[],
-): Result<void, readonly ValidationIssue[]> {
+): Result<void, ValidationIssues> {
   try {
     return writeOperations(session, document, operations);
   } catch (error) {
@@ -284,7 +282,7 @@ function writeOperations(
   session: SessionState,
   document: Y.Doc,
   operations: readonly SharedOperation[],
-): Result<void, readonly ValidationIssue[]> {
+): Result<void, ValidationIssues> {
   const all: TouchedItems = {
     tasks: new Set(),
     dependencies: new Set(),

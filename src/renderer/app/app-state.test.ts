@@ -78,9 +78,15 @@ describe('new projects', () => {
     const { app, control } = await withNewProject();
     const before = app.project;
     control.newDocumentId = 'not an identifier';
-    await app.newProject();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await app.newProject();
+      expect(logged).toHaveBeenCalledTimes(1);
+    } finally {
+      logged.mockRestore();
+    }
     expect(app.project).toBe(before);
-    expect(noticeTexts(app)).toEqual([english.fileErrors.INVALID_PROJECT]);
+    expect(noticeTexts(app)).toEqual([english.fileErrors.TASK_FAILED]);
   });
 });
 

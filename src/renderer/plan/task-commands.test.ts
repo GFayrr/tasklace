@@ -848,11 +848,11 @@ describe('any sequence of structural edits', () => {
           }
           const refusal = edit.ok
             ? applied?.ok === false
-              ? applied.error[0]?.code
+              ? applied.error[0].code
               : null
             : edit.error;
           if (REFUSABLE_EDITS.has(kind) && refusal !== null) {
-            expect(EXPECTED_BLOCK_REFUSALS.has(refusal ?? '')).toBe(true);
+            expect(EXPECTED_BLOCK_REFUSALS.has(refusal)).toBe(true);
           }
           if (applied?.ok !== true) {
             expect(normalized(session.project())).toEqual(before);
