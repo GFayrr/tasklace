@@ -15,6 +15,7 @@ export interface PlanRow {
 export interface PlanOutline {
   readonly rows: readonly PlanRow[];
   readonly wbsById: ReadonlyMap<TaskId, string>;
+  readonly idByWbs: ReadonlyMap<string, TaskId>;
   readonly rowIndexById: ReadonlyMap<TaskId, number>;
   readonly childrenById: ReadonlyMap<TaskId | null, readonly Task[]>;
 }
@@ -27,7 +28,7 @@ interface Level {
   next: number;
 }
 
-/** Lists the tasks in the order of the task tree, numbered as in the WBS, the descendants of collapsed summaries being numbered but not shown. */
+/** Lists the tasks in the order of the task tree with their WBS numbers, mapped from task to number and back, the descendants of collapsed summaries being numbered but not shown. */
 export function buildPlanOutline(
   tasks: readonly Task[],
   collapsed: ReadonlySet<TaskId>,
@@ -35,6 +36,7 @@ export function buildPlanOutline(
   const childrenById = groupChildren(tasks);
   const rows: PlanRow[] = [];
   const wbsById = new Map<TaskId, string>();
+  const idByWbs = new Map<string, TaskId>();
   const rowIndexById = new Map<TaskId, number>();
   const levels: Level[] = [
     { children: childrenById.get(null) ?? [], depth: 0, prefix: '', hidden: false, next: 0 },
@@ -50,6 +52,7 @@ export function buildPlanOutline(
     const children = childrenById.get(task.id) ?? [];
     const isCollapsed = children.length > 0 && collapsed.has(task.id);
     wbsById.set(task.id, wbs);
+    idByWbs.set(wbs, task.id);
     if (!level.hidden) {
       rowIndexById.set(task.id, rows.length);
       rows.push({
@@ -65,7 +68,7 @@ export function buildPlanOutline(
       levels.push({ children, depth: level.depth + 1, prefix: `${wbs}.`, hidden, next: 0 });
     }
   }
-  return { rows, wbsById, rowIndexById, childrenById };
+  return { rows, wbsById, idByWbs, rowIndexById, childrenById };
 }
 
 /** Groups the dependencies by the task they lead to, so that the predecessors of a row are found at once. */

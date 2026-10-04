@@ -46,6 +46,7 @@ export type StateCheckError =
   | { readonly code: 'WRONG_DOCUMENT' };
 
 interface ValidatedFile {
+  readonly state: Uint8Array;
   readonly document: Y.Doc;
   readonly project: Project;
   readonly documentId: DocumentId;
@@ -108,18 +109,16 @@ export function readTasklaceFile(
   return read.ok ? success(read.value.document) : read;
 }
 
-/** Reads an untrusted .tasklace file as readTasklaceFile does, giving with its shared document the identifier the validation found in it. */
+/** Reads an untrusted .tasklace file as readTasklaceFile does, giving the decompressed Yjs state it validated and the document identifier found in it. */
 export function readTasklaceDocument(
   file: Uint8Array,
   compressor: Compressor,
-): Result<{ readonly document: Y.Doc; readonly documentId: DocumentId }, FileError> {
+): Result<{ readonly state: Uint8Array; readonly documentId: DocumentId }, FileError> {
   const read = readValidatedFile(file, compressor);
-  return read.ok
-    ? success({ document: read.value.document, documentId: read.value.documentId })
-    : read;
+  return read.ok ? success({ state: read.value.state, documentId: read.value.documentId }) : read;
 }
 
-/** Reads and checks an untrusted .tasklace file, returning its shared document with the project it validated. */
+/** Reads and checks an untrusted .tasklace file, returning the state it decompressed, the shared document decoded from it, the project it validated and its identifier. */
 function readValidatedFile(
   file: Uint8Array,
   compressor: Compressor,
@@ -146,7 +145,7 @@ function readValidatedFile(
         code: 'INVALID_PROJECT',
         issues: [{ path: DOCUMENT_ID_KEY, code: 'MISSING_FIELD' }],
       })
-    : success({ document: document.value, project: project.value, documentId });
+    : success({ state: state.value, document: document.value, project: project.value, documentId });
 }
 
 /** Checks the size, signature, version, flags and checksum of a file and returns the uncompressed size it declares. */

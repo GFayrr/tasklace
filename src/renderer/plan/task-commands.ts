@@ -335,7 +335,7 @@ function resolveSource(
   block: number | null,
   type: DependencyType,
 ): Result<LinkEnd, EditError> {
-  const taskId = [...context.outline.wbsById].find(([, number]) => number === wbs)?.[0];
+  const taskId = context.outline.idByWbs.get(wbs);
   const task = taskId === undefined ? undefined : findTask(context, taskId);
   if (taskId === undefined || task === undefined) {
     return failure('UNKNOWN_TASK_NUMBER');

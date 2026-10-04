@@ -55,19 +55,27 @@ describe('buildPlanOutline', () => {
     expect(outline.rowIndexById.has('t11')).toBe(false);
   });
 
-  it('numbers tasks exactly as the schedule does, whatever their order', () => {
+  it('numbers tasks exactly as the schedule does, both ways, whatever their order and the summaries collapsed', () => {
+    const summaries = TASKS.filter((task) => task.kind === 'summary').map((task) => task.id);
     fc.assert(
-      fc.property(fc.shuffledSubarray(TASKS, { minLength: TASKS.length }), (shuffled) => {
-        const outline = buildPlanOutline(shuffled, new Set());
-        const grouped = new Map<string | null, typeof TASKS>();
-        shuffled.forEach((task) => {
-          grouped.set(task.parentId, [...(grouped.get(task.parentId) ?? []), task]);
-        });
-        expect(outline.wbsById).toEqual(computeWbsNumbers(grouped));
-        expect(outline.rows.map((row) => row.task.id)).toEqual(
-          buildPlanOutline(TASKS, new Set()).rows.map((row) => row.task.id),
-        );
-      }),
+      fc.property(
+        fc.shuffledSubarray(TASKS, { minLength: TASKS.length }),
+        fc.subarray(summaries),
+        (shuffled, collapsed) => {
+          const outline = buildPlanOutline(shuffled, new Set(collapsed));
+          const grouped = new Map<string | null, typeof TASKS>();
+          shuffled.forEach((task) => {
+            grouped.set(task.parentId, [...(grouped.get(task.parentId) ?? []), task]);
+          });
+          expect(outline.wbsById).toEqual(computeWbsNumbers(grouped));
+          expect(outline.idByWbs).toEqual(
+            new Map([...outline.wbsById].map(([id, wbs]) => [wbs, id])),
+          );
+          expect(outline.rows.map((row) => row.task.id)).toEqual(
+            buildPlanOutline(TASKS, new Set(collapsed)).rows.map((row) => row.task.id),
+          );
+        },
+      ),
     );
   });
 });

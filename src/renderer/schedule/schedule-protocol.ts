@@ -32,13 +32,24 @@ export function answerScheduleRequest(message: unknown): ScheduleResponse | null
   };
 }
 
-/** Tells whether a message is a schedule response of the current protocol version, whose result says whether it succeeded. */
+/** Tells whether a message is a schedule response of the current protocol version, whose result says whether it succeeded and, when it did, holds the tables of a schedule. */
 export function isScheduleResponse(message: unknown): message is ScheduleResponse {
   if (!hasVersionAndGeneration(message) || !('result' in message)) {
     return false;
   }
-  return typeof Reflect.get(Object(message.result), 'ok') === 'boolean';
+  const ok: unknown = Reflect.get(Object(message.result), 'ok');
+  return (
+    ok === false ||
+    (ok === true && holdsScheduleTables(Reflect.get(Object(message.result), 'value')))
+  );
 }
+
+/** Tells whether a value holds the tables of a schedule that the table, the timeline and the CSV export read. */
+function holdsScheduleTables(value: unknown): boolean {
+  return SCHEDULE_TABLES.every((table) => Reflect.get(Object(value), table) instanceof Map);
+}
+
+const SCHEDULE_TABLES = ['placements', 'summaries', 'wbsNumbers'] as const;
 
 /** Tells whether a message is a schedule request of the current protocol version. */
 function isScheduleRequest(message: unknown): message is ScheduleRequest {
