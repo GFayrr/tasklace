@@ -9,7 +9,7 @@ import { flushBeforeClosing, registerFlushHandler } from './close-flush';
 import { runInFileWorker } from './file-worker-client';
 import { registerIpcHandlers } from './ipc-handlers';
 import { createTrustCheck } from './ipc-trust';
-import { registerProjectFileHandlers } from './project-files';
+import { registerProjectFileHandlers, windowProjectKind } from './project-files';
 import { CONTENT_SECURITY_POLICY_HEADER, hardenContents, hardenSession } from './security';
 import { MESSAGES } from './messages';
 import { installApplicationMenu } from './platform/application-menu';
@@ -73,7 +73,7 @@ function start(): void {
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath);
   logPageMessages(window.webContents, log);
-  flushBeforeClosing(window);
+  flushBeforeClosing(window, windowProjectKind);
   let closing = false;
   window.once('close', () => {
     closing = true;

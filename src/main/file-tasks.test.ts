@@ -268,7 +268,7 @@ describe('file tasks', () => {
       savedAt: SAVED_AT,
     } as const;
     const { result } = await quietly(() => runFileTask(task));
-    expect(result).toEqual({ ok: false, error: { code: 'WRITE_FAILED' } });
+    expect(result).toEqual({ ok: false, error: { code: 'LOCAL_COPY_FAILED' } });
   });
 
   it('reports an import of a file that is gone, and the problems of a table that cannot be imported', async () => {
