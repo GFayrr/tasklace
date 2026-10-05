@@ -1,5 +1,12 @@
 import type { Schedule } from '../../core/scheduling/schedule-project';
-import type { ProjectHour } from '../../core/time';
+import { valueAt } from '../../core/table-value';
+import {
+  startOfDay,
+  weekdayOf,
+  type DayIndex,
+  type ProjectHour,
+  type Weekday,
+} from '../../core/time';
 
 export interface ProjectSpan {
   readonly start: ProjectHour;
@@ -7,6 +14,8 @@ export interface ProjectSpan {
 }
 
 const MILLISECONDS_PER_HOUR = 3_600_000;
+const DAYS_PER_WEEK = 7;
+const FIRST_WEEK_DAY: DayIndex = 0;
 
 /** Creates a function writing the day of a project hour in the regional format, project hours being wall-clock times without time zone. */
 export function createDayFormatter(locale: string): (hour: ProjectHour) => string {
@@ -23,4 +32,14 @@ export function projectSpan(schedule: Schedule): ProjectSpan | null {
     end = Math.max(end, placement.end);
   }
   return schedule.placements.size === 0 ? null : { start, end };
+}
+
+/** Creates a function writing the short name of a weekday in the language of the system, as "Mon" or "lun.". */
+export function createWeekdayNamer(locale: string): (weekday: Weekday) => string {
+  const format = new Intl.DateTimeFormat(locale, { weekday: 'short', timeZone: 'UTC' });
+  const names: string[] = [];
+  for (let day = FIRST_WEEK_DAY; day < FIRST_WEEK_DAY + DAYS_PER_WEEK; day += 1) {
+    names[weekdayOf(day)] = format.format(new Date(startOfDay(day) * MILLISECONDS_PER_HOUR));
+  }
+  return (weekday) => valueAt(names, weekday);
 }

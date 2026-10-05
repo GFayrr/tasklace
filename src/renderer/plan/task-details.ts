@@ -3,6 +3,7 @@ import { compareStrings } from '../../core/compare-strings';
 import type { Project, Task, TagId, TaskId, TaskSegment } from '../../core/model/project';
 import { failure, success, type Result } from '../../core/result';
 import { HOURS_PER_DAY, QUARTER_HOUR, type ProjectHour } from '../../core/time';
+import { formatTimeOfDay, parseTimeOfDay } from './time-of-day';
 import { hourFromPicker } from './cell-editing';
 import { durationEditorText, parseDuration } from './durations';
 import type { EditError } from './task-commands';
@@ -31,13 +32,10 @@ export type DetailsError =
 
 const PROGRESS_PATTERN = /^\d{1,3}$/;
 const GAP_PATTERN = /^\d{1,4}$/;
-const TIME_PATTERN = /^(\d{2}):(\d{2})$/;
 const MAX_PROGRESS = 100;
 const MIN_GAP_DAYS = 0;
 const ADDED_BLOCK_GAP_DAYS = 1;
 const MIN_HOURS_PER_DAY = 1;
-const MINUTES_PER_HOUR = 60;
-const TWO_DIGITS = 2;
 const DECIMAL_RADIX = 10;
 const DATE_TIME_SEPARATOR = 'T';
 const EMPTY_DRAFT: TaskDraft = {
@@ -73,7 +71,7 @@ export function draftFromTask(
     ...common,
     basis,
     hoursPerDay: task.hoursPerDay === null ? '' : durationEditorText(task.hoursPerDay),
-    dailyStart: task.dailyStartHour === null ? '' : timeOfDay(task.dailyStartHour),
+    dailyStart: task.dailyStartHour === null ? '' : formatTimeOfDay(task.dailyStartHour),
     blocks: task.segments.map((segment, block) => ({
       duration: durationEditorText(segment.durationHours),
       gapDays: String(segment.gapDaysBefore),
@@ -217,15 +215,7 @@ function readDailyPattern(
 
 /** Reads an optional time of day written as "HH:MM", on a quarter hour, null meaning none and undefined an unreadable time. */
 function readTime(text: string): number | null | undefined {
-  const trimmed = text.trim();
-  if (trimmed === '') {
-    return null;
-  }
-  const match = TIME_PATTERN.exec(trimmed);
-  const hours =
-    Number(match?.[1] ?? Number.NaN) + Number(match?.[2] ?? Number.NaN) / MINUTES_PER_HOUR;
-  const onQuarter = Number.isInteger(hours / QUARTER_HOUR);
-  return onQuarter && hours >= 0 && hours < HOURS_PER_DAY ? hours : undefined;
+  return text.trim() === '' ? null : (parseTimeOfDay(text) ?? undefined);
 }
 
 /** Reads the blocks of a work task: a duration each, and a gap of whole days and an optional start date for every block after the first. */
@@ -257,11 +247,4 @@ function readGap(text: string): number | null {
   const trimmed = text.trim();
   const value = GAP_PATTERN.test(trimmed) ? Number.parseInt(trimmed, DECIMAL_RADIX) : Number.NaN;
   return value >= MIN_GAP_DAYS ? value : null;
-}
-
-/** Writes a time of day as "HH:MM". */
-function timeOfDay(hours: number): string {
-  const minutes = Math.round(hours * MINUTES_PER_HOUR);
-  const hour = String(Math.floor(minutes / MINUTES_PER_HOUR)).padStart(TWO_DIGITS, '0');
-  return `${hour}:${String(minutes % MINUTES_PER_HOUR).padStart(TWO_DIGITS, '0')}`;
 }

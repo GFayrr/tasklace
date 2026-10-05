@@ -104,9 +104,24 @@ Step 5 turns the core into a desktop application. It is developed on a single br
 
 ### 5e. Project settings and advanced options
 
-- Project name and start date, working calendar editor, tag management.
-- Advanced options, disabled by default: critical path, date constraints, baseline plan with ghost bars, always showing patterns.
-- List of tag conflicts.
+Done in three parts, each with its mockups approved first.
+
+#### 5e-1. Project settings (done)
+
+- A "Project settings" button next to the project name, and Ctrl+, open a dialog with tabs: General and Calendar now, Tags and Advanced options shown as coming soon.
+- General: project name and project start; after a move, the dialog tells how many tasks it moved.
+- Calendar: working days, ranges of working hours to the quarter hour with the resulting hours per day, days off. Each change applies at once and can be undone with Ctrl+Z, even with the dialog open.
+- A date or time applies when the field is left or Enter is pressed. A refused change is explained beside the part that was changed, naming the task at stake when its hours no longer fit the working day, and the field shows the value of the project again.
+- The toolbar still fits on one line at 1,280 pixels.
+
+#### 5e-2. Tags (to do)
+
+- Tag management; deleting a tag in use asks for confirmation, then its tasks have no tag.
+- List of tag conflicts, as a collapsible panel under the legend.
+
+#### 5e-3. Advanced options (to do)
+
+- Disabled by default: critical path, date constraints, baseline plan with ghost bars, always showing patterns.
 
 ## After version 1
 

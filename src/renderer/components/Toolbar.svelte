@@ -118,6 +118,16 @@
       onchange={commitName}
       onkeydown={nameKey}
     />
+    <button
+      type="button"
+      class="button"
+      onclick={() => {
+        app.openSettings();
+      }}
+    >
+      <Icon name="gear" />
+      <span>{text.settings.open}</span>
+    </button>
     <span class="status" class:failed={app.saveStatus === 'failed'} role="status">
       {#if app.saveStatus === 'failed'}
         <Icon name="alert" />
@@ -197,19 +207,26 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-4);
+    gap: var(--space-3);
     background: var(--color-surface);
     border-bottom: 1px solid var(--color-border);
   }
 
   .identity {
-    display: flex;
-    flex-direction: column;
-    min-width: 200px;
+    display: grid;
+    grid-template-columns: var(--name-width) auto;
+    align-items: center;
+    column-gap: var(--space-2);
+    --name-width: 150px;
+  }
+
+  .identity .status {
+    grid-column: 1 / -1;
   }
 
   .name {
     width: 100%;
+    min-width: 0;
     padding: 2px var(--space-1);
     margin-left: calc(-1 * var(--space-1));
     font-size: var(--font-size-large);

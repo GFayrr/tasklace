@@ -15,7 +15,7 @@ import {
   TEST_DOCUMENT_ID,
 } from '../testing/project-builder';
 import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
-import { applyOperation, type SharedOperation } from './shared-operations';
+import { applyOperation, taskOfCalendarIssue, type SharedOperation } from './shared-operations';
 import { applySharedChange, mergeSharedUpdate, readSharedProject } from './shared-project';
 import { openSharedSession, type SharedSession } from './shared-session';
 
@@ -367,6 +367,27 @@ describe('shared session edge cases', () => {
     const before = readSharedData(victim.document);
     expect(victim.merge(update).ok).toBe(false);
     expect(readSharedData(victim.document)).toEqual(before);
+  });
+
+  it('names the task a shorter working day refuses, and no task for any other issue', () => {
+    const opened = openSharedSession(
+      createSharedDocument(project([workTask('long', { hoursPerDay: 6 })], []), TEST_DOCUMENT_ID),
+    );
+    if (!opened.ok) {
+      throw new Error(JSON.stringify(opened.error));
+    }
+    const refused = opened.value.apply({
+      type: 'updateProject',
+      fields: { calendar: { ...BASE_PROJECT.calendar, workingTimeRanges: MORNING_ONLY } },
+    });
+    expect(refused).toEqual({
+      ok: false,
+      error: [{ path: 'tasks.long', code: 'INVALID_HOURS_PER_DAY' }],
+    });
+    expect(refused.ok ? null : refused.error.map(taskOfCalendarIssue)).toEqual(['long']);
+    expect(
+      taskOfCalendarIssue({ path: 'calendar.workingWeekdays', code: 'EMPTY_LIST' }),
+    ).toBeNull();
   });
 
   it('rounds, clears and fits tasks in one fast merge, reporting repairs in order', () => {

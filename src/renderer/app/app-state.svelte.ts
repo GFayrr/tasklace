@@ -4,9 +4,14 @@ import { exportProjectJson } from '../../core/exchange/project-json';
 import type { Project, TaskId } from '../../core/model/project';
 import { success, type Result } from '../../core/result';
 import type { MergeFailure, SharedRepair } from '../../core/shared/shared-project';
+import type { ValidationIssue } from '../../core/validation/validation-issues';
+import type { DailyWindowErrorCode } from '../../core/calendar/task-slots';
+import { taskOfCalendarIssue } from '../../core/shared/shared-operations';
 import { issueText, repairText, type ReportedIssue } from '../i18n/issue-text';
 import { scheduleFailureText } from '../i18n/schedule-failure-text';
-import { parseDuration } from '../plan/durations';
+import { formatDuration, parseDuration } from '../plan/durations';
+import { renameProject, setProjectStart } from '../plan/project-commands';
+import { formatTimeOfDay } from '../plan/time-of-day';
 import {
   scheduleProject,
   type Schedule,
@@ -83,6 +88,29 @@ interface ComputedSchedule {
   readonly schedule: Schedule | null;
 }
 
+interface StartMove {
+  readonly base: Schedule;
+  readonly project: Project | null;
+}
+
+const DAILY_WINDOW_CODES: readonly string[] = [
+  'INVALID_HOURS_PER_DAY',
+  'INVALID_DAILY_START_HOUR',
+] satisfies readonly DailyWindowErrorCode[];
+
+/** Tells whether a problem is about the hours a task works each day. */
+function isDailyWindowCode(code: string): code is DailyWindowErrorCode {
+  return DAILY_WINDOW_CODES.includes(code);
+}
+
+/** Returns hours a task must have to be refused for them, failing loudly when it has none. */
+function requiredHours(hours: number | null): number {
+  if (hours === null) {
+    throw new Error('A task refused for its hours of the day has none.');
+  }
+  return hours;
+}
+
 type CloseDecision = 'proceed' | 'discarded' | 'canceled';
 
 export interface EditRequest {
@@ -128,6 +156,12 @@ export class AppState {
   selectedTaskId = $state<TaskId | null>(null);
   editRequest = $state<EditRequest | null>(null);
   detailsTaskId = $state<TaskId | null>(null);
+  #settingsOpen = $state(false);
+  #settingsResets = $state(0);
+  #settingsNotice = $state<string | null>(null);
+  #settingsAlert = $state<string | null>(null);
+  #settingsHeld = false;
+  #startMove: StartMove | null = null;
   #closePrompt = $state.raw<ClosePrompt | null>(null);
   #fileActionRunning = $state(false);
   #report = $state.raw<Report | null>(null);
@@ -179,6 +213,8 @@ export class AppState {
       failed: (error) => {
         console.error('The schedule could not be computed:', error);
         this.#scheduleStopped = true;
+        this.#startMove = null;
+        this.#alertSettings(this.messages.notices.scheduleStopped);
         this.#notify('error', this.messages.notices.scheduleStopped, null, true);
       },
     });
@@ -283,6 +319,10 @@ export class AppState {
       },
       redo: () => {
         this.redo();
+        return Promise.resolve();
+      },
+      openSettings: () => {
+        this.openSettings();
         return Promise.resolve();
       },
     };
@@ -464,9 +504,138 @@ export class AppState {
     return refusal === null;
   }
 
-  /** Applies a change built from the current project, returning why it was refused, as while a file action runs, or null once applied. */
+  /** Applies a change built from the current project, returning why it was refused, as while a file action runs, or null once applied, telling when the project start moved earlier to make room for a task. */
   tryEdit(
     build: (context: EditContext) => Result<readonly SharedOperation[], EditRefusal>,
+  ): string | null {
+    const previousStart = this.project?.startDate;
+    const refusal = this.#tryExplainedEdit(build, (issue) =>
+      editErrorMessage(this.messages, issue.code),
+    );
+    if (refusal === null && previousStart !== undefined) {
+      this.#notifyStartMove(previousStart);
+    }
+    return refusal;
+  }
+
+  /** Tells whether the settings of the open project are shown. */
+  get settingsOpen(): boolean {
+    return this.#settingsOpen;
+  }
+
+  /** Counts the times the settings started afresh, on opening or after an undo or redo, so that what they show restarts too. */
+  get settingsResets(): number {
+    return this.#settingsResets;
+  }
+
+  /** Returns the message about the latest move of the project start, telling how many tasks it moved, or null. */
+  get settingsNotice(): string | null {
+    return this.#settingsNotice;
+  }
+
+  /** Returns why the schedule could not be computed after a change made in the settings, or null. */
+  get settingsAlert(): string | null {
+    return this.#settingsAlert;
+  }
+
+  /** Opens the settings of the open project, starting afresh. */
+  openSettings(): void {
+    if (this.project !== null) {
+      this.#resetSettings();
+      this.#settingsOpen = true;
+    }
+  }
+
+  /** Closes the settings of the open project. */
+  closeSettings(): void {
+    this.#settingsOpen = false;
+    this.#resetSettings();
+  }
+
+  /** Keeps the settings open at the next attempt to close them, since a value typed in a field was refused as the field was left, perhaps to close them. */
+  holdSettingsOpen(): void {
+    this.#settingsHeld = true;
+  }
+
+  /** Closes the settings unless a refused value holds them open once on its reason, telling whether they closed. */
+  closeSettingsUnlessHeld(): boolean {
+    if (this.#settingsHeld) {
+      this.#settingsHeld = false;
+      return false;
+    }
+    this.closeSettings();
+    return true;
+  }
+
+  /** Applies a change of the project settings, returning why it was refused, naming the task whose hours per day or daily start no longer fit the working day, or null once applied. */
+  editSettings(
+    build: (context: EditContext) => Result<readonly SharedOperation[], EditRefusal>,
+  ): string | null {
+    const refusal = this.#tryExplainedEdit(build, (issue, project) =>
+      this.#settingsRefusal(project, issue),
+    );
+    if (refusal === null) {
+      this.#settingsHeld = false;
+    }
+    return refusal;
+  }
+
+  /** Renames the project from its settings, returning why the name was refused or null, an unchanged name changing nothing. */
+  renameFromSettings(text: string): string | null {
+    const name = text.trim();
+    return name === this.project?.name ? null : this.editSettings(() => renameProject(name));
+  }
+
+  /** Moves the start of the project, returning why it was refused or null, and tells in the settings how many tasks moved once the schedule of the moved project is known, counting from the schedule before a series of moves when the moves follow each other. */
+  moveProjectStart(text: string): string | null {
+    const previous = this.#startMove;
+    const before = this.currentSchedule;
+    const base = previous?.base ?? (before.ok ? before.value : null);
+    this.#settingsNotice = null;
+    this.#startMove = base === null ? null : { base, project: null };
+    const refusal = this.editSettings(() => setProjectStart(text));
+    if (refusal !== null) {
+      this.#startMove = previous;
+    } else if (this.#startMove !== null) {
+      this.#startMove = { base: this.#startMove.base, project: this.project };
+    }
+    return refusal;
+  }
+
+  /** Clears what the settings show about earlier changes. */
+  #resetSettings(): void {
+    this.#settingsNotice = null;
+    this.#settingsAlert = null;
+    this.#settingsHeld = false;
+    this.#startMove = null;
+    this.#settingsResets += 1;
+  }
+
+  /** Explains why a change of the settings was refused: a task whose hours per day or daily start no longer fit the working day is named, any other problem gets its own text. */
+  #settingsRefusal(project: Project, issue: ValidationIssue): string {
+    const id = taskOfCalendarIssue(issue);
+    const task = project.tasks.find((candidate) => candidate.id === id);
+    if (task?.kind !== 'task' || !isDailyWindowCode(issue.code)) {
+      return editErrorMessage(this.messages, issue.code);
+    }
+    const text = this.messages.settings;
+    return issue.code === 'INVALID_HOURS_PER_DAY'
+      ? fillMessage(text.hoursPerDayTooLong, {
+          name: task.name,
+          hours: formatDuration(requiredHours(task.hoursPerDay), this.messages, (value) =>
+            new Intl.NumberFormat(this.locale).format(value),
+          ),
+        })
+      : fillMessage(text.dailyStartTooLate, {
+          name: task.name,
+          time: formatTimeOfDay(requiredHours(task.dailyStartHour)),
+        });
+  }
+
+  /** Applies a change built from the current project, and returns null, or returns why it was refused, a refusal of the shared session being explained from its first problem and the project it was refused for. */
+  #tryExplainedEdit(
+    build: (context: EditContext) => Result<readonly SharedOperation[], EditRefusal>,
+    explain: (issue: ValidationIssue, project: Project) => string,
   ): string | null {
     const session = this.#session;
     const project = this.project;
@@ -486,10 +655,9 @@ export class AppState {
     }
     const applied = session.applyAll(edit.value);
     if (!applied.ok) {
-      return editErrorMessage(this.messages, applied.error[0].code);
+      return explain(applied.error[0], project);
     }
     this.#refresh();
-    this.#notifyStartMove(project.startDate);
     return null;
   }
 
@@ -578,6 +746,7 @@ export class AppState {
     if (this.#refuseWhileFileActionRuns()) {
       return;
     }
+    this.#resetSettings();
     this.#showHistoryStep(this.#session?.history.undo(), this.messages.notices.undoFailed);
   }
 
@@ -586,6 +755,7 @@ export class AppState {
     if (this.#refuseWhileFileActionRuns()) {
       return;
     }
+    this.#resetSettings();
     this.#showHistoryStep(this.#session?.history.redo(), this.messages.notices.redoFailed);
   }
 
@@ -702,6 +872,7 @@ export class AppState {
     this.selectedTaskId = null;
     this.editRequest = null;
     this.detailsTaskId = null;
+    this.closeSettings();
     this.#changedSinceOpened = false;
     this.collapsed = NOTHING_COLLAPSED;
     this.#openedCount += 1;
@@ -748,9 +919,27 @@ export class AppState {
       return;
     }
     this.#computed = { project, schedule: result.ok ? result.value : null };
+    const move = this.#startMove;
+    this.#startMove = null;
     if (!result.ok) {
       this.#showScheduleFailure(result.error, project);
+      return;
     }
+    this.#settingsAlert = null;
+    if (move !== null && (move.project === null || move.project === project)) {
+      this.#tellMovedTasks(move.base, result.value);
+    }
+  }
+
+  /** Tells in the settings how many tasks a move of the project start moved, comparing their starts in the schedule before the move and in the schedule of the moved project. */
+  #tellMovedTasks(base: Schedule, schedule: Schedule): void {
+    let moved = 0;
+    for (const [id, placement] of schedule.placements) {
+      if (base.placements.get(id)?.start !== placement.start) {
+        moved += 1;
+      }
+    }
+    this.#settingsNotice = countMessage(this.messages.settings.tasksMoved, moved, this.locale);
   }
 
   /** Tells the user why the schedule of a project could not be computed, with each problem and the task it concerns, and logs the cause. */
@@ -766,7 +955,15 @@ export class AppState {
     );
     const report =
       entries.length === 0 ? null : { title: this.messages.report.scheduleFailed, entries };
+    this.#alertSettings(text);
     this.#notify('error', text, report);
+  }
+
+  /** Shows a problem of the schedule inside the open settings, which hide the other messages. */
+  #alertSettings(text: string): void {
+    if (this.#settingsOpen) {
+      this.#settingsAlert = text;
+    }
   }
 
   /** Tells whether a draft of the details panel works fewer hours a day than the project, so that a daily start time makes sense. */

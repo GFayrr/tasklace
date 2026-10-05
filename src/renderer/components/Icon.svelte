@@ -14,7 +14,8 @@
     | 'diamond'
     | 'trash'
     | 'calendar'
-    | 'sliders';
+    | 'sliders'
+    | 'gear';
 
   let { name }: { name: IconName } = $props();
 </script>
@@ -59,6 +60,10 @@
       cy="12"
       r="2"
     /><circle cx="10" cy="18" r="2" />
+  {:else if name === 'gear'}
+    <circle cx="12" cy="12" r="3" /><path
+      d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"
+    />
   {:else if name === 'close'}
     <path d="M18 6 6 18M6 6l12 12" />
   {:else}

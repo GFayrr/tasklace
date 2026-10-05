@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { project, scheduleOrThrow, workTask, link } from '../../core/testing/project-builder';
 import { at } from '../../core/testing/civil-time';
-import { createDayFormatter, projectSpan } from './format';
+import type { Weekday } from '../../core/time';
+import { createDayFormatter, createWeekdayNamer, projectSpan } from './format';
 
 describe('createDayFormatter', () => {
   it('writes the wall-clock day whatever the time zone of the computer', () => {
@@ -21,5 +22,22 @@ describe('projectSpan', () => {
 
   it('is empty for a schedule without tasks', () => {
     expect(projectSpan(scheduleOrThrow(project([])))).toBeNull();
+  });
+});
+
+describe('createWeekdayNamer', () => {
+  it('names each weekday in the language of the system', () => {
+    const english = createWeekdayNamer('en-US');
+    const week: readonly Weekday[] = [1, 2, 3, 4, 5, 6, 0];
+    expect(week.map((day) => english(day))).toEqual([
+      'Mon',
+      'Tue',
+      'Wed',
+      'Thu',
+      'Fri',
+      'Sat',
+      'Sun',
+    ]);
+    expect(createWeekdayNamer('fr-FR')(1)).toBe('lun.');
   });
 });
