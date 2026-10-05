@@ -320,8 +320,10 @@
   aria-labelledby="tag-delete-title"
   {@attach followDeletion}
   {@attach holdHistory}
-  onclose={() => {
-    deletion = null;
+  onclose={(event) => {
+    if (!event.currentTarget.open) {
+      deletion = null;
+    }
   }}
 >
   {#if deletion !== null}

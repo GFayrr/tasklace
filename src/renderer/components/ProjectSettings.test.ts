@@ -103,7 +103,22 @@ describe('the project settings', () => {
     app.openSettings();
     update();
     dialog.dispatchEvent(new Event('close'));
+    expect([dialog.open, app.settingsOpen]).toEqual([true, true]);
+    dialog.close();
+    dialog.dispatchEvent(new Event('close'));
     expect(app.settingsOpen).toBe(false);
+  });
+
+  it('stay open when the close event of an earlier closing arrives after they were opened again', async () => {
+    const { app, dialog } = await renderSettings();
+    press(dialog, 'Escape');
+    app.closeSettings();
+    update();
+    app.openSettings();
+    update();
+    dialog.dispatchEvent(new Event('close'));
+    update();
+    expect([dialog.open, app.settingsOpen]).toEqual([true, true]);
   });
 
   it('move between the open tabs with the arrow keys, skipping those available later', async () => {

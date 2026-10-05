@@ -56,8 +56,10 @@
       event.preventDefault();
     }
   }}
-  onclose={() => {
-    app.closeSettings();
+  onclose={(event) => {
+    if (!event.currentTarget.open) {
+      app.closeSettings();
+    }
   }}
 >
   <div class="head">

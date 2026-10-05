@@ -89,6 +89,9 @@ describe('ReportDialog', () => {
     app.openReport({ title: 'T', entries: [] });
     update();
     const dialog = dialogIn(root);
+    dialog.dispatchEvent(new Event('close'));
+    update();
+    expect([dialog.open, app.report?.title]).toEqual([true, 'T']);
     dialog.close();
     dialog.dispatchEvent(new Event('close'));
     update();

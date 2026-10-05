@@ -266,6 +266,10 @@ describe('the Tags tab', () => {
     update();
     confirm.dispatchEvent(new Event('close'));
     update();
+    expect(dialog.querySelectorAll('dialog.confirm h3')).toHaveLength(1);
+    confirm.close();
+    confirm.dispatchEvent(new Event('close'));
+    update();
     expect(dialog.querySelectorAll('dialog.confirm h3')).toHaveLength(0);
     click(labelled(dialog, of(TEXT.removeTag, 'Design')));
     update();

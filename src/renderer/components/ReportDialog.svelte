@@ -19,8 +19,10 @@
   class="report"
   aria-labelledby="report-title"
   bind:this={dialog}
-  onclose={() => {
-    app.closeReport();
+  onclose={(event) => {
+    if (!event.currentTarget.open) {
+      app.closeReport();
+    }
   }}
 >
   <h2 id="report-title">{app.report?.title}</h2>
