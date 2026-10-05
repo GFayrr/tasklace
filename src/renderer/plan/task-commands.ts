@@ -44,7 +44,9 @@ export type EditError =
   | 'LINKS_WOULD_MERGE'
   | 'WAITS_NEED_TWO_BLOCKS'
   | 'TASK_CHANGED'
-  | ScheduleRefusal;
+  | ScheduleRefusal
+  | 'INVALID_TIME'
+  | 'NO_ROOM_FOR_RANGE';
 
 export type ScheduleRefusal = 'SCHEDULE_PENDING' | 'SCHEDULE_STOPPED';
 

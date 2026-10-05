@@ -1,4 +1,4 @@
-export type Command = 'newProject' | 'open' | 'save' | 'saveAs' | 'undo' | 'redo';
+export type Command = 'newProject' | 'open' | 'save' | 'saveAs' | 'undo' | 'redo' | 'openSettings';
 
 export interface KeyPress {
   readonly key: string;
@@ -14,6 +14,7 @@ const SHORTCUTS: Readonly<Record<string, readonly [Command, Command]>> = {
   s: ['save', 'saveAs'],
   z: ['undo', 'redo'],
   y: ['redo', 'redo'],
+  ',': ['openSettings', 'openSettings'],
 };
 const TEXT_HISTORY_COMMANDS: ReadonlySet<Command> = new Set(['undo', 'redo']);
 

@@ -15,6 +15,7 @@ describe('commandOf', () => {
     [control('z'), 'undo'],
     [control('Z', true), 'redo'],
     [control('y'), 'redo'],
+    [control(','), 'openSettings'],
   ])('maps %j to %s', (press, command) => {
     expect(commandOf(press, false)).toBe(command);
   });
@@ -34,5 +35,6 @@ describe('commandOf', () => {
     expect(commandOf(control('z'), true)).toBeNull();
     expect(commandOf(control('y'), true)).toBeNull();
     expect(commandOf(control('s'), true)).toBe('save');
+    expect(commandOf(control(','), true)).toBe('openSettings');
   });
 });
