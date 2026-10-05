@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { project, scheduleOrThrow, workTask, link } from '../../core/testing/project-builder';
 import { at } from '../../core/testing/civil-time';
 import type { Weekday } from '../../core/time';
-import { createDayFormatter, createWeekdayNamer, projectSpan } from './format';
+import {
+  createDayFormatter,
+  createPeriodFormatter,
+  createWeekdayNamer,
+  projectSpan,
+} from './format';
 
 describe('createDayFormatter', () => {
   it('writes the wall-clock day whatever the time zone of the computer', () => {
@@ -39,5 +44,15 @@ describe('createWeekdayNamer', () => {
       'Sun',
     ]);
     expect(createWeekdayNamer('fr-FR')(1)).toBe('lun.');
+  });
+});
+
+describe('createPeriodFormatter', () => {
+  it('writes a period with its days and times, the day once when both ends fall on it', () => {
+    const format = createPeriodFormatter('en-GB');
+    expect(format(at(2026, 10, 13, 10), at(2026, 10, 15, 12))).toBe(
+      'Tue 13 Oct, 10:00\u2009–\u2009Thu 15 Oct, 12:00',
+    );
+    expect(format(at(2026, 10, 26, 14), at(2026, 10, 26, 16))).toBe('Mon 26 Oct, 14:00–16:00');
   });
 });

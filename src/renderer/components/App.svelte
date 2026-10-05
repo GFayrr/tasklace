@@ -2,6 +2,7 @@
   import type { AppState } from '../app/app-state.svelte';
   import { commandOf, type Command } from '../app/shortcuts';
   import ClosePrompt from './ClosePrompt.svelte';
+  import ConflictList from './ConflictList.svelte';
   import ReportDialog from './ReportDialog.svelte';
   import Notices from './Notices.svelte';
   import StatusBar from './StatusBar.svelte';
@@ -51,6 +52,7 @@
     {#key app.openedCount}
       <Workspace {app} project={app.project} />
     {/key}
+    <ConflictList {app} />
     <StatusBar {app} />
   </div>
   <TaskDetails {app} project={app.project} />

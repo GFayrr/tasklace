@@ -5,6 +5,7 @@ export interface TagStyle {
   readonly color: string;
   readonly pale: string;
   readonly pattern: TagPattern | null;
+  readonly isDistinguishable: boolean;
 }
 
 const PALE_MIX = 0.55;
@@ -13,7 +14,7 @@ const CHANNEL_MAXIMUM = 255;
 const CHANNEL_DIGITS = 2;
 const CHANNEL_OFFSETS = [1, 3, 5] as const;
 
-/** Gives every tag of a project the color, pale color and pattern of its bars. */
+/** Gives every tag of a project the color, pale color and pattern of its bars, and whether it can be told apart from the other tags. */
 export function tagStylesOf(project: Project | null): ReadonlyMap<TagId, TagStyle> {
   const styles = new Map<TagId, TagStyle>();
   const appearances =
@@ -28,6 +29,7 @@ export function tagStylesOf(project: Project | null): ReadonlyMap<TagId, TagStyl
       color: appearance.color,
       pale: paleColor(appearance.color),
       pattern: appearance.pattern,
+      isDistinguishable: appearance.isDistinguishable,
     });
   }
   return styles;

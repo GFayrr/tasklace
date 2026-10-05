@@ -114,10 +114,13 @@ Done in three parts, each with its mockups approved first.
 - A date or time applies when the field is left or Enter is pressed. A refused change is explained beside the part that was changed, naming the task at stake when its hours no longer fit the working day, and the field shows the value of the project again.
 - The toolbar still fits on one line at 1,280 pixels.
 
-#### 5e-2. Tags (to do)
+#### 5e-2. Tags and conflicts (done)
 
-- Tag management; deleting a tag in use asks for confirmation, then its tasks have no tag.
-- List of tag conflicts, as a collapsible panel under the legend.
+- A Tags tab in the project settings: one line per tag with its color, name, "Person or team" and delete button. Names are unique; colors come from the twelve tested colors or from the color picker of the system.
+- A tag whose color is too close to others is shown with a pattern, in the settings, on the bars and now in the legend; a tag that can no longer be told apart gets a warning.
+- Deleting a tag that tasks use asks first; its tasks keep their dates and have no tag. Undo brings it back.
+- A "N conflicts" button after the legend opens the list of conflicts; a click on a line selects its first task and scrolls the table and the timeline to it.
+- A project can have up to 256 tags.
 
 #### 5e-3. Advanced options (to do)
 

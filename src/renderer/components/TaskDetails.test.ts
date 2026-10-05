@@ -190,6 +190,9 @@ describe('TaskDetails', () => {
     expect(dialogIn(root).open).toBe(false);
     openFor(app, 'a');
     const dialog = dialogIn(root);
+    dialog.dispatchEvent(new Event('close'));
+    update();
+    expect([dialog.open, app.detailsTaskId]).toEqual([true, 'a']);
     dialog.close();
     dialog.dispatchEvent(new Event('close'));
     update();

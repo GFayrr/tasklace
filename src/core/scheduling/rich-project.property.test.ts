@@ -6,17 +6,24 @@ import { countWorkingHours, lastWorkingHourEnd, shiftWorkingHours } from '../cal
 import type { Project, Task, TaskSegment } from '../model/project';
 import { permutationOf, PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { richProjectArbitrary } from '../testing/project-arbitrary';
+import { link, project, workTask } from '../testing/project-builder';
 import { constrainsSuccessorStart, dependencyAnchor } from './forward-pass';
-import { scheduleProject, type Schedule } from './schedule-project';
+import { scheduleProject, type Schedule, type SchedulingFailure } from './schedule-project';
 import { computePlacementSlots, type Placement } from './task-placement';
 
-/** Schedules a generated project, failing the property when it cannot be scheduled. */
+/** Schedules a generated project, leaving out the rare project whose dates leave the supported years (a refusal with its own deterministic tests), and failing the property on any other refusal. */
 function scheduled(project: Project): Schedule {
   const result = scheduleProject(project);
   if (!result.ok) {
+    fc.pre(!isBeyondHorizon(result.error));
     throw new Error(JSON.stringify(result.error));
   }
   return result.value;
+}
+
+/** Tells whether a scheduling failure comes from dates outside the supported years. */
+function isBeyondHorizon(failure: SchedulingFailure): boolean {
+  return failure.kind === 'task' && failure.error.code === 'BEYOND_PLANNING_HORIZON';
 }
 
 /** Returns the placement of a task, failing the property when it is missing. */
@@ -107,6 +114,7 @@ function overlappingTasksByTag(project: Project, schedule: Schedule): Map<string
 }
 
 const options = { timeout: PROPERTY_TEST_TIMEOUT_MS };
+const START = 490_896;
 
 describe('projects using every feature', () => {
   it(
@@ -344,5 +352,46 @@ describe('projects using every feature', () => {
         expect(second.tagConflicts).toEqual(first.tagConflicts);
       }),
     );
+  });
+});
+
+describe('a generated project whose latest dates fall before the supported years', () => {
+  it('is left out of the properties, as its refusal is tested on its own', () => {
+    const block = (durationHours: number, gapDaysBefore: number) => ({
+      durationHours,
+      gapDaysBefore,
+      startNoEarlierThan: null,
+    });
+    const counterexample: Project = {
+      ...project(
+        [
+          workTask('a', { segments: [block(0.25, 0)] }),
+          workTask('b', {
+            segments: [block(19.5, 0), block(27.5, 8), block(21.5, 8)],
+            mustFinishOn: START,
+          }),
+        ],
+        [link('a', 'b', 'finishToStart', 13.75)],
+        {
+          startDate: START,
+          options: {
+            criticalPathEnabled: true,
+            dateConstraintsEnabled: true,
+            alwaysShowPatterns: false,
+          },
+        },
+      ),
+      calendar: {
+        workingWeekdays: [5],
+        workingTimeRanges: [{ startHour: 4.25, endHour: 4.5 }],
+        nonWorkingPeriods: [],
+      },
+    };
+    const result = scheduleProject(counterexample);
+    expect(result.ok ? null : isBeyondHorizon(result.error)).toBe(true);
+    expect(() => {
+      scheduled(counterexample);
+    }).toThrow(fc.PreconditionFailure);
+    expect(isBeyondHorizon({ kind: 'startDate' })).toBe(false);
   });
 });

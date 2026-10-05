@@ -79,7 +79,15 @@
       "one": "{count} task",
       "other": "{count} tasks"
     },
-    "span": "{start} – {end}"
+    "span": "{start} – {end}",
+    "conflicts": {
+      "one": "{count} conflict",
+      "other": "{count} conflicts"
+    },
+    "conflictsTitle": "Conflicts",
+    "closeConflicts": "Close the list of conflicts",
+    "conflictsHint": "A person or team has two tasks at the same time.",
+    "showConflict": "Show this conflict"
   },
   "notices": {
     "dismiss": "Dismiss",
@@ -178,6 +186,9 @@
     "SCHEDULE_STOPPED": "The dates could not be updated after the last change. Change a value in the table to compute them again, then try again.",
     "INVALID_TIME": "This time could not be read. Write it as 08:30. Times go by quarter hours.",
     "NO_ROOM_FOR_RANGE": "There is no room left in the day for more working hours. Make the latest range end earlier first.",
+    "EMPTY_TAG_NAME": "A tag needs a name.",
+    "DUPLICATE_TAG_NAME": "Another tag already has this name.",
+    "TOO_MANY_TAGS": "A project can have at most 256 tags. Delete a tag you no longer use first.",
     "UNKNOWN_TASK_NUMBER": "There is no task with this number.",
     "DEPENDENCY_CYCLE": "This link would make tasks wait for each other in a loop.",
     "SUMMARY_DEPENDENCY": "Summary tasks cannot be linked. Link the tasks inside them.",
@@ -414,7 +425,28 @@
     "removePeriod": "Remove days off {number}",
     "addPeriod": "Add a day or a period off",
     "hoursPerDayTooLong": "“{name}” works {hours} per day, more than the new working day. Lower its hours per day first, or keep a longer working day.",
-    "dailyStartTooLate": "“{name}” starts its days at {time}, which leaves too few working hours in the new working day. Change its daily start first, or keep a longer working day."
+    "dailyStartTooLate": "“{name}” starts its days at {time}, which leaves too few working hours in the new working day. Change its daily start first, or keep a longer working day.",
+    "tagColumnColor": "Color",
+    "tagColumnName": "Name",
+    "tagColumnPerson": "Person or team",
+    "tagColor": "Color of “{name}”",
+    "tagName": "Name of “{name}”",
+    "tagPerson": "“{name}” represents a person or team",
+    "removeTag": "Delete the tag “{name}”",
+    "addTag": "Add a tag",
+    "newTag": "New tag",
+    "noTags": "No tags yet. A tag gives its tasks their color. A tag that represents a person or a team also warns you when that person or team has two tasks at the same time.",
+    "paletteColor": "Color {number}",
+    "customColor": "Custom color…",
+    "patterned": "Tags with a pattern have a color close to another tag: the pattern keeps their bars apart.",
+    "indistinct": "“{name}” cannot be told apart from some other tags: too many tags have a color close to it. Choose another color for it.",
+    "deleteTitle": "Delete the tag “{name}”?",
+    "deleteBody": {
+      "one": "{count} task uses it. That task keeps its dates and will have no tag. You can undo this with Ctrl+Z.",
+      "other": "{count} tasks use it. They keep their dates and will have no tag. You can undo this with Ctrl+Z."
+    },
+    "deleteConfirm": "Delete the tag",
+    "cancel": "Cancel"
   },
   "report": {
     "fileFailed": "Why the file could not be read",
