@@ -51,7 +51,16 @@
   }
 </script>
 
-<dialog class="details" aria-labelledby="details-title" bind:this={dialog} onclose={close}>
+<dialog
+  class="details"
+  aria-labelledby="details-title"
+  bind:this={dialog}
+  onclose={(event) => {
+    if (!event.currentTarget.open) {
+      close();
+    }
+  }}
+>
   {#if draft !== null && task !== undefined}
     {@const current = draft}
     <form

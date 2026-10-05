@@ -2,18 +2,18 @@
   import type { AppState } from '../app/app-state.svelte';
   import { createDayFormatter, projectSpan } from '../i18n/format';
   import { countMessage, fillMessage } from '../i18n/messages';
+  import { tagsByName } from '../plan/tag-commands';
+  import { tagStylesOf } from '../plan/tag-styles';
+  import Icon from './Icon.svelte';
+  import TagSwatch from './TagSwatch.svelte';
   import { ZOOM_LEVELS } from '../plan/time-scale';
 
   let { app }: { app: AppState } = $props();
   const text = $derived(app.messages);
   const formatDay = $derived(createDayFormatter(app.locale));
-  const collator = $derived(new Intl.Collator(app.locale));
-  const tags = $derived(
-    [...(app.project?.tags ?? [])].sort(
-      (left, right) =>
-        collator.compare(left.name, right.name) || collator.compare(left.id, right.id),
-    ),
-  );
+  const tags = $derived(tagsByName(app.project?.tags ?? [], app.locale));
+  const styles = $derived(tagStylesOf(app.project));
+  const conflictCount = $derived(app.schedule?.tagConflicts.conflicts.length ?? 0);
   const taskCount = $derived(
     countMessage(text.status.tasks, app.project?.tasks.length ?? 0, app.locale),
   );
@@ -30,13 +30,29 @@
   <ul class="legend" aria-labelledby="legend-title">
     {#each tags as tag (tag.id)}
       <li class="tag">
-        <span class="swatch" style:background={tag.color}></span>
+        <TagSwatch color={tag.color} pattern={styles.get(tag.id)?.pattern ?? null} />
         <span>{tag.name}</span>
       </li>
     {:else}
       <li class="empty">{text.status.noTags}</li>
     {/each}
   </ul>
+  {#if conflictCount > 0}
+    <button
+      type="button"
+      class="conflicts"
+      id="conflict-count"
+      title={text.status.conflictsHint}
+      aria-expanded={app.conflictsOpen}
+      aria-controls="conflict-list"
+      onclick={() => {
+        app.toggleConflicts();
+      }}
+    >
+      <span>{countMessage(text.status.conflicts, conflictCount, app.locale)}</span>
+      <Icon name="chevron" />
+    </button>
+  {/if}
   <div class="spacer"></div>
   <span class="summary">
     <span>{taskCount}</span>
@@ -101,10 +117,24 @@
     gap: 6px;
   }
 
-  .swatch {
-    width: 14px;
-    height: 14px;
-    border-radius: 4px;
+  .conflicts {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    height: 24px;
+    padding: 0 var(--space-3);
+    font-size: var(--font-size-small);
+    font-weight: 500;
+    color: var(--color-error);
+    background: var(--color-surface);
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+
+  .conflicts[aria-expanded='false'] :global(svg) {
+    transform: rotate(180deg);
   }
 
   .empty,

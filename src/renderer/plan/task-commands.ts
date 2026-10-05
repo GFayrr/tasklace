@@ -46,7 +46,10 @@ export type EditError =
   | 'TASK_CHANGED'
   | ScheduleRefusal
   | 'INVALID_TIME'
-  | 'NO_ROOM_FOR_RANGE';
+  | 'NO_ROOM_FOR_RANGE'
+  | 'EMPTY_TAG_NAME'
+  | 'DUPLICATE_TAG_NAME'
+  | 'TOO_MANY_TAGS';
 
 export type ScheduleRefusal = 'SCHEDULE_PENDING' | 'SCHEDULE_STOPPED';
 

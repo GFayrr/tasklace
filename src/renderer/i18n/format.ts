@@ -43,3 +43,22 @@ export function createWeekdayNamer(locale: string): (weekday: Weekday) => string
   }
   return (weekday) => valueAt(names, weekday);
 }
+
+/** Creates a function writing a period between two project hours in the regional format, the day written once when both fall on it. */
+export function createPeriodFormatter(
+  locale: string,
+): (start: ProjectHour, end: ProjectHour) => string {
+  const format = new Intl.DateTimeFormat(locale, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'UTC',
+  });
+  return (start, end) =>
+    format.formatRange(
+      new Date(start * MILLISECONDS_PER_HOUR),
+      new Date(end * MILLISECONDS_PER_HOUR),
+    );
+}

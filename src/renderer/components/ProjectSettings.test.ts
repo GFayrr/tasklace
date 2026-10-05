@@ -78,7 +78,12 @@ describe('the project settings', () => {
       [TEXT.tags, 'false'],
       [TEXT.advanced, 'false'],
     ]);
-    expect(tabs.slice(2).map((tab) => tab.getAttribute('aria-disabled'))).toEqual(['true', 'true']);
+    expect(tabs.map((tab) => tab.getAttribute('aria-disabled'))).toEqual([
+      null,
+      null,
+      null,
+      'true',
+    ]);
     openTab(root, TEXT.calendar);
     click(button(dialog, TEXT.done));
     update();
@@ -98,7 +103,22 @@ describe('the project settings', () => {
     app.openSettings();
     update();
     dialog.dispatchEvent(new Event('close'));
+    expect([dialog.open, app.settingsOpen]).toEqual([true, true]);
+    dialog.close();
+    dialog.dispatchEvent(new Event('close'));
     expect(app.settingsOpen).toBe(false);
+  });
+
+  it('stay open when the close event of an earlier closing arrives after they were opened again', async () => {
+    const { app, dialog } = await renderSettings();
+    press(dialog, 'Escape');
+    app.closeSettings();
+    update();
+    app.openSettings();
+    update();
+    dialog.dispatchEvent(new Event('close'));
+    update();
+    expect([dialog.open, app.settingsOpen]).toEqual([true, true]);
   });
 
   it('move between the open tabs with the arrow keys, skipping those available later', async () => {
@@ -110,16 +130,19 @@ describe('the project settings', () => {
     expect(document.activeElement?.id).toBe('settings-tab-calendar');
     press(tablist, 'ArrowRight');
     update();
+    expect(single(root, '[aria-selected="true"]').textContent).toBe(TEXT.tags);
+    press(tablist, 'ArrowRight');
+    update();
     expect(single(root, '[aria-selected="true"]').textContent).toBe(TEXT.general);
     expect(document.activeElement?.id).toBe('settings-tab-general');
     press(tablist, 'ArrowLeft');
     update();
-    expect(single(root, '[aria-selected="true"]').textContent).toBe(TEXT.calendar);
+    expect(single(root, '[aria-selected="true"]').textContent).toBe(TEXT.tags);
     press(tablist, 'Enter');
     update();
-    expect(single(root, '[aria-selected="true"]').textContent).toBe(TEXT.calendar);
-    openTab(root, TEXT.tags);
-    expect(single(root, '[aria-selected="true"]').textContent).toBe(TEXT.calendar);
+    expect(single(root, '[aria-selected="true"]').textContent).toBe(TEXT.tags);
+    openTab(root, TEXT.advanced);
+    expect(single(root, '[aria-selected="true"]').textContent).toBe(TEXT.tags);
   });
 
   it('rename the project and move its start when a field is left or Enter is pressed, telling how many tasks moved', async () => {

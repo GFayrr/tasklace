@@ -163,6 +163,50 @@ test('moves, stretches and links bars on the timeline', async () => {
   await picture('editing-timeline');
 });
 
+test('manages tags in the settings, lists the conflicts of a person, and deletes a tag after asking', async () => {
+  await addTask('Interviews');
+  await addTask('Analysis');
+  await page.keyboard.press('Control+,');
+  const settings = page.getByRole('dialog', { name: 'Project settings' });
+  await settings.getByRole('tab', { name: 'Tags' }).click();
+  await settings.getByRole('button', { name: 'Add a tag' }).click();
+  const name = settings.getByLabel('Name of “New tag”');
+  await expect(name).toBeFocused();
+  await name.fill('Alice');
+  await name.press('Enter');
+  await settings.getByLabel('“Alice” represents a person or team').check();
+  await picture('tag-settings');
+  await settings.getByRole('button', { name: 'Done' }).click();
+  for (const task of ['Interviews', 'Analysis']) {
+    await row(task).getByRole('gridcell').nth(7).dblclick();
+    await page.getByRole('listbox').getByRole('option', { name: 'Alice' }).click();
+    await expect(row(task)).toContainText('Alice');
+  }
+
+  await page.getByRole('button', { name: '1 conflict' }).click();
+  const list = page.getByRole('region', { name: 'Conflicts' });
+  await expect(list).toContainText('Alice');
+  await expect(list).toContainText('Interviews');
+  await picture('tag-conflicts');
+  await list.getByRole('button', { name: /Alice/ }).click();
+  await expect(grid.getByRole('row', { selected: true })).toContainText(/Interviews|Analysis/);
+
+  await page.keyboard.press('Control+,');
+  await settings.getByRole('tab', { name: 'Tags' }).click();
+  await settings.getByRole('button', { name: 'Delete the tag “Alice”' }).click();
+  const confirm = page.getByRole('dialog', { name: 'Delete the tag “Alice”?' });
+  await expect(confirm).toContainText('2 tasks use it.');
+  await confirm.getByRole('button', { name: 'Delete the tag' }).click();
+  await expect(settings.getByLabel('Name of “Alice”')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /conflict/ })).toHaveCount(0);
+  await expect(row('Analysis')).not.toContainText('Alice');
+  await page.keyboard.press('Control+z');
+  await expect(settings.getByLabel('Name of “Alice”')).toHaveValue('Alice');
+  await settings.getByRole('button', { name: 'Done' }).click();
+  await expect(row('Analysis')).toContainText('Alice');
+  await expect(page.getByRole('button', { name: '1 conflict' })).toBeVisible();
+});
+
 /** Writes a local working day, about some days away from the day the application created the project and moved forward past a weekend, as an ISO date and time. */
 function isoDaysFromToday(days: number, time: string): string {
   const moment = new Date(today);

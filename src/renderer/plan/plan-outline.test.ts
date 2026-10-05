@@ -16,6 +16,7 @@ import {
   predecessorText,
   taskIdOfNumber,
   toggledSummary,
+  withAncestorsOpen,
 } from './plan-outline';
 
 const TASKS = [
@@ -132,5 +133,14 @@ describe('toggledSummary', () => {
     const closed = toggledSummary(new Set(['a']), 'b');
     expect([...closed].sort()).toEqual(['a', 'b']);
     expect([...toggledSummary(closed, 'a')]).toEqual(['b']);
+  });
+});
+
+describe('withAncestorsOpen', () => {
+  it('opens every summary above a task, keeping the others and the same set when none hides it', () => {
+    const collapsed = new Set(['t', 't1', 's']);
+    expect([...withAncestorsOpen(collapsed, TASKS, 't11')]).toEqual(['s']);
+    expect(withAncestorsOpen(collapsed, TASKS, 'u')).toBe(collapsed);
+    expect(withAncestorsOpen(collapsed, TASKS, 'gone')).toBe(collapsed);
   });
 });

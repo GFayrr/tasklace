@@ -145,3 +145,18 @@ export function toggledSummary(collapsed: ReadonlySet<TaskId>, id: TaskId): Read
   }
   return next;
 }
+
+/** Returns the set of collapsed summaries without the summaries that hide a task, the same set when none hides it. */
+export function withAncestorsOpen(
+  collapsed: ReadonlySet<TaskId>,
+  tasks: readonly Task[],
+  id: TaskId,
+): ReadonlySet<TaskId> {
+  const parents = new Map(tasks.map((task) => [task.id, task.parentId]));
+  const next = new Set(collapsed);
+  for (let parent = parents.get(id); parent !== undefined && parent !== null;) {
+    next.delete(parent);
+    parent = parents.get(parent);
+  }
+  return next.size === collapsed.size ? collapsed : next;
+}

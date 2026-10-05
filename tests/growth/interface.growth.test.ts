@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Project } from '../../src/core/model/project';
 import { compileOrThrow } from '../../src/core/testing/civil-time';
 import { scheduleOrThrow } from '../../src/core/testing/project-builder';
+import { conflictLines } from '../../src/renderer/plan/conflict-lines';
 import { buildPlanOutline, groupIncoming } from '../../src/renderer/plan/plan-outline';
 import { tagStylesOf } from '../../src/renderer/plan/tag-styles';
 import { recordingCanvas } from '../../src/renderer/plan/testing/recording-canvas';
@@ -36,6 +37,28 @@ describe('growth of what the interface prepares after a change', () => {
     };
     const ratio = growthRatio(prepare(small), prepare(large));
     console.info(`Interface rows: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
+  });
+});
+
+describe('growth of the list of conflicts', () => {
+  it('describes the conflicts of a project in linear time', () => {
+    const asPeople = (project: Project): Project => ({
+      ...project,
+      tags: project.tags.map((tag) => ({ ...tag, representsPersonOrTeam: true })),
+    });
+    const small = asPeople(buildLargeProject(LARGE_PROJECT_SEED, SMALL_TASK_COUNT));
+    const large = asPeople(buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT));
+    const smallSchedule = scheduleOrThrow(small);
+    const largeSchedule = scheduleOrThrow(large);
+    expect(largeSchedule.tagConflicts.conflicts.length).toBeGreaterThan(
+      smallSchedule.tagConflicts.conflicts.length,
+    );
+    const ratio = growthRatio(
+      () => conflictLines(smallSchedule, small),
+      () => conflictLines(largeSchedule, large),
+    );
+    console.info(`Conflict lines: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
   });
 });
