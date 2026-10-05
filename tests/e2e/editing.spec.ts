@@ -122,6 +122,8 @@ test('plans tasks from the keyboard and the table, and undoes each change', asyn
 test('moves, stretches and links bars on the timeline', async () => {
   await addTask('First');
   await addTask('Second');
+  await typeInCell('Second', 2, '3d');
+  await expect(row('Second')).toContainText('27 h');
   await page.getByRole('button', { name: 'Hour', exact: true }).click();
   await page.getByRole('button', { name: 'Day', exact: true }).click();
   const scroller = page.locator('.timeline .scroller');
