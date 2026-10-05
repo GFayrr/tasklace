@@ -1,3 +1,4 @@
+import { MAX_TAGS } from '../limits';
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import * as Y from 'yjs';
@@ -450,8 +451,10 @@ describe('merging updates that break the shared schema', () => {
 
 describe('merging within limits and budgets', () => {
   it('trims tags added offline beyond the limit, keeping the smallest identifiers', () => {
+    const perSide = (MAX_TAGS * 3) / 4;
+    const keptOfRight = MAX_TAGS - perSide;
     const tags = (prefix: string): Tag[] =>
-      Array.from({ length: 150 }, (_unused, position) => ({
+      Array.from({ length: perSide }, (_unused, position) => ({
         ...DESIGN,
         id: `${prefix}${String(position).padStart(3, '0')}`,
       }));
@@ -463,11 +466,12 @@ describe('merging within limits and budgets', () => {
     change(right, (current) => ({ ...current, tags: tags('b') }));
     const repairs = sync(right, left);
     syncAll([left, right]);
-    expect(repairs).toHaveLength(100);
-    expect(repairs.every((repair) => repair.code === 'TAG_REMOVED' && repair.id >= 'b050')).toBe(
-      true,
-    );
-    expect(projectOf(left).tags).toHaveLength(200);
+    expect(repairs).toHaveLength(2 * perSide - MAX_TAGS);
+    const firstRemoved = `b${String(keptOfRight).padStart(3, '0')}`;
+    expect(
+      repairs.every((repair) => repair.code === 'TAG_REMOVED' && repair.id >= firstRemoved),
+    ).toBe(true);
+    expect(projectOf(left).tags).toHaveLength(MAX_TAGS);
     expect(readSharedData(left)).toEqual(readSharedData(right));
   });
 

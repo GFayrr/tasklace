@@ -111,6 +111,22 @@
     return Math.max(0, xOf(frame, project.startDate - LEAD_DAYS_SHOWN * HOURS_PER_DAY));
   }
 
+  $effect(() => {
+    const request = app.revealRequest;
+    if (request === null) {
+      return;
+    }
+    app.revealRequest = null;
+    const row = untrack(() => outline.rowIndexById.get(request.taskId));
+    if (row !== undefined) {
+      reveal(row);
+    }
+    scrollLeft = Math.max(
+      0,
+      untrack(() => xOf(frame, request.hour - LEAD_DAYS_SHOWN * HOURS_PER_DAY)),
+    );
+  });
+
   /** Opens the details of a task. */
   function openDetails(id: TaskId): void {
     app.openDetails(id);

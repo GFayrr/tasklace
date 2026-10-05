@@ -5,12 +5,13 @@
   import CalendarSettings from './CalendarSettings.svelte';
   import GeneralSettings from './GeneralSettings.svelte';
   import Icon from './Icon.svelte';
+  import TagSettings from './TagSettings.svelte';
 
   let { app, project }: { app: AppState; project: Project } = $props();
 
   const text = $derived(app.messages.settings);
-  const OPEN_TABS = ['general', 'calendar'] as const;
-  const LATER_TABS = ['tags', 'advanced'] as const;
+  const OPEN_TABS = ['general', 'calendar', 'tags'] as const;
+  const LATER_TABS = ['advanced'] as const;
   const TAB_STEPS: Readonly<Record<string, number>> = { ArrowLeft: -1, ArrowRight: 1 };
   let tab = $state<(typeof OPEN_TABS)[number]>('general');
 
@@ -101,8 +102,10 @@
   <div class="panel" id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
     {#if tab === 'general'}
       <GeneralSettings {app} {project} />
-    {:else}
+    {:else if tab === 'calendar'}
       <CalendarSettings {app} {project} />
+    {:else}
+      <TagSettings {app} {project} />
     {/if}
   </div>
   {#if app.settingsAlert !== null}

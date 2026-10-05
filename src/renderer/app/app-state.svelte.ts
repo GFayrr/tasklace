@@ -9,6 +9,7 @@ import type { DailyWindowErrorCode } from '../../core/calendar/task-slots';
 import { taskOfCalendarIssue } from '../../core/shared/shared-operations';
 import { issueText, repairText, type ReportedIssue } from '../i18n/issue-text';
 import { scheduleFailureText } from '../i18n/schedule-failure-text';
+import { conflictLines, type ConflictLine } from '../plan/conflict-lines';
 import { formatDuration, parseDuration } from '../plan/durations';
 import { renameProject, setProjectStart } from '../plan/project-commands';
 import { formatTimeOfDay } from '../plan/time-of-day';
@@ -18,6 +19,8 @@ import {
   type SchedulingFailure,
 } from '../../core/scheduling/schedule-project';
 import type { SharedSession } from '../../core/shared/shared-session';
+import type { TagConflict } from '../../core/tags/tag-conflicts';
+import type { ProjectHour } from '../../core/time';
 import type { ExchangeKind, RecentProject, TasklaceBridge } from '../../preload/bridge-contract';
 import { createDayFormatter } from '../i18n/format';
 import {
@@ -34,6 +37,7 @@ import {
   NOTHING_COLLAPSED,
   predecessorText,
   toggledSummary,
+  withAncestorsOpen,
 } from '../plan/plan-outline';
 import {
   findUnreadableBlockStart,
@@ -118,6 +122,11 @@ export interface EditRequest {
   readonly column: EditableColumn;
 }
 
+export interface RevealRequest {
+  readonly taskId: TaskId;
+  readonly hour: ProjectHour;
+}
+
 export interface Report {
   readonly title: string;
   readonly entries: readonly string[];
@@ -155,6 +164,8 @@ export class AppState {
   zoom = $state<ZoomLevel>('day');
   selectedTaskId = $state<TaskId | null>(null);
   editRequest = $state<EditRequest | null>(null);
+  revealRequest = $state<RevealRequest | null>(null);
+  #conflictsOpen = $state(false);
   detailsTaskId = $state<TaskId | null>(null);
   #settingsOpen = $state(false);
   #settingsResets = $state(0);
@@ -228,6 +239,12 @@ export class AppState {
   /** Returns the schedule shown, the latest computed for the open project even when older than its latest change, or null when none is computed or the latest computation failed. */
   get schedule(): Schedule | null {
     return this.#computed?.schedule ?? null;
+  }
+
+  /** Describes the conflicts of the schedule shown, with the tags and tasks of the project it was computed for, which may be a little older than the project shown. */
+  get conflictLines(): readonly ConflictLine[] {
+    const computed = this.#computed;
+    return computed === null ? [] : conflictLines(computed.schedule, computed.project);
   }
 
   /** Returns the schedule computed for the project as it is now, null when that computation failed, or why an edit relying on the dates must wait: the schedule is still being computed after the latest change, or it stopped and needs another change. */
@@ -516,6 +533,32 @@ export class AppState {
       this.#notifyStartMove(previousStart);
     }
     return refusal;
+  }
+
+  /** Tells whether the list of conflicts is shown, which it stops being for good once no conflict is left. */
+  get conflictsOpen(): boolean {
+    return this.#conflictsOpen;
+  }
+
+  /** Shows the list of conflicts, or hides it, showing it only while there are conflicts. */
+  toggleConflicts(): void {
+    this.#conflictsOpen = !this.#conflictsOpen && this.conflictLines.length > 0;
+  }
+
+  /** Selects the first task of a conflict that the project still has, opening the summaries that hide it, and asks the workspace to show the start of the conflict, telling the user to wait when the conflict comes from a schedule older than the deletion of its tasks. */
+  showConflict(conflict: TagConflict): void {
+    const project = this.project;
+    if (project === null) {
+      return;
+    }
+    const taskId = conflict.taskIds.find((id) => project.tasks.some((task) => task.id === id));
+    if (taskId === undefined) {
+      this.#notify('warning', this.messages.editErrors.SCHEDULE_PENDING);
+      return;
+    }
+    this.collapsed = withAncestorsOpen(this.collapsed, project.tasks, taskId);
+    this.selectedTaskId = taskId;
+    this.revealRequest = { taskId, hour: conflict.start };
   }
 
   /** Tells whether the settings of the open project are shown. */
@@ -871,6 +914,8 @@ export class AppState {
     this.#computed = null;
     this.selectedTaskId = null;
     this.editRequest = null;
+    this.revealRequest = null;
+    this.#conflictsOpen = false;
     this.detailsTaskId = null;
     this.closeSettings();
     this.#changedSinceOpened = false;
@@ -919,6 +964,9 @@ export class AppState {
       return;
     }
     this.#computed = { project, schedule: result.ok ? result.value : null };
+    if (this.conflictLines.length === 0) {
+      this.#conflictsOpen = false;
+    }
     const move = this.#startMove;
     this.#startMove = null;
     if (!result.ok) {
