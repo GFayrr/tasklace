@@ -15,6 +15,8 @@ const SAMPLE = {
 };
 const BACKGROUND = 'rgb(247, 246, 243)';
 const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
+const TOOLBAR_WIDTH = 1_280;
+const ONE_TOOLBAR_LINE_LIMIT = 80;
 
 let folder: string;
 let userData: string;
@@ -177,4 +179,55 @@ test('lets messages fade away on their own, but keeps them while the pointer res
   await expect(alert).toBeVisible();
   await page.mouse.move(0, 0);
   await expect(alert).toBeHidden({ timeout: 12_000 });
+});
+
+test('changes the calendar in the project settings, each change applied at once and undone after', async () => {
+  await page.getByRole('button', { name: /New project/ }).click();
+  await page.setViewportSize({ width: TOOLBAR_WIDTH, height: 800 });
+  const toolbar = await page.locator('header.toolbar').boundingBox();
+  await picture('toolbar-width');
+  expect(toolbar?.height).toBeLessThan(ONE_TOOLBAR_LINE_LIMIT);
+  await page.getByRole('button', { name: 'Project settings' }).click();
+  const settings = page.getByRole('dialog', { name: 'Project settings' });
+  await expect(settings).toBeVisible();
+  await settings.getByRole('tab', { name: 'Calendar' }).click();
+  await expect(settings.getByText('9 h per day')).toBeVisible();
+  await settings.getByRole('button', { name: 'Add working hours' }).click();
+  await expect(settings.getByText('10 h per day')).toBeVisible();
+  await settings.getByLabel('End of working hours 2').fill('20:00');
+  await expect(settings.getByText('10 h per day')).toBeVisible();
+  await settings.getByLabel('End of working hours 2').press('Enter');
+  await expect(settings.getByText('11 h per day')).toBeVisible();
+  await settings.getByRole('heading', { name: 'Working hours' }).click();
+  await page.keyboard.press('Control+z');
+  await expect(settings.getByText('10 h per day')).toBeVisible();
+  await expect(settings.getByLabel('End of working hours 2')).toHaveValue('19:00');
+  for (const day of ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']) {
+    await settings.getByRole('button', { name: day, exact: true }).click();
+  }
+  await expect(settings.getByRole('alert')).toHaveText(
+    'The calendar needs at least one working day.',
+  );
+  await expect(settings.getByRole('button', { name: 'Fri', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await picture('project-settings-calendar');
+  await page.keyboard.press('Escape');
+  await expect(settings).toBeHidden();
+  await page.keyboard.press('Control+,');
+  await expect(settings).toBeVisible();
+  await settings.getByRole('button', { name: 'Done' }).click();
+  await expect(settings).toBeHidden();
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await page.keyboard.press('Control+,');
+  await settings.getByRole('tab', { name: 'Calendar' }).click();
+  await expect(settings.getByRole('button', { name: 'Thu', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(settings.getByRole('button', { name: 'Wed', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
 });

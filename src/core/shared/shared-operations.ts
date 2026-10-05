@@ -33,6 +33,7 @@ import {
 import { blockPairKey, isKnownBlock, unitCountOf } from '../scheduling/block-links';
 import type { ProjectHeader } from './shared-document';
 
+const CALENDAR_TASK_PATH = 'tasks.';
 export type SharedOperation =
   | { readonly type: 'putTask'; readonly task: Task }
   | { readonly type: 'removeTasks'; readonly ids: readonly TaskId[] }
@@ -353,12 +354,19 @@ function updateProjectChecked(state: ProjectState, fields: Partial<ProjectHeader
   return success({ ...touched({}), header: true });
 }
 
+/** Returns the task a refused change of the calendar is about, or null when the issue is about no task. */
+export function taskOfCalendarIssue(issue: ValidationIssue): TaskId | null {
+  return issue.path.startsWith(CALENDAR_TASK_PATH)
+    ? issue.path.slice(CALENDAR_TASK_PATH.length)
+    : null;
+}
+
 /** Returns the first work task whose daily pattern no longer fits the calendar, as an issue, or null. */
 function findCalendarProblem(state: ProjectState): ValidationIssue | null {
   for (const task of state.tasks.values()) {
     const problem = task.kind === 'task' ? findDailyPatternProblem(state, task) : null;
     if (problem !== null) {
-      return { path: `tasks.${task.id}`, code: problem };
+      return { path: `${CALENDAR_TASK_PATH}${task.id}`, code: problem };
     }
   }
   return null;
