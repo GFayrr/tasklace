@@ -61,10 +61,30 @@
   const calendar = $derived(app.calendar);
   const tagStyles = $derived(tagStylesOf(project));
   const conflictTaskIds = $derived(
-    new Set(app.schedule?.tagConflicts.conflicts.flatMap((conflict) => conflict.taskIds) ?? []),
+    new Set([
+      ...(app.schedule?.tagConflicts.conflicts.flatMap((conflict) => conflict.taskIds) ?? []),
+      ...app.dateConflictLines.map((line) => line.conflict.taskId),
+    ]),
+  );
+  const deadlines = $derived(
+    project.options.dateConstraintsEnabled
+      ? {
+          missedTaskIds: new Set(
+            app.dateConflictLines
+              .filter((line) => line.conflict.code === 'DEADLINE_MISSED')
+              .map((line) => line.conflict.taskId),
+          ),
+        }
+      : null,
   );
   const frame = $derived(
-    timelineFrame(project.startDate, app.schedule, today, pixelsPerHour(app.zoom)),
+    timelineFrame(
+      project.startDate,
+      app.schedule,
+      today,
+      pixelsPerHour(app.zoom),
+      app.shownDeadlines,
+    ),
   );
   let scrollLeft = $state(untrack(() => startScrollLeft()));
   const formatters = $derived(createTableFormatters(app.locale));
@@ -82,6 +102,7 @@
     theme: app.theme,
     tagStyles,
     conflictTaskIds,
+    deadlines,
     selectedTaskId: app.selectedTaskId,
     today,
   });

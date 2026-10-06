@@ -12,8 +12,10 @@ import {
 } from '../../core/testing/project-builder';
 import { at } from '../../core/testing/civil-time';
 import { buildPlanOutline } from './plan-outline';
+import { pixelsPerHour } from './time-scale';
 import {
   ARROW_GAP,
+  deadlinesOf,
   dependencyArrow,
   hourAt,
   rowMiddle,
@@ -42,7 +44,7 @@ const PLAN = project(
 );
 const SCHEDULE = scheduleOrThrow(PLAN);
 const OUTLINE = buildPlanOutline(PLAN.tasks, new Set());
-const FRAME = timelineFrame(PLAN.startDate, SCHEDULE, PROJECT_START, 1);
+const FRAME = timelineFrame(PLAN.startDate, SCHEDULE, PROJECT_START, 1, []);
 
 /** Returns the shape of the row showing a task. */
 function shapeOf(id: string): RowShape {
@@ -64,16 +66,47 @@ describe('timelineFrame', () => {
   });
 
   it('never grows wider than a canvas can scroll', () => {
-    const frame = timelineFrame(PLAN.startDate, SCHEDULE, at(2199, 1, 1), 36);
+    const frame = timelineFrame(PLAN.startDate, SCHEDULE, at(2199, 1, 1), 36, []);
     expect(xOf(frame, frame.end)).toBeLessThanOrEqual(2 ** 24);
   });
 });
 
 describe('timelineFrame before the schedule is known', () => {
   it('covers at least two months from a week before the project', () => {
-    const frame = timelineFrame(PLAN.startDate, null, PLAN.startDate, 1);
+    const frame = timelineFrame(PLAN.startDate, null, PLAN.startDate, 1, []);
     expect(frame.origin).toBe(at(2026, 9, 21));
     expect(frame.end - frame.origin).toBeGreaterThanOrEqual(60 * 24);
+  });
+});
+
+describe('timelineFrame with deadlines', () => {
+  it('starts a week before the earliest deadline and ends a month after the latest one, in any order', () => {
+    const deadlines = [at(2027, 3, 2, 9), at(2026, 10, 1), at(2026, 9, 10, 12)];
+    for (const order of [deadlines, [...deadlines].reverse()]) {
+      const frame = timelineFrame(PLAN.startDate, null, PLAN.startDate, 1, order);
+      expect([frame.origin, frame.end]).toEqual([at(2026, 9, 3), at(2027, 4, 1)]);
+    }
+  });
+
+  it('ends a month after the last task when it ends after every deadline', () => {
+    const last = Math.max(...[...SCHEDULE.placements.values()].map((placement) => placement.end));
+    const frame = timelineFrame(PLAN.startDate, SCHEDULE, PLAN.startDate, 1, [at(2026, 9, 29)]);
+    const lastDay = last - (last % 24);
+    expect(frame.end).toBe(Math.max(lastDay, frame.origin + 60 * 24) + 30 * 24);
+  });
+
+  it('keeps the whole project in view when a deadline is decades earlier than the canvas can reach', () => {
+    const start = at(2075, 3, 4, 8);
+    const plan = { ...PLAN, startDate: start };
+    const schedule = scheduleOrThrow(plan);
+    const last = Math.max(...[...schedule.placements.values()].map((placement) => placement.end));
+    const perHour = pixelsPerHour('hour');
+    const frame = timelineFrame(start, schedule, start, perHour, [at(2020, 1, 6, 9)]);
+    expect(frame.end).toBe(last - (last % 24) + 30 * 24);
+    expect(xOf(frame, frame.end)).toBeLessThanOrEqual(2 ** 24);
+    expect(xOf(frame, frame.end)).toBeGreaterThan(2 ** 24 - 24 * perHour);
+    expect(frame.origin).toBeLessThanOrEqual(at(2075, 2, 25));
+    expect(frame.origin).toBeGreaterThan(at(2020, 1, 6, 9));
   });
 });
 
@@ -163,5 +196,17 @@ describe('dependencyArrow', () => {
     const to = shapeOf('m');
     const points = dependencyArrow(link('a', 'm', 'finishToFinish'), from, to);
     expect(points.at(-1)?.x).toBe(to.kind === 'milestone' ? to.x + 8 : 0);
+  });
+});
+
+describe('deadlinesOf', () => {
+  it('lists the deadlines of tasks and milestones, skipping summaries and tasks without one', () => {
+    const plan = project([
+      summary('s'),
+      workTask('a', { deadline: at(2026, 10, 2, 17) }),
+      workTask('b'),
+      milestone('m', { deadline: at(2026, 10, 9, 9) }),
+    ]);
+    expect(deadlinesOf(plan)).toEqual([at(2026, 10, 2, 17), at(2026, 10, 9, 9)]);
   });
 });

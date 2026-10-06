@@ -1,9 +1,12 @@
 import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
 import { countWorkingHours } from '../../core/calendar/working-time';
-import type { Task } from '../../core/model/project';
+import type { Task, TaskId } from '../../core/model/project';
 import type { TaskFloat } from '../../core/scheduling/backward-pass';
+import type { SchedulingConflictCode } from '../../core/scheduling/forward-pass';
 import type { Schedule } from '../../core/scheduling/schedule-project';
-import type { Messages } from '../i18n/messages';
+import type { ProjectHour } from '../../core/time';
+import { fillMessage, type Messages } from '../i18n/messages';
+import type { DateConflictLine } from './conflict-lines';
 import { formatDuration } from './durations';
 import { formatTableDateTime } from './table-dates';
 
@@ -31,6 +34,7 @@ const EMPTY_CELLS: TaskCells = { duration: '', start: '', end: '', progress: '' 
 const NO_FLOAT: FloatCells = { total: '', free: '', isCritical: false, isUnknown: false };
 const UNKNOWN_FLOAT = '?';
 const MINUS_SIGN = '\u2212';
+const SENTENCE_SEPARATOR = ' ';
 
 /** Creates the number formatters of the task table in the regional format, dates being always written in ISO form. */
 export function createTableFormatters(locale: string): TableFormatters {
@@ -106,4 +110,29 @@ function signedHours(
   }
   const written = formatDuration(Math.abs(hours), messages, formatters.number);
   return hours < 0 ? `${MINUS_SIGN}${written}` : written;
+}
+
+/** Writes, for each task that does not meet one of its dates, the tooltip of its end cell naming every date it misses, with the dates in the regional format. */
+export function dateConflictTitles(
+  lines: readonly DateConflictLine[],
+  messages: Messages,
+  formatMoment: (hour: ProjectHour) => string,
+): ReadonlyMap<TaskId, string> {
+  const sentences: Record<SchedulingConflictCode, string> = {
+    DEADLINE_MISSED: messages.table.deadlineMissed,
+    MUST_FINISH_ON_NOT_MET: messages.table.mustFinishOnNotMet,
+  };
+  const titles = new Map<TaskId, string>();
+  for (const { conflict, end, date } of lines) {
+    const sentence = fillMessage(sentences[conflict.code], {
+      date: formatMoment(date),
+      end: formatMoment(end),
+    });
+    const previous = titles.get(conflict.taskId);
+    titles.set(
+      conflict.taskId,
+      previous === undefined ? sentence : `${previous}${SENTENCE_SEPARATOR}${sentence}`,
+    );
+  }
+  return titles;
 }

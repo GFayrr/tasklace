@@ -4,6 +4,7 @@ import { at } from '../../core/testing/civil-time';
 import type { Weekday } from '../../core/time';
 import {
   createDayFormatter,
+  createMomentFormatter,
   createPeriodFormatter,
   createWeekdayNamer,
   projectSpan,
@@ -54,5 +55,12 @@ describe('createPeriodFormatter', () => {
       'Tue 13 Oct, 10:00\u2009–\u2009Thu 15 Oct, 12:00',
     );
     expect(format(at(2026, 10, 26, 14), at(2026, 10, 26, 16))).toBe('Mon 26 Oct, 14:00–16:00');
+  });
+});
+
+describe('createMomentFormatter', () => {
+  it('writes the wall-clock day and time of an instant in the regional format', () => {
+    expect(createMomentFormatter('en-GB')(at(2026, 10, 23, 17))).toBe('Fri 23 Oct, 17:00');
+    expect(createMomentFormatter('en-US')(at(2026, 10, 23, 9) + 0.25)).toBe('Fri, Oct 23, 9:15 AM');
   });
 });

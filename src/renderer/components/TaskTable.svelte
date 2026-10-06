@@ -17,7 +17,13 @@
   } from '../plan/cell-editing';
   import { groupIncoming, predecessorText, type PlanRow } from '../plan/plan-outline';
   import { isPickerRefusal } from '../plan/table-dates';
-  import { floatCells, taskCells, type TableFormatters } from '../plan/table-format';
+  import { createMomentFormatter } from '../i18n/format';
+  import {
+    dateConflictTitles,
+    floatCells,
+    taskCells,
+    type TableFormatters,
+  } from '../plan/table-format';
   import { indentTask, moveTask, outdentTask } from '../plan/task-commands';
   import { ROW_HEIGHT } from '../plan/timeline-geometry';
   import { visibleRows } from '../plan/timeline-painter';
@@ -49,6 +55,9 @@
   const ROW_INDEX_OFFSET = 2;
   const text = $derived(app.messages.table);
   const floats = $derived(app.schedule?.floats ?? null);
+  const lateTitles = $derived(
+    dateConflictTitles(app.dateConflictLines, app.messages, createMomentFormatter(app.locale)),
+  );
   const unknownFloatText = $derived(
     fillMessage(text.unknownFloat, { firstYear: String(MIN_PROJECT_YEAR) }),
   );
@@ -438,6 +447,7 @@
       {#each shown as { row, index, values } (row.task.id)}
         {@const selected = row.task.id === app.selectedTaskId}
         {@const rowFloat = floatCells(floats?.get(row.task.id), formatters, app.messages)}
+        {@const lateTitle = lateTitles.get(row.task.id)}
         <div
           class="row"
           class:selected
@@ -462,11 +472,13 @@
               class:number={column === 'duration' || column === 'progress'}
               class:date={column === 'start' || column === 'end'}
               class:critical={column === 'name' && rowFloat.isCritical}
+              class:late={column === 'end' && lateTitle !== undefined}
               class:active={selected && column === activeColumn}
               id={cellId(row.task.id, column)}
               role="gridcell"
               tabindex="-1"
               aria-readonly={!isEditable(row.task, column)}
+              title={column === 'end' ? lateTitle : undefined}
               style:padding-left={column === 'name'
                 ? `${String(NAME_PADDING + row.depth * INDENT_PIXELS)}px`
                 : undefined}
@@ -512,6 +524,9 @@
                   }}
                 />
               {:else}
+                {#if column === 'end' && lateTitle !== undefined}
+                  <Icon name="alert" />
+                {/if}
                 {#if column === 'tag' && tagOf(row.task) !== undefined}
                   <span class="swatch" style:background={tagOf(row.task)?.color}></span>
                 {/if}
@@ -732,6 +747,10 @@
 
   .unknown {
     color: var(--color-warning);
+  }
+
+  .late {
+    color: var(--color-error);
   }
 
   .predecessors {

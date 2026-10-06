@@ -85,9 +85,18 @@
       "other": "{count} conflicts"
     },
     "critical": "Critical: delaying these tasks delays the end of the project",
+    "deadline": "Deadline",
     "conflictsTitle": "Conflicts",
     "closeConflicts": "Close the list of conflicts",
-    "conflictsHint": "A person or team has two tasks at the same time.",
+    "conflictsHint": "A person or team has two tasks at the same time, or a task does not meet one of its dates.",
+    "peopleConflicts": "People and teams",
+    "peopleConflictsHint": "A person or team has two tasks at the same time.",
+    "dateConflicts": "Dates",
+    "dateConflictsHint": "A task ends after its deadline, or later than the date it must finish on.",
+    "deadlineMissed": "misses its deadline",
+    "mustFinishOnNotMet": "cannot finish on its date",
+    "deadlineMissedDates": "Ends {end} · deadline {date}",
+    "mustFinishOnNotMetDates": "Ends {end} · must finish on {date}",
     "showConflict": "Show this conflict"
   },
   "notices": {
@@ -109,6 +118,7 @@
     "localCopyFailed": "The project was saved to its file, but its copy on this computer could not be written. Check the free space on your disk.",
     "recentUnavailable": "The list of recent projects could not be read. Your projects were not changed.",
     "unexpectedError": "Something went wrong and the last action did not finish. Try again; if it keeps happening, save your project under another name.",
+    "dateConflictsUnavailable": "The tasks that do not meet their dates could not be marked. Change a value to compute the plan again; if it keeps happening, save your project under another name.",
     "pickerUnavailable": "The calendar could not open. Type the date instead, such as 2026-10-05 14:30.",
     "drawingUnavailable": {
       "timeline": "The timeline cannot be drawn on this computer. You can still plan your tasks in the table.",
@@ -141,6 +151,8 @@
     "duration": "Duration",
     "start": "Start",
     "end": "End",
+    "deadlineMissed": "Ends at {end}, after its deadline ({date}).",
+    "mustFinishOnNotMet": "Cannot finish on {date}: it ends at {end} at the earliest.",
     "totalFloat": "Total float",
     "freeFloat": "Free float",
     "unknownFloat": "To finish on time, this task would have to start before {firstYear}, the first year Tasklace handles, so its float cannot be worked out.",
@@ -212,7 +224,9 @@
     "INVALID_BLOCK": "Write the duration of each block, such as 4 h or 1 h 30.",
     "INVALID_GAP": "Write the days between two blocks as a whole number, 0 for the same day.",
     "INVALID_HOURS_PER_DAY": "Hours per day go from 1 hour to the length of a working day, by quarter hours.",
-    "INVALID_DAILY_START": "Write the daily start time as 13:30, on a quarter hour, leaving enough working hours after it."
+    "INVALID_DAILY_START": "Write the daily start time as 13:30, on a quarter hour, leaving enough working hours after it.",
+    "INVALID_MUST_FINISH_ON": "The “Must finish on” date could not be read. Pick a date and a time on a quarter hour, or leave it empty.",
+    "INVALID_DEADLINE": "The deadline could not be read. Pick a date and a time on a quarter hour, or leave it empty."
   },
   "durations": {
     "hours": "{hours} h",
@@ -227,6 +241,11 @@
     "progress": "Progress (%)",
     "start": "Do not start before",
     "startHint": "Leave empty to start as soon as possible.",
+    "dateConstraints": "Date constraints",
+    "mustFinishOn": "Must finish on",
+    "mustFinishOnHint": "The plan places the task to end at this time. Leave empty for none.",
+    "deadline": "Deadline",
+    "deadlineHint": "Nothing moves: the task is flagged if it ends later. Leave empty for none.",
     "hoursPerDay": "Hours per day",
     "hoursPerDayHint": "Leave empty to work the whole working day.",
     "dailyStart": "Daily start time",

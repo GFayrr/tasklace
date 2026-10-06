@@ -44,18 +44,26 @@ export function createWeekdayNamer(locale: string): (weekday: Weekday) => string
   return (weekday) => valueAt(names, weekday);
 }
 
+const MOMENT_OPTIONS: Intl.DateTimeFormatOptions = {
+  weekday: 'short',
+  day: 'numeric',
+  month: 'short',
+  hour: 'numeric',
+  minute: '2-digit',
+  timeZone: 'UTC',
+};
+
+/** Creates a function writing a project hour with its day and time in the regional format, as "Fri, Oct 23, 5:00 PM". */
+export function createMomentFormatter(locale: string): (hour: ProjectHour) => string {
+  const format = new Intl.DateTimeFormat(locale, MOMENT_OPTIONS);
+  return (hour) => format.format(new Date(hour * MILLISECONDS_PER_HOUR));
+}
+
 /** Creates a function writing a period between two project hours in the regional format, the day written once when both fall on it. */
 export function createPeriodFormatter(
   locale: string,
 ): (start: ProjectHour, end: ProjectHour) => string {
-  const format = new Intl.DateTimeFormat(locale, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone: 'UTC',
-  });
+  const format = new Intl.DateTimeFormat(locale, MOMENT_OPTIONS);
   return (start, end) =>
     format.formatRange(
       new Date(start * MILLISECONDS_PER_HOUR),

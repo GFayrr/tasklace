@@ -35,6 +35,8 @@ const SPLIT = splitTask(
 );
 
 const NO_WAITS = (): string => '';
+const ON = { criticalPathEnabled: false, dateConstraintsEnabled: true, alwaysShowPatterns: false };
+const OFF = { ...ON, dateConstraintsEnabled: false };
 
 describe('draftFromTask and taskFromDraft', () => {
   it('fills the panel from a split task and builds the same task back', () => {
@@ -44,6 +46,8 @@ describe('draftFromTask and taskFromDraft', () => {
       tagId: 'design',
       progress: '30',
       start: '2026-10-05T09:30',
+      mustFinishOn: '',
+      deadline: '',
       hoursPerDay: '4 h 30',
       dailyStart: '13:15',
       blocks: [
@@ -52,18 +56,18 @@ describe('draftFromTask and taskFromDraft', () => {
       ],
       basis: '',
     });
-    expect(taskFromDraft(SPLIT, draft, 9)).toEqual({ ok: true, value: SPLIT });
+    expect(taskFromDraft(SPLIT, draft, 9, ON)).toEqual({ ok: true, value: SPLIT });
   });
 
   it('builds the same milestone and summary back', () => {
     const point = milestone('m', { startNoEarlierThan: at(2026, 10, 5, 12) });
-    expect(taskFromDraft(point, draftFromTask(point, NO_WAITS, ''), 9)).toEqual({
+    expect(taskFromDraft(point, draftFromTask(point, NO_WAITS, ''), 9, ON)).toEqual({
       ok: true,
       value: point,
     });
     const group = summary('g', { name: 'Phase' });
     expect(
-      taskFromDraft(group, { ...draftFromTask(group, NO_WAITS, ''), name: ' Stage ' }, 9),
+      taskFromDraft(group, { ...draftFromTask(group, NO_WAITS, ''), name: ' Stage ' }, 9, ON),
     ).toEqual({
       ok: true,
       value: { ...group, name: 'Stage' },
@@ -77,7 +81,7 @@ describe('draftFromTask and taskFromDraft', () => {
       { duration: '7 h', gapDays: '0', start: '', origin: 0, waitsFor: '' },
       { duration: '9 h', gapDays: '1', start: '', origin: null, waitsFor: '' },
     ]);
-    const built = taskFromDraft(task, added, 9);
+    const built = taskFromDraft(task, added, 9, ON);
     expect(built.ok && built.value.kind === 'task' && built.value.segments).toEqual([
       { durationHours: 7, gapDaysBefore: 0, startNoEarlierThan: null },
       { durationHours: 9, gapDaysBefore: 1, startNoEarlierThan: null },
@@ -96,7 +100,7 @@ describe('draftFromTask and taskFromDraft', () => {
       ...draft,
       blocks: draft.blocks.map((block) => ({ ...block, gapDays: '0' })),
     };
-    const built = taskFromDraft(SPLIT, sameDay, 9);
+    const built = taskFromDraft(SPLIT, sameDay, 9, ON);
     expect(built.ok && built.value.kind === 'task' && built.value.segments[1]).toEqual({
       durationHours: 3.5,
       gapDaysBefore: 0,
@@ -106,7 +110,7 @@ describe('draftFromTask and taskFromDraft', () => {
 
   it('drops the daily start time of a task that works whole days', () => {
     const draft: TaskDraft = { ...draftFromTask(SPLIT, NO_WAITS, ''), hoursPerDay: '' };
-    expect(taskFromDraft(SPLIT, draft, 9)).toMatchObject({
+    expect(taskFromDraft(SPLIT, draft, 9, ON)).toMatchObject({
       ok: true,
       value: { hoursPerDay: null, dailyStartHour: null },
     });
@@ -119,7 +123,7 @@ describe('draftFromTask and taskFromDraft', () => {
       hoursPerDay: '',
       dailyStart: '',
     };
-    expect(taskFromDraft(SPLIT, draft, 9)).toMatchObject({
+    expect(taskFromDraft(SPLIT, draft, 9, ON)).toMatchObject({
       ok: true,
       value: { startNoEarlierThan: null, hoursPerDay: null, dailyStartHour: null },
     });
@@ -151,7 +155,9 @@ describe('draftFromTask and taskFromDraft', () => {
       'INVALID_GAP',
     ],
   ])('refuses %s', (_label, change, error) => {
-    expect(taskFromDraft(SPLIT, { ...draftFromTask(SPLIT, NO_WAITS, ''), ...change }, 9)).toEqual({
+    expect(
+      taskFromDraft(SPLIT, { ...draftFromTask(SPLIT, NO_WAITS, ''), ...change }, 9, ON),
+    ).toEqual({
       ok: false,
       error,
     });
@@ -166,14 +172,14 @@ describe('block start dates in the details panel', () => {
     ]);
     const draft = draftFromTask(dated, NO_WAITS, '');
     expect(draft.blocks.map((block) => block.start)).toEqual(['', '2026-10-06T13:15']);
-    expect(taskFromDraft(dated, draft, 9)).toEqual({ ok: true, value: dated });
+    expect(taskFromDraft(dated, draft, 9, ON)).toEqual({ ok: true, value: dated });
     const unreadable = {
       ...draft,
       blocks: draft.blocks.map((block, index) =>
         index === 1 ? { ...block, start: 'soon' } : block,
       ),
     };
-    expect(taskFromDraft(dated, unreadable, 9)).toEqual({ ok: false, error: 'INVALID_DATE' });
+    expect(taskFromDraft(dated, unreadable, 9, ON)).toEqual({ ok: false, error: 'INVALID_DATE' });
     expect(findUnreadableBlockStart(unreadable)).toBe(1);
     expect(findUnreadableBlockStart(draft)).toBeNull();
   });
@@ -192,6 +198,63 @@ describe('block start dates in the details panel', () => {
     expect(withoutBlock({ ...draft, start: '2026-10-05T09:00' }, 0).start).toBe('2026-10-06T13:00');
     expect(withoutBlock({ ...draft, start: '2026-10-09T09:00' }, 0).start).toBe('2026-10-09T09:00');
     expect(withoutBlock({ ...draft, start: 'soon' }, 0).start).toBe('soon');
+  });
+});
+
+describe('date constraints in the details panel', () => {
+  const CONSTRAINED = workTask('c', {
+    mustFinishOn: at(2026, 10, 9, 17),
+    deadline: at(2026, 10, 12, 12) + 0.75,
+  });
+
+  it('fills both dates and builds the same task back', () => {
+    const draft = draftFromTask(CONSTRAINED, NO_WAITS, '');
+    expect([draft.mustFinishOn, draft.deadline]).toEqual(['2026-10-09T17:00', '2026-10-12T12:45']);
+    expect(taskFromDraft(CONSTRAINED, draft, 9, ON)).toEqual({ ok: true, value: CONSTRAINED });
+  });
+
+  it('sets and clears the dates of a milestone', () => {
+    const point = milestone('m');
+    const set = { ...draftFromTask(point, NO_WAITS, ''), deadline: '2026-10-20T08:00' };
+    expect(taskFromDraft(point, set, 9, ON)).toEqual({
+      ok: true,
+      value: { ...point, deadline: at(2026, 10, 20, 8) },
+    });
+    const cleared = {
+      ...draftFromTask(CONSTRAINED, NO_WAITS, ''),
+      mustFinishOn: ' ',
+      deadline: '',
+    };
+    expect(taskFromDraft(CONSTRAINED, cleared, 9, ON)).toEqual({
+      ok: true,
+      value: { ...CONSTRAINED, mustFinishOn: null, deadline: null },
+    });
+  });
+
+  it.each([
+    ['the date it must finish on', { mustFinishOn: 'soon' }, 'INVALID_MUST_FINISH_ON'],
+    ['the deadline', { deadline: '2026-13-40T12:00' }, 'INVALID_DEADLINE'],
+    [
+      'both dates, naming the first one',
+      { mustFinishOn: 'soon', deadline: 'later' },
+      'INVALID_MUST_FINISH_ON',
+    ],
+  ])('refuses %s when it cannot be read', (_label, change, error) => {
+    const draft = { ...draftFromTask(CONSTRAINED, NO_WAITS, ''), ...change };
+    expect(taskFromDraft(CONSTRAINED, draft, 9, ON)).toEqual({ ok: false, error });
+  });
+
+  it('keeps the dates of the task untouched while date constraints are turned off', () => {
+    const draft = {
+      ...draftFromTask(CONSTRAINED, NO_WAITS, ''),
+      mustFinishOn: 'soon',
+      deadline: '',
+      name: 'Renamed',
+    };
+    expect(taskFromDraft(CONSTRAINED, draft, 9, OFF)).toEqual({
+      ok: true,
+      value: { ...CONSTRAINED, name: 'Renamed' },
+    });
   });
 });
 
@@ -215,5 +278,10 @@ describe('taskBasis', () => {
         's',
       ),
     ).not.toBe(basis);
+    const constrained = { ...plan.options, dateConstraintsEnabled: true };
+    expect(taskBasis({ ...plan, options: constrained }, 's')).not.toBe(basis);
+    expect(
+      taskBasis({ ...plan, options: { ...plan.options, criticalPathEnabled: true } }, 's'),
+    ).toBe(basis);
   });
 });
