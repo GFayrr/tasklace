@@ -106,4 +106,26 @@ describe('growth of drawing the timeline', () => {
     console.info(`Timeline frame: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
   });
+
+  it('draws one frame with the critical path and the floats in at most linear time of the project', () => {
+    const withCriticalPath = (project: Project): Project => ({
+      ...project,
+      options: { ...project.options, criticalPathEnabled: true },
+    });
+    const small = sceneOf(
+      withCriticalPath(buildLargeProject(LARGE_PROJECT_SEED, SMALL_TASK_COUNT)),
+    );
+    const large = sceneOf(
+      withCriticalPath(buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT)),
+    );
+    expect(large.scene.schedule?.floats?.size).toBe(LARGE_TASK_COUNT);
+    const draw =
+      ({ scene, viewport }: ReturnType<typeof sceneOf>) =>
+      () => {
+        paintTimelineBody(recordingCanvas().context, scene, viewport);
+      };
+    const ratio = growthRatio(draw(small), draw(large));
+    console.info(`Timeline frame with floats: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
+  });
 });

@@ -1,10 +1,16 @@
 import { formatDate, parseDate, parseDateTime } from '../../core/civil-format';
 import type { DayRange, TimeRange, WorkingCalendar } from '../../core/model/calendar';
+import type { ProjectOptions } from '../../core/model/project';
+
 import { failure, success } from '../../core/result';
 import type { SharedOperation } from '../../core/shared/shared-operations';
 import { dayIndexOf, HOURS_PER_DAY, type Weekday } from '../../core/time';
 import type { Edit, EditContext } from './task-commands';
 import { formatTimeOfDay, parseTimeOfDay } from './time-of-day';
+
+export type BooleanProjectOption = {
+  [Key in keyof ProjectOptions]: ProjectOptions[Key] extends boolean ? Key : never;
+}[keyof ProjectOptions];
 
 /** A range of working hours as the time fields show it, "00:00" as an end meaning the end of the day. */
 export interface TimeRangeText {
@@ -150,4 +156,10 @@ function calendarEdit(context: EditContext, change: Partial<WorkingCalendar>): E
   const calendar = { ...context.project.calendar, ...change };
   const operation: SharedOperation = { type: 'updateProject', fields: { calendar } };
   return success([operation]);
+}
+
+/** Turns an option of the project on when it is off and off when it is on, reading it in the project the change is built from, the rest of its options kept as they are. */
+export function toggleProjectOption(context: EditContext, option: BooleanProjectOption): Edit {
+  const options = { ...context.project.options, [option]: !context.project.options[option] };
+  return success([{ type: 'updateProject', fields: { options } }]);
 }

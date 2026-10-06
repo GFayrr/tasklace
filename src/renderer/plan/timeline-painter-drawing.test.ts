@@ -20,6 +20,7 @@ import { linkHandles } from './timeline-gestures';
 import {
   BAR_HEIGHT,
   dependencyArrow,
+  MILESTONE_SIZE,
   ROW_HEIGHT,
   rowShape,
   timelineFrame,
@@ -189,6 +190,127 @@ describe('paintTimelineBody', () => {
     expect(strokes).toHaveLength(1);
     const plain = paintBody();
     expect(callsOf(plain, 'stroke').some((call) => call.strokeStyle === THEME.error)).toBe(false);
+  });
+
+  it('underlines the blocks of critical tasks in graphite and draws the float of the others as a dashed line', () => {
+    const critical: Project = {
+      ...PLAN,
+      options: { ...PLAN.options, criticalPathEnabled: true },
+    };
+    const schedule = scheduleOrThrow(critical);
+    const floats = schedule.floats;
+    if (floats === null) {
+      throw new Error('No floats');
+    }
+    const calls = paintBody({ schedule });
+    const marks = callsOf(calls, 'fillRect').filter(
+      (call) => call.fillStyle === THEME.action && call.args[3] === 3,
+    );
+    const criticalBlocks = [...floats]
+      .filter(([, taskFloat]) => taskFloat.isCritical)
+      .map(([id]) => {
+        const shape = placedShapeOf(id);
+        return shape.kind === 'task' ? shape.segments.length : 1;
+      })
+      .reduce((sum, count) => sum + count, 0);
+    expect([...floats].filter(([, taskFloat]) => taskFloat.isCritical).map(([id]) => id)).toEqual([
+      'w',
+    ]);
+    expect(criticalBlocks).toBe(1);
+    expect(marks).toHaveLength(criticalBlocks);
+    const c = taskShapeOf('c');
+    const cFloat = floats.get('c');
+    expect(cFloat?.isCritical).toBe(false);
+    const dashed = callsOf(calls, 'stroke').filter((call) => call.lineDash.join() === '4,3');
+    const slipping = [...floats.values()].filter(
+      (taskFloat) => !taskFloat.isCritical && taskFloat.totalFloatHours > 0,
+    );
+    expect(slipping).toHaveLength(5);
+    expect(dashed.map((call) => [call.strokeStyle, call.lineWidth])).toEqual(
+      slipping.map(() => [THEME.textSecondary, 1.5]),
+    );
+    const middle = (OUTLINE.rowIndexById.get('c') ?? -1) * ROW_HEIGHT + ROW_HEIGHT / 2;
+    const cEnd = (c.segments.at(-1)?.x ?? 0) + (c.segments.at(-1)?.width ?? 0);
+    expect(
+      callsOf(calls, 'moveTo').some((call) => call.args[0] === cEnd && call.args[1] === middle),
+    ).toBe(true);
+    expect(
+      callsOf(calls, 'lineTo').some(
+        (call) => call.args[0] === xOf(FRAME, cFloat?.lateFinish ?? 0) && call.args[1] === middle,
+      ),
+    ).toBe(true);
+    const plain = paintBody();
+    expect(
+      callsOf(plain, 'fillRect').some(
+        (call) => call.fillStyle === THEME.action && call.args[3] === 3,
+      ),
+    ).toBe(false);
+    expect(callsOf(plain, 'stroke').some((call) => call.lineDash.join() === '4,3')).toBe(false);
+  });
+
+  it('underlines a critical milestone across its diamond', () => {
+    const m = placedShapeOf('m');
+    const floats = new Map([
+      [
+        'm',
+        { lateStart: 0, lateFinish: 0, totalFloatHours: 0, freeFloatHours: 0, isCritical: true },
+      ],
+    ]);
+    const calls = paintBody({ schedule: { ...SCHEDULE, floats } });
+    const top = (OUTLINE.rowIndexById.get('m') ?? -1) * ROW_HEIGHT;
+    expect(
+      callsOf(calls, 'fillRect')
+        .filter((call) => call.fillStyle === THEME.action && call.args[3] === 3)
+        .map((call) => call.args),
+    ).toEqual([
+      [
+        (m.kind === 'milestone' ? m.x : Number.NaN) - MILESTONE_SIZE / 2,
+        top + (ROW_HEIGHT + BAR_HEIGHT) / 2 + 2,
+        MILESTONE_SIZE,
+        3,
+      ],
+    ]);
+  });
+
+  it('underlines a task whose float is unknown as critical without any dashed line, and draws no float that ends exactly where the bar does', () => {
+    const critical: Project = {
+      ...PLAN,
+      options: { ...PLAN.options, criticalPathEnabled: true },
+    };
+    const schedule = scheduleOrThrow(critical);
+    const unknown = {
+      lateStart: null,
+      lateFinish: null,
+      totalFloatHours: null,
+      freeFloatHours: null,
+      isCritical: true,
+    } as const;
+    const floats = new Map([['c', unknown]]);
+    const calls = paintBody({ schedule: { ...schedule, floats } });
+    const c = taskShapeOf('c');
+    expect(
+      callsOf(calls, 'fillRect')
+        .filter((call) => call.fillStyle === THEME.action && call.args[3] === 3)
+        .map((call) => [call.args[0], call.args[2]]),
+    ).toEqual(c.segments.map((segment) => [segment.x, segment.width]));
+    expect(callsOf(calls, 'stroke').some((call) => call.lineDash.join() === '4,3')).toBe(false);
+    const early = new Map(
+      [...(schedule.floats ?? [])].map(([id]) => {
+        const placement = schedule.placements.get(id);
+        return [
+          id,
+          {
+            lateStart: placement?.start ?? 0,
+            lateFinish: placement?.end ?? 0,
+            totalFloatHours: 1,
+            freeFloatHours: 0,
+            isCritical: false,
+          },
+        ];
+      }),
+    );
+    const none = paintBody({ schedule: { ...schedule, floats: early } });
+    expect(callsOf(none, 'stroke').some((call) => call.lineDash.join() === '4,3')).toBe(false);
   });
 
   it('joins the blocks of a split task with a dotted line in its color', () => {

@@ -10,7 +10,7 @@ import {
   workTask,
 } from '../../core/testing/project-builder';
 import { loadMessages } from '../i18n/messages';
-import { createTableFormatters, taskCells } from './table-format';
+import { createTableFormatters, floatCells, taskCells } from './table-format';
 
 const messages = await loadMessages('en');
 const FORMATTERS = createTableFormatters('en-US');
@@ -96,6 +96,46 @@ describe('taskCells', () => {
       start: '',
       end: '',
       progress: '',
+    });
+  });
+});
+
+describe('floatCells', () => {
+  it('writes known, negative and unknown floats, and nothing without floats', () => {
+    const known = {
+      lateStart: 0,
+      lateFinish: 1,
+      totalFloatHours: 8.25,
+      freeFloatHours: 0,
+      isCritical: false,
+    };
+    expect(floatCells(known, FORMATTERS, messages)).toEqual({
+      total: '8 h 15',
+      free: '0 h',
+      isCritical: false,
+      isUnknown: false,
+    });
+    expect(
+      floatCells({ ...known, totalFloatHours: -3, isCritical: true }, FORMATTERS, messages),
+    ).toEqual({ total: '\u22123 h', free: '0 h', isCritical: true, isUnknown: false });
+    expect(
+      floatCells(
+        {
+          lateStart: null,
+          lateFinish: null,
+          totalFloatHours: null,
+          freeFloatHours: null,
+          isCritical: true,
+        },
+        FORMATTERS,
+        messages,
+      ),
+    ).toEqual({ total: '?', free: '?', isCritical: true, isUnknown: true });
+    expect(floatCells(undefined, FORMATTERS, messages)).toEqual({
+      total: '',
+      free: '',
+      isCritical: false,
+      isUnknown: false,
     });
   });
 });

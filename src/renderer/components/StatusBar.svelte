@@ -37,6 +37,12 @@
       <li class="empty">{text.status.noTags}</li>
     {/each}
   </ul>
+  {#if app.schedule?.floats != null}
+    <span class="critical-key">
+      <span class="critical-mark" aria-hidden="true"></span>
+      <span>{text.status.critical}</span>
+    </span>
+  {/if}
   {#if conflictCount > 0}
     <button
       type="button"
@@ -115,6 +121,21 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+
+  .critical-key {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+
+  .critical-mark {
+    width: 18px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--color-action);
   }
 
   .conflicts {

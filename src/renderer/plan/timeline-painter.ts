@@ -2,6 +2,7 @@ import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
 import { isWorkingDay } from '../../core/calendar/working-time';
 import type { DayRange } from '../../core/model/calendar';
 import type { Dependency, TagId, TaskId } from '../../core/model/project';
+import type { TaskFloat } from '../../core/scheduling/backward-pass';
 import type { Schedule } from '../../core/scheduling/schedule-project';
 import type { TagPattern } from '../../core/tags/tag-appearance';
 import {
@@ -91,6 +92,10 @@ const SUMMARY_TIP = 6;
 const ARROW_HEAD = 5;
 const ARROW_WIDTH = 1.5;
 const OUTLINE_WIDTH = 2;
+const CRITICAL_MARK_HEIGHT = 3;
+const CRITICAL_MARK_GAP = 2;
+const FLOAT_DASH = [4, 3];
+const FLOAT_LINE_WIDTH = 1.5;
 const TODAY_WIDTH = 2;
 const PREVIEW_DASH = [4, 3];
 const HALF_PIXEL = 0.5;
@@ -332,8 +337,10 @@ function paintShape(
   const tagId = task !== undefined && task.kind !== 'summary' ? task.tagId : null;
   const style = tagId === null ? undefined : scene.tagStyles.get(tagId);
   const outlined = scene.conflictTaskIds.has(shape.taskId);
+  const taskFloat = scene.schedule?.floats?.get(shape.taskId);
   if (shape.kind === 'milestone') {
     paintMilestone(context, style?.color ?? scene.theme.text, shape.x, top);
+    paintFloat(context, scene, taskFloat, [{ start: shape.x, end: shape.x }], top);
     return;
   }
   const color = style?.color ?? scene.theme.bar;
@@ -362,6 +369,48 @@ function paintShape(
       paintBarPart(context, scene, bar, part, fillEnd);
     });
   }
+  const blocks = shape.segments.map((segment) => ({
+    start: segment.x,
+    end: segment.x + segment.width,
+  }));
+  paintFloat(context, scene, taskFloat, blocks, top);
+}
+
+/** Marks a critical task with a line in the action color under each block, or draws the total float of a task that can slip as a dashed line from its end to its latest finish when that is later, drawing nothing without critical path. */
+function paintFloat(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  taskFloat: TaskFloat | undefined,
+  blocks: readonly PixelInterval[],
+  top: number,
+): void {
+  if (taskFloat === undefined) {
+    return;
+  }
+  const barBottom = top + (ROW_HEIGHT + BAR_HEIGHT) / HALF;
+  if (taskFloat.isCritical) {
+    context.fillStyle = scene.theme.action;
+    for (const block of blocks) {
+      const width = Math.max(block.end - block.start, MILESTONE_SIZE);
+      const left = block.start + (block.end - block.start - width) / HALF;
+      context.fillRect(left, barBottom + CRITICAL_MARK_GAP, width, CRITICAL_MARK_HEIGHT);
+    }
+    return;
+  }
+  const end = blocks.reduce((last, block) => Math.max(last, block.end), Number.NEGATIVE_INFINITY);
+  const latest = xOf(scene.frame, taskFloat.lateFinish);
+  if (latest <= end) {
+    return;
+  }
+  const middle = top + ROW_HEIGHT / HALF;
+  context.strokeStyle = scene.theme.textSecondary;
+  context.lineWidth = FLOAT_LINE_WIDTH;
+  context.setLineDash(FLOAT_DASH);
+  context.beginPath();
+  context.moveTo(end, middle);
+  context.lineTo(latest, middle);
+  context.stroke();
+  context.setLineDash([]);
 }
 
 /** Splits the horizontal extent of a block into the parts worked and the days off it spans, in pixels. */
