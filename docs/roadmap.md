@@ -128,7 +128,7 @@ Done in three parts, each with its mockups approved first. Every advanced featur
 
 ##### 5e-3a. Advanced options tab and critical path (done)
 
-- The Advanced options tab: one switch per feature, each explained in a sentence. Critical path, date constraints and always showing patterns work; the baseline is shown as coming soon.
+- The Advanced options tab: one switch per feature, each explained in a sentence. Critical path, date constraints, the baseline and always showing patterns all work.
 - With the critical path on, the table shows the total and free float of every task, with a hint on each header; the timeline underlines critical tasks in graphite and draws how far other tasks can slip as a dashed line; the legend explains the mark.
 - When a task would have to start before 2020, the first year handled, to finish on time, the plan stays available: only the floats concerned are unknown, shown as "?", and one message explains why and what to do.
 
@@ -139,10 +139,13 @@ Done in three parts, each with its mockups approved first. Every advanced featur
 - A task that misses one of its dates gets the red outline of a conflict on the timeline, milestones included, and a red "End" cell with an icon whose tooltip names each date missed.
 - Each deadline is drawn on the row of its task as an upright line topped by a small triangle, graphite when met and red when missed, with a "Deadline" key in the legend. The timeline widens to the deadlines, always keeping the whole project in view.
 
-##### 5e-3c. Baseline (to do)
+##### 5e-3c. Baseline (done)
 
-- A baseline switch, off by default; taking a baseline replaces the previous one after confirmation.
-- A ghost bar under each bar and a Variance column, in working days early or late.
+- A Baseline switch, off by default; under it, "Set baseline" freezes the start, end and duration of every task, then the strip tells when it was set and offers to set it again or to clear it, each after a question. Ctrl+Z undoes either. Turning the switch off hides the baseline and keeps it.
+- Tasks whose dates cannot be frozen are counted below the strip; an empty summary has nothing to freeze and is not counted.
+- On the timeline, a thin pale ghost at the top of each row shows where the task was planned, and a small hollow diamond where a milestone was; the timeline widens to the frozen dates of the tasks that still exist, always keeping the whole project in view.
+- A Variance column after End gives in working days how much later (+, in the warning color) or earlier (−) each task now ends, any gap showing as at least a quarter of a day; a dash for a task not in the baseline or a summary without dates.
+- The legend keys are short ("Critical", "Baseline", "Deadline"), each explained in a tooltip.
 
 ## After version 1
 

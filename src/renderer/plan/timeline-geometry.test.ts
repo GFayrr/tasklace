@@ -15,6 +15,7 @@ import { buildPlanOutline } from './plan-outline';
 import { pixelsPerHour } from './time-scale';
 import {
   ARROW_GAP,
+  baselineMarks,
   deadlinesOf,
   dependencyArrow,
   hourAt,
@@ -208,5 +209,26 @@ describe('deadlinesOf', () => {
       milestone('m', { deadline: at(2026, 10, 9, 9) }),
     ]);
     expect(deadlinesOf(plan)).toEqual([at(2026, 10, 2, 17), at(2026, 10, 9, 9)]);
+  });
+});
+
+describe('baselineMarks', () => {
+  it('gives the earliest frozen start and the latest frozen end of the tasks the project still has, and nothing without them', () => {
+    const baseline = {
+      takenAt: at(2026, 9, 30, 9),
+      entries: [
+        { taskId: 'm', start: at(2026, 10, 5, 9), end: at(2026, 10, 5, 9), durationHours: 0 },
+        { taskId: 'a', start: at(2026, 10, 1, 9), end: at(2026, 10, 2, 17), durationHours: 14 },
+        { taskId: 'gone', start: at(2026, 9, 1, 9), end: at(2027, 6, 1, 17), durationHours: 7 },
+      ],
+    };
+    const kept = new Set(['a', 'm', 'new']);
+    expect(baselineMarks(baseline, (id) => kept.has(id))).toEqual([
+      at(2026, 10, 1, 9),
+      at(2026, 10, 5, 9),
+    ]);
+    expect(baselineMarks(baseline, () => true)).toEqual([at(2026, 9, 1, 9), at(2027, 6, 1, 17)]);
+    expect(baselineMarks(baseline, (id) => id === 'new')).toEqual([]);
+    expect(baselineMarks(null, () => true)).toEqual([]);
   });
 });

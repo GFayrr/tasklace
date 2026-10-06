@@ -32,6 +32,7 @@ describe('scheduling performance (10,000 tasks, 20,000 dependencies)', () => {
       options: {
         criticalPathEnabled: true,
         dateConstraintsEnabled: true,
+        baselineEnabled: false,
         alwaysShowPatterns: false,
       },
     };

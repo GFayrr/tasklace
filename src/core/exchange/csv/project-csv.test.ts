@@ -109,6 +109,7 @@ function tableCompatible(input: Project): Project {
     options: {
       criticalPathEnabled: false,
       dateConstraintsEnabled: false,
+      baselineEnabled: false,
       alwaysShowPatterns: false,
     },
   };

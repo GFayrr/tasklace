@@ -14,7 +14,7 @@ import {
   workTask,
 } from '../testing/project-builder';
 import type { SharedOperation } from './shared-operations';
-import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
+import { createSharedDocument, PROJECT_ROOT, readSharedData, TASKS_ROOT } from './shared-document';
 import { mergeSharedUpdate, readSharedProject } from './shared-project';
 import { openSharedSession, type SharedSession } from './shared-session';
 
@@ -192,6 +192,33 @@ describe('a session receiving updates from the network', () => {
     expect(session.merge(renameUpdate(peer, 'b', 'After')).ok).toBe(true);
     const read = readSharedProject(session.document);
     expect(read.ok && read.value.tasks.find((task) => task.id === 'b')?.name).toBe('After');
+  });
+
+  it('shares the baseline switch between participants, refusing a value that is not a switch', () => {
+    const origin = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    const alice = sessionOn(origin, 1);
+    const bob = sessionOn(origin, 2);
+    const before = Y.encodeStateVector(alice.document);
+    const options = { ...SAMPLE.options, baselineEnabled: true };
+    expect(alice.apply({ type: 'updateProject', fields: { options } }).ok).toBe(true);
+    expect(bob.merge(Y.encodeStateAsUpdate(alice.document, before))).toEqual({
+      ok: true,
+      value: [],
+    });
+    expect(bob.project().options).toEqual(options);
+    const forger = new Y.Doc();
+    Y.applyUpdate(forger, Y.encodeStateAsUpdate(alice.document));
+    const forged = Y.encodeStateVector(forger);
+    forger.getMap(PROJECT_ROOT).set('baselineEnabled', 'yes');
+    const data = readSharedData(bob.document);
+    expect(bob.merge(Y.encodeStateAsUpdate(forger, forged))).toEqual({
+      ok: false,
+      error: {
+        kind: 'invalidProject',
+        issues: [{ path: 'options.baselineEnabled', code: 'WRONG_TYPE' }],
+      },
+    });
+    expect(readSharedData(bob.document)).toEqual(data);
   });
 
   it('keeps one whole baseline when two participants take one at the same time, the same for both', () => {

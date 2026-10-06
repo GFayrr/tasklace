@@ -1,7 +1,7 @@
 import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
 import { isWorkingDay } from '../../core/calendar/working-time';
 import type { DayRange } from '../../core/model/calendar';
-import type { Dependency, TagId, TaskId } from '../../core/model/project';
+import type { BaselineEntry, Dependency, TagId, TaskId } from '../../core/model/project';
 import type { TaskFloat } from '../../core/scheduling/backward-pass';
 import type { Schedule } from '../../core/scheduling/schedule-project';
 import { valueAt } from '../../core/table-value';
@@ -60,6 +60,7 @@ export interface TimelineScene {
   readonly tagStyles: ReadonlyMap<TagId, TagStyle>;
   readonly conflictTaskIds: ReadonlySet<TaskId>;
   readonly deadlines: DeadlineMarks | null;
+  readonly baseline: ReadonlyMap<TaskId, BaselineEntry> | null;
   readonly selectedTaskId: TaskId | null;
   readonly today: ProjectHour;
   readonly preview: DragPreview | null;
@@ -104,6 +105,11 @@ const CRITICAL_MARK_GAP = 2;
 const FLOAT_DASH = [4, 3];
 const FLOAT_LINE_WIDTH = 1.5;
 const TODAY_WIDTH = 2;
+const GHOST_HEIGHT = 3;
+const GHOST_INSET = 2;
+const GHOST_MIN_WIDTH = 2;
+const GHOST_MILESTONE_SIZE = 6;
+const GHOST_OUTLINE_WIDTH = 1.5;
 const DEADLINE_WIDTH = 2;
 const DEADLINE_INSET = 2;
 const DEADLINE_HEAD_WIDTH = 10;
@@ -184,7 +190,7 @@ export function splitAtDaysOff(
   return { parts, daysOff: mergeIntervals(daysOff) };
 }
 
-/** Draws the rows of the timeline that a viewport shows: non-working periods, selection, bars, deadlines, links and the today line. */
+/** Draws the rows of the timeline that a viewport shows: non-working periods, selection, links, baseline ghosts, bars, deadlines and the today line. */
 export function paintTimelineBody(
   context: CanvasRenderingContext2D,
   scene: TimelineScene,
@@ -200,6 +206,7 @@ export function paintTimelineBody(
   const shapes = visibleShapes(scene, range);
   paintSelection(context, scene, viewport);
   paintArrows(context, scene, range);
+  paintBaseline(context, scene, range);
   shapes.forEach((shape) => {
     paintShape(context, scene, shape);
   });
@@ -556,6 +563,57 @@ function paintMilestone(
   context.lineTo(x - half, middle);
   context.closePath();
   context.fill();
+}
+
+/** Draws where each visible task was planned in the baseline, as a thin pale bar at the top of its row or a small hollow diamond for a milestone, drawing nothing without a baseline shown. */
+function paintBaseline(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  range: RowRange,
+): void {
+  const entries = scene.baseline;
+  if (entries === null) {
+    return;
+  }
+  const color = paleColor(scene.theme.textSecondary);
+  for (let index = range.first; index <= range.last; index += 1) {
+    const task = valueAt(scene.rows, index).task;
+    const entry = entries.get(task.id);
+    if (entry !== undefined) {
+      paintGhost(context, scene, color, entry, index * ROW_HEIGHT);
+    }
+  }
+}
+
+/** Draws the ghost of one baseline entry on its row, a bar for a frozen period and a diamond for a frozen instant. */
+function paintGhost(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  color: string,
+  entry: BaselineEntry,
+  top: number,
+): void {
+  const start = xOf(scene.frame, entry.start);
+  const ghostTop = top + GHOST_INSET;
+  if (entry.end > entry.start) {
+    const width = Math.max(xOf(scene.frame, entry.end) - start, GHOST_MIN_WIDTH);
+    context.fillStyle = color;
+    context.fillRect(start, ghostTop, width, GHOST_HEIGHT);
+    return;
+  }
+  const half = GHOST_MILESTONE_SIZE / HALF;
+  const middle = ghostTop + GHOST_HEIGHT / HALF;
+  context.fillStyle = scene.theme.surface;
+  context.strokeStyle = scene.theme.textSecondary;
+  context.lineWidth = GHOST_OUTLINE_WIDTH;
+  context.beginPath();
+  context.moveTo(start, middle - half);
+  context.lineTo(start + half, middle);
+  context.lineTo(start, middle + half);
+  context.lineTo(start - half, middle);
+  context.closePath();
+  context.fill();
+  context.stroke();
 }
 
 /** Draws the red outline of a milestone that misses one of its dates. */

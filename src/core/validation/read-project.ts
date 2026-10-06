@@ -101,7 +101,12 @@ const PROJECT_KEYS = [
 const CALENDAR_KEYS = ['workingWeekdays', 'workingTimeRanges', 'nonWorkingPeriods'];
 const TIME_RANGE_KEYS = ['startHour', 'endHour'];
 const DAY_RANGE_KEYS = ['firstDay', 'lastDay'];
-const OPTION_KEYS = ['criticalPathEnabled', 'dateConstraintsEnabled', 'alwaysShowPatterns'];
+const OPTION_KEYS = [
+  'criticalPathEnabled',
+  'dateConstraintsEnabled',
+  'baselineEnabled',
+  'alwaysShowPatterns',
+];
 export const TAG_KEYS = ['id', 'name', 'color', 'representsPersonOrTeam'];
 const SUMMARY_KEYS = ['id', 'kind', 'name', 'parentId', 'sortKey'];
 const MILESTONE_KEYS = [
@@ -308,6 +313,7 @@ function readOptions(field: Field, issues: IssueList): ProjectOptions | undefine
   const options = {
     criticalPathEnabled: readBoolean(child('criticalPathEnabled'), issues),
     dateConstraintsEnabled: readBoolean(child('dateConstraintsEnabled'), issues),
+    baselineEnabled: readBoolean(child('baselineEnabled'), issues),
     alwaysShowPatterns: readBoolean(child('alwaysShowPatterns'), issues),
   };
   return allDefined(options) ? options : undefined;

@@ -17,6 +17,7 @@ import { scheduleProject, type Schedule } from './schedule-project';
 const ALL_OPTIONS = {
   criticalPathEnabled: true,
   dateConstraintsEnabled: true,
+  baselineEnabled: false,
   alwaysShowPatterns: false,
 };
 
@@ -302,6 +303,7 @@ describe('scheduleProject: critical path', () => {
         options: {
           criticalPathEnabled: true,
           dateConstraintsEnabled: false,
+          baselineEnabled: false,
           alwaysShowPatterns: false,
         },
       }),
@@ -439,6 +441,7 @@ describe('scheduleProject: failures', () => {
         options: {
           criticalPathEnabled: true,
           dateConstraintsEnabled: false,
+          baselineEnabled: false,
           alwaysShowPatterns: false,
         },
       });
@@ -463,6 +466,7 @@ describe('scheduleProject: failures', () => {
         options: {
           criticalPathEnabled: true,
           dateConstraintsEnabled: true,
+          baselineEnabled: false,
           alwaysShowPatterns: false,
         },
       });
@@ -511,6 +515,7 @@ describe('scheduleProject: failures', () => {
         options: {
           criticalPathEnabled: true,
           dateConstraintsEnabled: true,
+          baselineEnabled: false,
           alwaysShowPatterns: false,
         },
       },
@@ -539,6 +544,7 @@ describe('scheduleProject: failures', () => {
         options: {
           criticalPathEnabled: true,
           dateConstraintsEnabled: true,
+          baselineEnabled: false,
           alwaysShowPatterns: false,
         },
       },

@@ -19,6 +19,7 @@ const ALICE: Tag = { id: 'alice', name: 'Alice', color: '#4a3aa7', representsPer
 const OPTIONS = {
   criticalPathEnabled: false,
   dateConstraintsEnabled: true,
+  baselineEnabled: false,
   alwaysShowPatterns: false,
 };
 const PLAN = project(

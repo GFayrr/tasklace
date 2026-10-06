@@ -29,6 +29,7 @@ describe('tagStylesOf', () => {
       options: {
         criticalPathEnabled: false,
         dateConstraintsEnabled: false,
+        baselineEnabled: false,
         alwaysShowPatterns: true,
       },
     });

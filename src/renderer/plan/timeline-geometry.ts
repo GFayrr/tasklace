@@ -1,4 +1,11 @@
-import type { Dependency, Project, Task, TaskId } from '../../core/model/project';
+import type {
+  Baseline,
+  BaselineEntry,
+  Dependency,
+  Project,
+  Task,
+  TaskId,
+} from '../../core/model/project';
 import type { Schedule } from '../../core/scheduling/schedule-project';
 import { constrainsSuccessorStart, usesPredecessorStart } from '../../core/scheduling/forward-pass';
 import { HOURS_PER_DAY, type ProjectHour } from '../../core/time';
@@ -57,13 +64,13 @@ export type RowShape =
       readonly end: number;
     };
 
-/** Chooses the period the timeline covers: from a week before the earliest of the project start, today and the deadlines shown, to a month after the latest of the task ends, the project start, today and the deadlines shown, at least two months, and never wider than a canvas can scroll, a far deadline giving way so that the project always stays in view. */
+/** Chooses the period the timeline covers: from a week before the earliest of the project start, today and the marks shown (deadlines, baseline dates), to a month after the latest of the task ends, the project start, today and the marks shown, at least two months, and never wider than a canvas can scroll, a far mark giving way so that the project always stays in view. */
 export function timelineFrame(
   projectStart: ProjectHour,
   schedule: Schedule | null,
   today: ProjectHour,
   pixelsPerHour: number,
-  deadlines: readonly ProjectHour[],
+  marks: readonly ProjectHour[],
 ): TimelineFrame {
   const maximumSpan = Math.floor(MAXIMUM_TIMELINE_PIXELS / pixelsPerHour);
   let projectLast = Math.max(projectStart, today);
@@ -73,9 +80,9 @@ export function timelineFrame(
   const projectFirst = Math.min(projectStart, today);
   let earliest = projectFirst;
   let latest = projectLast;
-  for (const deadline of deadlines) {
-    earliest = Math.min(earliest, deadline);
-    latest = Math.max(latest, deadline);
+  for (const mark of marks) {
+    earliest = Math.min(earliest, mark);
+    latest = Math.max(latest, mark);
   }
   const keepsProject = startOfDayHour(trailingDay(projectLast) - maximumSpan) + HOURS_PER_DAY;
   const origin = Math.min(leadingDay(projectFirst), Math.max(leadingDay(earliest), keepsProject));
@@ -231,6 +238,42 @@ export function deadlinesOf(project: Project): ProjectHour[] {
     }
   }
   return deadlines;
+}
+
+/** Returns the earliest frozen start and the latest frozen end of the tasks a project still has, for the timeline to keep them in view, the entries of deleted tasks being ignored, or nothing without such entries; it reads the entries in an order kept with the baseline, so that it usually stops at the first one. */
+export function baselineMarks(
+  baseline: Baseline | null,
+  hasTask: (id: TaskId) => boolean,
+): ProjectHour[] {
+  if (baseline === null) {
+    return [];
+  }
+  const { byStart, byEnd } = entriesInOrder(baseline);
+  const first = byStart.find((entry) => hasTask(entry.taskId));
+  const last = byEnd.find((entry) => hasTask(entry.taskId));
+  return first === undefined || last === undefined ? [] : [first.start, last.end];
+}
+
+const ORDERED_ENTRIES = new WeakMap<
+  Baseline,
+  { readonly byStart: readonly BaselineEntry[]; readonly byEnd: readonly BaselineEntry[] }
+>();
+
+/** Returns the entries of a baseline sorted by earliest start and by latest end, sorted at the first request for that baseline and kept with it. */
+function entriesInOrder(baseline: Baseline): {
+  readonly byStart: readonly BaselineEntry[];
+  readonly byEnd: readonly BaselineEntry[];
+} {
+  const known = ORDERED_ENTRIES.get(baseline);
+  if (known !== undefined) {
+    return known;
+  }
+  const ordered = {
+    byStart: [...baseline.entries].sort((left, right) => left.start - right.start),
+    byEnd: [...baseline.entries].sort((left, right) => right.end - left.end),
+  };
+  ORDERED_ENTRIES.set(baseline, ordered);
+  return ordered;
 }
 
 /** Returns the deadline of a task or milestone, or null for a summary or a task without one. */

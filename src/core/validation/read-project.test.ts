@@ -65,7 +65,12 @@ const RICH_PROJECT: Project = project(
   {
     name: 'Rentrée 2026',
     tags: [DESIGN_TAG, ALICE_TAG],
-    options: { criticalPathEnabled: true, dateConstraintsEnabled: true, alwaysShowPatterns: false },
+    options: {
+      criticalPathEnabled: true,
+      dateConstraintsEnabled: true,
+      baselineEnabled: false,
+      alwaysShowPatterns: false,
+    },
     calendar: {
       workingWeekdays: [1, 2, 3, 4, 5, 6],
       workingTimeRanges: [
@@ -210,6 +215,17 @@ describe('readProject: shape of the data', () => {
       'dependencies',
       'baseline',
     ]);
+  });
+
+  it('requires every option, the baseline switch included', () => {
+    const options = { ...(projectWith({})['options'] as Data) };
+    delete options['baselineEnabled'];
+    expect(issuesOf(projectWith({ options }))).toEqual(
+      issue('options.baselineEnabled', 'MISSING_FIELD'),
+    );
+    expect(issuesOf(projectWith({ options: { ...options, baselineEnabled: 'yes' } }))).toEqual(
+      issue('options.baselineEnabled', 'WRONG_TYPE'),
+    );
   });
 
   it('reports unknown fields at every level', () => {

@@ -122,6 +122,7 @@ describe('growth of drawing the timeline', () => {
       tagStyles: tagStylesOf(project),
       conflictTaskIds: new Set(),
       deadlines: null,
+      baseline: null,
       selectedTaskId: null,
       today: project.startDate,
       preview: null,
@@ -162,6 +163,28 @@ describe('growth of drawing the timeline', () => {
       };
     const ratio = growthRatio(draw(small), draw(large));
     console.info(`Timeline frame with floats: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
+  });
+
+  it('draws one frame with a baseline entry for every task in at most linear time of the project', () => {
+    const withBaseline = ({ scene, viewport }: ReturnType<typeof sceneOf>) => {
+      const entries = new Map(
+        scene.rows.map((row) => {
+          const start = scene.frame.origin + 24 * 8;
+          return [row.task.id, { taskId: row.task.id, start, end: start + 9, durationHours: 9 }];
+        }),
+      );
+      return { scene: { ...scene, baseline: entries }, viewport };
+    };
+    const small = withBaseline(sceneOf(buildLargeProject(LARGE_PROJECT_SEED, SMALL_TASK_COUNT)));
+    const large = withBaseline(sceneOf(buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT)));
+    const draw =
+      ({ scene, viewport }: ReturnType<typeof sceneOf>) =>
+      () => {
+        paintTimelineBody(recordingCanvas().context, scene, viewport);
+      };
+    const ratio = growthRatio(draw(small), draw(large));
+    console.info(`Timeline frame with a baseline: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
   });
 

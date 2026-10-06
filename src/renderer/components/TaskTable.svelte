@@ -22,7 +22,9 @@
     dateConflictTitles,
     floatCells,
     taskCells,
+    varianceCell,
     type TableFormatters,
+    type VarianceKind,
   } from '../plan/table-format';
   import { indentTask, moveTask, outdentTask } from '../plan/task-commands';
   import { ROW_HEIGHT } from '../plan/timeline-geometry';
@@ -55,6 +57,16 @@
   const ROW_INDEX_OFFSET = 2;
   const text = $derived(app.messages.table);
   const floats = $derived(app.schedule?.floats ?? null);
+  const baselineEntries = $derived(app.shownBaseline);
+  const varianceTitles = $derived({
+    notInBaseline: text.varianceNotInBaseline,
+    noDates: text.varianceNoDates,
+    unknown: text.varianceUnknown,
+    behind: undefined,
+    ahead: undefined,
+    onTime: undefined,
+    pending: undefined,
+  } satisfies Record<VarianceKind, string | undefined>);
   const lateTitles = $derived(
     dateConflictTitles(app.dateConflictLines, app.messages, createMomentFormatter(app.locale)),
   );
@@ -390,7 +402,7 @@
 </script>
 
 <div
-  class={['table', { 'with-floats': floats !== null }]}
+  class={['table', { 'with-floats': floats !== null, 'with-variance': baselineEntries !== null }]}
   role="grid"
   tabindex="0"
   aria-label={text.label}
@@ -409,6 +421,11 @@
       <span class="cell number" role="columnheader">{text.duration}</span>
       <span class="cell date" role="columnheader">{text.start}</span>
       <span class="cell date" role="columnheader">{text.end}</span>
+      {#if baselineEntries !== null}
+        <span class="cell variance number" role="columnheader" title={text.varianceHint}
+          >{text.variance}</span
+        >
+      {/if}
       {#if floats !== null}
         <span class="cell float number" role="columnheader" title={text.totalFloatHint}
           >{text.totalFloat}</span
@@ -549,6 +566,24 @@
                 {/if}
               {/if}
             </span>
+            {#if column === 'end' && baselineEntries !== null}
+              {@const variance = varianceCell(
+                row.task,
+                baselineEntries.get(row.task.id),
+                app.schedule,
+                app.scheduleCalendar,
+                formatters,
+                app.messages,
+              )}
+              <span
+                class={['cell variance number', variance.kind]}
+                role="gridcell"
+                aria-readonly="true"
+                title={varianceTitles[variance.kind]}
+              >
+                <span class="label">{variance.text}</span>
+              </span>
+            {/if}
             {#if column === 'end' && floats !== null}
               <span
                 class={[
@@ -612,6 +647,16 @@
   .with-floats .header,
   .with-floats .body {
     width: max(100%, 1250px);
+  }
+
+  .with-variance .header,
+  .with-variance .body {
+    width: max(100%, 1146px);
+  }
+
+  .with-floats.with-variance .header,
+  .with-floats.with-variance .body {
+    width: max(100%, 1338px);
   }
 
   .header {
@@ -737,6 +782,21 @@
 
   .float {
     width: 96px;
+    color: var(--color-text-secondary);
+  }
+
+  .variance {
+    width: 88px;
+  }
+
+  .variance.behind {
+    font-weight: 500;
+    color: var(--color-warning);
+  }
+
+  .variance.notInBaseline,
+  .variance.noDates,
+  .variance.unknown {
     color: var(--color-text-secondary);
   }
 

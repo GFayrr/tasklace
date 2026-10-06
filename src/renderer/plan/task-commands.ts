@@ -49,7 +49,9 @@ export type EditError =
   | 'NO_ROOM_FOR_RANGE'
   | 'EMPTY_TAG_NAME'
   | 'DUPLICATE_TAG_NAME'
-  | 'TOO_MANY_TAGS';
+  | 'TOO_MANY_TAGS'
+  | 'SCHEDULE_FAILED'
+  | 'CLOCK_OUT_OF_RANGE';
 
 export type ScheduleRefusal = 'SCHEDULE_PENDING' | 'SCHEDULE_STOPPED';
 

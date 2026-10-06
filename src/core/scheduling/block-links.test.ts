@@ -99,6 +99,7 @@ describe('start dates of later blocks with links and floats', () => {
         options: {
           criticalPathEnabled: true,
           dateConstraintsEnabled: false,
+          baselineEnabled: false,
           alwaysShowPatterns: false,
         },
       }),
@@ -238,6 +239,7 @@ describe('links to and from blocks', () => {
         options: {
           criticalPathEnabled: true,
           dateConstraintsEnabled: false,
+          baselineEnabled: false,
           alwaysShowPatterns: false,
         },
       },
@@ -259,6 +261,7 @@ describe('links to and from blocks', () => {
         options: {
           criticalPathEnabled: true,
           dateConstraintsEnabled: false,
+          baselineEnabled: false,
           alwaysShowPatterns: false,
         },
       },

@@ -60,7 +60,7 @@ function headers(root: ParentNode): string[] {
 }
 
 describe('the Advanced options tab', () => {
-  it('lists every feature with its sentence, the coming ones turned off and grayed out', async () => {
+  it('lists every feature with its sentence, all of them turned off at first', async () => {
     const { dialog } = await renderAdvanced();
     const choices = [...dialog.querySelectorAll('.choice')];
     expect(
@@ -73,12 +73,10 @@ describe('the Advanced options tab', () => {
     ).toEqual([
       [TEXT.criticalPath, TEXT.criticalPathHint, 'false', null],
       [TEXT.dateConstraints, TEXT.dateConstraintsHint, 'false', null],
-      [TEXT.baseline, TEXT.baselineHint, 'false', 'true'],
+      [TEXT.baseline, TEXT.baselineHint, 'false', null],
       [TEXT.alwaysShowPatterns, TEXT.alwaysShowPatternsHint, 'false', null],
     ]);
-    expect([...dialog.querySelectorAll('.soon')].map((soon) => soon.textContent)).toEqual([
-      TEXT.soon,
-    ]);
+    expect(dialog.querySelectorAll('.baseline')).toHaveLength(0);
   });
 
   it('turns the critical path on and off, showing the floats in the table and the key in the legend', async () => {
@@ -103,6 +101,7 @@ describe('the Advanced options tab', () => {
     ).toEqual([english.table.totalFloatHint, english.table.freeFloatHint]);
     expect(single(root, '.table').classList.contains('with-floats')).toBe(true);
     expect(single(root, '.critical-key').textContent.trim()).toBe(english.status.critical);
+    expect(single(root, '.critical-key').title).toBe(english.status.criticalHint);
     const figures = [...root.querySelectorAll('[role="row"]')].find((row) =>
       row.textContent.includes('Figures'),
     );
@@ -122,12 +121,8 @@ describe('the Advanced options tab', () => {
     expect(headers(root)).not.toContain(english.table.totalFloat);
   });
 
-  it('turns patterns and date constraints on, and does nothing for a coming feature', async () => {
+  it('turns patterns and date constraints on', async () => {
     const { app, dialog } = await renderAdvanced();
-    const before = app.project;
-    click(switchOf(dialog, TEXT.baseline));
-    update();
-    expect(app.project).toBe(before);
     click(switchOf(dialog, TEXT.alwaysShowPatterns));
     update();
     expect(app.project?.options.alwaysShowPatterns).toBe(true);
@@ -207,6 +202,7 @@ describe('the Advanced options tab', () => {
           options: {
             criticalPathEnabled: true,
             dateConstraintsEnabled: true,
+            baselineEnabled: false,
             alwaysShowPatterns: false,
           },
         },

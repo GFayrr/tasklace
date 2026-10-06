@@ -125,6 +125,7 @@ export function project(
     options: {
       criticalPathEnabled: false,
       dateConstraintsEnabled: false,
+      baselineEnabled: false,
       alwaysShowPatterns: false,
     },
     tasks,

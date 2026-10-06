@@ -43,6 +43,7 @@ interface ScheduledProject {
 const DEFAULT_OPTIONS = {
   criticalPathEnabled: false,
   dateConstraintsEnabled: false,
+  baselineEnabled: false,
   alwaysShowPatterns: false,
 };
 const LIST_PATH_PATTERN = /^(tasks|dependencies|tags)(?:\[(\d+)\](?:\.([A-Za-z]+))?)?(?![A-Za-z])/;

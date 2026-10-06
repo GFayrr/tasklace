@@ -12,6 +12,7 @@ import { unwrap } from '../../src/core/testing/arbitraries';
 import { at } from '../../src/core/testing/civil-time';
 import { blockLink, project, splitTask, workTask } from '../../src/core/testing/project-builder';
 import { readProject, STORED_VALUE_CODEC } from '../../src/core/validation/read-project';
+import { endVarianceDays } from '../../src/core/baseline/end-variance';
 import { buildLargeProject, LARGE_PROJECT_SEED } from '../fixtures/large-project';
 import {
   batched,
@@ -24,6 +25,7 @@ import {
 } from './measure-growth';
 
 const SHORT_TASK_HOURS = 2_000;
+const VARIANCES_PER_RUN = 1_000;
 const BLANK_LINES_PER_TASK = 40;
 const CSV_FORMAT: RegionalFormat = {
   listSeparator: ';',
@@ -160,6 +162,7 @@ function interleavedProject(taskCount: number): Project {
     options: {
       criticalPathEnabled: true,
       dateConstraintsEnabled: false,
+      baselineEnabled: false,
       alwaysShowPatterns: false,
     },
   });
@@ -202,6 +205,21 @@ describe('growth of task placement with the duration of the task', () => {
       batched(PLACEMENTS_PER_RUN, () => placeTask(calendar, longTask, start)),
     );
     console.info(`Task placement: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(CONSTANT_MAX_RATIO);
+  });
+});
+
+describe('growth of the variance with the baseline', () => {
+  it('counts the working days between two ends in a time that does not depend on the gap', () => {
+    const calendar = calendarOf(project([]));
+    const frozen = at(2026, 9, 28, 17);
+    const shortGap = frozen + SHORT_TASK_HOURS;
+    const longGap = frozen + SHORT_TASK_HOURS * SIZE_FACTOR;
+    const ratio = growthRatio(
+      batched(VARIANCES_PER_RUN, () => endVarianceDays(calendar, frozen, shortGap)),
+      batched(VARIANCES_PER_RUN, () => endVarianceDays(calendar, frozen, longGap)),
+    );
+    console.info(`End variance: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(CONSTANT_MAX_RATIO);
   });
 });

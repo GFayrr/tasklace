@@ -525,6 +525,7 @@ function enrichProject(input: Project): fc.Arbitrary<Project> {
     const options = fc.record({
       criticalPathEnabled: fc.boolean(),
       dateConstraintsEnabled: fc.boolean(),
+      baselineEnabled: fc.boolean(),
       alwaysShowPatterns: fc.boolean(),
     });
     return fc.tuple(tasks, options).map(([enrichedTasks, enrichedOptions]) => ({
