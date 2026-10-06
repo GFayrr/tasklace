@@ -1,4 +1,5 @@
 import { compileCalendar } from '../../core/calendar/compile-calendar';
+import { MIN_PROJECT_YEAR } from '../../core/limits';
 import { exportProjectCsv } from '../../core/exchange/csv/project-csv-export';
 import { exportProjectJson } from '../../core/exchange/project-json';
 import type { Project, TaskId } from '../../core/model/project';
@@ -166,6 +167,7 @@ export class AppState {
   editRequest = $state<EditRequest | null>(null);
   revealRequest = $state<RevealRequest | null>(null);
   #conflictsOpen = $state(false);
+  #unknownFloatsNotice: string | null = null;
   detailsTaskId = $state<TaskId | null>(null);
   #settingsOpen = $state(false);
   #settingsResets = $state(0);
@@ -916,6 +918,7 @@ export class AppState {
     this.editRequest = null;
     this.revealRequest = null;
     this.#conflictsOpen = false;
+    this.#forgetUnknownFloats();
     this.detailsTaskId = null;
     this.closeSettings();
     this.#changedSinceOpened = false;
@@ -970,12 +973,45 @@ export class AppState {
     const move = this.#startMove;
     this.#startMove = null;
     if (!result.ok) {
+      this.#forgetUnknownFloats();
       this.#showScheduleFailure(result.error, project);
       return;
     }
     this.#settingsAlert = null;
+    this.#tellUnknownFloats(result.value);
     if (move !== null && (move.project === null || move.project === project)) {
       this.#tellMovedTasks(move.base, result.value);
+    }
+  }
+
+  /** Removes the message about floats that cannot be worked out, as when another project opens or the schedule fails. */
+  #forgetUnknownFloats(): void {
+    const previous = this.#unknownFloatsNotice;
+    this.#notices = this.notices.filter((notice) => notice.text !== previous);
+    this.#unknownFloatsNotice = null;
+  }
+
+  /** Tells, in one lasting message replaced when the count changes and removed once none is left, how many tasks have a float that cannot be worked out. */
+  #tellUnknownFloats(schedule: Schedule): void {
+    let unknown = 0;
+    for (const taskFloat of schedule.floats?.values() ?? []) {
+      if (taskFloat.totalFloatHours === null) {
+        unknown += 1;
+      }
+    }
+    const text =
+      unknown === 0
+        ? null
+        : fillMessage(countMessage(this.messages.notices.unknownFloats, unknown, this.locale), {
+            firstYear: String(MIN_PROJECT_YEAR),
+          });
+    if (text === this.#unknownFloatsNotice) {
+      return;
+    }
+    this.#forgetUnknownFloats();
+    this.#unknownFloatsNotice = text;
+    if (text !== null) {
+      this.#notify('warning', text, null, true);
     }
   }
 

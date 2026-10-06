@@ -207,6 +207,38 @@ test('manages tags in the settings, lists the conflicts of a person, and deletes
   await expect(page.getByRole('button', { name: '1 conflict' })).toBeVisible();
 });
 
+test('shows the critical path and the floats once turned on in the advanced options, and undoes it', async () => {
+  await addTask('Review');
+  await addTask('Write');
+  await typeInCell('Write', 6, '1');
+  await addTask('Figures');
+  await typeInCell('Figures', 2, '2');
+  await expect(grid.getByRole('columnheader', { name: 'Total float' })).toHaveCount(0);
+  await page.keyboard.press('Control+,');
+  const settings = page.getByRole('dialog', { name: 'Project settings' });
+  await settings.getByRole('tab', { name: 'Advanced options' }).click();
+  const critical = settings.getByRole('switch', { name: 'Critical path' });
+  await critical.click();
+  await expect(critical).toHaveAttribute('aria-checked', 'true');
+  await expect(settings.getByRole('switch', { name: 'Baseline' })).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+  await picture('advanced-options');
+  await settings.getByRole('button', { name: 'Done' }).click();
+  await expect(grid.getByRole('columnheader', { name: 'Total float' })).toBeVisible();
+  await expect(grid.getByRole('columnheader', { name: 'Free float' })).toBeVisible();
+  await expect(row('Write').locator('.name')).toHaveClass(/critical/);
+  await expect(row('Figures').locator('.name')).not.toHaveClass(/critical/);
+  await expect(row('Figures').locator('.float').first()).toHaveText(/\d+ h/);
+  await expect(
+    page.getByText('Critical: delaying these tasks delays the end of the project'),
+  ).toBeVisible();
+  await picture('critical-path');
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(grid.getByRole('columnheader', { name: 'Total float' })).toHaveCount(0);
+});
+
 /** Writes a local working day, about some days away from the day the application created the project and moved forward past a weekend, as an ISO date and time. */
 function isoDaysFromToday(days: number, time: string): string {
   const moment = new Date(today);

@@ -4,7 +4,7 @@ import { MAX_SEGMENTS_PER_TASK, MAX_SEGMENT_GAP_DAYS } from '../limits';
 import type { SchedulableTask } from '../model/project';
 import { at, compileOrThrow, format } from '../testing/civil-time';
 import { milestone, splitTask, workTask } from '../testing/project-builder';
-import { END_PROJECT_HOUR } from '../time';
+import { END_PROJECT_HOUR, MIN_PROJECT_HOUR, QUARTER_HOUR } from '../time';
 import {
   placeTask,
   placeTaskEarliest,
@@ -275,6 +275,34 @@ describe('placeTaskLatest', () => {
   it('propagates errors met while searching', () => {
     const result = placeTaskLatest(calendar, workTask('a', { hoursPerDay: 0 }), MONDAY_9, MONDAY_9);
     expect(result).toEqual({ ok: false, error: 'INVALID_HOURS_PER_DAY' });
+  });
+
+  const partDay = workTask('p', {
+    hoursPerDay: 2,
+    segments: [{ durationHours: 20, gapDaysBefore: 0, startNoEarlierThan: null }],
+  });
+
+  it('refuses a task that would have to start before the first supported year, found by searching', () => {
+    expect(placeTaskLatest(calendar, partDay, at(2020, 1, 6, 10), at(2020, 1, 6, 10))).toEqual({
+      ok: false,
+      error: 'BEYOND_PLANNING_HORIZON',
+    });
+  });
+
+  it('refuses a continuous task whose latest start falls before the first supported year', () => {
+    expect(
+      placeTaskLatest(calendar, threeHours, MIN_PROJECT_HOUR - QUARTER_HOUR, MONDAY_9),
+    ).toEqual({ ok: false, error: 'BEYOND_PLANNING_HORIZON' });
+  });
+
+  it('counts a start running past the last supported year as too late while searching', () => {
+    const result = placeTaskLatest(calendar, partDay, END_PROJECT_HOUR, END_PROJECT_HOUR);
+    const placed = unwrap(result);
+    const lastDay = unwrap(placeTask(calendar, partDay, placed.start));
+    expect(placed).toEqual(lastDay);
+    expect(placed.end).toBeLessThanOrEqual(END_PROJECT_HOUR);
+    const later = placeTask(calendar, partDay, placed.start + 24);
+    expect(later).toEqual({ ok: false, error: 'BEYOND_PLANNING_HORIZON' });
   });
 });
 

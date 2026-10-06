@@ -212,9 +212,10 @@ describe.each([
         const floats = [...(schedule.floats?.values() ?? [])];
         expect(floats).toHaveLength(schedulableTasks(input).length);
         for (const taskFloat of floats) {
-          expect(taskFloat.totalFloatHours).toBeGreaterThanOrEqual(0);
+          const total = taskFloat.totalFloatHours ?? Number.NaN;
+          expect(total).toBeGreaterThanOrEqual(0);
           expect(taskFloat.freeFloatHours).toBeGreaterThanOrEqual(0);
-          expect(taskFloat.freeFloatHours).toBeLessThanOrEqual(taskFloat.totalFloatHours);
+          expect(taskFloat.freeFloatHours).toBeLessThanOrEqual(total);
         }
         expect(floats.some((taskFloat) => taskFloat.isCritical)).toBe(true);
       }),

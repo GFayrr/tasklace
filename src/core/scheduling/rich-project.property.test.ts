@@ -11,7 +11,7 @@ import { constrainsSuccessorStart, dependencyAnchor } from './forward-pass';
 import { scheduleProject, type Schedule, type SchedulingFailure } from './schedule-project';
 import { computePlacementSlots, type Placement } from './task-placement';
 
-/** Schedules a generated project, leaving out the rare project whose dates leave the supported years (a refusal with its own deterministic tests), and failing the property on any other refusal. */
+/** Schedules a generated project, leaving out the rare project whose early dates leave the supported years (a refusal with its own deterministic tests), and failing the property on any other refusal. */
 function scheduled(project: Project): Schedule {
   const result = scheduleProject(project);
   if (!result.ok) {
@@ -337,6 +337,42 @@ describe('projects using every feature', () => {
     },
   );
 
+  it(
+    'keeps unknown floats critical and passed on through every link to their first block, and known free floats within total floats',
+    options,
+    () => {
+      fc.assert(
+        fc.property(richProjectArbitrary, ({ project }) => {
+          const floats = scheduled(project).floats;
+          if (floats === null) {
+            return;
+          }
+          for (const taskFloat of floats.values()) {
+            if (taskFloat.totalFloatHours === null) {
+              expect(taskFloat).toEqual({
+                lateStart: null,
+                lateFinish: null,
+                totalFloatHours: null,
+                freeFloatHours: null,
+                isCritical: true,
+              });
+            } else {
+              expect(taskFloat.freeFloatHours).toBeLessThanOrEqual(taskFloat.totalFloatHours);
+            }
+          }
+          const actsOnFirstBlock = (dependency: Project['dependencies'][number]) =>
+            (dependency.type === 'finishToStart' || dependency.type === 'startToStart') &&
+            (dependency.successorBlock ?? 0) === 0;
+          for (const dependency of project.dependencies.filter(actsOnFirstBlock)) {
+            const unknownAfter = floats.get(dependency.successorId)?.totalFloatHours === null;
+            const unknownBefore = floats.get(dependency.predecessorId)?.totalFloatHours === null;
+            expect(unknownAfter && !unknownBefore).toBe(false);
+          }
+        }),
+      );
+    },
+  );
+
   it('computes the same schedule whatever the order of the tasks, links and tags', options, () => {
     fc.assert(
       fc.property(reorderedArbitrary, ({ project, reordered }) => {
@@ -356,7 +392,7 @@ describe('projects using every feature', () => {
 });
 
 describe('a generated project whose latest dates fall before the supported years', () => {
-  it('is left out of the properties, as its refusal is tested on its own', () => {
+  it('keeps its schedule, the floats it cannot work out being unknown', () => {
     const block = (durationHours: number, gapDaysBefore: number) => ({
       durationHours,
       gapDaysBefore,
@@ -387,11 +423,14 @@ describe('a generated project whose latest dates fall before the supported years
         nonWorkingPeriods: [],
       },
     };
-    const result = scheduleProject(counterexample);
-    expect(result.ok ? null : isBeyondHorizon(result.error)).toBe(true);
-    expect(() => {
-      scheduled(counterexample);
-    }).toThrow(fc.PreconditionFailure);
+    const schedule = scheduled(counterexample);
+    expect([
+      schedule.floats?.get('a')?.totalFloatHours,
+      schedule.floats?.get('b')?.totalFloatHours,
+    ]).toEqual([null, -83]);
     expect(isBeyondHorizon({ kind: 'startDate' })).toBe(false);
+    expect(
+      isBeyondHorizon({ kind: 'task', error: { code: 'BEYOND_PLANNING_HORIZON', taskId: 'a' } }),
+    ).toBe(true);
   });
 });

@@ -122,9 +122,25 @@ Done in three parts, each with its mockups approved first.
 - A "N conflicts" button after the legend opens the list of conflicts; a click on a line selects its first task and scrolls the table and the timeline to it.
 - A project can have up to 256 tags.
 
-#### 5e-3. Advanced options (to do)
+#### 5e-3. Advanced options
 
-- Disabled by default: critical path, date constraints, baseline plan with ghost bars, always showing patterns.
+Done in three parts, each with its mockups approved first. Every advanced feature is off by default and turned on in the Advanced options tab of the project settings.
+
+##### 5e-3a. Advanced options tab and critical path (done)
+
+- The Advanced options tab: one switch per feature, each explained in a sentence. Critical path, date constraints and always showing patterns work; the baseline is shown as coming soon.
+- With the critical path on, the table shows the total and free float of every task, with a hint on each header; the timeline underlines critical tasks in graphite and draws how far other tasks can slip as a dashed line; the legend explains the mark.
+- When a task would have to start before 2020, the first year handled, to finish on time, the plan stays available: only the floats concerned are unknown, shown as "?", and one message explains why and what to do.
+
+##### 5e-3b. Date constraints (to do)
+
+- "Must finish on" and deadline dates in the details of a task.
+- Their conflicts listed in the same panel as the conflicts of people and teams, and the tasks concerned marked in the table and on the timeline.
+
+##### 5e-3c. Baseline (to do)
+
+- A baseline switch, off by default; taking a baseline replaces the previous one after confirmation.
+- A ghost bar under each bar and a Variance column, in working days early or late.
 
 ## After version 1
 
