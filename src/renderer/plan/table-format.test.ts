@@ -11,7 +11,13 @@ import {
 } from '../../core/testing/project-builder';
 import { loadMessages } from '../i18n/messages';
 import { at } from '../../core/testing/civil-time';
-import { createTableFormatters, dateConflictTitles, floatCells, taskCells } from './table-format';
+import {
+  createTableFormatters,
+  dateConflictTitles,
+  floatCells,
+  taskCells,
+  varianceCell,
+} from './table-format';
 
 const messages = await loadMessages('en');
 const FORMATTERS = createTableFormatters('en-US');
@@ -178,5 +184,71 @@ describe('dateConflictTitles', () => {
       ['b', 'Cannot finish on @9: it ends at @17 at the earliest.'],
     ]);
     expect(dateConflictTitles([], messages, moment).size).toBe(0);
+  });
+});
+
+describe('varianceCell', () => {
+  /** Builds a baseline entry for a task of the sample plan with a frozen end. */
+  const frozen = (taskId: string, end: number) => ({
+    taskId,
+    start: end - 7,
+    end,
+    durationHours: 7,
+  });
+  const cellOf = (id: string, end: number) =>
+    varianceCell(taskOf(id), frozen(id, end), SCHEDULE, CALENDAR, FORMATTERS, messages);
+
+  it('counts in working days how far each task now ends from the baseline, with its sign', () => {
+    expect([
+      cellOf('b', at(2026, 9, 28, 17)),
+      cellOf('a', at(2026, 9, 29, 17)),
+      cellOf('m', at(2026, 9, 30, 17)),
+      cellOf('s', at(2026, 9, 30, 12)),
+    ]).toEqual([
+      { text: '+2 d', kind: 'behind' },
+      { text: '\u22121 d', kind: 'ahead' },
+      { text: '0 d', kind: 'onTime' },
+      { text: '+0.5 d', kind: 'behind' },
+    ]);
+  });
+
+  it('writes a dash for a task not in the baseline or a summary without dates, nothing until its dates are known and a question mark when the gap cannot be counted', () => {
+    expect(varianceCell(taskOf('a'), undefined, SCHEDULE, CALENDAR, FORMATTERS, messages)).toEqual({
+      text: '\u2014',
+      kind: 'notInBaseline',
+    });
+    const entry = frozen('a', at(2026, 9, 29, 17));
+    expect(varianceCell(taskOf('a'), entry, null, CALENDAR, FORMATTERS, messages)).toEqual({
+      text: '',
+      kind: 'pending',
+    });
+    expect(
+      varianceCell(summary('unknown'), entry, SCHEDULE, CALENDAR, FORMATTERS, messages),
+    ).toEqual({ text: '', kind: 'pending' });
+    const empty = project([summary('empty')]);
+    expect(
+      varianceCell(summary('empty'), entry, scheduleOrThrow(empty), CALENDAR, FORMATTERS, messages),
+    ).toEqual({ text: '\u2014', kind: 'noDates' });
+    expect(varianceCell(taskOf('a'), entry, SCHEDULE, null, FORMATTERS, messages)).toEqual({
+      text: '?',
+      kind: 'unknown',
+    });
+    expect(
+      varianceCell(
+        taskOf('a'),
+        frozen('a', Number.MAX_SAFE_INTEGER),
+        SCHEDULE,
+        CALENDAR,
+        FORMATTERS,
+        messages,
+      ),
+    ).toEqual({ text: '?', kind: 'unknown' });
+  });
+
+  it('shows a gap of an hour late or early as a quarter of a day, never as on time', () => {
+    expect([cellOf('a', at(2026, 9, 28, 16)), cellOf('a', at(2026, 9, 29, 9) + 0.5)]).toEqual([
+      { text: '+0.25 d', kind: 'behind' },
+      { text: '\u22120.25 d', kind: 'ahead' },
+    ]);
   });
 });

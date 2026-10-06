@@ -16,6 +16,8 @@ import {
   renameProject,
   setNonWorkingPeriod,
   toggleProjectOption,
+  setBaseline,
+  clearBaseline,
   setProjectStart,
   setTimeRange,
   setWorkingWeekday,
@@ -260,6 +262,25 @@ describe('a calendar change applied to a session', () => {
     expect(opened.value.project().calendar).toEqual({
       ...PLAN.calendar,
       nonWorkingPeriods: [{ firstDay: day(2026, 10, 12), lastDay: day(2026, 10, 12) }],
+    });
+  });
+});
+
+describe('setBaseline and clearBaseline', () => {
+  it('replace the baseline of the project, or remove it', () => {
+    const baseline = {
+      takenAt: at(2026, 10, 6, 10),
+      entries: [
+        { taskId: 'a', start: at(2026, 10, 12, 8), end: at(2026, 10, 12, 17), durationHours: 9 },
+      ],
+    };
+    expect(setBaseline(baseline)).toEqual({
+      ok: true,
+      value: [{ type: 'updateProject', fields: { baseline } }],
+    });
+    expect(clearBaseline()).toEqual({
+      ok: true,
+      value: [{ type: 'updateProject', fields: { baseline: null } }],
     });
   });
 });

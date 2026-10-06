@@ -118,6 +118,23 @@ const START = 490_896;
 
 describe('projects using every feature', () => {
   it(
+    'computes the same schedule whatever its baseline and whether the baseline is shown',
+    options,
+    () => {
+      fc.assert(
+        fc.property(richProjectArbitrary, ({ project }) => {
+          const without = {
+            ...project,
+            options: { ...project.options, baselineEnabled: !project.options.baselineEnabled },
+            baseline: null,
+          };
+          expect(scheduleProject(without)).toEqual(scheduleProject(project));
+        }),
+      );
+    },
+  );
+
+  it(
     'respects every dependency, whatever its tags, date constraints, daily starts and outline',
     options,
     () => {
@@ -413,6 +430,7 @@ describe('a generated project whose latest dates fall before the supported years
           options: {
             criticalPathEnabled: true,
             dateConstraintsEnabled: true,
+            baselineEnabled: false,
             alwaysShowPatterns: false,
           },
         },

@@ -1,6 +1,6 @@
 import { formatDate, parseDate, parseDateTime } from '../../core/civil-format';
 import type { DayRange, TimeRange, WorkingCalendar } from '../../core/model/calendar';
-import type { ProjectOptions } from '../../core/model/project';
+import type { Baseline, ProjectOptions } from '../../core/model/project';
 
 import { failure, success } from '../../core/result';
 import type { SharedOperation } from '../../core/shared/shared-operations';
@@ -162,4 +162,14 @@ function calendarEdit(context: EditContext, change: Partial<WorkingCalendar>): E
 export function toggleProjectOption(context: EditContext, option: BooleanProjectOption): Edit {
   const options = { ...context.project.options, [option]: !context.project.options[option] };
   return success([{ type: 'updateProject', fields: { options } }]);
+}
+
+/** Replaces the baseline of the project with a newly taken one. */
+export function setBaseline(baseline: Baseline): Edit {
+  return success([{ type: 'updateProject', fields: { baseline } }]);
+}
+
+/** Removes the baseline of the project. */
+export function clearBaseline(): Edit {
+  return success([{ type: 'updateProject', fields: { baseline: null } }]);
 }

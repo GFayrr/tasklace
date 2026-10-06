@@ -47,6 +47,7 @@ const PROJECT_FIELD_KEYS: readonly string[] = [
   'nonWorkingPeriods',
   'criticalPathEnabled',
   'dateConstraintsEnabled',
+  'baselineEnabled',
   'alwaysShowPatterns',
   'baseline',
 ];
@@ -217,6 +218,7 @@ function headerFields(header: ProjectHeader): object {
     nonWorkingPeriods: calendar.nonWorkingPeriods,
     criticalPathEnabled: options.criticalPathEnabled,
     dateConstraintsEnabled: options.dateConstraintsEnabled,
+    baselineEnabled: options.baselineEnabled,
     alwaysShowPatterns: options.alwaysShowPatterns,
     baseline: header.baseline,
   };
@@ -240,6 +242,7 @@ function readData(
     options: {
       criticalPathEnabled: root.get('criticalPathEnabled'),
       dateConstraintsEnabled: root.get('dateConstraintsEnabled'),
+      baselineEnabled: root.get('baselineEnabled'),
       alwaysShowPatterns: root.get('alwaysShowPatterns'),
     },
     baseline: root.get('baseline'),

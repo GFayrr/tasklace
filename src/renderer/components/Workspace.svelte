@@ -29,7 +29,7 @@
     type BarShape,
     type PlacedShape,
   } from '../plan/timeline-gestures';
-  import { ROW_HEIGHT, timelineFrame, xOf } from '../plan/timeline-geometry';
+  import { baselineMarks, ROW_HEIGHT, timelineFrame, xOf } from '../plan/timeline-geometry';
   import { tagStylesOf } from '../plan/tag-styles';
   import { localHourOf } from '../project/new-project';
   import { pixels } from './css-length';
@@ -66,6 +66,7 @@
       ...app.dateConflictLines.map((line) => line.conflict.taskId),
     ]),
   );
+  const baseline = $derived(app.shownBaseline);
   const deadlines = $derived(
     project.options.dateConstraintsEnabled
       ? {
@@ -78,13 +79,12 @@
       : null,
   );
   const frame = $derived(
-    timelineFrame(
-      project.startDate,
-      app.schedule,
-      today,
-      pixelsPerHour(app.zoom),
-      app.shownDeadlines,
-    ),
+    timelineFrame(project.startDate, app.schedule, today, pixelsPerHour(app.zoom), [
+      ...app.shownDeadlines,
+      ...baselineMarks(project.options.baselineEnabled ? project.baseline : null, (id) =>
+        outline.wbsById.has(id),
+      ),
+    ]),
   );
   let scrollLeft = $state(untrack(() => startScrollLeft()));
   const formatters = $derived(createTableFormatters(app.locale));
@@ -103,6 +103,7 @@
     tagStyles,
     conflictTaskIds,
     deadlines,
+    baseline,
     selectedTaskId: app.selectedTaskId,
     today,
   });

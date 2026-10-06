@@ -42,6 +42,7 @@ const PLAN: Project = project(
     options: {
       criticalPathEnabled: false,
       dateConstraintsEnabled: true,
+      baselineEnabled: false,
       alwaysShowPatterns: false,
     },
   },
@@ -199,6 +200,7 @@ describe('the dates tasks do not meet', () => {
         item.textContent.trim(),
       );
     expect(key()).toEqual([STATUS.deadline]);
+    expect(single(root, '.status-bar .deadline-key').title).toBe(STATUS.deadlineHint);
     await toggleDateConstraints(app);
     expect(key()).toEqual([]);
     expect(root.querySelectorAll('.status-bar .conflicts')).toHaveLength(0);

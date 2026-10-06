@@ -83,6 +83,7 @@ function sceneOf(overrides: Partial<TimelineScene> = {}): TimelineScene {
     tagStyles: tagStylesOf(PLAN),
     conflictTaskIds: new Set(),
     deadlines: null,
+    baseline: null,
     selectedTaskId: null,
     today: at(2026, 9, 30, 12),
     preview: null,
@@ -286,6 +287,76 @@ describe('paintTimelineBody', () => {
         (call) => call.args[2] === 2 && call.args[3] === ROW_HEIGHT - 4,
       ),
     ).toEqual([]);
+  });
+
+  it('draws the baseline of each visible task as a thin pale bar at the top of its row, and a hollow diamond for a frozen instant', () => {
+    const entries = new Map([
+      [
+        'c',
+        { taskId: 'c', start: at(2026, 9, 29, 9), end: at(2026, 9, 30, 17), durationHours: 14 },
+      ],
+      ['n', { taskId: 'n', start: at(2026, 10, 1, 9), end: at(2026, 10, 1, 9), durationHours: 0 }],
+    ]);
+    const rowTop = (id: string) => (OUTLINE.rowIndexById.get(id) ?? -1) * ROW_HEIGHT;
+    const ghostTop = (id: string) => rowTop(id) + 2;
+    const pale = paleColor(THEME.textSecondary);
+    const calls = paintBody({ baseline: entries });
+    const ghosts = callsOf(calls, 'fillRect').filter(
+      (call) => call.fillStyle === pale && call.args[3] === 3,
+    );
+    expect(ghosts.map((call) => call.args)).toEqual([
+      [
+        xOf(FRAME, at(2026, 9, 29, 9)),
+        ghostTop('c'),
+        xOf(FRAME, at(2026, 9, 30, 17)) - xOf(FRAME, at(2026, 9, 29, 9)),
+        3,
+      ],
+    ]);
+    const x = xOf(FRAME, at(2026, 10, 1, 9));
+    const middle = ghostTop('n') + 1.5;
+    const start = calls.findIndex(
+      (call) => call.name === 'moveTo' && call.args[0] === x && call.args[1] === middle - 3,
+    );
+    expect(
+      calls.slice(start - 1, start + 7).map((call) => [call.name, ...call.args].join(' ')),
+    ).toEqual([
+      'beginPath',
+      `moveTo ${String(x)} ${String(middle - 3)}`,
+      `lineTo ${String(x + 3)} ${String(middle)}`,
+      `lineTo ${String(x)} ${String(middle + 3)}`,
+      `lineTo ${String(x - 3)} ${String(middle)}`,
+      'closePath',
+      'fill',
+      'stroke',
+    ]);
+    expect([
+      calls[start + 5]?.fillStyle,
+      calls[start + 6]?.strokeStyle,
+      calls[start + 6]?.lineWidth,
+    ]).toEqual([THEME.surface, THEME.textSecondary, 1.5]);
+    const firstBar = calls.findIndex((call) => call.fillStyle === paleColor(THEME.bar));
+    const [ghost] = ghosts;
+    if (ghost === undefined) {
+      throw new Error('No ghost');
+    }
+    expect(calls.indexOf(ghost)).toBeLessThan(firstBar);
+    expect(callsOf(paintBody(), 'fillRect').filter((call) => call.fillStyle === pale)).toEqual([]);
+  });
+
+  it('draws a ghost at least two pixels wide, and only for the visible rows', () => {
+    const instant = at(2026, 9, 29, 9);
+    const entries = new Map([
+      ['a', { taskId: 'a', start: instant, end: instant + 0.25, durationHours: 0.25 }],
+      ['w', { taskId: 'w', start: instant, end: instant + 1, durationHours: 1 }],
+    ]);
+    const pale = paleColor(THEME.textSecondary);
+    const below = { ...VIEWPORT, top: ((OUTLINE.rowIndexById.get('a') ?? -1) + 1) * ROW_HEIGHT };
+    const ghosts = (viewport: Viewport) =>
+      callsOf(paintBody({ baseline: entries }, viewport), 'fillRect')
+        .filter((call) => call.fillStyle === pale && call.args[3] === 3)
+        .map((call) => call.args[2]);
+    expect(ghosts(VIEWPORT)).toEqual([2, xOf(FRAME, instant + 1) - xOf(FRAME, instant)]);
+    expect(ghosts(below)).toEqual([xOf(FRAME, instant + 1) - xOf(FRAME, instant)]);
   });
 
   it('underlines the blocks of critical tasks in graphite and draws the float of the others as a dashed line', () => {

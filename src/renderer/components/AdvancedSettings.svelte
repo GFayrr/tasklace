@@ -1,13 +1,18 @@
 <script lang="ts">
   import type { Project } from '../../core/model/project';
   import type { AppState } from '../app/app-state.svelte';
+  import { createMomentFormatter } from '../i18n/format';
+  import { fillMessage } from '../i18n/messages';
   import { toggleProjectOption, type BooleanProjectOption } from '../plan/project-commands';
 
   type Feature = 'criticalPath' | 'dateConstraints' | 'baseline' | 'alwaysShowPatterns';
+  type Question = 'replace' | 'clear';
 
   let { app, project }: { app: AppState; project: Project } = $props();
 
   const text = $derived(app.messages.settings);
+  const formatMoment = $derived(createMomentFormatter(app.locale));
+  const HISTORY_KEYS: ReadonlySet<string> = new Set(['z', 'y']);
   const FEATURES: readonly Feature[] = [
     'criticalPath',
     'dateConstraints',
@@ -17,21 +22,91 @@
   const CHOICES = {
     criticalPath: { option: 'criticalPathEnabled', hint: 'criticalPathHint' },
     dateConstraints: { option: 'dateConstraintsEnabled', hint: 'dateConstraintsHint' },
-    baseline: { option: null, hint: 'baselineHint' },
+    baseline: { option: 'baselineEnabled', hint: 'baselineHint' },
     alwaysShowPatterns: { option: 'alwaysShowPatterns', hint: 'alwaysShowPatternsHint' },
   } as const satisfies Readonly<
-    Record<
-      Feature,
-      { readonly option: BooleanProjectOption | null; readonly hint: keyof typeof text }
-    >
+    Record<Feature, { readonly option: BooleanProjectOption; readonly hint: keyof typeof text }>
   >;
+  const questions = $derived({
+    replace: {
+      title: text.replaceBaselineTitle,
+      body: text.replaceBaselineBody,
+      confirm: text.replaceBaselineConfirm,
+      danger: false,
+      apply: () => app.setBaseline(),
+    },
+    clear: {
+      title: text.clearBaselineTitle,
+      body: text.clearBaselineBody,
+      confirm: text.clearBaselineConfirm,
+      danger: true,
+      apply: () => app.clearBaseline(),
+    },
+  } satisfies Record<
+    Question,
+    {
+      readonly title: string;
+      readonly body: string;
+      readonly confirm: string;
+      readonly danger: boolean;
+      readonly apply: () => string | null;
+    }
+  >);
   let refusal = $state<{ readonly text: string; readonly resets: number } | null>(null);
+  let asking = $state<Question | null>(null);
   const shownRefusal = $derived(refusal?.resets === app.settingsResets ? refusal.text : null);
 
   /** Turns an option of the project on or off, showing the reason when it is refused. */
   function toggle(option: BooleanProjectOption): void {
-    const refused = app.editSettings((context) => toggleProjectOption(context, option));
+    show(app.editSettings((context) => toggleProjectOption(context, option)));
+  }
+
+  /** Shows why a change was refused, or forgets an earlier refusal once a change is applied. */
+  function show(refused: string | null): void {
     refusal = refused === null ? null : { text: refused, resets: app.settingsResets };
+  }
+
+  /** Sets the first baseline at once, or asks before replacing the one the project has. */
+  function setBaseline(): void {
+    if (project.baseline === null) {
+      show(app.setBaseline());
+    } else {
+      asking = 'replace';
+    }
+  }
+
+  /** Applies the change the user confirmed. */
+  function confirm(question: Question): void {
+    asking = null;
+    show(questions[question].apply());
+  }
+
+  $effect(() => {
+    if (!project.options.baselineEnabled || project.baseline === null) {
+      asking = null;
+    }
+  });
+
+  /** Opens the confirmation dialog as a modal while a question waits for an answer, and closes it otherwise. */
+  function followQuestion(dialog: HTMLDialogElement): void {
+    if (asking !== null && !dialog.open) {
+      dialog.showModal();
+    } else if (asking === null && dialog.open) {
+      dialog.close();
+    }
+  }
+
+  /** Keeps undo and redo from changing the baseline while the user is asked to confirm. */
+  function holdHistory(dialog: HTMLDialogElement): () => void {
+    const hold = (event: KeyboardEvent): void => {
+      if ((event.ctrlKey || event.metaKey) && HISTORY_KEYS.has(event.key.toLowerCase())) {
+        event.stopPropagation();
+      }
+    };
+    dialog.addEventListener('keydown', hold);
+    return () => {
+      dialog.removeEventListener('keydown', hold);
+    };
   }
 </script>
 
@@ -42,30 +117,45 @@
       <div class="words">
         <h3 id={`advanced-${feature}`}>{text[feature]}</h3>
         <p>{text[hint]}</p>
-        {#if option === null}
-          <span class="soon">{text.soon}</span>
-        {/if}
       </div>
-      {#if option === null}
-        <button
-          type="button"
-          class="switch"
-          role="switch"
-          aria-checked="false"
-          aria-disabled="true"
-          aria-labelledby={`advanced-${feature}`}
-        ></button>
-      {:else}
-        <button
-          type="button"
-          class="switch"
-          role="switch"
-          aria-checked={project.options[option]}
-          aria-labelledby={`advanced-${feature}`}
-          onclick={() => {
-            toggle(option);
-          }}
-        ></button>
+      <button
+        type="button"
+        class="switch"
+        role="switch"
+        aria-checked={project.options[option]}
+        aria-labelledby={`advanced-${feature}`}
+        onclick={() => {
+          toggle(option);
+        }}
+      ></button>
+      {#if feature === 'baseline' && project.options.baselineEnabled}
+        <div class="baseline">
+          {#if project.baseline === null}
+            <span class="when">{text.baselineNone}</span>
+            <button type="button" class="button primary" onclick={setBaseline}
+              >{text.setBaseline}</button
+            >
+          {:else}
+            <span class="when"
+              >{fillMessage(text.baselineSetOn, {
+                date: formatMoment(project.baseline.takenAt),
+              })}</span
+            >
+            <button type="button" class="button" onclick={setBaseline}
+              >{text.setBaselineAgain}</button
+            >
+            <button
+              type="button"
+              class="button quiet"
+              onclick={() => {
+                asking = 'clear';
+              }}>{text.clearBaseline}</button
+            >
+          {/if}
+        </div>
+        {#if app.baselineNotice !== null}
+          <p class="notice" role="status">{app.baselineNotice}</p>
+        {/if}
       {/if}
     </div>
   {/each}
@@ -73,6 +163,45 @@
     <p class="refusal" role="alert">{shownRefusal}</p>
   {/if}
 </div>
+
+<dialog
+  class="confirm"
+  aria-labelledby="baseline-question-title"
+  {@attach followQuestion}
+  {@attach holdHistory}
+  onclose={(event) => {
+    if (!event.currentTarget.open) {
+      asking = null;
+    }
+  }}
+>
+  {#if asking !== null}
+    {@const question = asking}
+    {@const words = questions[question]}
+    <h3 id="baseline-question-title">{words.title}</h3>
+    <p>
+      {fillMessage(words.body, {
+        date: project.baseline === null ? '' : formatMoment(project.baseline.takenAt),
+      })}
+    </p>
+    <div class="actions">
+      <button
+        type="button"
+        class="button"
+        onclick={() => {
+          asking = null;
+        }}>{text.cancel}</button
+      >
+      <button
+        type="button"
+        class={['button', { primary: !words.danger, danger: words.danger }]}
+        onclick={() => {
+          confirm(question);
+        }}>{words.confirm}</button
+      >
+    </div>
+  {/if}
+</dialog>
 
 <style>
   .advanced {
@@ -103,12 +232,6 @@
     margin: 0;
     font-size: var(--font-size-small);
     color: var(--color-text-secondary);
-  }
-
-  .soon {
-    font-size: 12px;
-    color: var(--color-text-secondary);
-    opacity: 0.8;
   }
 
   .switch {
@@ -143,9 +266,88 @@
     left: 19px;
   }
 
-  .switch[aria-disabled='true'] {
-    cursor: not-allowed;
-    opacity: 0.45;
+  .baseline {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-background);
+    border: 1px solid var(--color-panel);
+    border-radius: var(--radius);
+  }
+
+  .notice {
+    grid-column: 1 / -1;
+    color: var(--color-warning);
+  }
+
+  .when {
+    flex: 1;
+    min-width: 180px;
+    font-size: var(--font-size-small);
+    color: var(--color-text-secondary);
+  }
+
+  .button {
+    height: var(--control-height);
+    padding: 0 var(--space-3);
+    font-weight: 500;
+    color: var(--color-text);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    cursor: pointer;
+  }
+
+  .button:hover {
+    background: var(--color-panel);
+  }
+
+  .button.quiet {
+    color: var(--color-text-secondary);
+  }
+
+  .button.primary {
+    color: var(--color-action-text);
+    background: var(--color-action);
+    border-color: var(--color-action);
+  }
+
+  .button.danger {
+    color: var(--color-action-text);
+    background: var(--color-error);
+    border-color: var(--color-error);
+  }
+
+  .confirm {
+    width: min(420px, calc(100% - 32px));
+    padding: var(--space-6);
+    color: var(--color-text);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: calc(var(--radius) + 4px);
+  }
+
+  .confirm::backdrop {
+    background: rgb(28 27 25 / 28%);
+  }
+
+  .confirm h3 {
+    margin: 0 0 var(--space-3);
+  }
+
+  .confirm p {
+    margin: 0 0 var(--space-4);
+    font-size: var(--font-size);
+    color: var(--color-text);
+  }
+
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
   }
 
   .refusal {

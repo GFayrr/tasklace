@@ -1,6 +1,7 @@
 import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
 import { countWorkingHours } from '../../core/calendar/working-time';
-import type { Task, TaskId } from '../../core/model/project';
+import { endVarianceDays } from '../../core/baseline/end-variance';
+import type { BaselineEntry, Task, TaskId } from '../../core/model/project';
 import type { TaskFloat } from '../../core/scheduling/backward-pass';
 import type { SchedulingConflictCode } from '../../core/scheduling/forward-pass';
 import type { Schedule } from '../../core/scheduling/schedule-project';
@@ -22,6 +23,14 @@ export interface TableFormatters {
   readonly percent: (percent: number) => string;
 }
 
+export type VarianceKind =
+  'behind' | 'ahead' | 'onTime' | 'notInBaseline' | 'noDates' | 'unknown' | 'pending';
+
+export interface VarianceCell {
+  readonly text: string;
+  readonly kind: VarianceKind;
+}
+
 export interface FloatCells {
   readonly total: string;
   readonly free: string;
@@ -35,6 +44,15 @@ const NO_FLOAT: FloatCells = { total: '', free: '', isCritical: false, isUnknown
 const UNKNOWN_FLOAT = '?';
 const MINUS_SIGN = '\u2212';
 const SENTENCE_SEPARATOR = ' ';
+const PLUS_SIGN = '+';
+const NO_VARIANCE = '\u2014';
+const VARIANCE_SIGNS = {
+  behind: PLUS_SIGN,
+  ahead: MINUS_SIGN,
+  onTime: '',
+} as const satisfies Record<'behind' | 'ahead' | 'onTime', string>;
+const UNKNOWN_VARIANCE = '?';
+const PENDING_VARIANCE: VarianceCell = { text: '', kind: 'pending' };
 
 /** Creates the number formatters of the task table in the regional format, dates being always written in ISO form. */
 export function createTableFormatters(locale: string): TableFormatters {
@@ -135,4 +153,43 @@ export function dateConflictTitles(
     );
   }
   return titles;
+}
+
+/** Writes how many working days a task now ends after (+) or before (−) its end in the baseline, a dash for a task the baseline does not hold or a summary without dates, nothing while its end is not known yet and a question mark when the gap cannot be counted. */
+export function varianceCell(
+  task: Task,
+  entry: BaselineEntry | undefined,
+  schedule: Schedule | null,
+  calendar: CompiledCalendar | null,
+  formatters: TableFormatters,
+  messages: Messages,
+): VarianceCell {
+  if (entry === undefined) {
+    return { text: NO_VARIANCE, kind: 'notInBaseline' };
+  }
+  const end = scheduledEnd(task, schedule);
+  if (end === 'pending' || end === 'noDates') {
+    return end === 'pending' ? PENDING_VARIANCE : { text: NO_VARIANCE, kind: 'noDates' };
+  }
+  const days = calendar === null ? null : endVarianceDays(calendar, entry.end, end);
+  if (days?.ok !== true) {
+    return { text: UNKNOWN_VARIANCE, kind: 'unknown' };
+  }
+  const kind = days.value > 0 ? 'behind' : days.value < 0 ? 'ahead' : 'onTime';
+  const text = fillMessage(messages.table.varianceDays, {
+    days: `${VARIANCE_SIGNS[kind]}${formatters.number(Math.abs(days.value))}`,
+  });
+  return { text, kind };
+}
+
+/** Returns the end a task has in a schedule, the end of its children for a summary, 'noDates' for a summary without any, or 'pending' while the schedule does not know the task. */
+function scheduledEnd(task: Task, schedule: Schedule | null): ProjectHour | 'noDates' | 'pending' {
+  if (task.kind !== 'summary') {
+    return schedule?.placements.get(task.id)?.end ?? 'pending';
+  }
+  const dates = schedule?.summaries.get(task.id);
+  if (dates === undefined) {
+    return 'pending';
+  }
+  return dates.end ?? 'noDates';
 }

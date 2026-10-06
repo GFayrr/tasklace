@@ -39,13 +39,19 @@
     {/each}
   </ul>
   {#if app.schedule?.floats != null}
-    <span class="critical-key">
+    <span class="critical-key" title={text.status.criticalHint}>
       <span class="critical-mark" aria-hidden="true"></span>
       <span>{text.status.critical}</span>
     </span>
   {/if}
+  {#if app.shownBaseline !== null}
+    <span class="baseline-key" title={text.status.baselineHint}>
+      <span class="ghost-mark" aria-hidden="true"></span>
+      <span>{text.status.baseline}</span>
+    </span>
+  {/if}
   {#if showsDeadlines}
-    <span class="deadline-key">
+    <span class="deadline-key" title={text.status.deadlineHint}>
       <span class="deadline-mark" aria-hidden="true"></span>
       <span>{text.status.deadline}</span>
     </span>
@@ -131,6 +137,7 @@
   }
 
   .critical-key,
+  .baseline-key,
   .deadline-key {
     flex-shrink: 0;
     display: flex;
@@ -144,6 +151,13 @@
     height: 3px;
     border-radius: 2px;
     background: var(--color-action);
+  }
+
+  .ghost-mark {
+    width: 18px;
+    height: 3px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--color-text-secondary) 45%, white);
   }
 
   .deadline-mark {

@@ -9,7 +9,7 @@ import { LARGE_PROJECT_SEED, buildLargeProject } from './large-project';
 import { createRandom } from './random';
 
 const LARGE_PROJECT_FINGERPRINT =
-  '176ce5698f63be87b8c9a80aa4db90ecbe6ad9f3895d8443fa2c5323db4f575c';
+  '28a7245c71c77b2ee66fccf8920bd27d3281b02f55f75ec855b62d04391db0f2';
 
 const SCHEDULE_FINGERPRINT = '04da93f6c20d9d0f9bbd12c17e74b6444fb3fae72c73cb60c0bedd557553a7b5';
 const ADVANCED_SCHEDULE_FINGERPRINT =
@@ -115,6 +115,7 @@ describe('large project schedule', () => {
       options: {
         criticalPathEnabled: true,
         dateConstraintsEnabled: true,
+        baselineEnabled: false,
         alwaysShowPatterns: false,
       },
     };

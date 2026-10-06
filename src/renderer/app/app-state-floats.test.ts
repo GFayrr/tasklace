@@ -36,6 +36,7 @@ function sparse(waiting: readonly string[]): Project {
         options: {
           criticalPathEnabled: true,
           dateConstraintsEnabled: true,
+          baselineEnabled: false,
           alwaysShowPatterns: false,
         },
       },

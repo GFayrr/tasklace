@@ -140,6 +140,7 @@ export const projectArbitrary: fc.Arbitrary<GeneratedProject> = calendarArbitrar
             options: {
               criticalPathEnabled: true,
               dateConstraintsEnabled: false,
+              baselineEnabled: false,
               alwaysShowPatterns: false,
             },
           }),
@@ -312,6 +313,7 @@ export const richProjectArbitrary: fc.Arbitrary<GeneratedProject> = projectArbit
         }),
         depth: fc.integer({ min: 0, max: MAX_HIERARCHY_DEPTH - 1 }),
         dateConstraintsEnabled: fc.boolean(),
+        baselineEnabled: fc.boolean(),
         alwaysShowPatterns: fc.boolean(),
         baseline: baselineShapeArbitrary,
       })
@@ -360,6 +362,7 @@ export const richProjectArbitrary: fc.Arbitrary<GeneratedProject> = projectArbit
             options: {
               criticalPathEnabled: true,
               dateConstraintsEnabled: extra.dateConstraintsEnabled,
+              baselineEnabled: extra.baselineEnabled,
               alwaysShowPatterns: extra.alwaysShowPatterns,
             },
           },

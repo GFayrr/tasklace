@@ -221,8 +221,8 @@ test('shows the critical path and the floats once turned on in the advanced opti
   await critical.click();
   await expect(critical).toHaveAttribute('aria-checked', 'true');
   await expect(settings.getByRole('switch', { name: 'Baseline' })).toHaveAttribute(
-    'aria-disabled',
-    'true',
+    'aria-checked',
+    'false',
   );
   await picture('advanced-options');
   await settings.getByRole('button', { name: 'Done' }).click();
@@ -231,9 +231,10 @@ test('shows the critical path and the floats once turned on in the advanced opti
   await expect(row('Write').locator('.name')).toHaveClass(/critical/);
   await expect(row('Figures').locator('.name')).not.toHaveClass(/critical/);
   await expect(row('Figures').locator('.float').first()).toHaveText(/\d+ h/);
-  await expect(
-    page.getByText('Critical: delaying these tasks delays the end of the project'),
-  ).toBeVisible();
+  await expect(page.locator('.status-bar .critical-key')).toHaveAttribute(
+    'title',
+    'Critical tasks: delaying them delays the end of the project.',
+  );
   await picture('critical-path');
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(grid.getByRole('columnheader', { name: 'Total float' })).toHaveCount(0);
@@ -378,6 +379,59 @@ test('flags a missed deadline once date constraints are on, lists it and leads t
   await expect(end).not.toHaveClass(/late/);
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(page.getByRole('button', { name: '1 conflict' })).toBeVisible();
+});
+
+test('sets a baseline, shows how far a task moved from it, then replaces and clears it', async () => {
+  await addTask('Write');
+  await addTask('Review');
+  await page.keyboard.press('Control+,');
+  const settings = page.getByRole('dialog', { name: 'Project settings' });
+  await settings.getByRole('tab', { name: 'Advanced options' }).click();
+  await settings.getByRole('switch', { name: 'Baseline' }).click();
+  await expect(settings.getByText('No baseline set yet.')).toBeVisible();
+  await settings.getByRole('button', { name: 'Set baseline' }).click();
+  await expect(settings.getByText(/^Set on .+\.$/)).toBeVisible();
+  await picture('baseline-settings');
+  await settings.getByRole('button', { name: 'Done' }).click();
+
+  await expect(grid.getByRole('columnheader', { name: 'Variance' })).toBeVisible();
+  const variance = row('Write').locator('.variance');
+  await expect(variance).toHaveText('0 d');
+  await typeInCell('Write', 2, '18');
+  await expect(variance).toHaveText('+1 d');
+  await expect(variance).toHaveClass(/behind/);
+  await expect(page.locator('.status-bar .baseline-key')).toHaveText('Baseline');
+  await expect(page.locator('.status-bar .baseline-key')).toHaveAttribute(
+    'title',
+    'Where each task was planned when the baseline was set.',
+  );
+  await addTask('Figures');
+  await expect(row('Figures').locator('.variance')).toHaveText('\u2014');
+  await picture('baseline-variance');
+
+  await page.keyboard.press('Control+,');
+  await settings.getByRole('tab', { name: 'Advanced options' }).click();
+  await settings.getByRole('switch', { name: 'Critical path' }).click();
+  await settings.getByRole('button', { name: 'Done' }).click();
+  await expect(grid.getByRole('columnheader', { name: 'Total float' })).toBeVisible();
+  await expect(grid.getByRole('columnheader', { name: 'Variance' })).toBeVisible();
+  await picture('baseline-critical');
+
+  await page.keyboard.press('Control+,');
+  await settings.getByRole('tab', { name: 'Advanced options' }).click();
+  await settings.getByRole('button', { name: 'Set again' }).click();
+  const replace = page.getByRole('dialog', { name: 'Replace the baseline?' });
+  await replace.getByRole('button', { name: 'Replace the baseline' }).click();
+  await expect(replace).toBeHidden();
+  await settings.getByRole('button', { name: 'Clear baseline' }).click();
+  const clear = page.getByRole('dialog', { name: 'Clear the baseline?' });
+  await clear.getByRole('button', { name: 'Clear the baseline' }).click();
+  await expect(settings.getByText('No baseline set yet.')).toBeVisible();
+  await settings.getByRole('button', { name: 'Done' }).click();
+  await expect(grid.getByRole('columnheader', { name: 'Variance' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(variance).toHaveText('0 d');
+  await expect(row('Figures').locator('.variance')).toHaveText('0 d');
 });
 
 test('starts a later block no earlier than a date chosen in the details', async () => {

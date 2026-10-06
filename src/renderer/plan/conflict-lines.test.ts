@@ -61,6 +61,7 @@ describe('dateConflictLines', () => {
     options: {
       criticalPathEnabled: false,
       dateConstraintsEnabled: true,
+      baselineEnabled: false,
       alwaysShowPatterns: false,
     },
   });

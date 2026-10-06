@@ -35,7 +35,12 @@ const SPLIT = splitTask(
 );
 
 const NO_WAITS = (): string => '';
-const ON = { criticalPathEnabled: false, dateConstraintsEnabled: true, alwaysShowPatterns: false };
+const ON = {
+  criticalPathEnabled: false,
+  dateConstraintsEnabled: true,
+  baselineEnabled: false,
+  alwaysShowPatterns: false,
+};
 const OFF = { ...ON, dateConstraintsEnabled: false };
 
 describe('draftFromTask and taskFromDraft', () => {

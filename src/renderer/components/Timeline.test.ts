@@ -73,6 +73,7 @@ function renderTimeline(selectedTaskId: string | null = null, scrollTop = 0, pla
     tagStyles: tagStylesOf(plan),
     conflictTaskIds: new Set<string>(),
     deadlines: null,
+    baseline: null,
     selectedTaskId,
     today: at(2026, 9, 28, 12),
   };
@@ -238,6 +239,7 @@ describe('Timeline drawing conditions', () => {
         options: {
           criticalPathEnabled: false,
           dateConstraintsEnabled: false,
+          baselineEnabled: false,
           alwaysShowPatterns: true,
         },
       },

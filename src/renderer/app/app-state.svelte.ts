@@ -2,8 +2,9 @@ import { compileCalendar } from '../../core/calendar/compile-calendar';
 import { MIN_PROJECT_YEAR } from '../../core/limits';
 import { exportProjectCsv } from '../../core/exchange/csv/project-csv-export';
 import { exportProjectJson } from '../../core/exchange/project-json';
-import type { Project, TaskId } from '../../core/model/project';
-import { success, type Result } from '../../core/result';
+import type { BaselineEntry, Project, TaskId } from '../../core/model/project';
+import { takeBaseline, type SkippedTask } from '../../core/baseline/take-baseline';
+import { failure, success, type Result } from '../../core/result';
 import type { MergeFailure, SharedRepair } from '../../core/shared/shared-project';
 import type { ValidationIssue } from '../../core/validation/validation-issues';
 import type { DailyWindowErrorCode } from '../../core/calendar/task-slots';
@@ -17,7 +18,12 @@ import {
   type DateConflictLine,
 } from '../plan/conflict-lines';
 import { formatDuration, parseDuration } from '../plan/durations';
-import { renameProject, setProjectStart } from '../plan/project-commands';
+import {
+  clearBaseline,
+  renameProject,
+  setBaseline,
+  setProjectStart,
+} from '../plan/project-commands';
 import { formatTimeOfDay } from '../plan/time-of-day';
 import {
   scheduleProject,
@@ -62,7 +68,8 @@ import {
   type EditContext,
 } from '../plan/task-commands';
 import type { SharedOperation } from '../../core/shared/shared-operations';
-import { buildNewProject } from '../project/new-project';
+import { buildNewProject, localQuarterOf } from '../project/new-project';
+import { entriesByTask, unfrozenTasks } from '../plan/baseline-view';
 import {
   createProjectFiles,
   FileActionError,
@@ -180,6 +187,7 @@ export class AppState {
   #settingsResets = $state(0);
   #settingsNotice = $state<string | null>(null);
   #settingsAlert = $state<string | null>(null);
+  #baselineNotice = $state<string | null>(null);
   #settingsHeld = false;
   #startMove: StartMove | null = null;
   #closePrompt = $state.raw<ClosePrompt | null>(null);
@@ -191,6 +199,14 @@ export class AppState {
   readonly outline = $derived(buildPlanOutline(this.project?.tasks ?? [], this.collapsed));
   readonly calendar = $derived.by(() => {
     const compiled = this.project === null ? null : compileCalendar(this.project.calendar);
+    return compiled?.ok === true ? compiled.value : null;
+  });
+  readonly scheduleCalendar = $derived.by(() => {
+    const project = this.#computed?.project;
+    if (project === this.project) {
+      return this.calendar;
+    }
+    const compiled = project === undefined ? null : compileCalendar(project.calendar);
     return compiled?.ok === true ? compiled.value : null;
   });
 
@@ -265,6 +281,14 @@ export class AppState {
   get shownDeadlines(): readonly ProjectHour[] {
     const project = this.project;
     return project?.options.dateConstraintsEnabled === true ? deadlinesOf(project) : [];
+  }
+
+  /** Returns the frozen dates of the baseline the table and the timeline show, by task, or null while the baseline is turned off or not set. */
+  get shownBaseline(): ReadonlyMap<TaskId, BaselineEntry> | null {
+    const project = this.project;
+    return project?.options.baselineEnabled === true && project.baseline !== null
+      ? entriesByTask(project.baseline)
+      : null;
   }
 
   /** Counts the conflicts of the schedule shown, person or team conflicts and dates not met together, as the list shows them. */
@@ -658,6 +682,59 @@ export class AppState {
     return refusal;
   }
 
+  /** Freezes the plan as it is now as the baseline of the project, replacing the previous one, returning why it was refused or null, and tells in the settings how many tasks other than empty summaries could not be frozen, logging them. */
+  setBaseline(): string | null {
+    const current = this.currentSchedule;
+    const calendar = this.calendar;
+    let unfrozen: readonly SkippedTask[] = [];
+    this.#baselineNotice = null;
+    const refusal = this.editSettings((context) => {
+      if (!current.ok) {
+        return current;
+      }
+      if (current.value === null) {
+        return failure('SCHEDULE_FAILED');
+      }
+      const takenAt = this.#baselineTime();
+      if (takenAt === null || calendar === null) {
+        return failure(takenAt === null ? 'CLOCK_OUT_OF_RANGE' : 'NOT_POSSIBLE');
+      }
+      const frozen = takeBaseline(context.project, current.value, calendar, takenAt);
+      unfrozen = unfrozenTasks(frozen.skipped, context.project.tasks);
+      return setBaseline(frozen.baseline);
+    });
+    if (refusal === null && unfrozen.length > 0) {
+      console.error('Tasks could not be frozen in the baseline:', unfrozen);
+      this.#baselineNotice = countMessage(
+        this.messages.notices.baselineSkipped,
+        unfrozen.length,
+        this.locale,
+      );
+    }
+    return refusal;
+  }
+
+  /** Returns the time a new baseline is taken at, the current quarter hour, or null after logging that the clock is outside the supported years. */
+  #baselineTime(): ProjectHour | null {
+    const moment = this.#context.now();
+    const takenAt = localQuarterOf(moment);
+    if (takenAt === null) {
+      console.error('The clock is outside the supported years; the baseline is refused:', moment);
+    }
+    return takenAt;
+  }
+
+  /** Removes the baseline of the project, returning why it was refused or null. */
+  clearBaseline(): string | null {
+    this.#baselineNotice = null;
+    return this.editSettings(() => clearBaseline());
+  }
+
+  /** Returns how many tasks the latest baseline set from the settings could not freeze, or null. */
+  get baselineNotice(): string | null {
+    return this.#baselineNotice;
+  }
+
   /** Renames the project from its settings, returning why the name was refused or null, an unchanged name changing nothing. */
   renameFromSettings(text: string): string | null {
     const name = text.trim();
@@ -683,6 +760,7 @@ export class AppState {
   /** Clears what the settings show about earlier changes. */
   #resetSettings(): void {
     this.#settingsNotice = null;
+    this.#baselineNotice = null;
     this.#settingsAlert = null;
     this.#settingsHeld = false;
     this.#startMove = null;

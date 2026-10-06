@@ -4,6 +4,7 @@ import { createDefaultTags } from '../../core/tags/tag-palette';
 import { MIN_PROJECT_HOUR, toProjectHour, type ProjectHour } from '../../core/time';
 
 const FIRST_MONTH_OFFSET = 1;
+const MINUTES_PER_QUARTER = 15;
 const MIDNIGHT = 0;
 
 /** Returns midnight of the local day of a moment, or the first supported hour for a clock outside the supported years. */
@@ -37,6 +38,7 @@ export function buildNewProject(name: string, moment: Date, createId: () => stri
     options: {
       criticalPathEnabled: false,
       dateConstraintsEnabled: false,
+      baselineEnabled: false,
       alwaysShowPatterns: false,
     },
     tasks: [],
@@ -44,4 +46,16 @@ export function buildNewProject(name: string, moment: Date, createId: () => stri
     tags: createDefaultTags(createId),
     baseline: null,
   };
+}
+
+/** Returns the local wall-clock time of a moment as a project hour, rounded down to the quarter hour, or null for a clock outside the supported years. */
+export function localQuarterOf(moment: Date): ProjectHour | null {
+  const hour = toProjectHour({
+    year: moment.getFullYear(),
+    month: moment.getMonth() + FIRST_MONTH_OFFSET,
+    day: moment.getDate(),
+    hour: moment.getHours(),
+    minute: Math.floor(moment.getMinutes() / MINUTES_PER_QUARTER) * MINUTES_PER_QUARTER,
+  });
+  return hour.ok ? hour.value : null;
 }
