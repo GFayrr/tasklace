@@ -156,6 +156,7 @@ describe('Workspace', () => {
       rendered.app.schedule,
       localHourOf(TODAY),
       pixelsPerHour('day'),
+      [],
     );
     const scrollLeft = xOf(frame, PLAN.startDate - 48);
     return { ...rendered, scroller, frame, scrollLeft };
@@ -347,7 +348,7 @@ describe('Workspace', () => {
     const scroller = single(root, '.scroller');
     resize(scroller, 800, 400);
     expect(app.schedule).toBeNull();
-    const frame = timelineFrame(PLAN.startDate, null, localHourOf(TODAY), pixelsPerHour('day'));
+    const frame = timelineFrame(PLAN.startDate, null, localHourOf(TODAY), pixelsPerHour('day'), []);
     expect(scroller.scrollLeft).toBe(xOf(frame, PLAN.startDate - 48));
   });
 

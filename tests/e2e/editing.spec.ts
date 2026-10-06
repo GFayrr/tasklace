@@ -326,6 +326,60 @@ test('makes a block of a split task wait for another task, shown in its details 
   await expect(row('Build').getByRole('gridcell').nth(6)).toHaveText('1');
 });
 
+test('flags a missed deadline once date constraints are on, lists it and leads to the task', async () => {
+  await addTask('Write');
+  await addTask('Review');
+  await row('Write').getByRole('gridcell').nth(1).click();
+  await page.keyboard.press('Alt+Enter');
+  const details = page.getByRole('dialog', { name: 'Task details' });
+  await expect(details.getByLabel('Deadline')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(details).toBeHidden();
+
+  await page.keyboard.press('Control+,');
+  const settings = page.getByRole('dialog', { name: 'Project settings' });
+  await settings.getByRole('tab', { name: 'Advanced options' }).click();
+  const constraints = settings.getByRole('switch', { name: 'Date constraints' });
+  await constraints.click();
+  await expect(constraints).toHaveAttribute('aria-checked', 'true');
+  await settings.getByRole('button', { name: 'Done' }).click();
+
+  await row('Write').getByRole('gridcell').nth(1).click();
+  await page.keyboard.press('Alt+Enter');
+  await details.getByLabel('Deadline').fill(isoDaysFromToday(0, '00:00').replace(' ', 'T'));
+  await picture('date-constraints-details');
+  await details.getByRole('button', { name: 'Save' }).click();
+  await expect(details).toBeHidden();
+  const end = row('Write').getByRole('gridcell').nth(4);
+  await expect(end).toHaveClass(/late/);
+  await expect(end).toHaveAttribute('title', /^Ends at .+, after its deadline \(.+\)\.$/);
+  const label = end.locator('.label');
+  expect(await label.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(page.locator('.status-bar .deadline-key')).toHaveText('Deadline');
+
+  await row('Review').getByRole('gridcell').nth(1).click();
+  await page.getByRole('button', { name: '1 conflict' }).click();
+  const list = page.getByRole('region', { name: 'Conflicts' });
+  await expect(list.getByRole('heading', { name: /^Dates/ })).toBeVisible();
+  await expect(list.getByRole('heading', { name: /^People and teams/ })).toHaveCount(0);
+  await expect(list.locator('.conflict strong')).toHaveText('Write');
+  await expect(list.locator('.conflict .when')).toHaveText('misses its deadline');
+  await picture('date-conflicts');
+  await list.getByRole('button', { name: /Write/ }).click();
+  await expect(grid.getByRole('row', { selected: true }).locator('.name .label')).toHaveText(
+    'Write',
+  );
+
+  await page.keyboard.press('Control+,');
+  await settings.getByRole('tab', { name: 'Advanced options' }).click();
+  await constraints.click();
+  await settings.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByRole('button', { name: /conflict/ })).toHaveCount(0);
+  await expect(end).not.toHaveClass(/late/);
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByRole('button', { name: '1 conflict' })).toBeVisible();
+});
+
 test('starts a later block no earlier than a date chosen in the details', async () => {
   await addTask('Build');
   await row('Build').getByRole('gridcell').nth(1).click();

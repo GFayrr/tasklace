@@ -1,6 +1,13 @@
 import { formatDateTime } from '../../core/civil-format';
 import { compareStrings } from '../../core/compare-strings';
-import type { Project, Task, TagId, TaskId, TaskSegment } from '../../core/model/project';
+import type {
+  Project,
+  ProjectOptions,
+  Task,
+  TagId,
+  TaskId,
+  TaskSegment,
+} from '../../core/model/project';
 import { failure, success, type Result } from '../../core/result';
 import { HOURS_PER_DAY, QUARTER_HOUR, type ProjectHour } from '../../core/time';
 import { formatTimeOfDay, parseTimeOfDay } from './time-of-day';
@@ -21,6 +28,8 @@ export interface TaskDraft {
   readonly tagId: TagId | null;
   readonly progress: string;
   readonly start: string;
+  readonly mustFinishOn: string;
+  readonly deadline: string;
   readonly hoursPerDay: string;
   readonly dailyStart: string;
   readonly blocks: readonly BlockDraft[];
@@ -28,7 +37,13 @@ export interface TaskDraft {
 }
 
 export type DetailsError =
-  EditError | 'INVALID_BLOCK' | 'INVALID_GAP' | 'INVALID_HOURS_PER_DAY' | 'INVALID_DAILY_START';
+  | EditError
+  | 'INVALID_BLOCK'
+  | 'INVALID_GAP'
+  | 'INVALID_HOURS_PER_DAY'
+  | 'INVALID_DAILY_START'
+  | 'INVALID_MUST_FINISH_ON'
+  | 'INVALID_DEADLINE';
 
 const PROGRESS_PATTERN = /^\d{1,3}$/;
 const GAP_PATTERN = /^\d{1,4}$/;
@@ -43,6 +58,8 @@ const EMPTY_DRAFT: TaskDraft = {
   tagId: null,
   progress: '0',
   start: '',
+  mustFinishOn: '',
+  deadline: '',
   hoursPerDay: '',
   dailyStart: '',
   blocks: [],
@@ -62,7 +79,9 @@ export function draftFromTask(
     name: task.name,
     tagId: task.tagId,
     progress: String(task.progressPercent),
-    start: task.startNoEarlierThan === null ? '' : formatDateTime(task.startNoEarlierThan),
+    start: pickerText(task.startNoEarlierThan),
+    mustFinishOn: pickerText(task.mustFinishOn),
+    deadline: pickerText(task.deadline),
   };
   if (task.kind === 'milestone') {
     return { ...EMPTY_DRAFT, ...common, basis };
@@ -75,27 +94,28 @@ export function draftFromTask(
     blocks: task.segments.map((segment, block) => ({
       duration: durationEditorText(segment.durationHours),
       gapDays: String(segment.gapDaysBefore),
-      start: segment.startNoEarlierThan === null ? '' : formatDateTime(segment.startNoEarlierThan),
+      start: pickerText(segment.startNoEarlierThan),
       origin: block,
       waitsFor: waitsFor(block),
     })),
   };
 }
 
-/** Describes a task and the links that touch it, in an order that does not depend on the project, so that two descriptions differ only when the task or its links changed. */
+/** Describes a task, the links that touch it and whether its date constraints are shown, in an order that does not depend on the project, so that two descriptions differ only when one of them changed. */
 export function taskBasis(project: Project, id: TaskId): string {
   const task = project.tasks.find((candidate) => candidate.id === id);
   const links = project.dependencies
     .filter((link) => link.predecessorId === id || link.successorId === id)
     .sort((left, right) => compareStrings(left.id, right.id));
-  return JSON.stringify([task, links]);
+  return JSON.stringify([task, links, project.options.dateConstraintsEnabled]);
 }
 
-/** Builds the task the details panel asks for, reading every field, or tells which field cannot be read. */
+/** Builds the task the details panel asks for, reading every field shown and keeping the date constraints unchanged while they are turned off, or tells which field cannot be read. */
 export function taskFromDraft(
   task: Task,
   draft: TaskDraft,
   dayHours: number,
+  options: ProjectOptions,
 ): Result<Task, DetailsError> {
   const name = draft.name.trim();
   if (name === '') {
@@ -105,12 +125,16 @@ export function taskFromDraft(
     return success({ ...task, name });
   }
   const progress = readProgress(draft.progress);
-  const start = readStart(draft.start);
+  const start = readPickerInstant(draft.start);
   if (progress === null) {
     return failure('INVALID_PROGRESS');
   }
   if (start === undefined) {
     return failure('INVALID_DATE');
+  }
+  const constraints = options.dateConstraintsEnabled ? readConstraints(draft) : success({});
+  if (!constraints.ok) {
+    return constraints;
   }
   const dated = {
     ...task,
@@ -118,6 +142,7 @@ export function taskFromDraft(
     tagId: draft.tagId,
     progressPercent: progress,
     startNoEarlierThan: start,
+    ...constraints.value,
   };
   if (dated.kind === 'milestone') {
     return success(dated);
@@ -160,19 +185,39 @@ export function withoutBlock(draft: TaskDraft, index: number): TaskDraft {
 /** Returns the index of the first later block whose start date cannot be read, or null, so that the details panel can tell which field to fix. */
 export function findUnreadableBlockStart(draft: TaskDraft): number | null {
   const index = draft.blocks.findIndex(
-    (block, position) => position > 0 && readStart(block.start) === undefined,
+    (block, position) => position > 0 && readPickerInstant(block.start) === undefined,
   );
   return index < 0 ? null : index;
 }
 
 /** Returns the later of two start dates written in pickers, keeping the first one when either cannot be read so that saving reports it. */
 function laterStart(taskStart: string, blockStart: string): string {
-  const task = readStart(taskStart);
-  const block = readStart(blockStart);
+  const task = readPickerInstant(taskStart);
+  const block = readPickerInstant(blockStart);
   if (block === null || block === undefined || task === undefined) {
     return taskStart;
   }
   return task === null || block > task ? blockStart : taskStart;
+}
+
+/** Writes an optional instant as a date and time picker expects it, empty meaning none. */
+function pickerText(hour: ProjectHour | null): string {
+  return hour === null ? '' : formatDateTime(hour);
+}
+
+/** Reads the optional "must finish on" date and deadline of a task, or tells which one cannot be read. */
+function readConstraints(
+  draft: TaskDraft,
+): Result<
+  { readonly mustFinishOn: ProjectHour | null; readonly deadline: ProjectHour | null },
+  DetailsError
+> {
+  const mustFinishOn = readPickerInstant(draft.mustFinishOn);
+  if (mustFinishOn === undefined) {
+    return failure('INVALID_MUST_FINISH_ON');
+  }
+  const deadline = readPickerInstant(draft.deadline);
+  return deadline === undefined ? failure('INVALID_DEADLINE') : success({ mustFinishOn, deadline });
 }
 
 /** Reads a whole progress from 0 to 100, or null. */
@@ -184,8 +229,8 @@ function readProgress(text: string): number | null {
   return value >= 0 && value <= MAX_PROGRESS ? value : null;
 }
 
-/** Reads the optional start of a task from a date and time picker, null meaning none and undefined an unreadable date. */
-function readStart(text: string): ProjectHour | null | undefined {
+/** Reads an optional instant from a date and time picker, null meaning none and undefined an unreadable date. */
+function readPickerInstant(text: string): ProjectHour | null | undefined {
   if (text.trim() === '') {
     return null;
   }
@@ -233,7 +278,7 @@ function readBlocks(
     if (gap === null) {
       return failure('INVALID_GAP');
     }
-    const start = index === 0 ? null : readStart(block.start);
+    const start = index === 0 ? null : readPickerInstant(block.start);
     if (start === undefined) {
       return failure('INVALID_DATE');
     }

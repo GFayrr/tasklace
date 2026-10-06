@@ -100,6 +100,21 @@
           <input type="datetime-local" step="900" bind:value={draft.start} />
           <small>{text.startHint}</small>
         </label>
+        {#if project.options.dateConstraintsEnabled}
+          <fieldset class="constraints">
+            <legend>{text.dateConstraints}</legend>
+            <label class="field">
+              <span>{text.mustFinishOn}</span>
+              <input type="datetime-local" step="900" bind:value={draft.mustFinishOn} />
+              <small>{text.mustFinishOnHint}</small>
+            </label>
+            <label class="field">
+              <span>{text.deadline}</span>
+              <input type="datetime-local" step="900" bind:value={draft.deadline} />
+              <small>{text.deadlineHint}</small>
+            </label>
+          </fieldset>
+        {/if}
       {/if}
       {#if task.kind === 'task'}
         <div class="pair">
@@ -247,7 +262,8 @@
     gap: var(--space-3);
   }
 
-  .blocks {
+  .blocks,
+  .constraints {
     margin: 0;
     padding: var(--space-3);
     display: flex;

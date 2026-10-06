@@ -10,7 +10,12 @@ import type { DailyWindowErrorCode } from '../../core/calendar/task-slots';
 import { taskOfCalendarIssue } from '../../core/shared/shared-operations';
 import { issueText, repairText, type ReportedIssue } from '../i18n/issue-text';
 import { scheduleFailureText } from '../i18n/schedule-failure-text';
-import { conflictLines, type ConflictLine } from '../plan/conflict-lines';
+import {
+  conflictLines,
+  dateConflictLines,
+  type ConflictLine,
+  type DateConflictLine,
+} from '../plan/conflict-lines';
 import { formatDuration, parseDuration } from '../plan/durations';
 import { renameProject, setProjectStart } from '../plan/project-commands';
 import { formatTimeOfDay } from '../plan/time-of-day';
@@ -22,6 +27,7 @@ import {
 import type { SharedSession } from '../../core/shared/shared-session';
 import type { TagConflict } from '../../core/tags/tag-conflicts';
 import type { ProjectHour } from '../../core/time';
+import { deadlinesOf } from '../plan/timeline-geometry';
 import type { ExchangeKind, RecentProject, TasklaceBridge } from '../../preload/bridge-contract';
 import { createDayFormatter } from '../i18n/format';
 import {
@@ -155,6 +161,7 @@ export interface AppContext {
 export class AppState {
   #project = $state.raw<Project | null>(null);
   #computed = $state.raw<ComputedSchedule | null>(null);
+  #dateLines = $state.raw<readonly DateConflictLine[]>([]);
   #scheduleStopped = $state(false);
   #saveStatus = $state<SaveStatus>('saved');
   #hasFile = $state(false);
@@ -243,10 +250,26 @@ export class AppState {
     return this.#computed?.schedule ?? null;
   }
 
-  /** Describes the conflicts of the schedule shown, with the tags and tasks of the project it was computed for, which may be a little older than the project shown. */
+  /** Describes the person or team conflicts of the schedule shown, with the tags and tasks of the project it was computed for, which may be a little older than the project shown. */
   get conflictLines(): readonly ConflictLine[] {
     const computed = this.#computed;
     return computed === null ? [] : conflictLines(computed.schedule, computed.project);
+  }
+
+  /** Describes the dates the tasks of the schedule shown do not meet, with the tasks of the project it was computed for, which may be a little older than the project shown. */
+  get dateConflictLines(): readonly DateConflictLine[] {
+    return this.#dateLines;
+  }
+
+  /** Lists the deadlines the timeline shows: those of the tasks and milestones of the open project while date constraints are turned on, none otherwise. */
+  get shownDeadlines(): readonly ProjectHour[] {
+    const project = this.project;
+    return project?.options.dateConstraintsEnabled === true ? deadlinesOf(project) : [];
+  }
+
+  /** Counts the conflicts of the schedule shown, person or team conflicts and dates not met together, as the list shows them. */
+  get conflictCount(): number {
+    return (this.schedule?.tagConflicts.conflicts.length ?? 0) + this.#dateLines.length;
   }
 
   /** Returns the schedule computed for the project as it is now, null when that computation failed, or why an edit relying on the dates must wait: the schedule is still being computed after the latest change, or it stopped and needs another change. */
@@ -544,23 +567,33 @@ export class AppState {
 
   /** Shows the list of conflicts, or hides it, showing it only while there are conflicts. */
   toggleConflicts(): void {
-    this.#conflictsOpen = !this.#conflictsOpen && this.conflictLines.length > 0;
+    this.#conflictsOpen = !this.#conflictsOpen && this.conflictCount > 0;
   }
 
-  /** Selects the first task of a conflict that the project still has, opening the summaries that hide it, and asks the workspace to show the start of the conflict, telling the user to wait when the conflict comes from a schedule older than the deletion of its tasks. */
+  /** Selects the first task of a person or team conflict that the project still has, opening the summaries that hide it, and asks the workspace to show the start of the conflict, telling the user to wait when the conflict comes from a schedule older than the deletion of its tasks. */
   showConflict(conflict: TagConflict): void {
+    this.#revealConflict(conflict.taskIds, conflict.start);
+  }
+
+  /** Selects the task that does not meet one of its dates, opening the summaries that hide it, and asks the workspace to show its end, telling the user to wait when the task was deleted after the schedule was computed. */
+  showDateConflict(line: DateConflictLine): void {
+    this.#revealConflict([line.conflict.taskId], line.end);
+  }
+
+  /** Selects the first of the tasks of a conflict that the project still has, opening the summaries that hide it, and asks the workspace to show an instant on its row, telling the user to wait when none is left. */
+  #revealConflict(taskIds: readonly TaskId[], hour: ProjectHour): void {
     const project = this.project;
     if (project === null) {
       return;
     }
-    const taskId = conflict.taskIds.find((id) => project.tasks.some((task) => task.id === id));
+    const taskId = taskIds.find((id) => project.tasks.some((task) => task.id === id));
     if (taskId === undefined) {
       this.#notify('warning', this.messages.editErrors.SCHEDULE_PENDING);
       return;
     }
     this.collapsed = withAncestorsOpen(this.collapsed, project.tasks, taskId);
     this.selectedTaskId = taskId;
-    this.revealRequest = { taskId, hour: conflict.start };
+    this.revealRequest = { taskId, hour };
   }
 
   /** Tells whether the settings of the open project are shown. */
@@ -741,7 +774,7 @@ export class AppState {
       return blockProblem;
     }
     const refusal = this.tryEdit((context) => {
-      const built = taskFromDraft(task, draft, context.dayHours);
+      const built = taskFromDraft(task, draft, context.dayHours, context.project.options);
       return built.ok ? replaceTask(context, built.value, draft.blocks) : built;
     });
     if (refusal === null) {
@@ -914,6 +947,7 @@ export class AppState {
     this.#session?.document.off('update', this.#queueRefresh);
     this.#session = session;
     this.#computed = null;
+    this.#dateLines = [];
     this.selectedTaskId = null;
     this.editRequest = null;
     this.revealRequest = null;
@@ -961,13 +995,25 @@ export class AppState {
     }
   }
 
+  /** Describes the dates a computed schedule finds not met, or tells the user and logs why they cannot be described, marking no task. */
+  #describeDates(computed: ComputedSchedule): readonly DateConflictLine[] {
+    try {
+      return dateConflictLines(computed.schedule, computed.project);
+    } catch (error) {
+      console.error('The dates not met could not be described:', error);
+      this.#notify('error', this.messages.notices.dateConflictsUnavailable);
+      return [];
+    }
+  }
+
   /** Shows a computed schedule if it still belongs to the open project. */
   #showSchedule(result: Result<Schedule, SchedulingFailure>, project: Project): void {
     if (project !== this.project) {
       return;
     }
     this.#computed = { project, schedule: result.ok ? result.value : null };
-    if (this.conflictLines.length === 0) {
+    this.#dateLines = this.#describeDates(this.#computed);
+    if (this.conflictCount === 0) {
       this.#conflictsOpen = false;
     }
     const move = this.#startMove;

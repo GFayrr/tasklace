@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, plans tasks in a table and on a timeline, and has its project settings: name and start, working calendar, tags, and the critical path among the advanced options. Date constraints and the baseline in the interface, PDF export and collaboration are still to come, and there is no downloadable release yet.
+> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, plans tasks in a table and on a timeline, and has its project settings: name and start, working calendar, tags, and the critical path and date constraints among the advanced options. The baseline in the interface, PDF export and collaboration are still to come, and there is no downloadable release yet.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -65,7 +65,7 @@ What Tasklace already supports:
 - Project settings in a dialog with tabs: project name and start, working days, working hours to the quarter hour and days off, each change applied at once and undone with Ctrl+Z.
 - Tag management: rename, choose one of twelve tested colors or a custom one, mark a person or a team, add and delete (with a question when tasks use the tag); the legend shows the patterns of close colors.
 - A list of the conflicts of people and teams next to the legend: a line selects the first task concerned and scrolls the table and the timeline to it.
-- Advanced options, off by default, turned on in the project settings: with the critical path on, the table shows total and free floats, the timeline underlines critical tasks and draws how far the others can slip.
+- Advanced options, off by default, turned on in the project settings: with the critical path on, the table shows total and free floats, the timeline underlines critical tasks and draws how far the others can slip; with date constraints on, a task can have a date it must finish on and a deadline, each date missed is listed with the conflicts, marked in the table and on the timeline, and each deadline is drawn on its row.
 
 ## Roadmap
 

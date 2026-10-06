@@ -132,10 +132,12 @@ Done in three parts, each with its mockups approved first. Every advanced featur
 - With the critical path on, the table shows the total and free float of every task, with a hint on each header; the timeline underlines critical tasks in graphite and draws how far other tasks can slip as a dashed line; the legend explains the mark.
 - When a task would have to start before 2020, the first year handled, to finish on time, the plan stays available: only the floats concerned are unknown, shown as "?", and one message explains why and what to do.
 
-##### 5e-3b. Date constraints (to do)
+##### 5e-3b. Date constraints (done)
 
-- "Must finish on" and deadline dates in the details of a task.
-- Their conflicts listed in the same panel as the conflicts of people and teams, and the tasks concerned marked in the table and on the timeline.
+- With date constraints on, the details of a task or milestone have a "Date constraints" frame with a "Must finish on" date and a deadline, to the quarter hour. When the option is off, the frame is hidden and the dates already entered are kept, ignored by the plan.
+- One "N conflicts" button counts every conflict; its list has two parts, "People and teams" and "Dates", a part with nothing in it being hidden. Each date line names the task, its end and the date it misses, in the order of the table; a click selects the task and scrolls to its end.
+- A task that misses one of its dates gets the red outline of a conflict on the timeline, milestones included, and a red "End" cell with an icon whose tooltip names each date missed.
+- Each deadline is drawn on the row of its task as an upright line topped by a small triangle, graphite when met and red when missed, with a "Deadline" key in the legend. The timeline widens to the deadlines, always keeping the whole project in view.
 
 ##### 5e-3c. Baseline (to do)
 

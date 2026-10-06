@@ -3,12 +3,14 @@ import { describe, expect, it } from 'vitest';
 import type { Project } from '../../src/core/model/project';
 import { compileOrThrow } from '../../src/core/testing/civil-time';
 import { scheduleOrThrow } from '../../src/core/testing/project-builder';
-import { conflictLines } from '../../src/renderer/plan/conflict-lines';
+import { conflictLines, dateConflictLines } from '../../src/renderer/plan/conflict-lines';
+import { loadMessages } from '../../src/renderer/i18n/messages';
+import { dateConflictTitles } from '../../src/renderer/plan/table-format';
 import { buildPlanOutline, groupIncoming } from '../../src/renderer/plan/plan-outline';
 import { tagStylesOf } from '../../src/renderer/plan/tag-styles';
 import { recordingCanvas } from '../../src/renderer/plan/testing/recording-canvas';
 import { pixelsPerHour } from '../../src/renderer/plan/time-scale';
-import { timelineFrame } from '../../src/renderer/plan/timeline-geometry';
+import { deadlinesOf, timelineFrame } from '../../src/renderer/plan/timeline-geometry';
 import {
   paintTimelineBody,
   type TimelineScene,
@@ -63,6 +65,38 @@ describe('growth of the list of conflicts', () => {
   });
 });
 
+describe('growth of the dates tasks do not meet', () => {
+  it('describes the missed deadlines, their tooltips and the deadlines shown in linear time', async () => {
+    const messages = await loadMessages('en');
+    const late = (project: Project): Project => ({
+      ...project,
+      options: { ...project.options, dateConstraintsEnabled: true },
+      tasks: project.tasks.map((task) =>
+        task.kind === 'summary' ? task : { ...task, deadline: project.startDate },
+      ),
+    });
+    const small = late(buildLargeProject(LARGE_PROJECT_SEED, SMALL_TASK_COUNT));
+    const large = late(buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT));
+    const smallSchedule = scheduleOrThrow(small);
+    const largeSchedule = scheduleOrThrow(large);
+    const lateTasks = (project: Project, schedule: typeof smallSchedule) =>
+      [...schedule.placements.values()].filter((placement) => placement.end > project.startDate)
+        .length;
+    expect(smallSchedule.conflicts).toHaveLength(lateTasks(small, smallSchedule));
+    expect(largeSchedule.conflicts).toHaveLength(lateTasks(large, largeSchedule));
+    const describeDates = (project: Project, schedule: typeof smallSchedule) => () => {
+      dateConflictTitles(dateConflictLines(schedule, project), messages, String);
+      deadlinesOf(project);
+    };
+    const ratio = growthRatio(
+      describeDates(small, smallSchedule),
+      describeDates(large, largeSchedule),
+    );
+    console.info(`Date conflict lines: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
+  });
+});
+
 describe('growth of drawing the timeline', () => {
   /** Builds the scene of a large project, shown from its start in a window of fixed size. */
   function sceneOf(project: Project): { scene: TimelineScene; viewport: Viewport } {
@@ -73,6 +107,7 @@ describe('growth of drawing the timeline', () => {
       schedule,
       project.startDate,
       pixelsPerHour('day'),
+      [],
     );
     const scene: TimelineScene = {
       frame,
@@ -86,6 +121,7 @@ describe('growth of drawing the timeline', () => {
       theme: SAND_GRAPHITE,
       tagStyles: tagStylesOf(project),
       conflictTaskIds: new Set(),
+      deadlines: null,
       selectedTaskId: null,
       today: project.startDate,
       preview: null,
@@ -126,6 +162,29 @@ describe('growth of drawing the timeline', () => {
       };
     const ratio = growthRatio(draw(small), draw(large));
     console.info(`Timeline frame with floats: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
+  });
+
+  it('draws one frame with a deadline on every task in at most linear time of the project', () => {
+    const withDeadlines = ({ scene, viewport }: ReturnType<typeof sceneOf>) => {
+      const ids = scene.rows.map((row) => row.task.id);
+      const rows = scene.rows.map((row) =>
+        row.task.kind === 'summary'
+          ? row
+          : { ...row, task: { ...row.task, deadline: scene.frame.origin + 24 * 10 } },
+      );
+      const missedTaskIds = new Set(ids.filter((_id, index) => index % 2 === 0));
+      return { scene: { ...scene, rows, deadlines: { missedTaskIds } }, viewport };
+    };
+    const small = withDeadlines(sceneOf(buildLargeProject(LARGE_PROJECT_SEED, SMALL_TASK_COUNT)));
+    const large = withDeadlines(sceneOf(buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT)));
+    const draw =
+      ({ scene, viewport }: ReturnType<typeof sceneOf>) =>
+      () => {
+        paintTimelineBody(recordingCanvas().context, scene, viewport);
+      };
+    const ratio = growthRatio(draw(small), draw(large));
+    console.info(`Timeline frame with deadlines: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
   });
 });
