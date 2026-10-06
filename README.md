@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, and plans tasks in a table and on a timeline; project settings, PDF export and collaboration are still to come, and there is no downloadable release yet.
+> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, plans tasks in a table and on a timeline, and has its project settings: name and start, working calendar, tags, and the critical path among the advanced options. Date constraints and the baseline in the interface, PDF export and collaboration are still to come, and there is no downloadable release yet.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -62,6 +62,10 @@ What Tasklace already supports:
 - A sober, readable interface: light theme with WCAG AA contrasts checked by a test, undo and redo that never touch the changes of others, and scheduling in a background worker.
 - A task table and a timeline side by side: edit names, durations, dates, progress, predecessors and tags in the table, drag and stretch bars, link tasks or single blocks by dragging, and open the details of a task to edit its blocks and daily hours.
 - Safe file handling: one file action at a time with the window waiting meanwhile, automatic saving with a local copy, the last three projects at hand, clear messages for every failure and a log file for diagnosis.
+- Project settings in a dialog with tabs: project name and start, working days, working hours to the quarter hour and days off, each change applied at once and undone with Ctrl+Z.
+- Tag management: rename, choose one of twelve tested colors or a custom one, mark a person or a team, add and delete (with a question when tasks use the tag); the legend shows the patterns of close colors.
+- A list of the conflicts of people and teams next to the legend: a line selects the first task concerned and scrolls the table and the timeline to it.
+- Advanced options, off by default, turned on in the project settings: with the critical path on, the table shows total and free floats, the timeline underlines critical tasks and draws how far the others can slip.
 
 ## Roadmap
 
