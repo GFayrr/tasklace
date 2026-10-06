@@ -4,6 +4,7 @@ import type { DayRange } from '../../core/model/calendar';
 import type { Dependency, TagId, TaskId } from '../../core/model/project';
 import type { TaskFloat } from '../../core/scheduling/backward-pass';
 import type { Schedule } from '../../core/scheduling/schedule-project';
+import { valueAt } from '../../core/table-value';
 import type { TagPattern } from '../../core/tags/tag-appearance';
 import {
   dayIndexOf,
@@ -26,6 +27,7 @@ import {
 } from './timeline-gestures';
 import {
   BAR_HEIGHT,
+  deadlineOf,
   dependencyArrow,
   hourAt,
   MILESTONE_SIZE,
@@ -57,10 +59,15 @@ export interface TimelineScene {
   readonly theme: Theme;
   readonly tagStyles: ReadonlyMap<TagId, TagStyle>;
   readonly conflictTaskIds: ReadonlySet<TaskId>;
+  readonly deadlines: DeadlineMarks | null;
   readonly selectedTaskId: TaskId | null;
   readonly today: ProjectHour;
   readonly preview: DragPreview | null;
   readonly patternFor: (pattern: TagPattern) => CanvasPattern | null;
+}
+
+export interface DeadlineMarks {
+  readonly missedTaskIds: ReadonlySet<TaskId>;
 }
 
 export interface RowRange {
@@ -97,6 +104,10 @@ const CRITICAL_MARK_GAP = 2;
 const FLOAT_DASH = [4, 3];
 const FLOAT_LINE_WIDTH = 1.5;
 const TODAY_WIDTH = 2;
+const DEADLINE_WIDTH = 2;
+const DEADLINE_INSET = 2;
+const DEADLINE_HEAD_WIDTH = 10;
+const DEADLINE_HEAD_HEIGHT = 6;
 const PREVIEW_DASH = [4, 3];
 const HALF_PIXEL = 0.5;
 const DAY_OFF_HEIGHT = 6;
@@ -173,7 +184,7 @@ export function splitAtDaysOff(
   return { parts, daysOff: mergeIntervals(daysOff) };
 }
 
-/** Draws the rows of the timeline that a viewport shows: non-working periods, selection, bars, links and the today line. */
+/** Draws the rows of the timeline that a viewport shows: non-working periods, selection, bars, deadlines, links and the today line. */
 export function paintTimelineBody(
   context: CanvasRenderingContext2D,
   scene: TimelineScene,
@@ -192,6 +203,7 @@ export function paintTimelineBody(
   shapes.forEach((shape) => {
     paintShape(context, scene, shape);
   });
+  paintDeadlines(context, scene, range);
   paintLinkHandles(context, scene, shapes);
   paintPreview(context, scene);
   paintToday(context, scene, viewport);
@@ -322,7 +334,7 @@ function shapeAt(scene: TimelineScene, index: number): RowShape | null {
     : rowShape(row, index, scene.schedule, scene.frame);
 }
 
-/** Draws one bar, milestone or summary, outlined when its task is in a person or team conflict. */
+/** Draws one bar, milestone or summary, outlining a bar or milestone whose task is in a person or team conflict or misses one of its dates. */
 function paintShape(
   context: CanvasRenderingContext2D,
   scene: TimelineScene,
@@ -340,6 +352,9 @@ function paintShape(
   const taskFloat = scene.schedule?.floats?.get(shape.taskId);
   if (shape.kind === 'milestone') {
     paintMilestone(context, style?.color ?? scene.theme.text, shape.x, top);
+    if (outlined) {
+      paintMilestoneOutline(context, scene.theme.error, shape.x, top);
+    }
     paintFloat(context, scene, taskFloat, [{ start: shape.x, end: shape.x }], top);
     return;
   }
@@ -539,6 +554,69 @@ function paintMilestone(
   context.lineTo(x + half, middle);
   context.lineTo(x, middle + half);
   context.lineTo(x - half, middle);
+  context.closePath();
+  context.fill();
+}
+
+/** Draws the red outline of a milestone that misses one of its dates. */
+function paintMilestoneOutline(
+  context: CanvasRenderingContext2D,
+  color: string,
+  x: number,
+  top: number,
+): void {
+  const middle = top + ROW_HEIGHT / HALF;
+  const half = MILESTONE_SIZE / HALF + OUTLINE_WIDTH;
+  context.strokeStyle = color;
+  context.lineWidth = OUTLINE_WIDTH;
+  context.beginPath();
+  context.moveTo(x, middle - half);
+  context.lineTo(x + half, middle);
+  context.lineTo(x, middle + half);
+  context.lineTo(x - half, middle);
+  context.closePath();
+  context.stroke();
+}
+
+/** Draws the deadline of each visible task or milestone that has one, as an upright line through its row topped by a small triangle, in red when the task ends later, drawing nothing while deadlines are hidden. */
+function paintDeadlines(
+  context: CanvasRenderingContext2D,
+  scene: TimelineScene,
+  range: RowRange,
+): void {
+  const marks = scene.deadlines;
+  if (marks === null) {
+    return;
+  }
+  for (let index = range.first; index <= range.last; index += 1) {
+    const task = valueAt(scene.rows, index).task;
+    const deadline = deadlineOf(task);
+    if (deadline !== null) {
+      const color = marks.missedTaskIds.has(task.id) ? scene.theme.error : scene.theme.action;
+      paintDeadline(context, color, xOf(scene.frame, deadline), index * ROW_HEIGHT);
+    }
+  }
+}
+
+/** Draws one deadline marker on a row. */
+function paintDeadline(
+  context: CanvasRenderingContext2D,
+  color: string,
+  x: number,
+  top: number,
+): void {
+  const lineTop = top + DEADLINE_INSET;
+  context.fillStyle = color;
+  context.fillRect(
+    x - DEADLINE_WIDTH / HALF,
+    lineTop,
+    DEADLINE_WIDTH,
+    ROW_HEIGHT - DEADLINE_INSET * HALF,
+  );
+  context.beginPath();
+  context.moveTo(x - DEADLINE_HEAD_WIDTH / HALF, lineTop);
+  context.lineTo(x + DEADLINE_HEAD_WIDTH / HALF, lineTop);
+  context.lineTo(x, lineTop + DEADLINE_HEAD_HEIGHT);
   context.closePath();
   context.fill();
 }

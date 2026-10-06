@@ -35,7 +35,7 @@ const PLAN: Project = project(
 );
 const SCHEDULE = scheduleOrThrow(PLAN);
 const OUTLINE = buildPlanOutline(PLAN.tasks, new Set());
-const FRAME = timelineFrame(PLAN.startDate, SCHEDULE, at(2026, 9, 28, 12), 4);
+const FRAME = timelineFrame(PLAN.startDate, SCHEDULE, at(2026, 9, 28, 12), 4, []);
 
 /** Returns the shape of the row of a work task, failing the test for another kind. */
 function shapeOf(id: string): Extract<RowShape, { kind: 'task' }> {
@@ -72,6 +72,7 @@ function renderTimeline(selectedTaskId: string | null = null, scrollTop = 0, pla
     theme: SAND_GRAPHITE,
     tagStyles: tagStylesOf(plan),
     conflictTaskIds: new Set<string>(),
+    deadlines: null,
     selectedTaskId,
     today: at(2026, 9, 28, 12),
   };

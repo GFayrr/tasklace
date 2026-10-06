@@ -13,7 +13,8 @@
   const formatDay = $derived(createDayFormatter(app.locale));
   const tags = $derived(tagsByName(app.project?.tags ?? [], app.locale));
   const styles = $derived(tagStylesOf(app.project));
-  const conflictCount = $derived(app.schedule?.tagConflicts.conflicts.length ?? 0);
+  const conflictCount = $derived(app.conflictCount);
+  const showsDeadlines = $derived(app.shownDeadlines.length > 0);
   const taskCount = $derived(
     countMessage(text.status.tasks, app.project?.tasks.length ?? 0, app.locale),
   );
@@ -41,6 +42,12 @@
     <span class="critical-key">
       <span class="critical-mark" aria-hidden="true"></span>
       <span>{text.status.critical}</span>
+    </span>
+  {/if}
+  {#if showsDeadlines}
+    <span class="deadline-key">
+      <span class="deadline-mark" aria-hidden="true"></span>
+      <span>{text.status.deadline}</span>
     </span>
   {/if}
   {#if conflictCount > 0}
@@ -123,7 +130,8 @@
     gap: 6px;
   }
 
-  .critical-key {
+  .critical-key,
+  .deadline-key {
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -136,6 +144,32 @@
     height: 3px;
     border-radius: 2px;
     background: var(--color-action);
+  }
+
+  .deadline-mark {
+    position: relative;
+    width: 10px;
+    height: 14px;
+  }
+
+  .deadline-mark::before {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--color-action);
+  }
+
+  .deadline-mark::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid var(--color-action);
   }
 
   .conflicts {

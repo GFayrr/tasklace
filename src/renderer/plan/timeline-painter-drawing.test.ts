@@ -65,7 +65,7 @@ const PLAN: Project = project(
 );
 const SCHEDULE = scheduleOrThrow(PLAN);
 const OUTLINE = buildPlanOutline(PLAN.tasks, new Set());
-const FRAME = timelineFrame(PLAN.startDate, SCHEDULE, at(2026, 9, 30, 12), 4);
+const FRAME = timelineFrame(PLAN.startDate, SCHEDULE, at(2026, 9, 30, 12), 4, []);
 const VIEWPORT: Viewport = { left: 0, top: 0, width: xOf(FRAME, FRAME.end), height: 600 };
 
 /** Builds the scene of the sample plan, with any part replaced. */
@@ -82,6 +82,7 @@ function sceneOf(overrides: Partial<TimelineScene> = {}): TimelineScene {
     theme: THEME,
     tagStyles: tagStylesOf(PLAN),
     conflictTaskIds: new Set(),
+    deadlines: null,
     selectedTaskId: null,
     today: at(2026, 9, 30, 12),
     preview: null,
@@ -190,6 +191,101 @@ describe('paintTimelineBody', () => {
     expect(strokes).toHaveLength(1);
     const plain = paintBody();
     expect(callsOf(plain, 'stroke').some((call) => call.strokeStyle === THEME.error)).toBe(false);
+  });
+
+  it('outlines a milestone that misses one of its dates with the error color', () => {
+    const shape = placedShapeOf('n');
+    const x = shape.kind === 'milestone' ? shape.x : Number.NaN;
+    const middle = shape.row * ROW_HEIGHT + ROW_HEIGHT / 2;
+    const reach = MILESTONE_SIZE / 2 + 2;
+    const calls = paintBody({ conflictTaskIds: new Set(['n']) });
+    const outline = callsOf(calls, 'stroke').filter(
+      (call) => call.strokeStyle === THEME.error && call.lineWidth === 2,
+    );
+    expect(outline).toHaveLength(1);
+    const [stroke] = outline;
+    if (stroke === undefined) {
+      throw new Error('No outline');
+    }
+    const end = calls.indexOf(stroke);
+    expect(
+      calls.slice(end - 6, end + 1).map((call) => [call.name, ...call.args].join(' ')),
+    ).toEqual([
+      'beginPath',
+      `moveTo ${String(x)} ${String(middle - reach)}`,
+      `lineTo ${String(x + reach)} ${String(middle)}`,
+      `lineTo ${String(x)} ${String(middle + reach)}`,
+      `lineTo ${String(x - reach)} ${String(middle)}`,
+      'closePath',
+      'stroke',
+    ]);
+  });
+
+  it('draws each deadline as a line across its row under a triangle, in red when missed, only when shown', () => {
+    const DEADLINES = new Map([
+      ['c', at(2026, 10, 1, 12)],
+      ['n', at(2026, 10, 5, 9)],
+    ]);
+    const dated: Project = {
+      ...PLAN,
+      tasks: PLAN.tasks.map((task) => {
+        const deadline = DEADLINES.get(task.id);
+        return task.kind === 'summary' || deadline === undefined ? task : { ...task, deadline };
+      }),
+    };
+    const outline = buildPlanOutline(dated.tasks, new Set());
+    const scene = { rows: outline.rows, rowIndexById: outline.rowIndexById };
+    const lineOf = (id: string, deadline: ProjectHour, color: string) => {
+      const top = (outline.rowIndexById.get(id) ?? -1) * ROW_HEIGHT;
+      return { x: xOf(FRAME, deadline), top, color };
+    };
+    const marks = [
+      lineOf('c', at(2026, 10, 1, 12), THEME.action),
+      lineOf('n', at(2026, 10, 5, 9), THEME.error),
+    ];
+    const calls = paintBody({
+      ...scene,
+      deadlines: { missedTaskIds: new Set(['n']) },
+    });
+    const isMark = (call: CanvasCall) =>
+      call.name === 'fillRect' && call.args[2] === 2 && call.args[3] === ROW_HEIGHT - 4;
+    const drawnMarks = calls.flatMap((call, index) =>
+      isMark(call)
+        ? [
+            calls
+              .slice(index, index + 7)
+              .map((step) => [step.name, ...step.args, step.fillStyle].join(' ')),
+          ]
+        : [],
+    );
+    expect(drawnMarks).toEqual(
+      marks.map(({ x, top, color }) => [
+        `fillRect ${String(x - 1)} ${String(top + 2)} 2 ${String(ROW_HEIGHT - 4)} ${color}`,
+        `beginPath ${color}`,
+        `moveTo ${String(x - 5)} ${String(top + 2)} ${color}`,
+        `lineTo ${String(x + 5)} ${String(top + 2)} ${color}`,
+        `lineTo ${String(x)} ${String(top + 8)} ${color}`,
+        `closePath ${color}`,
+        `fill ${color}`,
+      ]),
+    );
+    const lastBar = calls.findLastIndex((call) => call.name === 'stroke');
+    expect(calls.findIndex(isMark)).toBeGreaterThan(lastBar);
+    const below = paintBody(
+      { ...scene, deadlines: { missedTaskIds: new Set(['n']) } },
+      { ...VIEWPORT, top: (outline.rowIndexById.get('c') ?? -1) * ROW_HEIGHT + ROW_HEIGHT },
+    );
+    expect(
+      callsOf(below, 'fillRect')
+        .filter(isMark)
+        .map((call) => call.fillStyle),
+    ).toEqual([THEME.error]);
+    const hidden = paintBody(scene);
+    expect(
+      callsOf(hidden, 'fillRect').filter(
+        (call) => call.args[2] === 2 && call.args[3] === ROW_HEIGHT - 4,
+      ),
+    ).toEqual([]);
   });
 
   it('underlines the blocks of critical tasks in graphite and draws the float of the others as a dashed line', () => {

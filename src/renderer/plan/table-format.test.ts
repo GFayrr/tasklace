@@ -10,7 +10,8 @@ import {
   workTask,
 } from '../../core/testing/project-builder';
 import { loadMessages } from '../i18n/messages';
-import { createTableFormatters, floatCells, taskCells } from './table-format';
+import { at } from '../../core/testing/civil-time';
+import { createTableFormatters, dateConflictTitles, floatCells, taskCells } from './table-format';
 
 const messages = await loadMessages('en');
 const FORMATTERS = createTableFormatters('en-US');
@@ -137,5 +138,45 @@ describe('floatCells', () => {
       isCritical: false,
       isUnknown: false,
     });
+  });
+});
+
+describe('dateConflictTitles', () => {
+  const moment = (hour: number) => `@${String(hour - at(2026, 10, 23))}`;
+
+  it('names every date a task misses, in one tooltip per task', () => {
+    const end = at(2026, 10, 23, 17);
+    const titles = dateConflictTitles(
+      [
+        {
+          conflict: { code: 'DEADLINE_MISSED', taskId: 'a' },
+          taskName: 'A',
+          end,
+          date: at(2026, 10, 23, 12),
+        },
+        {
+          conflict: { code: 'MUST_FINISH_ON_NOT_MET', taskId: 'a' },
+          taskName: 'A',
+          end,
+          date: at(2026, 10, 23, 10),
+        },
+        {
+          conflict: { code: 'MUST_FINISH_ON_NOT_MET', taskId: 'b' },
+          taskName: 'B',
+          end,
+          date: at(2026, 10, 23, 9),
+        },
+      ],
+      messages,
+      moment,
+    );
+    expect([...titles]).toEqual([
+      [
+        'a',
+        'Ends at @17, after its deadline (@12). Cannot finish on @10: it ends at @17 at the earliest.',
+      ],
+      ['b', 'Cannot finish on @9: it ends at @17 at the earliest.'],
+    ]);
+    expect(dateConflictTitles([], messages, moment).size).toBe(0);
   });
 });

@@ -87,6 +87,11 @@ describe('the conflicts of people and teams', () => {
       createPeriodFormatter(app.locale)(conflict.start, conflict.end),
     );
     expect(single(line, '.tasks').textContent).toBe('Analysis and Interviews');
+    expect(
+      [...single(root, '#conflict-list').querySelectorAll('h3')].map(
+        (heading) => heading.textContent,
+      ),
+    ).toEqual([`${TEXT.peopleConflicts}${TEXT.peopleConflictsHint}`]);
     click(button(root, TEXT.closeConflicts));
     update();
     expect(root.querySelectorAll('#conflict-list')).toHaveLength(0);
@@ -112,6 +117,7 @@ describe('the conflicts of people and teams', () => {
       schedule,
       localHourOf(TODAY),
       pixelsPerHour(app.zoom),
+      [],
     );
     expect(scroller.scrollLeft).toBe(xOf(frame, conflict.start - 2 * HOURS_PER_DAY));
     expect(app.revealRequest).toBeNull();

@@ -1,4 +1,4 @@
-import type { Dependency, TaskId } from '../../core/model/project';
+import type { Dependency, Project, Task, TaskId } from '../../core/model/project';
 import type { Schedule } from '../../core/scheduling/schedule-project';
 import { constrainsSuccessorStart, usesPredecessorStart } from '../../core/scheduling/forward-pass';
 import { HOURS_PER_DAY, type ProjectHour } from '../../core/time';
@@ -57,21 +57,41 @@ export type RowShape =
       readonly end: number;
     };
 
-/** Chooses the period the timeline covers: from a week before the project to a month after its last task or today, at least two months, and never wider than a canvas can scroll. */
+/** Chooses the period the timeline covers: from a week before the earliest of the project start, today and the deadlines shown, to a month after the latest of the task ends, the project start, today and the deadlines shown, at least two months, and never wider than a canvas can scroll, a far deadline giving way so that the project always stays in view. */
 export function timelineFrame(
   projectStart: ProjectHour,
   schedule: Schedule | null,
   today: ProjectHour,
   pixelsPerHour: number,
+  deadlines: readonly ProjectHour[],
 ): TimelineFrame {
-  const origin = startOfDayHour(Math.min(projectStart, today)) - LEAD_DAYS * HOURS_PER_DAY;
-  let last = Math.max(projectStart, today, origin + MINIMUM_DAYS * HOURS_PER_DAY);
+  const maximumSpan = Math.floor(MAXIMUM_TIMELINE_PIXELS / pixelsPerHour);
+  let projectLast = Math.max(projectStart, today);
   for (const placement of schedule?.placements.values() ?? []) {
-    last = Math.max(last, placement.end);
+    projectLast = Math.max(projectLast, placement.end);
   }
-  const wanted = startOfDayHour(last) + TRAIL_DAYS * HOURS_PER_DAY;
-  const end = Math.min(wanted, origin + Math.floor(MAXIMUM_TIMELINE_PIXELS / pixelsPerHour));
+  const projectFirst = Math.min(projectStart, today);
+  let earliest = projectFirst;
+  let latest = projectLast;
+  for (const deadline of deadlines) {
+    earliest = Math.min(earliest, deadline);
+    latest = Math.max(latest, deadline);
+  }
+  const keepsProject = startOfDayHour(trailingDay(projectLast) - maximumSpan) + HOURS_PER_DAY;
+  const origin = Math.min(leadingDay(projectFirst), Math.max(leadingDay(earliest), keepsProject));
+  const last = Math.max(latest, origin + MINIMUM_DAYS * HOURS_PER_DAY);
+  const end = Math.min(trailingDay(last), origin + maximumSpan);
   return { origin, end, pixelsPerHour };
+}
+
+/** Returns the start of the day a week before an instant, where the timeline may begin. */
+function leadingDay(hour: ProjectHour): ProjectHour {
+  return startOfDayHour(hour) - LEAD_DAYS * HOURS_PER_DAY;
+}
+
+/** Returns the start of the day a month after an instant, where the timeline may end. */
+function trailingDay(hour: ProjectHour): ProjectHour {
+  return startOfDayHour(hour) + TRAIL_DAYS * HOURS_PER_DAY;
 }
 
 /** Returns the horizontal position of an instant on the timeline. */
@@ -199,4 +219,21 @@ function fillSegments(
 /** Returns midnight of the day of an instant. */
 function startOfDayHour(hour: ProjectHour): ProjectHour {
   return Math.floor(hour / HOURS_PER_DAY) * HOURS_PER_DAY;
+}
+
+/** Lists the deadlines of the tasks and milestones of a project. */
+export function deadlinesOf(project: Project): ProjectHour[] {
+  const deadlines: ProjectHour[] = [];
+  for (const task of project.tasks) {
+    const deadline = deadlineOf(task);
+    if (deadline !== null) {
+      deadlines.push(deadline);
+    }
+  }
+  return deadlines;
+}
+
+/** Returns the deadline of a task or milestone, or null for a summary or a task without one. */
+export function deadlineOf(task: Task): ProjectHour | null {
+  return task.kind === 'summary' ? null : task.deadline;
 }
