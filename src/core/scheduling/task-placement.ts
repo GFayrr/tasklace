@@ -80,14 +80,13 @@ export function placeTaskEarliest(
   const boundary = findFirstStartWhere(
     calendar,
     task,
-    earliestStart,
-    endBound,
+    { low: earliestStart, high: endBound, beyondIsTrue: false },
     (placement) => placement.end >= endBound,
   );
   return boundary.ok ? placeTask(calendar, task, boundary.value) : boundary;
 }
 
-/** Places a task at the latest start that still starts and ends no later than the given bounds. */
+/** Places a task at the latest start that still starts and ends no later than the given bounds, refusing with BEYOND_PLANNING_HORIZON a task that would have to start before the first supported year. */
 export function placeTaskLatest(
   calendar: CompiledCalendar,
   task: SchedulableTask,
@@ -97,24 +96,23 @@ export function placeTaskLatest(
   if (task.kind === 'milestone') {
     return placeTask(calendar, task, Math.min(latestStart, latestEnd));
   }
-  const direct = worksContinuously(calendar, task)
-    ? latestContinuousStart(calendar, task, latestStart, latestEnd)
-    : null;
-  if (direct !== null) {
-    return placeTask(calendar, task, direct);
+  if (worksContinuously(calendar, task)) {
+    const direct = latestContinuousStart(calendar, task, latestStart, latestEnd);
+    return direct.ok ? placeTask(calendar, task, direct.value) : direct;
   }
   const upperBound = Math.min(latestEnd, END_PROJECT_HOUR - QUARTER_HOUR);
   const firstLate = findFirstStartWhere(
     calendar,
     task,
-    MIN_PROJECT_HOUR,
-    upperBound,
+    { low: MIN_PROJECT_HOUR, high: upperBound, beyondIsTrue: true },
     (placement) => placement.start > latestStart || placement.end > latestEnd,
   );
   if (!firstLate.ok) {
     return firstLate;
   }
-  return placeTask(calendar, task, Math.max(firstLate.value - QUARTER_HOUR, MIN_PROJECT_HOUR));
+  return firstLate.value <= MIN_PROJECT_HOUR
+    ? failure('BEYOND_PLANNING_HORIZON')
+    : placeTask(calendar, task, firstLate.value - QUARTER_HOUR);
 }
 
 /** Computes on demand the exact working time slots of every block of a placed work task, refusing a placement with a block the task does not have. */
@@ -157,16 +155,19 @@ function worksContinuously(calendar: CompiledCalendar, task: WorkTask): boolean 
   return task.segments.length === 1 && worksFullDays(calendar, task);
 }
 
-/** Computes directly the latest start of a continuously worked task, or null when out of range. */
+/** Computes directly the latest start of a continuously worked task, failing when it would fall before the first supported year. */
 function latestContinuousStart(
   calendar: CompiledCalendar,
   task: WorkTask,
   latestStart: ProjectHour,
   latestEnd: ProjectHour,
-): ProjectHour | null {
+): Result<ProjectHour, PlacementErrorCode> {
   const byEnd = subtractWorkingHours(calendar, latestEnd, totalDurationHours(task));
+  if (!byEnd.ok) {
+    return byEnd;
+  }
   const byStart = subtractWorkingHours(calendar, latestStart + QUARTER_HOUR, QUARTER_HOUR);
-  return byEnd.ok && byStart.ok ? Math.min(byEnd.value, byStart.value) : null;
+  return byStart.ok ? success(Math.min(byEnd.value, byStart.value)) : byStart;
 }
 
 /** Sums the durations of every block of a work task. */
@@ -174,23 +175,24 @@ function totalDurationHours(task: WorkTask): number {
   return task.segments.reduce((total, segment) => total + segment.durationHours, 0);
 }
 
-/** Finds by binary search, among the quarter hours of a range, the first start whose placement satisfies a monotonic predicate. */
+/** Finds by binary search, among the quarter hours of a range, the first start whose placement satisfies a monotonic predicate, a placement running past the last supported year counting as satisfying it when asked, since any later start runs past it too. */
 function findFirstStartWhere(
   calendar: CompiledCalendar,
   task: WorkTask,
-  low: ProjectHour,
-  high: ProjectHour,
+  range: { readonly low: ProjectHour; readonly high: ProjectHour; readonly beyondIsTrue: boolean },
   predicate: (placement: Placement) => boolean,
 ): Result<ProjectHour, PlacementErrorCode> {
-  let lastFalse = toQuarters(low) - 1;
-  let firstTrue = toQuarters(high);
+  let lastFalse = toQuarters(range.low) - 1;
+  let firstTrue = toQuarters(range.high);
   while (firstTrue - lastFalse > 1) {
     const middle = Math.floor((lastFalse + firstTrue) / HALF);
     const placement = placeTask(calendar, task, fromQuarters(middle));
-    if (!placement.ok) {
+    const beyond =
+      range.beyondIsTrue && !placement.ok && placement.error === 'BEYOND_PLANNING_HORIZON';
+    if (!placement.ok && !beyond) {
       return placement;
     }
-    if (predicate(placement.value)) {
+    if (beyond || (placement.ok && predicate(placement.value))) {
       firstTrue = middle;
     } else {
       lastFalse = middle;

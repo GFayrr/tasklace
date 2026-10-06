@@ -84,6 +84,7 @@
       "one": "{count} conflict",
       "other": "{count} conflicts"
     },
+    "critical": "Critical: delaying these tasks delays the end of the project",
     "conflictsTitle": "Conflicts",
     "closeConflicts": "Close the list of conflicts",
     "conflictsHint": "A person or team has two tasks at the same time.",
@@ -120,6 +121,10 @@
       "SCHEDULE_MISMATCH": "The table could not be written while the schedule was being updated. Try again.",
       "UNKNOWN_BLOCK": "The table could not be written: a link names a block its task does not have. Check the links of the split tasks."
     },
+    "unknownFloats": {
+      "one": "The float of {count} task cannot be worked out: to finish on time, it would have to start before {firstYear}, the first year Tasklace handles. Give the calendar more working hours, or turn off the date constraints in the advanced options.",
+      "other": "The float of {count} tasks cannot be worked out: to finish on time, they would have to start before {firstYear}, the first year Tasklace handles. Give the calendar more working hours, or turn off the date constraints in the advanced options."
+    },
     "projectStartMoved": "The project now starts on {date}, so that this task can start earlier.",
     "details": "Details"
   },
@@ -136,6 +141,11 @@
     "duration": "Duration",
     "start": "Start",
     "end": "End",
+    "totalFloat": "Total float",
+    "freeFloat": "Free float",
+    "unknownFloat": "To finish on time, this task would have to start before {firstYear}, the first year Tasklace handles, so its float cannot be worked out.",
+    "totalFloatHint": "How long this task can slip without delaying the end of the project.",
+    "freeFloatHint": "How long this task can slip without delaying any task that waits for it.",
     "progress": "%",
     "predecessors": "Predecessors",
     "expand": "Expand {name}",
@@ -446,6 +456,14 @@
       "other": "{count} tasks use it. They keep their dates and will have no tag. You can undo this with Ctrl+Z."
     },
     "deleteConfirm": "Delete the tag",
+    "criticalPath": "Critical path",
+    "criticalPathHint": "Shows the tasks that would delay the end of the project if they slipped, and how long every other task can slip.",
+    "dateConstraints": "Date constraints",
+    "dateConstraintsHint": "Lets a task have a date it must finish on, and a deadline. When off, they are kept but ignored.",
+    "baseline": "Baseline",
+    "baselineHint": "Freezes the current plan, then shows how far each task has moved from it.",
+    "alwaysShowPatterns": "Always show patterns",
+    "alwaysShowPatternsHint": "Gives every tag a pattern on its bars, not only tags whose colors are close.",
     "cancel": "Cancel"
   },
   "report": {

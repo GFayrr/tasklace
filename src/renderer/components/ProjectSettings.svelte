@@ -2,6 +2,7 @@
   import type { Project } from '../../core/model/project';
   import { valueAt } from '../../core/table-value';
   import type { AppState } from '../app/app-state.svelte';
+  import AdvancedSettings from './AdvancedSettings.svelte';
   import CalendarSettings from './CalendarSettings.svelte';
   import GeneralSettings from './GeneralSettings.svelte';
   import Icon from './Icon.svelte';
@@ -10,8 +11,7 @@
   let { app, project }: { app: AppState; project: Project } = $props();
 
   const text = $derived(app.messages.settings);
-  const OPEN_TABS = ['general', 'calendar', 'tags'] as const;
-  const LATER_TABS = ['advanced'] as const;
+  const OPEN_TABS = ['general', 'calendar', 'tags', 'advanced'] as const;
   const TAB_STEPS: Readonly<Record<string, number>> = { ArrowLeft: -1, ArrowRight: 1 };
   let tab = $state<(typeof OPEN_TABS)[number]>('general');
 
@@ -89,25 +89,16 @@
         }}>{text[name]}</button
       >
     {/each}
-    {#each LATER_TABS as name (name)}
-      <button
-        type="button"
-        role="tab"
-        class="tab later"
-        aria-selected="false"
-        aria-disabled="true"
-        tabindex="-1"
-        title={text.soon}>{text[name]}</button
-      >
-    {/each}
   </div>
   <div class="panel" id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
     {#if tab === 'general'}
       <GeneralSettings {app} {project} />
     {:else if tab === 'calendar'}
       <CalendarSettings {app} {project} />
-    {:else}
+    {:else if tab === 'tags'}
       <TagSettings {app} {project} />
+    {:else}
+      <AdvancedSettings {app} {project} />
     {/if}
   </div>
   {#if app.settingsAlert !== null}
@@ -175,11 +166,6 @@
     color: var(--color-text);
     font-weight: 500;
     border-bottom-color: var(--color-action);
-  }
-
-  .tab.later {
-    cursor: default;
-    opacity: 0.6;
   }
 
   .panel {

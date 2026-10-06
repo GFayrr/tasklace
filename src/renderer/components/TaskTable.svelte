@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { MIN_PROJECT_YEAR } from '../../core/limits';
   import { tick } from 'svelte';
   import type { Tag, TagId, Task, TaskId } from '../../core/model/project';
   import type { AppState } from '../app/app-state.svelte';
@@ -16,7 +17,7 @@
   } from '../plan/cell-editing';
   import { groupIncoming, predecessorText, type PlanRow } from '../plan/plan-outline';
   import { isPickerRefusal } from '../plan/table-dates';
-  import { taskCells, type TableFormatters } from '../plan/table-format';
+  import { floatCells, taskCells, type TableFormatters } from '../plan/table-format';
   import { indentTask, moveTask, outdentTask } from '../plan/task-commands';
   import { ROW_HEIGHT } from '../plan/timeline-geometry';
   import { visibleRows } from '../plan/timeline-painter';
@@ -47,6 +48,10 @@
   const NAME_PADDING = 4;
   const ROW_INDEX_OFFSET = 2;
   const text = $derived(app.messages.table);
+  const floats = $derived(app.schedule?.floats ?? null);
+  const unknownFloatText = $derived(
+    fillMessage(text.unknownFloat, { firstYear: String(MIN_PROJECT_YEAR) }),
+  );
   const rows = $derived(app.outline.rows);
   const incoming = $derived(groupIncoming(app.project?.dependencies ?? []));
   const tagsById = $derived(new Map((app.project?.tags ?? []).map((tag) => [tag.id, tag])));
@@ -376,7 +381,7 @@
 </script>
 
 <div
-  class="table"
+  class={['table', { 'with-floats': floats !== null }]}
   role="grid"
   tabindex="0"
   aria-label={text.label}
@@ -395,6 +400,14 @@
       <span class="cell number" role="columnheader">{text.duration}</span>
       <span class="cell date" role="columnheader">{text.start}</span>
       <span class="cell date" role="columnheader">{text.end}</span>
+      {#if floats !== null}
+        <span class="cell float number" role="columnheader" title={text.totalFloatHint}
+          >{text.totalFloat}</span
+        >
+        <span class="cell float number" role="columnheader" title={text.freeFloatHint}
+          >{text.freeFloat}</span
+        >
+      {/if}
       <span class="cell progress number" role="columnheader">{text.progress}</span>
       <span class="cell predecessors" role="columnheader">{text.predecessors}</span>
       <span class="cell tag" role="columnheader">{text.tag}</span>
@@ -424,6 +437,7 @@
     <div class="rows" style:transform="translateY({-scrollTop}px)">
       {#each shown as { row, index, values } (row.task.id)}
         {@const selected = row.task.id === app.selectedTaskId}
+        {@const rowFloat = floatCells(floats?.get(row.task.id), formatters, app.messages)}
         <div
           class="row"
           class:selected
@@ -447,6 +461,7 @@
               class="cell {column}"
               class:number={column === 'duration' || column === 'progress'}
               class:date={column === 'start' || column === 'end'}
+              class:critical={column === 'name' && rowFloat.isCritical}
               class:active={selected && column === activeColumn}
               id={cellId(row.task.id, column)}
               role="gridcell"
@@ -519,6 +534,22 @@
                 {/if}
               {/if}
             </span>
+            {#if column === 'end' && floats !== null}
+              <span
+                class={[
+                  'cell float number',
+                  { critical: rowFloat.isCritical, unknown: rowFloat.isUnknown },
+                ]}
+                role="gridcell"
+                aria-readonly="true"
+                title={rowFloat.isUnknown ? unknownFloatText : undefined}
+              >
+                <span class="label">{rowFloat.total}</span>
+              </span>
+              <span class="cell float number" role="gridcell" aria-readonly="true">
+                <span class="label">{rowFloat.free}</span>
+              </span>
+            {/if}
           {/each}
         </div>
       {/each}
@@ -561,6 +592,11 @@
   .header,
   .body {
     width: max(100%, 1058px);
+  }
+
+  .with-floats .header,
+  .with-floats .body {
+    width: max(100%, 1250px);
   }
 
   .header {
@@ -682,6 +718,20 @@
 
   .date {
     width: 180px;
+  }
+
+  .float {
+    width: 96px;
+    color: var(--color-text-secondary);
+  }
+
+  .critical {
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .unknown {
+    color: var(--color-warning);
   }
 
   .predecessors {

@@ -15,6 +15,7 @@ import {
   removeTimeRange,
   renameProject,
   setNonWorkingPeriod,
+  toggleProjectOption,
   setProjectStart,
   setTimeRange,
   setWorkingWeekday,
@@ -259,6 +260,28 @@ describe('a calendar change applied to a session', () => {
     expect(opened.value.project().calendar).toEqual({
       ...PLAN.calendar,
       nonWorkingPeriods: [{ firstDay: day(2026, 10, 12), lastDay: day(2026, 10, 12) }],
+    });
+  });
+});
+
+describe('toggleProjectOption', () => {
+  it('turns one option on when off and off when on, keeping the others', () => {
+    expect(toggleProjectOption(contextOf(), 'criticalPathEnabled')).toEqual({
+      ok: true,
+      value: [
+        {
+          type: 'updateProject',
+          fields: { options: { ...PLAN.options, criticalPathEnabled: true } },
+        },
+      ],
+    });
+    const on = {
+      ...contextOf(),
+      project: { ...PLAN, options: { ...PLAN.options, dateConstraintsEnabled: true } },
+    };
+    expect(toggleProjectOption(on, 'dateConstraintsEnabled')).toEqual({
+      ok: true,
+      value: [{ type: 'updateProject', fields: { options: PLAN.options } }],
     });
   });
 });

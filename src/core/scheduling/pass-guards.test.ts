@@ -167,6 +167,17 @@ describe('the backward pass facing inconsistent inputs', () => {
     }
   });
 
+  it('refuses a task whose block was never placed late', () => {
+    const lone = project([workTask('a'), workTask('z')]);
+    const { context, graph, placements } = prepared(lone);
+    expect(runBackwardPass(context, withoutInOrder(graph, unitOf(graph, 'z')), placements)).toEqual(
+      {
+        ok: false,
+        error: { code: INVALID, taskId: 'z' },
+      },
+    );
+  });
+
   it('reports a free float that cannot be measured for a task without successor', () => {
     const lone = project([workTask('a'), workTask('z')]);
     const { context, graph, placements } = prepared(lone);
