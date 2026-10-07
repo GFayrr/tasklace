@@ -23,6 +23,19 @@ const dialogs = vi.hoisted(() => ({
 }));
 
 const recording = vi.hoisted((): { failure: Error | null } => ({ failure: null }));
+const examining = vi.hoisted((): { failure: Error | null } => ({ failure: null }));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...original,
+    stat: (...values: Parameters<typeof original.stat>) => {
+      const failure = examining.failure;
+      examining.failure = null;
+      return failure === null ? original.stat(...values) : Promise.reject(failure);
+    },
+  };
+});
 
 vi.mock('./recent-projects', async (importOriginal) => {
   const original = await importOriginal<typeof import('./recent-projects')>();
@@ -569,28 +582,22 @@ describe('exporting projects', () => {
     expect(await readFile(join(folder, 'plan.json'), 'utf8')).toBe('{}');
   });
 
-  it('counts a file that cannot be examined as absent, warning, so that the write reports the problem', async () => {
-    const blocking = join(folder, 'a-file');
-    await writeFile(blocking, '');
-    chooseToSave(join(blocking, 'plan'));
+  it('counts a file that cannot be examined as absent, warning, and writes the export', async () => {
+    chooseToSave(join(folder, 'plan'));
+    const denied = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    examining.failure = denied;
     const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
-      const { answer, logged } = await quietly(() =>
-        request(IPC_CHANNELS.exportProject, {}, 'json', '{}', 'Plan'),
+      expect(await request(IPC_CHANNELS.exportProject, {}, 'json', '{}', 'Plan')).toEqual(
+        success({ fileName: 'plan.json' }),
       );
-      expect(answer).toEqual(failure({ code: 'WRITE_FAILED' }));
-      expect(logged.map((call: unknown[]) => String(call[0]))).toEqual([
-        'The export could not be written:',
+      expect(warned.mock.calls).toEqual([
+        ['A file could not be examined, so it counts as absent:', denied],
       ]);
-      expect(
-        warned.mock.calls.map((call: unknown[]) => [
-          String(call[0]),
-          (call[1] as NodeJS.ErrnoException).code,
-        ]),
-      ).toEqual([['A file could not be examined, so it counts as absent:', 'ENOTDIR']]);
     } finally {
       warned.mockRestore();
     }
+    expect(await readFile(join(folder, 'plan.json'), 'utf8')).toBe('{}');
   });
 
   it('refuses an invalid request, and reports a canceled or failed export', async () => {
