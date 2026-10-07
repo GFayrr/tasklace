@@ -188,9 +188,9 @@ describe('logWorkerErrors', () => {
 });
 
 describe('writeLogBeforeQuitting', () => {
-  it('holds the end of the application once, until the log has written what it was given', async () => {
+  it('holds the end of the application until the log has written what it was given, then ends it at once', async () => {
     const listeners: ((event: { preventDefault: () => void }) => void)[] = [];
-    let quits = 0;
+    let exits = 0;
     let release: () => void = () => undefined;
     const written = new Promise<void>((resolve) => {
       release = resolve;
@@ -198,29 +198,24 @@ describe('writeLogBeforeQuitting', () => {
     writeLogBeforeQuitting(
       {
         on: (_event, listener) => listeners.push(listener),
-        quit: () => {
-          quits += 1;
+        exit: () => {
+          exits += 1;
         },
       },
       { write: () => undefined, written: () => written },
     );
-    const quitting = (): boolean => {
-      let held = false;
-      for (const listener of listeners) {
-        listener({
-          preventDefault: () => {
-            held = true;
-          },
-        });
-      }
-      return held;
-    };
-    expect(quitting()).toBe(true);
-    expect(quits).toBe(0);
+    let held = false;
+    for (const listener of listeners) {
+      listener({
+        preventDefault: () => {
+          held = true;
+        },
+      });
+    }
+    expect([held, exits]).toEqual([true, 0]);
     release();
     await written;
     await Promise.resolve();
-    expect(quits).toBe(1);
-    expect(quitting()).toBe(false);
+    expect(exits).toBe(1);
   });
 });
