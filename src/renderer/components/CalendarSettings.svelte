@@ -39,12 +39,12 @@
     readonly text: string;
     readonly resets: number;
   } | null>(null);
-  const shownRefusal = $derived(refusal?.resets === app.settingsResets ? refusal : null);
+  const shownRefusal = $derived(refusal?.resets === app.settings.resets ? refusal : null);
 
   /** Applies a change of the calendar, showing the reason for a refusal beside the part that was changed, or clearing it once applied, and tells whether it was applied. */
   function change(section: Section, build: (context: EditContext) => Edit): boolean {
     const refused = app.editSettings(build);
-    refusal = refused === null ? null : { section, text: refused, resets: app.settingsResets };
+    refusal = refused === null ? null : { section, text: refused, resets: app.settings.resets };
     return refused === null;
   }
 
@@ -57,7 +57,7 @@
   ): void {
     if (!change(section, build)) {
       field.value = current;
-      app.holdSettingsOpen();
+      app.settings.hold();
     }
   }
 </script>

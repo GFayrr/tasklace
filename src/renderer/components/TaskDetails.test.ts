@@ -10,6 +10,7 @@ import {
 import { AppState } from '../app/app-state.svelte';
 import { fakeAppContext, openedProjectOf, settle } from '../app/testing/fake-app-context';
 import english from '../locales/en.json';
+import { deleteTasks } from '../plan/task-commands';
 import TaskDetails from './TaskDetails.svelte';
 import { button, click, dialogIn, render, single, update } from './testing/render';
 
@@ -185,9 +186,12 @@ describe('TaskDetails', () => {
   it('closes when its task disappears, and when the dialog is closed with Escape', async () => {
     const { app, root } = await renderDetails();
     openFor(app, 'a');
-    app.detailsTaskId = 'gone';
+    expect(app.edit((context) => deleteTasks(context, ['a']))).toBe(true);
+    await settle();
     update();
-    expect(dialogIn(root).open).toBe(false);
+    expect([dialogIn(root).open, app.detailsTaskId]).toEqual([false, null]);
+    app.undo();
+    await settle();
     openFor(app, 'a');
     const dialog = dialogIn(root);
     dialog.dispatchEvent(new Event('close'));

@@ -17,10 +17,10 @@
 
   /** Opens the dialog on the General tab when the settings open, and closes it when they are closed elsewhere. */
   function followOpening(dialog: HTMLDialogElement): void {
-    if (app.settingsOpen && !dialog.open) {
+    if (app.settings.isOpen && !dialog.open) {
       tab = 'general';
       dialog.showModal();
-    } else if (!app.settingsOpen && dialog.open) {
+    } else if (!app.settings.isOpen && dialog.open) {
       dialog.close();
     }
   }
@@ -43,7 +43,7 @@
     if (focused instanceof HTMLInputElement) {
       focused.blur();
     }
-    return app.closeSettingsUnlessHeld();
+    return app.settings.closeUnlessHeld();
   }
 </script>
 
@@ -58,7 +58,7 @@
   }}
   onclose={(event) => {
     if (!event.currentTarget.open) {
-      app.closeSettings();
+      app.settings.close();
     }
   }}
 >
@@ -101,8 +101,8 @@
       <AdvancedSettings {app} {project} />
     {/if}
   </div>
-  {#if app.settingsAlert !== null}
-    <p class="alert" role="alert">{app.settingsAlert}</p>
+  {#if app.settings.alert !== null}
+    <p class="alert" role="alert">{app.settings.alert}</p>
   {/if}
   <div class="foot">
     <small>{text.undoHint}</small>

@@ -10,6 +10,7 @@ import {
   IPC_CHANNELS,
   type BridgeResult,
   type ChannelAnswers,
+  type ChannelArguments,
   type ResultChannel,
   type RecentProject,
   type TasklaceBridge,
@@ -88,7 +89,7 @@ contextBridge.exposeInMainWorld(BRIDGE_NAME, bridge);
 /** Sends a file request to the main process and gives back its result, an answer of any other shape being logged and counting as a failed task. */
 async function request<C extends ResultChannel>(
   channel: C,
-  ...values: unknown[]
+  ...values: ChannelArguments[C]
 ): Promise<ChannelAnswers[C] | BridgeResult<never>> {
   const result: unknown = await ipcRenderer.invoke(channel, ...values);
   if (isAnswerOf(channel, result)) {

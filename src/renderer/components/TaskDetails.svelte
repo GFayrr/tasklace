@@ -45,7 +45,7 @@
 
   /** Closes the panel without applying anything. */
   function close(): void {
-    app.detailsTaskId = null;
+    app.closeDetails();
     openedFor = null;
     dialog?.close();
   }

@@ -6,7 +6,7 @@ import type { BaselineEntry, Project, TaskId } from '../../core/model/project';
 import { takeBaseline, type SkippedTask } from '../../core/baseline/take-baseline';
 import { failure, success, type Result } from '../../core/result';
 import type { MergeFailure, SharedRepair } from '../../core/shared/shared-project';
-import type { ValidationIssue } from '../../core/validation/validation-issues';
+import type { ValidationIssue, ValidationIssueCode } from '../../core/validation/validation-issues';
 import type { DailyWindowErrorCode } from '../../core/calendar/task-slots';
 import { taskOfCalendarIssue } from '../../core/shared/shared-operations';
 import { issueText, repairText, type ReportedIssue } from '../i18n/issue-text';
@@ -42,7 +42,6 @@ import {
   issueMessage,
   fileErrorMessage,
   fillMessage,
-  type EditRefusal,
   type Messages,
 } from '../i18n/messages';
 import type { CurrentSchedule, EditableColumn } from '../plan/cell-editing';
@@ -66,14 +65,15 @@ import {
   findBlockWaitProblem,
   replaceTask,
   type Edit,
+  type EditBuild,
   type EditContext,
 } from '../plan/task-commands';
-import type { SharedOperation } from '../../core/shared/shared-operations';
 import { buildNewProject, localQuarterOf } from '../project/new-project';
 import { entriesByTask, unfrozenTasks } from '../plan/baseline-view';
 import {
   createProjectFiles,
   FileActionError,
+  issuesOf,
   type ActionFailure,
   type ActionResult,
   type OpenedSession,
@@ -83,6 +83,7 @@ import {
 import type { ZoomLevel } from '../plan/time-scale';
 import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
 import type { Theme } from '../theme/theme';
+import { SettingsPanel } from './settings-panel.svelte';
 import type { Command } from './shortcuts';
 
 export type NoticeKind = 'error' | 'warning' | 'info';
@@ -91,16 +92,10 @@ export type CloseChoice = 'save' | 'discard' | 'cancel';
 
 export type DrawingPart = 'timeline' | 'patterns';
 
-export type ClosePrompt =
-  | { readonly reason: 'unsaved'; readonly answer: (choice: CloseChoice) => void }
-  | {
-      readonly reason: 'saveFailed';
-      readonly detail: string;
-      readonly answer: (choice: CloseChoice) => void;
-    };
-
 type CloseQuestion =
   { readonly reason: 'unsaved' } | { readonly reason: 'saveFailed'; readonly detail: string };
+
+export type ClosePrompt = CloseQuestion & { readonly answer: (choice: CloseChoice) => void };
 
 interface ComputedSchedule {
   readonly project: Project;
@@ -112,13 +107,13 @@ interface StartMove {
   readonly project: Project | null;
 }
 
-const DAILY_WINDOW_CODES: readonly string[] = [
+const DAILY_WINDOW_CODES: readonly ValidationIssueCode[] = [
   'INVALID_HOURS_PER_DAY',
   'INVALID_DAILY_START_HOUR',
 ] satisfies readonly DailyWindowErrorCode[];
 
 /** Tells whether a problem is about the hours a task works each day. */
-function isDailyWindowCode(code: string): code is DailyWindowErrorCode {
+function isDailyWindowCode(code: ValidationIssueCode): code is DailyWindowErrorCode {
   return DAILY_WINDOW_CODES.includes(code);
 }
 
@@ -179,19 +174,16 @@ export class AppState {
   #recentProjects = $state.raw<readonly RecentProject[]>([]);
   #notices = $state.raw<readonly Notice[]>([]);
   zoom = $state<ZoomLevel>('day');
-  selectedTaskId = $state<TaskId | null>(null);
-  editRequest = $state<EditRequest | null>(null);
-  revealRequest = $state<RevealRequest | null>(null);
+  #selectedTaskId = $state<TaskId | null>(null);
+  #editRequest = $state<EditRequest | null>(null);
+  #revealRequest = $state<RevealRequest | null>(null);
   #conflictsOpen = $state(false);
-  #unknownFloatsNotice: string | null = null;
-  detailsTaskId = $state<TaskId | null>(null);
-  #settingsOpen = $state(false);
-  #settingsResets = $state(0);
-  #settingsNotice = $state<string | null>(null);
-  #settingsAlert = $state<string | null>(null);
-  #baselineNotice = $state<string | null>(null);
-  #settingsHeld = false;
+  #unknownFloatsNotice: { readonly text: string; readonly id: number } | null = null;
+  #detailsTaskId = $state<TaskId | null>(null);
   #startMove: StartMove | null = null;
+  readonly settings = new SettingsPanel(() => {
+    this.#startMove = null;
+  });
   #closePrompt = $state.raw<ClosePrompt | null>(null);
   #fileActionRunning = $state(false);
   #report = $state.raw<Report | null>(null);
@@ -252,7 +244,7 @@ export class AppState {
         console.error('The schedule could not be computed:', error);
         this.#scheduleStopped = true;
         this.#startMove = null;
-        this.#alertSettings(this.messages.notices.scheduleStopped);
+        this.settings.alertIfOpen(this.messages.notices.scheduleStopped);
         this.#notify('error', this.messages.notices.scheduleStopped, null, true);
       },
     });
@@ -261,6 +253,53 @@ export class AppState {
   /** Returns the open project, or null. */
   get project(): Project | null {
     return this.#project;
+  }
+
+  /** Returns the task selected in the table and on the timeline, or null. */
+  get selectedTaskId(): TaskId | null {
+    return this.#selectedTaskId;
+  }
+
+  /** Selects a task of the open project, or nothing, throwing on a task the project does not have. */
+  select(id: TaskId | null): void {
+    if (id !== null && !this.outline.wbsById.has(id)) {
+      throw new Error(`The task ${id} to select is not in the project.`);
+    }
+    this.#selectedTaskId = id;
+  }
+
+  /** Returns the task whose details panel is open, or null. */
+  get detailsTaskId(): TaskId | null {
+    return this.#detailsTaskId;
+  }
+
+  /** Closes the details panel. */
+  closeDetails(): void {
+    this.#detailsTaskId = null;
+  }
+
+  /** Returns the cell the table is asked to edit, until the table takes the request. */
+  get editRequest(): EditRequest | null {
+    return this.#editRequest;
+  }
+
+  /** Takes the request to edit a cell, which is then answered once only. */
+  takeEditRequest(): EditRequest | null {
+    const request = this.#editRequest;
+    this.#editRequest = null;
+    return request;
+  }
+
+  /** Returns the instant the workspace is asked to show, until the workspace takes the request. */
+  get revealRequest(): RevealRequest | null {
+    return this.#revealRequest;
+  }
+
+  /** Takes the request to show an instant on a row, which is then answered once only. */
+  takeRevealRequest(): RevealRequest | null {
+    const request = this.#revealRequest;
+    this.#revealRequest = null;
+    return request;
   }
 
   /** Returns the schedule shown, the latest computed for the open project even when older than its latest change, or null when none is computed or the latest computation failed. */
@@ -563,7 +602,7 @@ export class AppState {
   }
 
   /** Applies a change built from the current project, telling the user why when it is refused. */
-  edit(build: (context: EditContext) => Result<readonly SharedOperation[], EditRefusal>): boolean {
+  edit(build: EditBuild): boolean {
     const refusal = this.tryEdit(build);
     if (refusal !== null) {
       this.#notify('error', refusal);
@@ -572,9 +611,7 @@ export class AppState {
   }
 
   /** Applies a change built from the current project, returning why it was refused, as while a file action runs, or null once applied, telling when the project start moved earlier to make room for a task. */
-  tryEdit(
-    build: (context: EditContext) => Result<readonly SharedOperation[], EditRefusal>,
-  ): string | null {
+  tryEdit(build: EditBuild): string | null {
     const previousStart = this.project?.startDate;
     const refusal = this.#tryExplainedEdit(build, (issue) =>
       issueMessage(this.messages, issue.code),
@@ -617,68 +654,24 @@ export class AppState {
       return;
     }
     this.collapsed = withAncestorsOpen(this.collapsed, project.tasks, taskId);
-    this.selectedTaskId = taskId;
-    this.revealRequest = { taskId, hour };
-  }
-
-  /** Tells whether the settings of the open project are shown. */
-  get settingsOpen(): boolean {
-    return this.#settingsOpen;
-  }
-
-  /** Counts the times the settings started afresh, on opening or after an undo or redo, so that what they show restarts too. */
-  get settingsResets(): number {
-    return this.#settingsResets;
-  }
-
-  /** Returns the message about the latest move of the project start, telling how many tasks it moved, or null. */
-  get settingsNotice(): string | null {
-    return this.#settingsNotice;
-  }
-
-  /** Returns why the schedule could not be computed after a change made in the settings, or null. */
-  get settingsAlert(): string | null {
-    return this.#settingsAlert;
+    this.#selectedTaskId = taskId;
+    this.#revealRequest = { taskId, hour };
   }
 
   /** Opens the settings of the open project, starting afresh. */
   openSettings(): void {
     if (this.project !== null) {
-      this.#resetSettings();
-      this.#settingsOpen = true;
+      this.settings.open();
     }
-  }
-
-  /** Closes the settings of the open project. */
-  closeSettings(): void {
-    this.#settingsOpen = false;
-    this.#resetSettings();
-  }
-
-  /** Keeps the settings open at the next attempt to close them, since a value typed in a field was refused as the field was left, perhaps to close them. */
-  holdSettingsOpen(): void {
-    this.#settingsHeld = true;
-  }
-
-  /** Closes the settings unless a refused value holds them open once on its reason, telling whether they closed. */
-  closeSettingsUnlessHeld(): boolean {
-    if (this.#settingsHeld) {
-      this.#settingsHeld = false;
-      return false;
-    }
-    this.closeSettings();
-    return true;
   }
 
   /** Applies a change of the project settings, returning why it was refused, naming the task whose hours per day or daily start no longer fit the working day, or null once applied. */
-  editSettings(
-    build: (context: EditContext) => Result<readonly SharedOperation[], EditRefusal>,
-  ): string | null {
+  editSettings(build: EditBuild): string | null {
     const refusal = this.#tryExplainedEdit(build, (issue, project) =>
       this.#settingsRefusal(project, issue),
     );
     if (refusal === null) {
-      this.#settingsHeld = false;
+      this.settings.release();
     }
     return refusal;
   }
@@ -688,7 +681,7 @@ export class AppState {
     const current = this.currentSchedule;
     const calendar = this.calendar;
     let unfrozen: readonly SkippedTask[] = [];
-    this.#baselineNotice = null;
+    this.settings.tellBaseline(null);
     const refusal = this.editSettings((context) => {
       if (!current.ok) {
         return current;
@@ -706,10 +699,8 @@ export class AppState {
     });
     if (refusal === null && unfrozen.length > 0) {
       console.error('Tasks could not be frozen in the baseline:', unfrozen);
-      this.#baselineNotice = countMessage(
-        this.messages.notices.baselineSkipped,
-        unfrozen.length,
-        this.locale,
+      this.settings.tellBaseline(
+        countMessage(this.messages.notices.baselineSkipped, unfrozen.length, this.locale),
       );
     }
     return refusal;
@@ -727,13 +718,8 @@ export class AppState {
 
   /** Removes the baseline of the project, returning why it was refused or null. */
   clearBaseline(): string | null {
-    this.#baselineNotice = null;
+    this.settings.tellBaseline(null);
     return this.editSettings(() => clearBaseline());
-  }
-
-  /** Returns how many tasks the latest baseline set from the settings could not freeze, or null. */
-  get baselineNotice(): string | null {
-    return this.#baselineNotice;
   }
 
   /** Renames the project from its settings, returning why the name was refused or null, an unchanged name changing nothing. */
@@ -747,7 +733,7 @@ export class AppState {
     const previous = this.#startMove;
     const before = this.currentSchedule;
     const base = previous?.base ?? (before.ok ? before.value : null);
-    this.#settingsNotice = null;
+    this.settings.tell(null);
     this.#startMove = base === null ? null : { base, project: null };
     const refusal = this.editSettings(() => setProjectStart(text));
     if (refusal !== null) {
@@ -756,16 +742,6 @@ export class AppState {
       this.#startMove = { base: this.#startMove.base, project: this.project };
     }
     return refusal;
-  }
-
-  /** Clears what the settings show about earlier changes. */
-  #resetSettings(): void {
-    this.#settingsNotice = null;
-    this.#baselineNotice = null;
-    this.#settingsAlert = null;
-    this.#settingsHeld = false;
-    this.#startMove = null;
-    this.#settingsResets += 1;
   }
 
   /** Explains why a change of the settings was refused: a task whose hours per day or daily start no longer fit the working day is named, any other problem gets its own text. */
@@ -791,7 +767,7 @@ export class AppState {
 
   /** Applies a change built from the current project, and returns null, or returns why it was refused, a refusal of the shared session being explained from its first problem and the project it was refused for. */
   #tryExplainedEdit(
-    build: (context: EditContext) => Result<readonly SharedOperation[], EditRefusal>,
+    build: EditBuild,
     explain: (issue: ValidationIssue, project: Project) => string,
   ): string | null {
     const session = this.#session;
@@ -819,10 +795,10 @@ export class AppState {
   }
 
   /** Opens the details panel of a task, or of the selected task. */
-  openDetails(id: TaskId | null = this.selectedTaskId): void {
+  openDetails(id: TaskId | null = this.#selectedTaskId): void {
     if (id !== null) {
-      this.selectedTaskId = id;
-      this.detailsTaskId = id;
+      this.select(id);
+      this.#detailsTaskId = id;
     }
   }
 
@@ -840,7 +816,7 @@ export class AppState {
 
   /** Applies the details panel to its task, returning why it was refused, or null once applied. */
   saveDetails(draft: TaskDraft): string | null {
-    const id = this.detailsTaskId;
+    const id = this.#detailsTaskId;
     const task = this.project?.tasks.find((candidate) => candidate.id === id);
     if (task === undefined) {
       return editErrorMessage(this.messages, 'NOT_POSSIBLE');
@@ -857,7 +833,7 @@ export class AppState {
       return built.ok ? replaceTask(context, built.value, draft.blocks) : built;
     });
     if (refusal === null) {
-      this.detailsTaskId = null;
+      this.#detailsTaskId = null;
     }
     return refusal;
   }
@@ -866,20 +842,20 @@ export class AppState {
   addTask(): void {
     const added: TaskId[] = [];
     const applied = this.edit((context) => {
-      const inserted = insertTask(context, this.selectedTaskId, this.messages.table.newTask);
+      const inserted = insertTask(context, this.#selectedTaskId, this.messages.table.newTask);
       added.push(inserted.taskId);
       return { ok: true, value: inserted.operations };
     });
     const [taskId] = added;
     if (applied && taskId !== undefined) {
-      this.selectedTaskId = taskId;
-      this.editRequest = { taskId, column: 'name' };
+      this.#selectedTaskId = taskId;
+      this.#editRequest = { taskId, column: 'name' };
     }
   }
 
   /** Applies a change to the selected task, doing nothing when no task is selected. */
   editSelected(build: (context: EditContext, id: TaskId) => Edit): void {
-    const id = this.selectedTaskId;
+    const id = this.#selectedTaskId;
     if (id !== null) {
       this.edit((context) => build(context, id));
     }
@@ -887,14 +863,14 @@ export class AppState {
 
   /** Deletes the selected task and everything under it, then selects the row that takes its place. */
   deleteSelected(): void {
-    const id = this.selectedTaskId;
+    const id = this.#selectedTaskId;
     if (id === null) {
       return;
     }
     const index = this.outline.rowIndexById.get(id) ?? 0;
     if (this.edit((context) => deleteTasks(context, [id]))) {
       const rows = this.outline.rows;
-      this.selectedTaskId = rows[Math.min(index, rows.length - 1)]?.task.id ?? null;
+      this.#selectedTaskId = rows[Math.min(index, rows.length - 1)]?.task.id ?? null;
     }
   }
 
@@ -903,7 +879,7 @@ export class AppState {
     if (this.#refuseWhileFileActionRuns()) {
       return;
     }
-    this.#resetSettings();
+    this.settings.restart();
     this.#showHistoryStep(this.#session?.history.undo(), this.messages.notices.undoFailed);
   }
 
@@ -912,7 +888,7 @@ export class AppState {
     if (this.#refuseWhileFileActionRuns()) {
       return;
     }
-    this.#resetSettings();
+    this.settings.restart();
     this.#showHistoryStep(this.#session?.history.redo(), this.messages.notices.redoFailed);
   }
 
@@ -1028,13 +1004,13 @@ export class AppState {
     this.#computed = null;
     this.#peopleLines = [];
     this.#dateLines = [];
-    this.selectedTaskId = null;
-    this.editRequest = null;
-    this.revealRequest = null;
+    this.#selectedTaskId = null;
+    this.#editRequest = null;
+    this.#revealRequest = null;
     this.#conflictsOpen = false;
     this.#forgetUnknownFloats();
-    this.detailsTaskId = null;
-    this.closeSettings();
+    this.#detailsTaskId = null;
+    this.settings.close();
     this.#changedSinceOpened = false;
     this.collapsed = NOTHING_COLLAPSED;
     this.#openedCount += 1;
@@ -1070,8 +1046,11 @@ export class AppState {
     this.#canRedo = session.history.canRedo();
     this.#scheduleStopped = false;
     this.#scheduler.request(project);
-    if (this.selectedTaskId !== null && !this.outline.wbsById.has(this.selectedTaskId)) {
-      this.selectedTaskId = null;
+    if (this.#selectedTaskId !== null && !this.outline.wbsById.has(this.#selectedTaskId)) {
+      this.#selectedTaskId = null;
+    }
+    if (this.#detailsTaskId !== null && !this.outline.wbsById.has(this.#detailsTaskId)) {
+      this.#detailsTaskId = null;
     }
   }
 
@@ -1115,7 +1094,7 @@ export class AppState {
       this.#showScheduleFailure(result.error, project);
       return;
     }
-    this.#settingsAlert = null;
+    this.settings.clearAlert();
     this.#tellUnknownFloats(result.value);
     if (move !== null && (move.project === null || move.project === project)) {
       this.#tellMovedTasks(move.base, result.value);
@@ -1125,7 +1104,7 @@ export class AppState {
   /** Removes the message about floats that cannot be worked out, as when another project opens or the schedule fails. */
   #forgetUnknownFloats(): void {
     const previous = this.#unknownFloatsNotice;
-    this.#notices = this.notices.filter((notice) => notice.text !== previous);
+    this.#notices = this.notices.filter((notice) => notice.id !== previous?.id);
     this.#unknownFloatsNotice = null;
   }
 
@@ -1143,13 +1122,12 @@ export class AppState {
         : fillMessage(countMessage(this.messages.notices.unknownFloats, unknown, this.locale), {
             firstYear: String(MIN_PROJECT_YEAR),
           });
-    if (text === this.#unknownFloatsNotice) {
+    if (text === (this.#unknownFloatsNotice?.text ?? null)) {
       return;
     }
     this.#forgetUnknownFloats();
-    this.#unknownFloatsNotice = text;
     if (text !== null) {
-      this.#notify('warning', text, null, true);
+      this.#unknownFloatsNotice = { text, id: this.#notify('warning', text, null, true) };
     }
   }
 
@@ -1161,7 +1139,7 @@ export class AppState {
         moved += 1;
       }
     }
-    this.#settingsNotice = countMessage(this.messages.settings.tasksMoved, moved, this.locale);
+    this.settings.tell(countMessage(this.messages.settings.tasksMoved, moved, this.locale));
   }
 
   /** Tells the user why the schedule of a project could not be computed, with each problem and the task it concerns, and logs the cause. */
@@ -1177,15 +1155,8 @@ export class AppState {
     );
     const report =
       entries.length === 0 ? null : { title: this.messages.report.scheduleFailed, entries };
-    this.#alertSettings(text);
+    this.settings.alertIfOpen(text);
     this.#notify('error', text, report);
-  }
-
-  /** Shows a problem of the schedule inside the open settings, which hide the other messages. */
-  #alertSettings(text: string): void {
-    if (this.#settingsOpen) {
-      this.#settingsAlert = text;
-    }
   }
 
   /** Tells whether a draft of the details panel works fewer hours a day than the project, so that a daily start time makes sense. */
@@ -1270,13 +1241,13 @@ export class AppState {
     if (failure.code === 'UNSAVED_PROJECT') {
       return failure.cause === null ? null : this.#causeReport(failure.cause);
     }
-    const issues = 'issues' in failure ? failure.issues : [];
+    const issues = issuesOf(failure);
     return issues.length === 0 ? null : this.#issueReport(this.messages.report.fileFailed, issues);
   }
 
   /** Lists the failure of the save that kept the open project, then the problems it found. */
   #causeReport(cause: ActionFailure): Report {
-    const issues = 'issues' in cause ? cause.issues : [];
+    const issues = issuesOf(cause);
     const reason = fileErrorMessage(this.messages, cause.code);
     return {
       title: this.messages.report.saveFailed,
@@ -1288,7 +1259,7 @@ export class AppState {
   }
 
   /** Tells the user that the project now starts earlier, so that a task placed before it fits. */
-  #notifyStartMove(previousStart: number): void {
+  #notifyStartMove(previousStart: ProjectHour): void {
     const start = this.project?.startDate;
     if (start !== undefined && start < previousStart) {
       const date = createDayFormatter(this.locale)(start);
@@ -1333,15 +1304,16 @@ export class AppState {
     console.error('A file action failed unexpectedly:', error);
   }
 
-  /** Adds a message, replacing the same message already shown so that it is shown once, with its latest details; a message with details, or asked to last, stays until the user dismisses it. */
+  /** Adds a message and returns its identifier, replacing the same message already shown so that it is shown once with its latest details, a message with details or asked to last staying until the user dismisses it. */
   #notify(
     kind: NoticeKind,
     text: string,
     report: Report | null = null,
     lasting = report !== null,
-  ): void {
+  ): number {
     this.#nextNoticeId += 1;
     const others = this.notices.filter((notice) => notice.text !== text);
     this.#notices = [...others, { id: this.#nextNoticeId, kind, text, report, lasting }];
+    return this.#nextNoticeId;
   }
 }

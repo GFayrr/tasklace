@@ -81,7 +81,7 @@ describe('date conflicts in the application state', () => {
     expect(app.conflictCount).toBe(1);
     app.undo();
     await settle();
-    app.selectedTaskId = 'busy';
+    app.select('busy');
     app.deleteSelected();
     await settle();
     expect([app.conflictLines, app.conflictCount]).toEqual([[], 2]);
@@ -143,10 +143,10 @@ describe('date conflicts in the application state', () => {
       throw new Error('No date conflict');
     }
     scheduler.automatic = false;
-    app.selectedTaskId = 'defense';
+    app.select('defense');
     app.deleteSelected();
     await settle();
-    app.revealRequest = null;
+    app.takeRevealRequest();
     app.showDateConflict(line);
     expect(app.revealRequest).toBeNull();
     expect(app.notices.map((notice) => [notice.kind, notice.text])).toEqual([
@@ -165,7 +165,7 @@ describe('date conflicts in the application state', () => {
       app.editSettings((context) => toggleProjectOption(context, 'dateConstraintsEnabled')),
     ).toBeNull();
     await settle();
-    app.detailsTaskId = 'free';
+    app.openDetails('free');
     expect(app.saveDetails({ ...draft, deadline: '2026-10-02T15:00' })).toBe(
       english.editErrors.TASK_CHANGED,
     );
@@ -179,7 +179,7 @@ describe('date conflicts in the application state', () => {
       throw new Error('Missing task');
     }
     const draft = draftFromTask(task, () => '', app.detailsBasis('free'));
-    app.detailsTaskId = 'free';
+    app.openDetails('free');
     expect(app.saveDetails({ ...draft, deadline: 'soon' })).toBe(
       english.editErrors.INVALID_DEADLINE,
     );
@@ -194,7 +194,7 @@ describe('date conflicts in the application state', () => {
     if (saved === undefined) {
       throw new Error('Missing task');
     }
-    app.detailsTaskId = 'free';
+    app.openDetails('free');
     const hidden = draftFromTask(saved, () => '', app.detailsBasis('free'));
     expect(app.saveDetails({ ...hidden, deadline: '', name: 'Kept' })).toBeNull();
     await settle();

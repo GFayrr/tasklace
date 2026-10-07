@@ -57,7 +57,7 @@ describe('the list of conflicts', () => {
     app.showConflict({ ...conflict, taskIds: ['interviews', 'analysis'] });
     expect([app.selectedTaskId, app.collapsed.has('s')]).toEqual(['interviews', false]);
     expect(app.revealRequest).toEqual({ taskId: 'interviews', hour: conflict.start });
-    app.revealRequest = null;
+    app.takeRevealRequest();
     app.showConflict({ ...conflict, taskIds: [] });
     expect([app.selectedTaskId, app.revealRequest]).toEqual(['interviews', null]);
   });
@@ -119,7 +119,7 @@ describe('the list of conflicts', () => {
       throw new Error('No conflict');
     }
     scheduler.automatic = false;
-    app.selectedTaskId = 'analysis';
+    app.select('analysis');
     app.deleteSelected();
     await settle();
     app.showConflict(conflict);
@@ -127,7 +127,7 @@ describe('the list of conflicts', () => {
       'interviews',
       { taskId: 'interviews', hour: conflict.start },
     ]);
-    app.revealRequest = null;
+    app.takeRevealRequest();
     app.showConflict({ ...conflict, taskIds: ['analysis'] });
     expect([app.selectedTaskId, app.revealRequest]).toEqual(['interviews', null]);
     expect(app.notices.map((notice) => [notice.kind, notice.text])).toEqual([

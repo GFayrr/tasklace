@@ -9,7 +9,7 @@
   const text = $derived(app.messages.settings);
   const start = $derived(formatDateTime(project.startDate));
   let refusal = $state<{ readonly text: string; readonly resets: number } | null>(null);
-  const shownRefusal = $derived(refusal?.resets === app.settingsResets ? refusal.text : null);
+  const shownRefusal = $derived(refusal?.resets === app.settings.resets ? refusal.text : null);
 
   /** Applies a change of a field, showing the reason for a refusal, putting the value of the project back in the field and holding the settings open once, or clearing the reason once applied. */
   function change(
@@ -18,10 +18,10 @@
     current: () => string,
   ): void {
     const refused = apply();
-    refusal = refused === null ? null : { text: refused, resets: app.settingsResets };
+    refusal = refused === null ? null : { text: refused, resets: app.settings.resets };
     if (refused !== null) {
       field.value = current();
-      app.holdSettingsOpen();
+      app.settings.hold();
     }
   }
 </script>
@@ -67,8 +67,8 @@
   {#if shownRefusal !== null}
     <p class="refusal" role="alert">{shownRefusal}</p>
   {/if}
-  {#if app.settingsNotice !== null}
-    <p class="notice" role="status">{app.settingsNotice}</p>
+  {#if app.settings.notice !== null}
+    <p class="notice" role="status">{app.settings.notice}</p>
   {/if}
 </div>
 

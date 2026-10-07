@@ -30,7 +30,7 @@
       app.closePrompt !== null ||
       app.report !== null ||
       app.detailsTaskId !== null ||
-      (app.settingsOpen && !SETTINGS_COMMANDS.includes(command))
+      (app.settings.isOpen && !SETTINGS_COMMANDS.includes(command))
     ) {
       return;
     }

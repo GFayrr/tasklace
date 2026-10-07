@@ -13,7 +13,7 @@ import {
 import english from '../locales/en.json';
 import { issueText } from '../i18n/issue-text';
 import { draftFromTask } from '../plan/task-details';
-import { setStart } from '../plan/task-commands';
+import { deleteTasks, setStart } from '../plan/task-commands';
 import { AUTOSAVE_DELAY_MS } from '../project/autosave';
 import { AppState } from './app-state.svelte';
 import { fakeAppContext, openedProjectOf, settle } from './testing/fake-app-context';
@@ -459,6 +459,23 @@ describe('editing', () => {
     expect(app.canUndo).toBe(true);
   });
 
+  it('selects only a task the project has, and answers each request once', async () => {
+    const { app } = await withOpenPlan();
+    app.select('a');
+    expect(app.selectedTaskId).toBe('a');
+    expect(() => {
+      app.select('gone');
+    }).toThrow('The task gone to select is not in the project.');
+    app.select(null);
+    expect(app.selectedTaskId).toBeNull();
+    app.addTask();
+    const asked = app.editRequest;
+    expect(asked?.column).toBe('name');
+    expect(app.takeEditRequest()).toBe(asked);
+    expect([app.takeEditRequest(), app.editRequest]).toEqual([null, null]);
+    expect(app.takeRevealRequest()).toBeNull();
+  });
+
   it('explains a value the project refuses with the problem found, not with the help to write it', async () => {
     const { app } = await withOpenPlan();
     const tooLong = workTask('a', { parentId: 's', hoursPerDay: 12 });
@@ -479,7 +496,7 @@ describe('editing', () => {
 
   it('adds a task after the selected one, selects it and asks to edit its name', async () => {
     const { app } = await withOpenPlan();
-    app.selectedTaskId = 'a';
+    app.select('a');
     app.addTask();
     expect(app.selectedTaskId).toBe('id1');
     expect(app.editRequest).toEqual({ taskId: 'id1', column: 'name' });
@@ -496,7 +513,7 @@ describe('editing', () => {
     const { app } = await withOpenPlan();
     app.deleteSelected();
     expect(app.project?.tasks).toHaveLength(3);
-    app.selectedTaskId = 's';
+    app.select('s');
     app.deleteSelected();
     expect(app.project?.tasks.map((task) => task.id)).toEqual(['m']);
     expect(app.selectedTaskId).toBe('m');
@@ -510,7 +527,7 @@ describe('editing', () => {
     const build = vi.fn(() => ({ ok: true, value: [] }) as const);
     app.editSelected(build);
     expect(build).not.toHaveBeenCalled();
-    app.selectedTaskId = 'a';
+    app.select('a');
     app.editSelected(build);
     expect(build).toHaveBeenCalledWith(expect.anything(), 'a');
   });
@@ -762,7 +779,9 @@ describe('saving the details panel', () => {
   it('refuses a panel whose task changed or disappeared meanwhile', async () => {
     const { app, draft } = await detailsOf('a');
     expect(app.saveDetails({ ...draft, basis: 'older' })).toBe(english.editErrors.TASK_CHANGED);
-    app.detailsTaskId = 'gone';
+    expect(app.edit((context) => deleteTasks(context, ['a']))).toBe(true);
+    await settle();
+    expect(app.detailsTaskId).toBeNull();
     expect(app.saveDetails(draft)).toBe(english.editErrors.NOT_POSSIBLE);
   });
 
@@ -826,7 +845,7 @@ describe('one file action at a time', () => {
     expect(app.tryEdit((edit) => setStart(edit, 'a', '2026-09-29 10:00'))).toBe(
       english.fileErrors.BUSY,
     );
-    app.selectedTaskId = 'a';
+    app.select('a');
     app.addTask();
     app.deleteSelected();
     expect(app.rename('During')).toBe(false);

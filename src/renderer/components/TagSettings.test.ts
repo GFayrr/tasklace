@@ -130,13 +130,13 @@ describe('the Tags tab', () => {
     name.value = 'Alice';
     click(button(dialog, TEXT.done));
     update();
-    expect(app.settingsOpen).toBe(true);
+    expect(app.settings.isOpen).toBe(true);
     expect(single(dialog, '[role="alert"]').textContent).toBe(
       english.editErrors.DUPLICATE_TAG_NAME,
     );
     click(button(dialog, TEXT.done));
     update();
-    expect(app.settingsOpen).toBe(false);
+    expect(app.settings.isOpen).toBe(false);
     app.openSettings();
     update();
     const tab = [...dialog.querySelectorAll<HTMLElement>('[role="tab"]')].find(
@@ -201,7 +201,7 @@ describe('the Tags tab', () => {
     press(single(dialog, '.palette'), 'Escape');
     update();
     expect(dialog.querySelectorAll('.palette')).toHaveLength(0);
-    expect([document.activeElement, app.settingsOpen]).toEqual([swatch, true]);
+    expect([document.activeElement, app.settings.isOpen]).toEqual([swatch, true]);
     click(swatch);
     update();
     click(swatch);
@@ -280,7 +280,7 @@ describe('the Tags tab', () => {
     expect(
       app.project?.tasks.map((task) => (task.kind === 'summary' ? 'summary' : task.tagId)),
     ).toEqual([null, null]);
-    expect(app.settingsOpen).toBe(true);
+    expect(app.settings.isOpen).toBe(true);
   });
 
   it('tells in the singular when one task uses the tag', async () => {

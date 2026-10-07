@@ -135,11 +135,10 @@
   }
 
   $effect(() => {
-    const request = app.revealRequest;
+    const request = app.revealRequest === null ? null : app.takeRevealRequest();
     if (request === null) {
       return;
     }
-    app.revealRequest = null;
     const row = untrack(() => outline.rowIndexById.get(request.taskId));
     if (row !== undefined) {
       reveal(row);
@@ -157,7 +156,7 @@
 
   /** Selects a task. */
   function selectTask(id: TaskId): void {
-    app.selectedTaskId = id;
+    app.select(id);
   }
 
   /** Scrolls the least needed to show a row. */

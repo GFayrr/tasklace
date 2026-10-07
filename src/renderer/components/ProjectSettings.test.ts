@@ -70,7 +70,7 @@ describe('the project settings', () => {
   it('open on the General tab from the toolbar, and close with Done, the close button or Escape', async () => {
     const { app, root, dialog } = await renderSettings();
     expect(dialog.open).toBe(true);
-    expect(app.settingsOpen).toBe(true);
+    expect(app.settings.isOpen).toBe(true);
     const tabs = [...root.querySelectorAll('[role="tab"]')];
     expect(tabs.map((tab) => [tab.textContent, tab.getAttribute('aria-selected')])).toEqual([
       [TEXT.general, 'true'],
@@ -82,7 +82,7 @@ describe('the project settings', () => {
     openTab(root, TEXT.calendar);
     click(button(dialog, TEXT.done));
     update();
-    expect([dialog.open, app.settingsOpen]).toEqual([false, false]);
+    expect([dialog.open, app.settings.isOpen]).toEqual([false, false]);
     app.openSettings();
     update();
     expect(single(root, '[aria-selected="true"]').textContent).toBe(TEXT.general);
@@ -94,26 +94,26 @@ describe('the project settings', () => {
     const cancel = new Event('cancel', { cancelable: true });
     dialog.dispatchEvent(cancel);
     update();
-    expect([cancel.defaultPrevented, app.settingsOpen]).toEqual([false, false]);
+    expect([cancel.defaultPrevented, app.settings.isOpen]).toEqual([false, false]);
     app.openSettings();
     update();
     dialog.dispatchEvent(new Event('close'));
-    expect([dialog.open, app.settingsOpen]).toEqual([true, true]);
+    expect([dialog.open, app.settings.isOpen]).toEqual([true, true]);
     dialog.close();
     dialog.dispatchEvent(new Event('close'));
-    expect(app.settingsOpen).toBe(false);
+    expect(app.settings.isOpen).toBe(false);
   });
 
   it('stay open when the close event of an earlier closing arrives after they were opened again', async () => {
     const { app, dialog } = await renderSettings();
     press(dialog, 'Escape');
-    app.closeSettings();
+    app.settings.close();
     update();
     app.openSettings();
     update();
     dialog.dispatchEvent(new Event('close'));
     update();
-    expect([dialog.open, app.settingsOpen]).toEqual([true, true]);
+    expect([dialog.open, app.settings.isOpen]).toEqual([true, true]);
   });
 
   it('move between the tabs with the arrow keys, wrapping around at the ends', async () => {
@@ -285,7 +285,7 @@ describe('the project settings', () => {
     end.value = '14:00';
     click(button(root, TEXT.done));
     update();
-    expect([root.open, app.settingsOpen]).toEqual([true, true]);
+    expect([root.open, app.settings.isOpen]).toEqual([true, true]);
     expect(single(root, '[role="alert"]').textContent).toBe(
       english.issues.OVERLAPPING_WORKING_TIME_RANGES,
     );
@@ -294,7 +294,7 @@ describe('the project settings', () => {
     const cancel = new Event('cancel', { cancelable: true });
     root.dispatchEvent(cancel);
     update();
-    expect([cancel.defaultPrevented, app.settingsOpen]).toEqual([true, true]);
+    expect([cancel.defaultPrevented, app.settings.isOpen]).toEqual([true, true]);
     click(button(root, TEXT.done));
     update();
     expect(root.open).toBe(false);

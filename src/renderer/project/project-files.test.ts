@@ -8,6 +8,7 @@ import type { Timer } from './autosave';
 import {
   createProjectFiles,
   FileActionError,
+  issuesOf,
   type ProjectBridge,
   type ProjectFiles,
   type ProjectFilesListener,
@@ -588,5 +589,17 @@ describe('createProjectFiles', () => {
     expect(sentNames).toEqual(['First', 'Second']);
     answers[1]?.(SAVED);
     expect(await manual).toEqual(SAVED);
+  });
+});
+
+describe('issuesOf', () => {
+  it('gives the problems of the failures that list them, and none for the others', () => {
+    const issues = [{ path: 'name', code: 'EMPTY_TEXT' as const }];
+    expect(issuesOf({ code: 'INVALID_PROJECT', issues })).toBe(issues);
+    expect(issuesOf({ code: 'INVALID_IMPORT', issues })).toBe(issues);
+    expect(issuesOf({ code: 'INVALID_STATE', issues })).toBe(issues);
+    expect(issuesOf({ code: 'WRITE_FAILED' })).toEqual([]);
+    expect(issuesOf({ code: 'BUSY' })).toEqual([]);
+    expect(issuesOf({ code: 'UNSAVED_PROJECT', cause: null })).toEqual([]);
   });
 });

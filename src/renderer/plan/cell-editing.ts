@@ -17,8 +17,8 @@ import {
   setStart,
   type Edit,
   type EditContext,
-  type ScheduleRefusal,
 } from './task-commands';
+import type { ScheduleRefusal } from './edit-refusal';
 
 const PICKER_PATTERN = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/;
 

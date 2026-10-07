@@ -7,16 +7,19 @@ import {
   type SharedSession,
   type StateOpeningFailure,
 } from '../../core/shared/shared-session';
-import type {
-  BridgeResult,
-  ExchangeKind,
-  ExportedFile,
-  FileFailure,
-  ImportWarning,
-  OpenedProject,
-  SavedProject,
-  TasklaceBridge,
+import {
+  ISSUE_FAILURE_CODES,
+  type BridgeResult,
+  type ExchangeKind,
+  type ExportedFile,
+  type FileFailure,
+  type ImportWarning,
+  type OpenedProject,
+  type SavedProject,
+  type TasklaceBridge,
 } from '../../preload/bridge-contract';
+import type { ValidationIssue } from '../../core/validation/validation-issues';
+import type { Result } from '../../core/result';
 import { createAutosave, type Timer } from './autosave';
 
 export type ProjectBridge = Pick<
@@ -36,8 +39,20 @@ export type ActionFailure =
   | { readonly code: 'BUSY' }
   | { readonly code: 'UNSAVED_PROJECT'; readonly cause: ActionFailure | null };
 
-export type ActionResult<T> =
-  { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: ActionFailure };
+export type ActionResult<T> = Result<T, ActionFailure>;
+
+type IssueFailure = Extract<FileFailure, { readonly issues: readonly ValidationIssue[] }>;
+
+/** Returns the problems a failed file action found, none for a failure that lists none. */
+export function issuesOf(failure: ActionFailure): readonly ValidationIssue[] {
+  return carriesIssues(failure) ? failure.issues : [];
+}
+
+/** Tells whether a failure is one of those that list the problems found. */
+function carriesIssues(failure: ActionFailure): failure is IssueFailure {
+  const codes: readonly string[] = ISSUE_FAILURE_CODES;
+  return codes.includes(failure.code);
+}
 
 export interface OpenedSession {
   readonly session: SharedSession;

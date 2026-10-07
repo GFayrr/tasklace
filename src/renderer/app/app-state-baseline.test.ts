@@ -105,7 +105,7 @@ describe('the baseline in the application state', () => {
     } finally {
       logged.mockRestore();
     }
-    expect([app.project?.baseline, app.baselineNotice]).toEqual([null, null]);
+    expect([app.project?.baseline, app.settings.baselineNotice]).toEqual([null, null]);
   });
 
   it('refuses to date a baseline with a clock outside the supported years, logging it', async () => {
@@ -152,10 +152,12 @@ describe('the baseline in the application state', () => {
       logged.mockRestore();
     }
     expect(app.project?.baseline?.entries).toEqual([]);
-    expect(app.baselineNotice).toBe(english.notices.baselineSkipped.other.replace('{count}', '2'));
+    expect(app.settings.baselineNotice).toBe(
+      english.notices.baselineSkipped.other.replace('{count}', '2'),
+    );
     expect(app.notices).toEqual([]);
     expect(app.clearBaseline()).toBeNull();
-    expect(app.baselineNotice).toBeNull();
+    expect(app.settings.baselineNotice).toBeNull();
   });
 
   it('replaces the baseline with the plan as it is now, Ctrl+Z bringing back the first one', async () => {

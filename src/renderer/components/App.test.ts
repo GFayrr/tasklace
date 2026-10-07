@@ -76,7 +76,7 @@ describe('App', () => {
   it('commits the cell being edited before a file shortcut, so that the save holds the typed value', async () => {
     const { app, root, control } = await renderApp(true);
     const grid = single(root, '[role="grid"]');
-    app.selectedTaskId = 'a';
+    app.select('a');
     update();
     press(grid, 'Enter');
     await settle();
@@ -123,7 +123,7 @@ describe('App', () => {
     app.openDetails('a');
     update();
     press(window, 'o', { ctrlKey: true });
-    app.detailsTaskId = null;
+    app.closeDetails();
     app.openReport({ title: 'T', entries: [] });
     update();
     press(window, 'o', { ctrlKey: true });
@@ -324,7 +324,7 @@ describe('Workspace', () => {
     const { app, root, scroller } = await renderSized();
     resize(scroller, 800, ROW_HEIGHT);
     const grid = single(root, '[role="grid"]');
-    app.selectedTaskId = 'a';
+    app.select('a');
     update();
     press(grid, 'ArrowDown');
     expect(scroller.scrollTop).toBe(ROW_HEIGHT);

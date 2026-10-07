@@ -1,12 +1,11 @@
 import type { ValidationIssueCode } from '../../core/validation/validation-issues';
-import type { DetailsError } from '../plan/task-details';
+import type { EditRefusal, InterfaceRefusal } from '../plan/edit-refusal';
 import type { ActionFailure } from '../project/project-files';
 import type english from '../locales/en.json';
 
 export type Messages = typeof english;
 export type Language = 'en';
 export type ShownFailureCode = Exclude<ActionFailure['code'], 'CANCELLED'>;
-export type EditRefusal = DetailsError | ValidationIssueCode;
 
 type KnownEditErrors = {
   readonly [Key in keyof Messages['editErrors']]: Key extends EditRefusal ? string : never;
@@ -54,10 +53,10 @@ export function countMessage(message: PluralMessage, count: number, locale: stri
 
 /** Returns the message telling the user why a change was refused: its own text when the refusal has one, otherwise the text of the problem found, every code having a text and every text a code, both checked at compile time. */
 export function editErrorMessage(messages: Messages, code: EditRefusal): string {
-  const edits: Readonly<Record<DetailsError, string>> =
+  const edits: Readonly<Record<InterfaceRefusal, string>> =
     messages.editErrors satisfies KnownEditErrors;
   const issues: Readonly<Record<ValidationIssueCode, string>> = messages.issues;
-  return isDetailsError(edits, code) ? edits[code] : issues[code];
+  return isInterfaceRefusal(edits, code) ? edits[code] : issues[code];
 }
 
 const ISSUES_EXPLAINED_AS_CHANGES = [
@@ -78,9 +77,9 @@ export function issueMessage(messages: Messages, code: ValidationIssueCode): str
 }
 
 /** Tells whether a refusal has a text of its own among the edit errors. */
-function isDetailsError(
-  edits: Readonly<Record<DetailsError, string>>,
+function isInterfaceRefusal(
+  edits: Readonly<Record<InterfaceRefusal, string>>,
   code: EditRefusal,
-): code is DetailsError {
+): code is InterfaceRefusal {
   return Object.hasOwn(edits, code);
 }

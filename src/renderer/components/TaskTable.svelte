@@ -113,9 +113,8 @@
   let grid: HTMLDivElement | undefined = $state();
 
   $effect(() => {
-    const request = app.editRequest;
+    const request = app.editRequest === null ? null : app.takeEditRequest();
     if (request !== null) {
-      app.editRequest = null;
       startEditing(request.taskId, request.column, null);
     }
   });
@@ -151,7 +150,7 @@
     if (task === undefined || index === undefined || !isEditable(task, column)) {
       return;
     }
-    app.selectedTaskId = taskId;
+    app.select(taskId);
     activeColumn = column;
     reveal(index);
     const initial = editorText(task, column, source);
@@ -240,7 +239,7 @@
     const shown = column === 'end' ? placement?.end : (task.startNoEarlierThan ?? placement?.start);
     picker.value = shown === undefined ? '' : pickerValue(shown);
     picking = { taskId, column };
-    app.selectedTaskId = taskId;
+    app.select(taskId);
     activeColumn = column;
     try {
       picker.showPicker();
@@ -270,7 +269,7 @@
   function selectRow(index: number): void {
     const row = rows[index];
     if (row !== undefined) {
-      app.selectedTaskId = row.task.id;
+      app.select(row.task.id);
       reveal(index);
     }
   }
@@ -384,7 +383,7 @@
       event.preventDefault();
       grid?.focus();
     }
-    app.selectedTaskId = taskId;
+    app.select(taskId);
     if (column !== null) {
       activeColumn = column;
     }

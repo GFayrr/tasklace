@@ -4,6 +4,7 @@
   import { createMomentFormatter } from '../i18n/format';
   import { fillMessage } from '../i18n/messages';
   import { toggleProjectOption, type BooleanProjectOption } from '../plan/project-commands';
+  import ConfirmDialog from './ConfirmDialog.svelte';
 
   type Feature = 'criticalPath' | 'dateConstraints' | 'baseline' | 'alwaysShowPatterns';
   type Question = 'replace' | 'clear';
@@ -12,7 +13,6 @@
 
   const text = $derived(app.messages.settings);
   const formatMoment = $derived(createMomentFormatter(app.locale));
-  const HISTORY_KEYS: ReadonlySet<string> = new Set(['z', 'y']);
   const FEATURES: readonly Feature[] = [
     'criticalPath',
     'dateConstraints',
@@ -54,7 +54,7 @@
   >);
   let refusal = $state<{ readonly text: string; readonly resets: number } | null>(null);
   let asking = $state<Question | null>(null);
-  const shownRefusal = $derived(refusal?.resets === app.settingsResets ? refusal.text : null);
+  const shownRefusal = $derived(refusal?.resets === app.settings.resets ? refusal.text : null);
 
   /** Turns an option of the project on or off, showing the reason when it is refused. */
   function toggle(option: BooleanProjectOption): void {
@@ -63,7 +63,7 @@
 
   /** Shows why a change was refused, or forgets an earlier refusal once a change is applied. */
   function show(refused: string | null): void {
-    refusal = refused === null ? null : { text: refused, resets: app.settingsResets };
+    refusal = refused === null ? null : { text: refused, resets: app.settings.resets };
   }
 
   /** Sets the first baseline at once, or asks before replacing the one the project has. */
@@ -86,28 +86,6 @@
       asking = null;
     }
   });
-
-  /** Opens the confirmation dialog as a modal while a question waits for an answer, and closes it otherwise. */
-  function followQuestion(dialog: HTMLDialogElement): void {
-    if (asking !== null && !dialog.open) {
-      dialog.showModal();
-    } else if (asking === null && dialog.open) {
-      dialog.close();
-    }
-  }
-
-  /** Keeps undo and redo from changing the baseline while the user is asked to confirm. */
-  function holdHistory(dialog: HTMLDialogElement): () => void {
-    const hold = (event: KeyboardEvent): void => {
-      if ((event.ctrlKey || event.metaKey) && HISTORY_KEYS.has(event.key.toLowerCase())) {
-        event.stopPropagation();
-      }
-    };
-    dialog.addEventListener('keydown', hold);
-    return () => {
-      dialog.removeEventListener('keydown', hold);
-    };
-  }
 </script>
 
 <div class="advanced">
@@ -153,8 +131,8 @@
             >
           {/if}
         </div>
-        {#if app.baselineNotice !== null}
-          <p class="notice" role="status">{app.baselineNotice}</p>
+        {#if app.settings.baselineNotice !== null}
+          <p class="notice" role="status">{app.settings.baselineNotice}</p>
         {/if}
       {/if}
     </div>
@@ -164,44 +142,26 @@
   {/if}
 </div>
 
-<dialog
-  class="confirm"
-  aria-labelledby="baseline-question-title"
-  {@attach followQuestion}
-  {@attach holdHistory}
-  onclose={(event) => {
-    if (!event.currentTarget.open) {
-      asking = null;
+<ConfirmDialog
+  question={asking === null
+    ? null
+    : {
+        ...questions[asking],
+        body: fillMessage(questions[asking].body, {
+          date: project.baseline === null ? '' : formatMoment(project.baseline.takenAt),
+        }),
+      }}
+  titleId="baseline-question-title"
+  cancel={text.cancel}
+  confirmed={() => {
+    if (asking !== null) {
+      confirm(asking);
     }
   }}
->
-  {#if asking !== null}
-    {@const question = asking}
-    {@const words = questions[question]}
-    <h3 id="baseline-question-title">{words.title}</h3>
-    <p>
-      {fillMessage(words.body, {
-        date: project.baseline === null ? '' : formatMoment(project.baseline.takenAt),
-      })}
-    </p>
-    <div class="actions">
-      <button
-        type="button"
-        class="button"
-        onclick={() => {
-          asking = null;
-        }}>{text.cancel}</button
-      >
-      <button
-        type="button"
-        class={['button', { primary: !words.danger, danger: words.danger }]}
-        onclick={() => {
-          confirm(question);
-        }}>{words.confirm}</button
-      >
-    </div>
-  {/if}
-</dialog>
+  dismissed={() => {
+    asking = null;
+  }}
+/>
 
 <style>
   .advanced {
@@ -313,41 +273,6 @@
     color: var(--color-action-text);
     background: var(--color-action);
     border-color: var(--color-action);
-  }
-
-  .button.danger {
-    color: var(--color-action-text);
-    background: var(--color-error);
-    border-color: var(--color-error);
-  }
-
-  .confirm {
-    width: min(420px, calc(100% - 32px));
-    padding: var(--space-6);
-    color: var(--color-text);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: calc(var(--radius) + 4px);
-  }
-
-  .confirm::backdrop {
-    background: rgb(28 27 25 / 28%);
-  }
-
-  .confirm h3 {
-    margin: 0 0 var(--space-3);
-  }
-
-  .confirm p {
-    margin: 0 0 var(--space-4);
-    font-size: var(--font-size);
-    color: var(--color-text);
-  }
-
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-2);
   }
 
   .refusal {

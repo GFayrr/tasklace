@@ -204,7 +204,7 @@ describe('Toolbar', () => {
     const root = render(Toolbar, { app });
     const details = button(root, english.tasks.details);
     expect(details.disabled).toBe(true);
-    app.selectedTaskId = 'a';
+    app.select('a');
     update();
     expect(details.disabled).toBe(false);
     click(details);
