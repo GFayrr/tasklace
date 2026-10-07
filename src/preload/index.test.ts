@@ -92,18 +92,11 @@ describe('the bridge exposed to the page', () => {
 
   it('gives simple answers their expected type', async () => {
     const bridge = await loadBridge();
-    electron.invoke
-      .mockResolvedValueOnce(12)
-      .mockResolvedValueOnce('yes')
-      .mockResolvedValueOnce(true);
-    expect(await bridge.appVersion()).toBe('12');
-    expect(await bridge.openExternal('https://github.com/GFayrr/tasklace')).toBe(false);
-    expect(await bridge.openExternal('https://github.com/GFayrr/tasklace')).toBe(true);
     electron.invoke.mockResolvedValueOnce('11111111-1111-4111-8111-111111111111');
     expect(await bridge.newProject()).toBe('11111111-1111-4111-8111-111111111111');
   });
 
-  it('keeps only well-formed recent projects, refuses a value that is not a list, and passes a failure through, logging each unexpected answer', async () => {
+  it('refuses recent projects with an entry of an unexpected shape, whose positions would no longer match, or that are not a list, and passes a failure through, logging each unexpected answer', async () => {
     const bridge = await loadBridge();
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
@@ -114,10 +107,7 @@ describe('the bridge exposed to the page', () => {
         null,
       ];
       electron.invoke.mockResolvedValueOnce({ ok: true, value: entries });
-      expect(await bridge.recentProjects()).toEqual({
-        ok: true,
-        value: [{ name: 'Plan', folder: '/projects' }],
-      });
+      expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
       const single = { name: 'Plan', folder: '/projects' };
       electron.invoke.mockResolvedValueOnce({ ok: true, value: single });
       expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });

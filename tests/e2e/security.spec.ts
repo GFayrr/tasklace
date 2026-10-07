@@ -1,16 +1,10 @@
-import { readFileSync } from 'node:fs';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { closeDiscarding, launchApplication } from './application';
 
 const ENTRY_URL = 'app://tasklace/index.html';
 const FOREIGN_URL = 'https://example.com/';
-const REFUSED_ADDRESS = 'https://github.com.evil.example/GFayrr/tasklace';
 const SETTLE_MS = 500;
 const STRING_CODE_WAIT_MS = 100;
-const version: unknown = Reflect.get(
-  JSON.parse(readFileSync('package.json', 'utf8')) as object,
-  'version',
-);
 
 let application: ElectronApplication;
 let page: Page;
@@ -75,30 +69,26 @@ test('refuses every permission the page asks for', async () => {
 });
 
 test('exposes only the listed bridge functions, which check what they receive', async () => {
-  const bridge = await page.evaluate(
-    async ({ refused, WRONG_TYPE }) => {
-      const api = window.tasklace;
-      if (api === undefined) {
-        return null;
-      }
-      return {
-        keys: Object.keys(api).sort(),
-        version: await api.appVersion(),
-        refused: await api.openExternal(refused),
-        wrongType: await api.openExternal(WRONG_TYPE),
-      };
-    },
-    { refused: REFUSED_ADDRESS, WRONG_TYPE: 42 },
-  );
+  const bridge = await page.evaluate(async (wrongPosition) => {
+    const api = window.tasklace;
+    if (api === undefined) {
+      return null;
+    }
+    return {
+      keys: Object.keys(api).sort(),
+      wrongType: await api.openRecentProject(wrongPosition).then(
+        () => 'answered',
+        () => 'refused',
+      ),
+    };
+  }, -1);
   expect(bridge).toEqual({
     keys: [
       'adoptProject',
-      'appVersion',
       'exportProject',
       'importProject',
       'newProject',
       'onFlushRequested',
-      'openExternal',
       'openProject',
       'openRecentProject',
       'recentProjects',
@@ -107,9 +97,7 @@ test('exposes only the listed bridge functions, which check what they receive', 
       'saveProject',
       'saveProjectAs',
     ],
-    version,
-    refused: false,
-    wrongType: false,
+    wrongType: 'refused',
   });
 });
 

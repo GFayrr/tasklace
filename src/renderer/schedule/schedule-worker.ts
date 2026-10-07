@@ -8,8 +8,5 @@ interface WorkerScope {
 const scope = self as unknown as WorkerScope;
 
 scope.onmessage = (event) => {
-  const response = answerScheduleRequest(event.data);
-  if (response !== null) {
-    scope.postMessage(response);
-  }
+  scope.postMessage(answerScheduleRequest(event.data));
 };

@@ -16,7 +16,7 @@ describe('growth of the schedule worker round trip', () => {
   const roundTrip = (project: typeof small) => () => {
     const request = structuredClone({ version: 1, generation: 1, project });
     const response = structuredClone(answerScheduleRequest(request));
-    expect(response?.result.ok).toBe(true);
+    expect(response.result.ok).toBe(true);
   };
 
   it('copies, schedules and copies back a project in linear time', () => {

@@ -123,3 +123,23 @@ async function prepare(folder: string, path: string): Promise<number> {
     throw error;
   }
 }
+
+export interface QuittingApplication {
+  on(event: 'will-quit', listener: (event: { preventDefault: () => void }) => void): unknown;
+  quit(): void;
+}
+
+/** Holds the end of the application once, until the log has written every line it was given, so that the last errors before quitting are never lost. */
+export function writeLogBeforeQuitting(application: QuittingApplication, log: LogFile): void {
+  let written = false;
+  application.on('will-quit', (event) => {
+    if (written) {
+      return;
+    }
+    event.preventDefault();
+    void log.written().finally(() => {
+      written = true;
+      application.quit();
+    });
+  });
+}

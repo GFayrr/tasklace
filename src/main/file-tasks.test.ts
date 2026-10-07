@@ -19,6 +19,19 @@ import {
   workTask,
 } from '../core/testing/project-builder';
 import { isResultOf, runFileTask, type FileTaskResult, type LoadedProject } from './file-tasks';
+
+const writing = vi.hoisted(() => ({ fault: null as Error | null }));
+
+vi.mock('./safe-write', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./safe-write')>();
+  return {
+    ...original,
+    writeFileSafely: (path: string, bytes: Uint8Array) =>
+      writing.fault === null
+        ? original.writeFileSafely(path, bytes)
+        : Promise.reject(writing.fault),
+  };
+});
 import { readIndexText } from './local-copies';
 import { zlibCompressor } from './zlib-compressor';
 
@@ -232,6 +245,45 @@ describe('file tasks', () => {
       }),
     );
     expect(opened.documentId).toBe(TEST_DOCUMENT_ID);
+  });
+
+  it('refuses a file whose content Yjs cannot decode, logging the reason and giving the page only the code', async () => {
+    const path = join(folder, 'broken.tasklace');
+    await writeFile(
+      path,
+      encodeTasklaceState(new Uint8Array([255, 255, 255, 255]), zlibCompressor),
+    );
+    const { result, logged } = await quietly(() => runFileTask({ kind: 'openProject', path }));
+    expect(result).toEqual({ ok: false, error: { code: 'INVALID_CONTENT' } });
+    expect(logged).toEqual(['The content of the project file could not be decoded:']);
+  });
+
+  it('refuses to read a path that is not a regular file, logging it', async () => {
+    const { result, logged } = await quietly(() =>
+      runFileTask({ kind: 'openProject', path: folder }),
+    );
+    expect(result).toEqual({ ok: false, error: { code: 'READ_FAILED' } });
+    expect(logged).toEqual([`${folder} is not a regular file, so it cannot be read.`]);
+  });
+
+  it('throws a programming error met while writing, never reporting it as a file that could not be written', async () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const fault = new TypeError('A programming error on purpose');
+    writing.fault = fault;
+    try {
+      await expect(
+        runFileTask({
+          kind: 'saveProject',
+          path: join(folder, 'plan.tasklace'),
+          state,
+          documentId: TEST_DOCUMENT_ID,
+          localCopyFolder: folder,
+          savedAt: SAVED_AT,
+        }),
+      ).rejects.toBe(fault);
+    } finally {
+      writing.fault = null;
+    }
   });
 
   it('saves a project whose local copy cannot be written, telling so, since its file is written', async () => {

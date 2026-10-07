@@ -31,8 +31,6 @@ export type ProjectBridge = Pick<
   | 'exportProject'
 >;
 
-export type PageFailureCode = 'BUSY' | 'UNSAVED_PROJECT';
-
 export type ActionFailure =
   | FileFailure
   | { readonly code: 'BUSY' }
@@ -128,7 +126,7 @@ export function createProjectFiles(
   };
   const saveCurrent = async (): Promise<void> => {
     const result = await trackSave(bridge.saveProject);
-    if (!result.ok && result.error.code !== 'NO_PROJECT') {
+    if (!result.ok && result !== NOTHING_TO_SAVE) {
       throw new FileActionError(result.error);
     }
   };

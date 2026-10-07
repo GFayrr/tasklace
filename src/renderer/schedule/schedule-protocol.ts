@@ -20,10 +20,10 @@ export interface ScheduleResponse {
   readonly result: Result<Schedule, SchedulingFailure>;
 }
 
-/** Computes the schedule asked by a request of the current protocol version, ignoring any other message. */
-export function answerScheduleRequest(message: unknown): ScheduleResponse | null {
+/** Computes the schedule asked by a request of the current protocol version, throwing on any other message so that the worker fails and is replaced instead of leaving the computation waiting forever. */
+export function answerScheduleRequest(message: unknown): ScheduleResponse {
   if (!isScheduleRequest(message)) {
-    return null;
+    throw new Error('The schedule worker received a message that is not a schedule request.');
   }
   return {
     version: SCHEDULE_PROTOCOL_VERSION,

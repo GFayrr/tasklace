@@ -45,7 +45,7 @@ import {
 import { readRecentProjects, recordRecentProject } from './recent-projects';
 import { writeFileSafely } from './safe-write';
 import { createSerialQueue } from './serial-queue';
-import { isSystemError } from './stored-files';
+import { isMissingFile, isSystemError } from './stored-files';
 import { regionalFormatOf } from './system-regional-format';
 
 export interface ProjectFileServices {
@@ -84,6 +84,12 @@ const LOCAL_COPY_FOLDER = 'local-copies';
 const projects = new WeakMap<WebContents, WindowProject>();
 const saveInOrder = createSerialQueue();
 const offered = new WeakMap<WebContents, WindowProject>();
+
+/** Forgets the project of the window of a page about to reload, the reloaded page starting without any project. */
+export function forgetWindowProject(sender: WebContents): void {
+  projects.delete(sender);
+  offered.delete(sender);
+}
 
 /** Tells what the window of a page holds: no project, a project saved to a file, or a project kept only on this computer. */
 export function windowProjectKind(sender: WebContents): WindowProjectKind {
@@ -196,8 +202,15 @@ async function openRecent(
   value: unknown,
 ): Promise<BridgeResult<OpenedProject>> {
   const index = readRecentIndex(value) ?? refuseMessage();
-  const path = (await readRecentProjects(recentStore(services)))[index];
-  return path === undefined ? failure({ code: 'READ_FAILED' }) : openPath(services, sender, path);
+  const paths = await readRecentProjects(recentStore(services));
+  const path = paths[index];
+  if (path === undefined) {
+    console.error(
+      `The page asked for recent project ${String(index)}, but only ${String(paths.length)} are known.`,
+    );
+    return failure({ code: 'READ_FAILED' });
+  }
+  return openPath(services, sender, path);
 }
 
 /** Lists the recent projects by name and folder, a list that cannot be read being logged and reported, so that the page keeps the list it shows and tells the user. */
@@ -283,6 +296,7 @@ async function saveProject(
   const state = readProjectState(value) ?? refuseMessage();
   const project = projects.get(sender);
   if (project === undefined) {
+    console.error('A page asked to save a project its window does not hold.');
     return failure({ code: 'NO_PROJECT' });
   }
   const path =
@@ -434,7 +448,11 @@ async function fileExists(path: string): Promise<boolean> {
     await stat(path);
     return true;
   } catch (error) {
+    if (isMissingFile(error)) {
+      return false;
+    }
     if (isSystemError(error)) {
+      console.warn('A file could not be examined, so it counts as absent:', error);
       return false;
     }
     throw error;

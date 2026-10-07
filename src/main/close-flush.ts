@@ -12,6 +12,7 @@ interface PageWindow {
 }
 
 const answers = new WeakMap<WebContents, PageWindow>();
+const ABORTED_LOAD = -3;
 const CRASHED_BODIES: Readonly<Record<WindowProjectKind, string>> = {
   none: MESSAGES.pageProblems.crashedWithoutProjectBody,
   withFile: MESSAGES.pageProblems.crashedBody,
@@ -22,11 +23,11 @@ const CRASHED_BODIES: Readonly<Record<WindowProjectKind, string>> = {
 export function registerFlushHandler(assertTrusted: TrustCheck): void {
   ipcMain.on(IPC_CHANNELS.pageStartFailed, (event) => {
     assertTrusted(event);
-    answers.get(event.sender)?.startFailed();
+    windowOf(event.sender, IPC_CHANNELS.pageStartFailed)?.startFailed();
   });
   ipcMain.on(IPC_CHANNELS.flushDone, (event, mayClose: unknown) => {
     assertTrusted(event);
-    const answer = answers.get(event.sender);
+    const answer = windowOf(event.sender, IPC_CHANNELS.flushDone);
     if (typeof mayClose !== 'boolean') {
       console.error(
         'The page answered a close request with something else than yes or no:',
@@ -43,15 +44,26 @@ export function registerFlushHandler(assertTrusted: TrustCheck): void {
   });
 }
 
-/** Holds the closing of a window until its page has saved its pending changes and agreed to close; a page that crashed lets its window close until a new page has loaded, or offers to reload it when nobody asked to close, and a page that stops responding while asked to save lets the user wait for it or close anyway. */
+/** Returns how the window of a page answers its messages, logging a message from a page whose window is not followed. */
+function windowOf(sender: WebContents, channel: string): PageWindow | undefined {
+  const known = answers.get(sender);
+  if (known === undefined) {
+    console.warn(`A page whose window is not followed sent ${channel}.`);
+  }
+  return known;
+}
+
+/** Holds the closing of a window until its page has saved its pending changes and agreed to close; a page that crashed, could not load or lost its bridge lets its window close and, when nobody asked to close, is offered a reload that forgets its project, and a page that stops responding while asked to save lets the user wait for it or close anyway. */
 export function flushBeforeClosing(
   window: BrowserWindow,
   projectKind: (contents: WebContents) => WindowProjectKind,
+  forgetProject: (contents: WebContents) => void,
 ): void {
   const contents = window.webContents;
   let requested = false;
   let released = false;
   let pageGone = false;
+  let bridgeMissing = false;
   let unresponsive = false;
   let askingToWait = false;
   const closeNow = (): void => {
@@ -89,11 +101,11 @@ export function flushBeforeClosing(
       requested = false;
     },
     startFailed: () => {
-      offerReload(window, MESSAGES.pageProblems.startFailedBody);
+      offerReload(window, MESSAGES.pageProblems.startFailedBody, forgetProject);
     },
   });
   window.on('close', (event) => {
-    if (released || pageGone) {
+    if (released || pageGone || bridgeMissing) {
       released = true;
       return;
     }
@@ -106,30 +118,59 @@ export function flushBeforeClosing(
       offerToCloseAnyway();
     }
   });
-  contents.on('render-process-gone', () => {
+  contents.on('render-process-gone', (_event, details: unknown) => {
+    console.error('The page of a window stopped:', details);
     pageGone = true;
     if (requested) {
       closeNow();
       return;
     }
-    offerReload(window, CRASHED_BODIES[projectKind(contents)]);
+    offerReload(window, CRASHED_BODIES[projectKind(contents)], forgetProject);
+  });
+  contents.on('did-start-loading', () => {
+    bridgeMissing = false;
   });
   contents.on('did-finish-load', () => {
     pageGone = false;
   });
+  contents.on(
+    'did-fail-load',
+    (_event, code: number, description: string, address: string, isMainFrame: boolean) => {
+      console.error(
+        `The page of a window could not load ${address}: ${description} (${String(code)}).`,
+      );
+      if (isMainFrame && code !== ABORTED_LOAD) {
+        pageGone = true;
+        offerReload(window, MESSAGES.pageProblems.startFailedBody, forgetProject);
+      }
+    },
+  );
+  contents.on('preload-error', (_event, path: string, error: unknown) => {
+    console.error(`The bridge of a page could not load (${path}):`, error);
+    bridgeMissing = true;
+    offerReload(window, MESSAGES.pageProblems.startFailedBody, forgetProject);
+  });
   window.on('unresponsive', () => {
+    console.warn('The page of a window stopped responding.');
     unresponsive = true;
     if (requested) {
       offerToCloseAnyway();
     }
   });
   window.on('responsive', () => {
+    if (unresponsive) {
+      console.warn('The page of a window responds again.');
+    }
     unresponsive = false;
   });
 }
 
-/** Asks whether to reload a window whose page failed, or to close it, reloading only once the failure has been handled and closing the window when the question cannot be shown. */
-function offerReload(window: BrowserWindow, body: string): void {
+/** Asks whether to reload a window whose page failed, or to close it, reloading only once the failure has been handled, after forgetting the project of the window, and closing the window when the question cannot be shown. */
+function offerReload(
+  window: BrowserWindow,
+  body: string,
+  forgetProject: (contents: WebContents) => void,
+): void {
   askAfterPageFailure(window, body)
     .then((choice) => {
       if (window.isDestroyed()) {
@@ -141,6 +182,7 @@ function offerReload(window: BrowserWindow, body: string): void {
       }
       setImmediate(() => {
         if (!window.isDestroyed()) {
+          forgetProject(window.webContents);
           window.webContents.reload();
         }
       });

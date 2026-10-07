@@ -13,6 +13,7 @@ import {
   checkStateToSave,
   encodeTasklaceState,
   readTasklaceDocument,
+  type FileError,
 } from '../core/file/tasklace-file';
 import type { Project } from '../core/model/project';
 import { failure, success, type Result } from '../core/result';
@@ -119,10 +120,19 @@ async function openProject(path: string): Promise<FileTaskResult> {
   }
   const read = readTasklaceDocument(bytes.value, zlibCompressor);
   if (!read.ok) {
-    return failure(read.error);
+    return failure(withoutReason(read.error));
   }
   const { state, documentId } = read.value;
   return success({ kind: 'loaded', state: ownBytes(state), documentId, warnings: [] });
+}
+
+/** Logs why the content of a file could not be decoded, and keeps only its code for the page, which never needs the inner error. */
+function withoutReason(error: FileError): FileFailure {
+  if (error.code !== 'INVALID_CONTENT' || error.reason === undefined) {
+    return error;
+  }
+  console.error('The content of the project file could not be decoded:', error.reason);
+  return { code: 'INVALID_CONTENT' };
 }
 
 /** Returns bytes that own their whole buffer, copying a view into a larger buffer, such as the pool a decompression writes into, into a new buffer since slicing a Node buffer gives another view, so that sending them never carries memory around them. */
@@ -207,13 +217,13 @@ async function saveProject(
   return success({ kind: 'saved', localCopySaved });
 }
 
-/** Runs a write and tells whether it succeeded, logging the whole error that stopped it. */
+/** Runs a write and tells whether it succeeded, logging the whole error of the system that stopped it, any other error being thrown again so that a programming error is never shown as a file that could not be written. */
 async function attemptWrite(what: string, write: () => Promise<void>): Promise<boolean> {
   try {
     await write();
     return true;
   } catch (error) {
-    if (error instanceof Error) {
+    if (isSystemError(error)) {
       console.error(`${what} could not be written:`, error);
       return false;
     }
@@ -228,6 +238,7 @@ async function readBytes(path: string, limit: number): Promise<Result<Uint8Array
     handle = await open(path, 'r');
     const details = await handle.stat();
     if (!details.isFile()) {
+      console.error(`${path} is not a regular file, so it cannot be read.`);
       return failure({ code: 'READ_FAILED' });
     }
     if (details.size > limit) {

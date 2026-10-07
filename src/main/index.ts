@@ -7,9 +7,12 @@ import { MAX_FILE_WORKER_HEAP_MEBIBYTES } from '../core/limits';
 import { contentSecurityPolicy } from './content-security-policy';
 import { flushBeforeClosing, registerFlushHandler } from './close-flush';
 import { runInFileWorker } from './file-worker-client';
-import { registerIpcHandlers } from './ipc-handlers';
 import { createTrustCheck } from './ipc-trust';
-import { registerProjectFileHandlers, windowProjectKind } from './project-files';
+import {
+  forgetWindowProject,
+  registerProjectFileHandlers,
+  windowProjectKind,
+} from './project-files';
 import { CONTENT_SECURITY_POLICY_HEADER, hardenContents, hardenSession } from './security';
 import { MESSAGES } from './messages';
 import { installApplicationMenu } from './platform/application-menu';
@@ -19,6 +22,7 @@ import {
   logPageMessages,
   logProcessErrors,
   logWorkerErrors,
+  writeLogBeforeQuitting,
 } from './log-file';
 import { isMissingFile } from './stored-files';
 import { createMainWindow } from './window';
@@ -39,6 +43,7 @@ const log = createLogFile(
 );
 captureConsole(console, log);
 logProcessErrors(process);
+writeLogBeforeQuitting(app, log);
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -63,7 +68,6 @@ function start(): void {
   hardenSession(session.defaultSession, policy);
   protocol.handle(APP_SCHEME, serveAppFile);
   const assertTrusted = createTrustCheck((address) => isAppAddress(address, developmentOrigin));
-  registerIpcHandlers(assertTrusted);
   registerFlushHandler(assertTrusted);
   registerProjectFileHandlers({
     assertTrusted,
@@ -73,7 +77,7 @@ function start(): void {
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath);
   logPageMessages(window.webContents, log);
-  flushBeforeClosing(window, windowProjectKind);
+  flushBeforeClosing(window, windowProjectKind, forgetWindowProject);
   let closing = false;
   window.once('close', () => {
     closing = true;

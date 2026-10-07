@@ -298,12 +298,17 @@ describe('createScheduler', () => {
 });
 
 describe('answerScheduleRequest', () => {
-  it('answers only requests of the current version', () => {
-    expect(answerScheduleRequest({ version: 2, generation: 1, project: FIRST })).toBeNull();
-    expect(answerScheduleRequest({ version: 1, generation: 1.5, project: FIRST })).toBeNull();
-    expect(answerScheduleRequest(null)).toBeNull();
+  it('answers only requests of the current version, failing on any other message', () => {
+    const refusal = 'The schedule worker received a message that is not a schedule request.';
+    expect(() => answerScheduleRequest({ version: 2, generation: 1, project: FIRST })).toThrow(
+      refusal,
+    );
+    expect(() => answerScheduleRequest({ version: 1, generation: 1.5, project: FIRST })).toThrow(
+      refusal,
+    );
+    expect(() => answerScheduleRequest(null)).toThrow(refusal);
     const answer = answerScheduleRequest({ version: 1, generation: 3, project: FIRST });
-    expect(answer?.generation).toBe(3);
-    expect(answer?.result.ok).toBe(true);
+    expect(answer.generation).toBe(3);
+    expect(answer.result.ok).toBe(true);
   });
 });

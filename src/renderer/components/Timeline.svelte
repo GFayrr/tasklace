@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { TaskId } from '../../core/model/project';
+  import type { Task, TaskId } from '../../core/model/project';
   import type { LinkEnd } from '../plan/task-commands';
   import type { DrawingPart } from '../app/app-state.svelte';
   import { createPatternCache } from '../plan/bar-patterns';
@@ -34,6 +34,7 @@
     readonly moved: (shape: PlacedShape, offset: number, block: number | null) => void;
     readonly stretched: (shape: BarShape, offset: number) => void;
     readonly linked: (from: LinkEnd, to: LinkEnd) => void;
+    readonly linkedToSummary: () => void;
     readonly opened: (id: TaskId) => void;
     readonly drawingFailed: (part: DrawingPart) => void;
   }
@@ -62,6 +63,7 @@
     moved,
     stretched,
     linked,
+    linkedToSummary,
     opened,
     drawingFailed,
   }: Props = $props();
@@ -306,7 +308,14 @@
       stretched(target.shape, offset);
     } else if (shown?.kind === 'link' && shown.target !== null) {
       linked({ taskId: target.shape.taskId, block: target.block }, shown.target.end);
+    } else if (shown?.kind === 'link' && rowTaskAt(event, element)?.kind === 'summary') {
+      linkedToSummary();
     }
+  }
+
+  /** Returns the task of the row under the pointer, if any. */
+  function rowTaskAt(event: PointerEvent, element: HTMLElement): Task | undefined {
+    return scene.rows[Math.floor(contentPoint(event, element).y / ROW_HEIGHT)]?.task;
   }
 
   /** Opens the details of the task whose bar is double-clicked. */

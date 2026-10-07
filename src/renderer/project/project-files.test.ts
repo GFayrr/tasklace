@@ -269,6 +269,15 @@ describe('createProjectFiles', () => {
     expect(saves).toEqual([]);
   });
 
+  it('fails a save the main process cannot place, instead of taking it for a page without project', async () => {
+    const { bridge } = fakeBridge(openedOf(OTHER_ID), { ok: false, error: { code: 'NO_PROJECT' } });
+    const files = createProjectFiles(bridge, QUIET, manualTimer());
+    const session = await createdOn(files);
+    expect(await files.save()).toEqual({ ok: false, error: { code: 'NO_PROJECT' } });
+    session.apply({ type: 'updateProject', fields: { name: 'Changed' } });
+    await expect(files.flush()).rejects.toThrow(FileActionError);
+  });
+
   it('keeps the open project when it cannot be saved before a new one is created', async () => {
     const timer = manualTimer();
     const failures: unknown[] = [];

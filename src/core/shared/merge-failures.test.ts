@@ -106,11 +106,12 @@ describe('a merge whose repair raises an exception', () => {
     const origin = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const session = sessionOn(origin);
     const garbage = Uint8Array.from([255, 255, 255, 255, 1]);
-    expect(session.merge(garbage)).toMatchObject({ ok: false, error: { kind: 'malformedUpdate' } });
-    expect(mergeSharedUpdate(session.document, garbage)).toMatchObject({
-      ok: false,
-      error: { kind: 'malformedUpdate' },
-    });
+    for (const merged of [session.merge(garbage), mergeSharedUpdate(session.document, garbage)]) {
+      expect(merged.ok || merged.error.kind).toBe('malformedUpdate');
+      expect(
+        !merged.ok && merged.error.kind === 'malformedUpdate' && merged.error.error,
+      ).toBeInstanceOf(Error);
+    }
   });
 
   it('refuses a full merge that the repair leaves invalid, leaving the document as it was', () => {

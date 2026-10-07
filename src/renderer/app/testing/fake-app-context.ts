@@ -93,8 +93,6 @@ export function fakeBridge(): {
     return Promise.resolve(value);
   };
   const bridge: TasklaceBridge = {
-    appVersion: () => called('appVersion', '1.0.0'),
-    openExternal: () => called('openExternal', true),
     regionalFormat: () => called('regionalFormat', FRENCH_FORMAT),
     newProject: () => called('newProject', control.newDocumentId),
     openProject: () => called('openProject', control.openResult),

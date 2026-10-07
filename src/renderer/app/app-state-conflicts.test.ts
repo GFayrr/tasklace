@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Tag } from '../../core/model/project';
 import { project, scheduleOrThrow, summary, workTask } from '../../core/testing/project-builder';
 import { removeTag, setTagRepresentsPerson } from '../plan/tag-commands';
@@ -132,6 +132,36 @@ describe('the list of conflicts', () => {
     expect([app.selectedTaskId, app.revealRequest]).toEqual(['interviews', null]);
     expect(app.notices.map((notice) => [notice.kind, notice.text])).toEqual([
       ['warning', english.editErrors.SCHEDULE_PENDING],
+    ]);
+  });
+
+  it('lists no conflict, tells the user and logs why when the conflicts cannot be described', async () => {
+    const { app, scheduler } = await openedApp();
+    const opened = app.project;
+    if (opened === null) {
+      throw new Error('No project');
+    }
+    const schedule = scheduleOrThrow(opened);
+    const conflict = { tagId: 'ghost', start: 0, end: 1, taskIds: ['analysis'] };
+    const broken = {
+      ...schedule,
+      tagConflicts: { ...schedule.tagConflicts, conflicts: [conflict] },
+    };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      scheduler.listener().scheduled({ ok: true, value: broken }, opened);
+      expect(logged.mock.calls).toEqual([
+        [
+          'The conflicts of people and teams could not be described:',
+          new Error('A conflict is about the unknown tag ghost.'),
+        ],
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
+    expect([app.conflictLines, app.conflictCount]).toEqual([[], 0]);
+    expect(app.notices.map((notice) => [notice.kind, notice.text])).toEqual([
+      ['error', english.notices.peopleConflictsUnavailable],
     ]);
   });
 

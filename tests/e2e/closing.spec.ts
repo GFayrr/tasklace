@@ -248,6 +248,19 @@ test('shows unexpected errors of the interface to the user and writes them to th
     .toMatch(/ERROR Page: .*Rejected on purpose[\s\S]*ERROR Page: .*Thrown on purpose/);
 });
 
+test('writes the objects and the causes the interface logs, not only their names', async () => {
+  await page.evaluate(() => {
+    const cause = new Error('Inner cause on purpose');
+    console.error('Logged on purpose:', { code: 'X', issues: [{ path: 'a' }] });
+    console.error('Wrapped on purpose:', new Error('Outer error on purpose', { cause }));
+  });
+  await expect
+    .poll(async () => readFile(join(userData, 'logs', 'tasklace.log'), 'utf8').catch(() => ''))
+    .toMatch(
+      /ERROR Page: Logged on purpose: \{"code":"X","issues":\[\{"path":"a"\}\]\}[\s\S]*ERROR Page: Wrapped on purpose: Error: Outer error on purpose \| .*Caused by: Error: Inner cause on purpose/,
+    );
+});
+
 test('closes a window at once while its interface is still starting', async () => {
   for (let attempt = 0; attempt < STARTING_CLOSE_ATTEMPTS; attempt += 1) {
     const ownData = await mkdtemp(join(tmpdir(), 'tasklace-e2e-starting-'));

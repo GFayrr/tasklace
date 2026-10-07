@@ -1,5 +1,6 @@
 import { mount } from 'svelte';
 import { AppState } from './app/app-state.svelte';
+import { errorOfEvent, writeConsoleAsText } from './app/describe-for-log';
 import App from './components/App.svelte';
 import { loadMessages } from './i18n/messages';
 import { createScheduler } from './schedule/scheduler';
@@ -9,12 +10,14 @@ import './styles/global.css';
 
 let app: AppState | null = null;
 
+writeConsoleAsText(console);
+
 window.addEventListener('unhandledrejection', (event) => {
   event.preventDefault();
   reportUnexpectedError(event.reason);
 });
 window.addEventListener('error', (event) => {
-  reportUnexpectedError(event.error);
+  reportUnexpectedError(errorOfEvent(event));
 });
 
 try {

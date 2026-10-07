@@ -36,23 +36,57 @@ describe('regionalFormatOf', () => {
     });
   });
 
-  it('falls back to the default order, the slash and a 24-hour clock for an unfamiliar date format', () => {
+  it('writes ISO dates, with a warning, for short dates of an unfamiliar form, keeping the list separator and the clock', () => {
     const parts = vi
       .spyOn(Intl.DateTimeFormat.prototype, 'formatToParts')
       .mockReturnValue([{ type: 'era', value: 'AD' }]);
     const options = vi
       .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
       .mockReturnValue({} as Intl.ResolvedDateTimeFormatOptions);
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
-      expect(regionalFormatOf('en-US')).toEqual({
-        listSeparator: ',',
-        dateOrder: DEFAULT_REGIONAL_FORMAT.dateOrder,
-        dateSeparator: '/',
+      expect(regionalFormatOf('fr-FR')).toEqual({
+        listSeparator: ';',
+        dateOrder: 'yearMonthDay',
+        dateSeparator: '-',
         twelveHourClock: false,
       });
+      expect(warned.mock.calls).toEqual([
+        [
+          'The short dates of "fr-FR" are written "AD", which CSV files cannot follow: they use ISO dates.',
+        ],
+      ]);
     } finally {
       parts.mockRestore();
       options.mockRestore();
+      warned.mockRestore();
+    }
+  });
+
+  it('writes ISO dates, with a warning, for a date separator it does not know', () => {
+    const parts = vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts').mockReturnValue([
+      { type: 'day', value: '05' },
+      { type: 'literal', value: '~' },
+      { type: 'month', value: '10' },
+      { type: 'literal', value: '~' },
+      { type: 'year', value: '2026' },
+    ]);
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      expect(regionalFormatOf('en-GB')).toEqual({
+        listSeparator: ',',
+        dateOrder: 'yearMonthDay',
+        dateSeparator: '-',
+        twelveHourClock: false,
+      });
+      expect(warned.mock.calls).toEqual([
+        [
+          'The short dates of "en-GB" are written "05~10~2026", which CSV files cannot follow: they use ISO dates.',
+        ],
+      ]);
+    } finally {
+      parts.mockRestore();
+      warned.mockRestore();
     }
   });
 

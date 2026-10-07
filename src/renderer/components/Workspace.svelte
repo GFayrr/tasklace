@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { failure } from '../../core/result';
   import type { Project, TaskId } from '../../core/model/project';
   import type { AppState, DrawingPart } from '../app/app-state.svelte';
   import { createTableFormatters } from '../plan/table-format';
@@ -291,6 +292,9 @@
       moved={moveBar}
       stretched={stretchBar}
       linked={linkBar}
+      linkedToSummary={() => {
+        app.edit(() => failure('SUMMARY_DEPENDENCY'));
+      }}
       opened={openDetails}
       drawingFailed={(part: DrawingPart) => {
         app.reportDrawingProblem(part);

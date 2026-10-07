@@ -459,6 +459,15 @@ describe('editing', () => {
     expect(app.canUndo).toBe(true);
   });
 
+  it('explains a value the project refuses with the problem found, not with the help to write it', async () => {
+    const { app } = await withOpenPlan();
+    const tooLong = workTask('a', { parentId: 's', hoursPerDay: 12 });
+    expect(app.tryEdit(() => ({ ok: true, value: [{ type: 'putTask', task: tooLong }] }))).toBe(
+      english.issues.INVALID_HOURS_PER_DAY,
+    );
+    expect(english.issues.INVALID_HOURS_PER_DAY).not.toBe(english.editErrors.INVALID_HOURS_PER_DAY);
+  });
+
   it('moves the project start back for a task placed before it, and says so', async () => {
     const { app } = await withOpenPlan();
     expect(app.edit((context) => setStart(context, 'a', '2026-09-21 09:00'))).toBe(true);

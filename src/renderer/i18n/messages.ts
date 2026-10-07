@@ -60,6 +60,23 @@ export function editErrorMessage(messages: Messages, code: EditRefusal): string 
   return isDetailsError(edits, code) ? edits[code] : issues[code];
 }
 
+const ISSUES_EXPLAINED_AS_CHANGES = [
+  'DEPENDENCY_CYCLE',
+  'DUPLICATE_DEPENDENCY',
+  'HIERARCHY_TOO_DEEP',
+  'TOO_MANY_ITEMS',
+  'TOO_MANY_TAGS',
+  'UNKNOWN_BLOCK',
+] as const satisfies readonly (keyof Messages['editErrors'] & ValidationIssueCode)[];
+
+/** Returns the message telling the user why the project refused a change: the text of the problem found, or, for the problems a single change makes, the text written for that change, never the help to write a value that a typed value which could not be read gets. */
+export function issueMessage(messages: Messages, code: ValidationIssueCode): string {
+  const explainedAsChange: readonly string[] = ISSUES_EXPLAINED_AS_CHANGES;
+  return explainedAsChange.includes(code)
+    ? editErrorMessage(messages, code)
+    : messages.issues[code];
+}
+
 /** Tells whether a refusal has a text of its own among the edit errors. */
 function isDetailsError(
   edits: Readonly<Record<DetailsError, string>>,

@@ -39,6 +39,7 @@ import { createDayFormatter } from '../i18n/format';
 import {
   countMessage,
   editErrorMessage,
+  issueMessage,
   fileErrorMessage,
   fillMessage,
   type EditRefusal,
@@ -168,6 +169,7 @@ export interface AppContext {
 export class AppState {
   #project = $state.raw<Project | null>(null);
   #computed = $state.raw<ComputedSchedule | null>(null);
+  #peopleLines = $state.raw<readonly ConflictLine[]>([]);
   #dateLines = $state.raw<readonly DateConflictLine[]>([]);
   #scheduleStopped = $state(false);
   #saveStatus = $state<SaveStatus>('saved');
@@ -268,8 +270,7 @@ export class AppState {
 
   /** Describes the person or team conflicts of the schedule shown, with the tags and tasks of the project it was computed for, which may be a little older than the project shown. */
   get conflictLines(): readonly ConflictLine[] {
-    const computed = this.#computed;
-    return computed === null ? [] : conflictLines(computed.schedule, computed.project);
+    return this.#peopleLines;
   }
 
   /** Describes the dates the tasks of the schedule shown do not meet, with the tasks of the project it was computed for, which may be a little older than the project shown. */
@@ -293,7 +294,7 @@ export class AppState {
 
   /** Counts the conflicts of the schedule shown, person or team conflicts and dates not met together, as the list shows them. */
   get conflictCount(): number {
-    return (this.schedule?.tagConflicts.conflicts.length ?? 0) + this.#dateLines.length;
+    return this.#peopleLines.length + this.#dateLines.length;
   }
 
   /** Returns the schedule computed for the project as it is now, null when that computation failed, or why an edit relying on the dates must wait: the schedule is still being computed after the latest change, or it stopped and needs another change. */
@@ -562,7 +563,7 @@ export class AppState {
   }
 
   /** Applies a change built from the current project, telling the user why when it is refused. */
-  edit(build: (context: EditContext) => Edit): boolean {
+  edit(build: (context: EditContext) => Result<readonly SharedOperation[], EditRefusal>): boolean {
     const refusal = this.tryEdit(build);
     if (refusal !== null) {
       this.#notify('error', refusal);
@@ -576,7 +577,7 @@ export class AppState {
   ): string | null {
     const previousStart = this.project?.startDate;
     const refusal = this.#tryExplainedEdit(build, (issue) =>
-      editErrorMessage(this.messages, issue.code),
+      issueMessage(this.messages, issue.code),
     );
     if (refusal === null && previousStart !== undefined) {
       this.#notifyStartMove(previousStart);
@@ -772,7 +773,7 @@ export class AppState {
     const id = taskOfCalendarIssue(issue);
     const task = project.tasks.find((candidate) => candidate.id === id);
     if (task?.kind !== 'task' || !isDailyWindowCode(issue.code)) {
-      return editErrorMessage(this.messages, issue.code);
+      return issueMessage(this.messages, issue.code);
     }
     const text = this.messages.settings;
     return issue.code === 'INVALID_HOURS_PER_DAY'
@@ -1025,6 +1026,7 @@ export class AppState {
     this.#session?.document.off('update', this.#queueRefresh);
     this.#session = session;
     this.#computed = null;
+    this.#peopleLines = [];
     this.#dateLines = [];
     this.selectedTaskId = null;
     this.editRequest = null;
@@ -1073,6 +1075,17 @@ export class AppState {
     }
   }
 
+  /** Describes the person or team conflicts a computed schedule finds, or tells the user and logs why they cannot be described, listing none. */
+  #describePeople(computed: ComputedSchedule): readonly ConflictLine[] {
+    try {
+      return conflictLines(computed.schedule, computed.project);
+    } catch (error) {
+      console.error('The conflicts of people and teams could not be described:', error);
+      this.#notify('error', this.messages.notices.peopleConflictsUnavailable);
+      return [];
+    }
+  }
+
   /** Describes the dates a computed schedule finds not met, or tells the user and logs why they cannot be described, marking no task. */
   #describeDates(computed: ComputedSchedule): readonly DateConflictLine[] {
     try {
@@ -1090,6 +1103,7 @@ export class AppState {
       return;
     }
     this.#computed = { project, schedule: result.ok ? result.value : null };
+    this.#peopleLines = this.#describePeople(this.#computed);
     this.#dateLines = this.#describeDates(this.#computed);
     if (this.conflictCount === 0) {
       this.#conflictsOpen = false;

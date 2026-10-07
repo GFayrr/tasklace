@@ -126,6 +126,7 @@
       "one": "{count} task could not be put in the baseline because its dates could not be worked out.",
       "other": "{count} tasks could not be put in the baseline because their dates could not be worked out."
     },
+    "peopleConflictsUnavailable": "The conflicts of people and teams could not be listed. Change a value to compute the plan again; if it keeps happening, save your project under another name.",
     "dateConflictsUnavailable": "The tasks that do not meet their dates could not be marked. Change a value to compute the plan again; if it keeps happening, save your project under another name.",
     "pickerUnavailable": "The calendar could not open. Type the date instead, such as 2026-10-05 14:30.",
     "drawingUnavailable": {

@@ -4,8 +4,6 @@ import type { FileError, StateCheckError } from '../core/file/tasklace-file';
 import type { ValidationIssue } from '../core/validation/validation-issues';
 
 export const IPC_CHANNELS = {
-  appVersion: 'app:version',
-  openExternal: 'shell:open-external',
   regionalFormat: 'system:regional-format',
   newProject: 'project:new',
   openProject: 'project:open',
@@ -20,8 +18,6 @@ export const IPC_CHANNELS = {
   flushRequested: 'project:flush-requested',
   flushDone: 'project:flush-done',
 } as const;
-
-export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
 
 export type ExchangeKind = 'json' | 'csv';
 
@@ -70,8 +66,6 @@ export interface RecentProject {
 }
 
 export interface TasklaceBridge {
-  readonly appVersion: () => Promise<string>;
-  readonly openExternal: (url: string) => Promise<boolean>;
   readonly regionalFormat: () => Promise<RegionalFormat>;
   readonly newProject: () => Promise<string>;
   readonly openProject: () => Promise<BridgeResult<OpenedProject>>;
@@ -94,8 +88,6 @@ export interface TasklaceBridge {
 }
 
 export interface ChannelAnswers {
-  readonly [IPC_CHANNELS.appVersion]: string;
-  readonly [IPC_CHANNELS.openExternal]: boolean;
   readonly [IPC_CHANNELS.regionalFormat]: RegionalFormat;
   readonly [IPC_CHANNELS.newProject]: string;
   readonly [IPC_CHANNELS.openProject]: BridgeResult<OpenedProject>;

@@ -21,8 +21,6 @@ const DATE_SEPARATOR_VALUES: readonly unknown[] = DATE_SEPARATORS;
 const UNEXPECTED_ANSWER: BridgeResult<never> = { ok: false, error: { code: 'TASK_FAILED' } };
 
 const bridge: TasklaceBridge = {
-  appVersion: async () => String(await ipcRenderer.invoke(IPC_CHANNELS.appVersion)),
-  openExternal: async (url) => (await ipcRenderer.invoke(IPC_CHANNELS.openExternal, url)) === true,
   regionalFormat: async () => {
     const format: unknown = await ipcRenderer.invoke(IPC_CHANNELS.regionalFormat);
     if (!isRegionalFormat(format)) {
@@ -43,11 +41,11 @@ const bridge: TasklaceBridge = {
       console.error('The main process sent recent projects that are not a list:', projects);
       return UNEXPECTED_ANSWER;
     }
-    const recent = projects.filter(isRecentProject);
-    if (recent.length !== projects.length) {
+    if (!projects.every(isRecentProject)) {
       console.error('The main process sent recent projects of an unexpected shape:', projects);
+      return UNEXPECTED_ANSWER;
     }
-    return { ok: true, value: recent };
+    return { ok: true, value: projects };
   },
   importProject: (kind) => request(IPC_CHANNELS.importProject, kind),
   adoptProject: (documentId) => request(IPC_CHANNELS.adoptProject, documentId),
