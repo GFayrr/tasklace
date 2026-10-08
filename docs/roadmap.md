@@ -14,9 +14,9 @@ Tasklace is built in nine steps. Each step, or sub-step, is developed on its own
 | 8    | End-to-end encrypted relay                                 | Planned |
 | 9    | Distribution                                               | Planned |
 
-## Step 5: secure Electron shell and Svelte user interface
+## Step 5: secure Electron shell and Svelte user interface (done)
 
-Step 5 turns the core into a desktop application. It is developed on its own branch, one sub-step after the other, each sub-step merged into that branch through its own reviewed pull request. The sub-steps that do not shape the look of the application come first.
+Step 5 turned the core into a desktop application. It was developed on its own branch, one sub-step after the other, each sub-step merged into that branch through its own reviewed pull request, the sub-steps that do not shape the look of the application first. Once reviewed and corrected as a whole, the step was merged into `main`.
 
 ### 5a. Tooling and secure shell (done)
 
