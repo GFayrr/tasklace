@@ -87,6 +87,7 @@ describe('childField and itemField', () => {
 });
 
 describe('readRecord', () => {
+  /** Reads a record with the keys a and b. */
   const read = (field: Field, issues: IssueList): unknown => readRecord(field, issues, ['a', 'b']);
 
   it('accepts a plain object with allowed keys only', () => {
@@ -139,6 +140,7 @@ describe('readRecord', () => {
 });
 
 describe('readArray', () => {
+  /** Reads a list of at most two items. */
   const read = (field: Field, issues: IssueList): unknown => readArray(field, issues, 2);
 
   it('accepts an array up to the maximum length', () => {
@@ -161,6 +163,7 @@ describe('readArray', () => {
 });
 
 describe('readInteger', () => {
+  /** Reads a whole number from -5 to 10. */
   const read = (field: Field, issues: IssueList): unknown => readInteger(field, issues, -5, 10);
 
   it('accepts whole numbers within both bounds', () => {
@@ -200,6 +203,7 @@ describe('readBoolean', () => {
 });
 
 describe('readEnum', () => {
+  /** Reads one of the values one and two. */
   const read = (field: Field, issues: IssueList): unknown =>
     readEnum(field, issues, ['one', 'two']);
 
@@ -224,6 +228,7 @@ describe('readEnum', () => {
 
 describe('readText', () => {
   const MAX_LENGTH = 5;
+  /** Reads a text no longer than the limit. */
   const read = (field: Field, issues: IssueList): unknown => readText(field, issues, MAX_LENGTH);
 
   it('accepts ordinary and Unicode texts, keeping them unchanged', () => {
@@ -305,6 +310,7 @@ describe('readIdentifier', () => {
 });
 
 describe('readPatternString', () => {
+  /** Reads a short text of lowercase letters. */
   const read = (field: Field, issues: IssueList): unknown =>
     readPatternString(field, issues, /^[a-z]+$/, 3);
 
@@ -324,6 +330,7 @@ describe('readNullable', () => {
   });
 
   it('delegates any other value to the inner reader', () => {
+    /** Reads a true or false value that may be null. */
     const read = (field: Field, issues: IssueList): unknown =>
       readNullable(field, issues, readBoolean);
     expect(run(true, read).result).toBe(true);

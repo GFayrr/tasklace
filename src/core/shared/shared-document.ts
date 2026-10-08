@@ -32,8 +32,14 @@ export type SharedProjectData = { readonly [Key in keyof Project]: unknown } & {
   readonly tasks: readonly unknown[];
 };
 
+export type DocumentId = string;
+
+export const DOCUMENT_ID_KEY = 'documentId';
+
 const ROOTS: readonly string[] = [PROJECT_ROOT, TASKS_ROOT, DEPENDENCIES_ROOT, TAGS_ROOT];
+const DOCUMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const PROJECT_FIELD_KEYS: readonly string[] = [
+  DOCUMENT_ID_KEY,
   'name',
   'startDate',
   'workingWeekdays',
@@ -41,6 +47,7 @@ const PROJECT_FIELD_KEYS: readonly string[] = [
   'nonWorkingPeriods',
   'criticalPathEnabled',
   'dateConstraintsEnabled',
+  'baselineEnabled',
   'alwaysShowPatterns',
   'baseline',
 ];
@@ -62,16 +69,32 @@ const HIDDEN_TASK_DEFAULTS: Omit<WorkTask, keyof SummaryTask> = {
   startNoEarlierThan: null,
   mustFinishOn: null,
   deadline: null,
-  segments: [{ durationHours: NEW_TASK_DURATION_HOURS, gapDaysBefore: 0 }],
+  segments: [
+    { durationHours: NEW_TASK_DURATION_HOURS, gapDaysBefore: 0, startNoEarlierThan: null },
+  ],
   hoursPerDay: null,
   dailyStartHour: null,
 };
 
-/** Creates a shared document holding a project. */
-export function createSharedDocument(project: Project): Y.Doc {
+/** Creates a shared document holding a project under a stable document identifier that never changes afterwards. */
+export function createSharedDocument(project: Project, documentId: DocumentId): Y.Doc {
   const document = new Y.Doc();
-  writeSharedProject(document, project, null);
+  document.transact(() => {
+    document.getMap(PROJECT_ROOT).set(DOCUMENT_ID_KEY, documentId);
+    writeSharedProject(document, project, null);
+  });
   return document;
+}
+
+/** Tells whether a value is a document identifier: a lower-case UUID. */
+export function isDocumentId(value: unknown): value is DocumentId {
+  return typeof value === 'string' && DOCUMENT_ID_PATTERN.test(value);
+}
+
+/** Returns the identifier of a shared document, or null when it has none or an invalid one. */
+export function readDocumentId(document: Y.Doc): DocumentId | null {
+  const value = document.getMap(PROJECT_ROOT).get(DOCUMENT_ID_KEY);
+  return isDocumentId(value) ? value : null;
 }
 
 /** Reads the raw content of a shared document as plain, still untrusted project data, lists sorted by identifier and tasks limited to the fields of their kind. */
@@ -91,6 +114,7 @@ export function findSchemaIssues(document: Y.Doc): readonly ValidationIssue[] {
     issues.add(name, 'UNKNOWN_FIELD');
   }
   checkFields(document.getMap(PROJECT_ROOT), PROJECT_ROOT, PROJECT_FIELD_KEYS, issues);
+  checkDocumentId(document, issues);
   for (const [root, allowedKeys] of ENTRY_KEYS_BY_ROOT) {
     checkEntries(document.getMap(root), root, allowedKeys, issues);
   }
@@ -104,6 +128,7 @@ export function findRootIssues(document: Y.Doc): readonly ValidationIssue[] {
     issues.add(name, 'UNKNOWN_FIELD');
   }
   checkFields(document.getMap(PROJECT_ROOT), PROJECT_ROOT, PROJECT_FIELD_KEYS, issues);
+  checkDocumentId(document, issues);
   for (const [root] of ENTRY_KEYS_BY_ROOT) {
     checkSequenceContent(document.getMap(root), root, issues);
   }
@@ -193,6 +218,7 @@ function headerFields(header: ProjectHeader): object {
     nonWorkingPeriods: calendar.nonWorkingPeriods,
     criticalPathEnabled: options.criticalPathEnabled,
     dateConstraintsEnabled: options.dateConstraintsEnabled,
+    baselineEnabled: options.baselineEnabled,
     alwaysShowPatterns: options.alwaysShowPatterns,
     baseline: header.baseline,
   };
@@ -216,6 +242,7 @@ function readData(
     options: {
       criticalPathEnabled: root.get('criticalPathEnabled'),
       dateConstraintsEnabled: root.get('dateConstraintsEnabled'),
+      baselineEnabled: root.get('baselineEnabled'),
       alwaysShowPatterns: root.get('alwaysShowPatterns'),
     },
     baseline: root.get('baseline'),
@@ -239,6 +266,16 @@ function checkEntries(
     } else {
       issues.add(`${root}.${id}`, 'WRONG_TYPE');
     }
+  }
+}
+
+/** Reports a shared document whose identifier is missing or is not a lower-case UUID. */
+function checkDocumentId(document: Y.Doc, issues: IssueList): void {
+  const value = document.getMap(PROJECT_ROOT).get(DOCUMENT_ID_KEY);
+  if (value === undefined) {
+    issues.add(DOCUMENT_ID_KEY, 'MISSING_FIELD');
+  } else if (!isDocumentId(value)) {
+    issues.add(DOCUMENT_ID_KEY, 'INVALID_IDENTIFIER');
   }
 }
 

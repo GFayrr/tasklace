@@ -14,7 +14,7 @@ import {
   summary,
   workTask,
 } from '../testing/project-builder';
-import { DEFAULT_CALENDAR } from '../calendar/default-calendar';
+import { TEST_CALENDAR } from '../testing/test-calendar';
 import { END_PROJECT_HOUR } from '../time';
 import { takeBaseline } from './take-baseline';
 
@@ -39,7 +39,8 @@ describe('takeBaseline', () => {
       [link('a', 'b'), link('b', 'm')],
     );
     const schedule = scheduleOrThrow(input);
-    const taken = takeBaseline(input, schedule, compileOrThrow(DEFAULT_CALENDAR), TAKEN_AT);
+    const taken = takeBaseline(input, schedule, compileOrThrow(TEST_CALENDAR), TAKEN_AT);
+    /** Returns the placement of a task in the schedule. */
     const placementOf = (id: string) => schedule.placements.get(id);
     expect(taken.skipped).toEqual([]);
     expect(taken.baseline.takenAt).toBe(TAKEN_AT);
@@ -56,7 +57,7 @@ describe('takeBaseline', () => {
     const taken = takeBaseline(
       input,
       scheduleOrThrow(input),
-      compileOrThrow(DEFAULT_CALENDAR),
+      compileOrThrow(TEST_CALENDAR),
       TAKEN_AT,
     );
     expect(taken.skipped).toEqual([{ taskId: 'empty', reason: 'NO_DATES' }]);
@@ -71,7 +72,7 @@ describe('takeBaseline', () => {
     const taken = takeBaseline(
       input,
       { placements, summaries: new Map() },
-      compileOrThrow(DEFAULT_CALENDAR),
+      compileOrThrow(TEST_CALENDAR),
       TAKEN_AT,
     );
     expect(taken).toEqual({

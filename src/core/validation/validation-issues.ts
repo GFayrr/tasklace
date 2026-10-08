@@ -23,7 +23,8 @@ export type ValueIssueCode =
   | 'EMPTY_LIST'
   | 'TOO_MANY_ISSUES'
   | 'DUPLICATE_ENTRY'
-  | 'TOO_MANY_REPAIRS';
+  | 'TOO_MANY_REPAIRS'
+  | 'READ_ONLY_FIELD';
 
 export type ImportIssueCode =
   | 'INVALID_CSV'
@@ -45,6 +46,17 @@ export type ValidationIssueCode =
 export interface ValidationIssue {
   readonly path: string;
   readonly code: ValidationIssueCode;
+}
+
+export type ValidationIssues = readonly [ValidationIssue, ...ValidationIssue[]];
+
+/** Returns issues as a list that is never empty, throwing when a refusal holds none, since every refusal has a reason. */
+export function requireIssues(issues: readonly ValidationIssue[]): ValidationIssues {
+  const [first, ...others] = issues;
+  if (first === undefined) {
+    throw new Error('A refusal holds no issue.');
+  }
+  return [first, ...others];
 }
 
 export interface IssueList {

@@ -1,12 +1,8 @@
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
-import type { Compressor, DecompressionErrorCode } from '../../src/core/file/tasklace-file';
-import { crc32 } from '../../src/core/file/crc32';
-import { failure, success } from '../../src/core/result';
+import type { Compressor, DecompressionErrorCode } from '../core/file/tasklace-file';
+import { failure, success } from '../core/result';
 
 const FAST_COMPRESSION_LEVEL = 1;
-const HEADER_BYTES = 16;
-const CHECKSUM_OFFSET = 8;
-const DECLARED_SIZE_OFFSET = 12;
 const INVALID_DATA_CODES: readonly unknown[] = ['Z_DATA_ERROR', 'Z_BUF_ERROR'];
 const OUTPUT_TOO_LARGE_CODE = 'ERR_BUFFER_TOO_LARGE';
 
@@ -15,9 +11,9 @@ interface Inflated {
   readonly consumedBytes: number;
 }
 
-/** Compresses with fast raw deflate (level 1) and decompresses with a hard output limit, refusing bytes after the end of the stream. */
+/** Compresses with fast raw deflate (level 1) and decompresses with a hard output limit, refusing bytes after the end of the stream, without copying the results. */
 export const zlibCompressor: Compressor = {
-  compress: (bytes) => new Uint8Array(deflateRawSync(bytes, { level: FAST_COMPRESSION_LEVEL })),
+  compress: (bytes) => deflateRawSync(bytes, { level: FAST_COMPRESSION_LEVEL }),
   decompress: (bytes, maxOutputBytes) => {
     try {
       const inflated = readInflated(
@@ -42,7 +38,7 @@ function readInflated(result: unknown): Inflated {
   if (!(buffer instanceof Uint8Array) || typeof consumedBytes !== 'number') {
     throw new TypeError('Unexpected result from zlib');
   }
-  return { output: new Uint8Array(buffer), consumedBytes };
+  return { output: buffer, consumedBytes };
 }
 
 /** Maps a zlib error on untrusted data to a decompression error code, rethrowing any other error. */
@@ -55,19 +51,4 @@ function decompressionErrorCode(error: unknown): DecompressionErrorCode {
     return 'INVALID_DATA';
   }
   throw error;
-}
-
-/** Builds a file around a payload with a chosen declared size and a correct checksum, as an attacker would. */
-export function forgeFile(
-  header: Uint8Array,
-  payload: Uint8Array,
-  declaredSize: number,
-): Uint8Array {
-  const file = new Uint8Array(HEADER_BYTES + payload.length);
-  file.set(header.subarray(0, HEADER_BYTES), 0);
-  file.set(payload, HEADER_BYTES);
-  const view = new DataView(file.buffer);
-  view.setUint32(DECLARED_SIZE_OFFSET, declaredSize, true);
-  view.setUint32(CHECKSUM_OFFSET, crc32(file.subarray(DECLARED_SIZE_OFFSET)), true);
-  return file;
 }

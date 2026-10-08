@@ -125,4 +125,9 @@ describe('spreadKeys', () => {
     expect(keyBetween(first ?? null, second ?? null).ok).toBe(true);
     expect(keyBetween(second ?? null, null).ok).toBe(true);
   });
+
+  it('takes the first digit of a longer upper key when the first digits are next to each other', () => {
+    expect(keyBetween('1', '2x')).toEqual({ ok: true, value: '2' });
+    expect(keyBetween('1', '2')).toEqual({ ok: true, value: '1V' });
+  });
 });

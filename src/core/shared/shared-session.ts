@@ -5,7 +5,7 @@ import { MAX_DEPENDENCIES, MAX_TAGS, MAX_TASKS } from '../limits';
 import type { Dependency, Project, Tag, Task, TaskId } from '../model/project';
 import { failure, success, type Result } from '../result';
 import { readProject, STORED_VALUE_CODEC } from '../validation/read-project';
-import type { ValidationIssue } from '../validation/validation-issues';
+import type { ValidationIssue, ValidationIssues } from '../validation/validation-issues';
 import {
   createProjectState,
   putDependency,
@@ -21,11 +21,13 @@ import { fitDailyPattern } from './repair-project';
 import {
   DEPENDENCIES_ROOT,
   deleteEntry,
+  DOCUMENT_ID_KEY,
   findEntryIssues,
   findRootIssues,
   isCalendarField,
   LOCAL_ORIGIN,
   PROJECT_ROOT,
+  readDocumentId,
   readEntry,
   readHeaderData,
   REMOTE_ORIGIN,
@@ -36,6 +38,7 @@ import {
   viewTaskUnion,
   writeEntry,
   writeProjectHeader,
+  type DocumentId,
   type EntryRoot,
 } from './shared-document';
 import {
@@ -48,6 +51,8 @@ import {
   type TouchedItems,
 } from './shared-operations';
 import {
+  DOCUMENT_ID_CHANGED,
+  malformedUpdate,
   readSharedProject,
   repairDocumentProject,
   roundedProgress,
@@ -58,13 +63,24 @@ import {
 
 export interface SharedSession {
   readonly document: Y.Doc;
+  readonly documentId: DocumentId;
   readonly openingRepairs: readonly SharedRepair[];
   readonly project: () => Project;
-  readonly apply: (operation: SharedOperation) => Result<void, readonly ValidationIssue[]>;
+  readonly apply: (operation: SharedOperation) => Result<void, ValidationIssues>;
+  readonly applyAll: (operations: readonly SharedOperation[]) => Result<void, ValidationIssues>;
   readonly merge: (update: Uint8Array) => Result<readonly SharedRepair[], MergeFailure>;
+  readonly history: SessionHistory;
+}
+
+export interface SessionHistory {
+  readonly canUndo: () => boolean;
+  readonly canRedo: () => boolean;
+  readonly undo: () => Result<readonly SharedRepair[], MergeFailure>;
+  readonly redo: () => Result<readonly SharedRepair[], MergeFailure>;
 }
 
 interface SessionState {
+  readonly documentId: DocumentId;
   state: ProjectState;
   shadow: Y.Doc;
   project: Project | null;
@@ -101,18 +117,69 @@ const FAST_REPAIR_ORDER: readonly SharedRepairCode[] = [
   'DAILY_START_HOUR_CLEARED',
 ];
 
+export type StateOpeningFailure =
+  | { readonly kind: 'unreadableState'; readonly error: unknown }
+  | { readonly kind: 'invalidProject'; readonly issues: readonly ValidationIssue[] };
+
+const INCOMPLETE_STATE = 'The state depends on updates it does not hold.';
+const UNDO_CAPTURE_TIMEOUT_MS = 0;
+const HISTORY_ROOTS = [PROJECT_ROOT, TASKS_ROOT, DEPENDENCIES_ROOT, TAGS_ROOT] as const;
+
 type SharedType = Y.Transaction['changed'] extends Map<infer Type, unknown> ? Type : never;
 
 /** Opens a session on a valid shared document, clearing and reporting references to missing tags, and keeps a validated, indexed copy of its project and a trial copy of the document. */
 export function openSharedSession(
   document: Y.Doc,
 ): Result<SharedSession, readonly ValidationIssue[]> {
+  return openSession(document, null);
+}
+
+/** Decodes a Yjs state into a new document and opens a session on it, the trial copy being decoded from the same state rather than from the document encoded again, refusing a state that cannot be read or that depends on updates it does not hold. */
+export function openSharedSessionFromState(
+  state: Uint8Array,
+): Result<SharedSession, StateOpeningFailure> {
+  const document = new Y.Doc();
+  try {
+    Y.applyUpdate(document, state);
+  } catch (error) {
+    return failure({ kind: 'unreadableState', error });
+  }
+  if (document.store.pendingStructs !== null || document.store.pendingDs !== null) {
+    return failure({ kind: 'unreadableState', error: new Error(INCOMPLETE_STATE) });
+  }
+  const opened = openSession(document, state);
+  return opened.ok ? opened : failure({ kind: 'invalidProject', issues: opened.error });
+}
+
+/** Opens a session on a valid shared document, its trial copy decoded from the state the document was just decoded from when one is given. */
+function openSession(
+  document: Y.Doc,
+  decodedFrom: Uint8Array | null,
+): Result<SharedSession, readonly ValidationIssue[]> {
+  const documentId = readDocumentId(document);
+  if (documentId === null) {
+    return failure([{ path: DOCUMENT_ID_KEY, code: 'MISSING_FIELD' }]);
+  }
   const read = readSharedProject(document);
-  return read.ok ? success(openValidatedSession(document, read.value)) : read;
+  return read.ok ? success(validatedSession(document, read.value, documentId, decodedFrom)) : read;
 }
 
 /** Opens a session on a shared document whose project was already read and validated, so that it is not validated twice. */
-export function openValidatedSession(document: Y.Doc, project: Project): SharedSession {
+export function openValidatedSession(
+  document: Y.Doc,
+  project: Project,
+  documentId: DocumentId,
+): SharedSession {
+  return validatedSession(document, project, documentId, null);
+}
+
+/** Opens a session on a shared document whose project was validated, its trial copy decoded from the unchanged state the document was just decoded from when one is given and the opening cleared nothing, and copied from the document otherwise. */
+function validatedSession(
+  document: Y.Doc,
+  project: Project,
+  documentId: DocumentId,
+  decodedFrom: Uint8Array | null,
+): SharedSession {
   const tagIds = new Set(project.tags.map((tag) => tag.id));
   const tasks = project.tasks.map((task) => withKnownTag(task, (id) => tagIds.has(id)));
   const cleared = tasks.filter((task, index) => task !== project.tasks[index]);
@@ -123,8 +190,12 @@ export function openValidatedSession(document: Y.Doc, project: Project): SharedS
   }, REPAIR_ORIGIN);
   const opened = { ...project, tasks };
   const session: SessionState = {
+    documentId,
     state: createProjectState(opened),
-    shadow: copyDocument(document, newRepairClientId(document)),
+    shadow:
+      decodedFrom === null || cleared.length > 0
+        ? copyDocument(document, newRepairClientId(document))
+        : documentFrom(decodedFrom, newRepairClientId(document)),
     project: opened,
     stateChanged: false,
   };
@@ -135,13 +206,77 @@ export function openValidatedSession(document: Y.Doc, project: Project): SharedS
   });
   return {
     document,
+    documentId,
     openingRepairs: cleared
       .map((task): SharedRepair => ({ code: 'TAG_CLEARED', id: task.id }))
       .sort((left, right) => compareStrings(left.id, right.id)),
     project: () => currentProject(session),
     apply: (operation) => applyOperationToSession(session, document, operation),
+    applyAll: (operations) => applyOperationsToSession(session, document, operations),
     merge: (update) => mergeIntoSession(session, document, update),
+    history: createHistory(session, document),
   };
+}
+
+/** Keeps the local changes of a session in an undo history that ignores the changes of others, each undone or redone step being checked and repaired like a received update. */
+function createHistory(session: SessionState, document: Y.Doc): SessionHistory {
+  const roots = HISTORY_ROOTS.map((root) => document.getMap(root));
+  const manager = new Y.UndoManager(roots, {
+    trackedOrigins: new Set([LOCAL_ORIGIN]),
+    captureTimeout: UNDO_CAPTURE_TIMEOUT_MS,
+  });
+  return {
+    canUndo: () => manager.canUndo(),
+    canRedo: () => manager.canRedo(),
+    undo: () =>
+      replayStep(session, document, manager, {
+        step: () => manager.undo(),
+        revert: () => manager.redo(),
+      }),
+    redo: () =>
+      replayStep(session, document, manager, {
+        step: () => manager.redo(),
+        revert: () => manager.undo(),
+      }),
+  };
+}
+
+/** Runs one step of the history on the document, then checks and repairs what it changed, reverting it when the project cannot be repaired. */
+function replayStep(
+  session: SessionState,
+  document: Y.Doc,
+  manager: Y.UndoManager,
+  moves: { readonly step: () => unknown; readonly revert: () => unknown },
+): Result<readonly SharedRepair[], MergeFailure> {
+  const updates: Uint8Array[] = [];
+  /** Keeps the updates the undo manager writes. */
+  const collect = (update: Uint8Array, origin: unknown): void => {
+    if (origin === manager) {
+      updates.push(update);
+    }
+  };
+  document.on('update', collect);
+  moves.step();
+  document.off('update', collect);
+  if (updates.length === 0) {
+    return success([]);
+  }
+  const repairUpdates: Uint8Array[] = [];
+  const replayed = tryMerge(session, Y.mergeUpdates(updates), repairUpdates);
+  if (!replayed.ok) {
+    moves.revert();
+    session.shadow = copyDocument(document, session.shadow.clientID);
+    session.stateChanged = true;
+    restoreState(session, document);
+    session.project = null;
+    return replayed;
+  }
+  session.stateChanged = false;
+  if (repairUpdates.length > 0) {
+    Y.applyUpdate(document, Y.mergeUpdates(repairUpdates), REPAIR_ORIGIN);
+  }
+  session.project = null;
+  return replayed;
 }
 
 /** Returns the project of a session, rebuilt from the indexed state only after it changed. */
@@ -150,21 +285,97 @@ function currentProject(session: SessionState): Project {
   return session.project;
 }
 
-/** Checks an operation on the indexed state and writes only what it touched to the document. */
+/** Checks an operation on the indexed state and writes only what it touched to the document, the state matching the document again when the check or the write raises. */
 function applyOperationToSession(
   session: SessionState,
   document: Y.Doc,
   operation: SharedOperation,
-): Result<void, readonly ValidationIssue[]> {
-  const checked = applyToState(session.state, operation);
-  if (!checked.ok) {
-    return checked;
+): Result<void, ValidationIssues> {
+  try {
+    const checked = applyToState(session.state, operation);
+    if (!checked.ok) {
+      return checked;
+    }
+    session.project = null;
+    document.transact(() => {
+      writeTouched(document, session.state, checked.value);
+    }, LOCAL_ORIGIN);
+    return success(undefined);
+  } catch (error) {
+    throwAfterReset(session, document, error);
+  }
+}
+
+/** Checks operations one after another on the indexed state and writes all they touched in one change, or nothing at all when one of them is refused or raises before the writing, the state matching the document again whenever something raises. */
+function applyOperationsToSession(
+  session: SessionState,
+  document: Y.Doc,
+  operations: readonly SharedOperation[],
+): Result<void, ValidationIssues> {
+  let written: Result<void, ValidationIssues>;
+  try {
+    written = writeOperations(session, document, operations);
+  } catch (error) {
+    throwAfterReset(session, document, error);
+  }
+  if (!written.ok) {
+    resetState(session, document);
+  }
+  return written;
+}
+
+/** Puts the indexed state back as the document holds it after a change raised, then raises that error again, or both errors together when the document no longer holds a valid project either. */
+function throwAfterReset(session: SessionState, document: Y.Doc, error: unknown): never {
+  try {
+    resetState(session, document);
+  } catch (resetError) {
+    throw new AggregateError(
+      [error, resetError],
+      'A change to the session failed, and its document could not be read back.',
+    );
+  }
+  throw error;
+}
+
+/** Applies operations to the indexed state, then writes what they touched to the document, stopping at the first one refused, the state then still holding the operations checked before it. */
+function writeOperations(
+  session: SessionState,
+  document: Y.Doc,
+  operations: readonly SharedOperation[],
+): Result<void, ValidationIssues> {
+  const all: TouchedItems = {
+    tasks: new Set(),
+    dependencies: new Set(),
+    tags: new Set(),
+    header: false,
+  };
+  for (const operation of operations) {
+    const checked = applyToState(session.state, operation);
+    if (!checked.ok) {
+      return checked;
+    }
+    addTouched(all, checked.value);
   }
   session.project = null;
   document.transact(() => {
-    writeTouched(document, session.state, checked.value);
+    writeTouched(document, session.state, all);
   }, LOCAL_ORIGIN);
   return success(undefined);
+}
+
+/** Rebuilds the indexed state from the document after a change was refused or failed partway. */
+function resetState(session: SessionState, document: Y.Doc): void {
+  session.stateChanged = true;
+  restoreState(session, document);
+  session.project = null;
+}
+
+/** Adds the items one operation touched to those of the previous ones. */
+function addTouched(all: TouchedItems, more: TouchedItems): void {
+  more.tasks.forEach((id) => all.tasks.add(id));
+  more.dependencies.forEach((id) => all.dependencies.add(id));
+  more.tags.forEach((id) => all.tags.add(id));
+  all.header ||= more.header;
 }
 
 /** Writes the touched project fields, tasks, dependencies and tags of the state to a document, deleting those that no longer exist. */
@@ -213,28 +424,37 @@ function mergeIntoSession(
   return merged;
 }
 
-/** Applies an update to the trial copy and checks and repairs it, collecting the repairs written there. */
+/** Applies an update to the trial copy and checks and repairs it, collecting the repairs written there, an exception raised by the bytes being a malformed update, and one raised during the repair a failed repair. */
 function tryMerge(
   session: SessionState,
   update: Uint8Array,
   repairUpdates: Uint8Array[],
 ): Result<readonly SharedRepair[], MergeFailure> {
   const { shadow } = session;
+  let change: ShadowChange;
   try {
-    const change = applyToShadow(shadow, update);
-    if (shadow.store.pendingStructs !== null || shadow.store.pendingDs !== null) {
-      return failure({ kind: 'incompleteUpdate' });
-    }
-    const collect = (repairUpdate: Uint8Array): void => {
-      repairUpdates.push(repairUpdate);
-    };
-    shadow.on('update', collect);
+    change = applyToShadow(shadow, update);
+  } catch (error) {
+    return malformedUpdate(error);
+  }
+  if (shadow.store.pendingStructs !== null || shadow.store.pendingDs !== null) {
+    return failure({ kind: 'incompleteUpdate' });
+  }
+  if (readDocumentId(shadow) !== session.documentId) {
+    return failure({ kind: 'invalidProject', issues: [DOCUMENT_ID_CHANGED] });
+  }
+  /** Keeps the updates a repair writes. */
+  const collect = (repairUpdate: Uint8Array): void => {
+    repairUpdates.push(repairUpdate);
+  };
+  shadow.on('update', collect);
+  try {
     const repairs = change.structural ? repairAll(session) : repairChanged(session, change);
-    shadow.off('update', collect);
     return repairs.ok ? repairs : failure({ kind: 'invalidProject', issues: repairs.error });
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return failure({ kind: 'malformedUpdate', reason });
+    return failure({ kind: 'repairFailed', error });
+  } finally {
+    shadow.off('update', collect);
   }
 }
 
@@ -247,6 +467,7 @@ function applyToShadow(shadow: Y.Doc, update: Uint8Array): ShadowChange {
     headerFields: new Set(),
     structural: false,
   };
+  /** Notes in the indexed state every part of the document a transaction changed. */
   const collect = (transaction: Y.Transaction): void => {
     transaction.changed.forEach((keys, type) => {
       noteChange(shadow, change, type, keys);
@@ -461,6 +682,7 @@ function applyChangedItems(
     [...items.tasks, ...untouchedTasksOfTags(state, items)],
     items.rounded,
   );
+  const previous = new Map(fixed.tasks.map((task) => [task.id, state.tasks.get(task.id)]));
   fixed.tasks.forEach((task) => {
     putTask(state, task);
   });
@@ -468,7 +690,7 @@ function applyChangedItems(
     state.tags.size > MAX_TAGS ||
     state.tasks.size > MAX_TASKS ||
     hasOrphans(state, items.deletedTasks) ||
-    fixed.tasks.some((task) => findTaskProblem(state, task) !== null);
+    fixed.tasks.some((task) => findTaskProblem(state, task, previous.get(task.id)) !== null);
   return broken || !addDependencies(state, items.dependencies) ? null : fixed;
 }
 
@@ -530,15 +752,16 @@ function addDependencies(state: ProjectState, dependencies: readonly Dependency[
   return state.dependencies.size <= MAX_DEPENDENCIES;
 }
 
-/** Rebuilds the indexed state from a document after a refused merge left it half changed. */
+/** Rebuilds the indexed state from a document after a refused or failed change left it half changed, throwing when the document no longer holds a valid project. */
 function restoreState(session: SessionState, document: Y.Doc): void {
   if (!session.stateChanged) {
     return;
   }
   const read = readSharedProject(document);
-  if (read.ok) {
-    session.state = createProjectState(read.value);
+  if (!read.ok) {
+    throw new Error('The shared document of the session no longer holds a valid project.');
   }
+  session.state = createProjectState(read.value);
   session.stateChanged = false;
 }
 
@@ -553,8 +776,13 @@ function sortRepairs(repairs: readonly SharedRepair[]): SharedRepair[] {
 
 /** Copies a document into a new one that writes under a given identity. */
 function copyDocument(document: Y.Doc, clientId: number): Y.Doc {
+  return documentFrom(Y.encodeStateAsUpdate(document), clientId);
+}
+
+/** Decodes a Yjs state into a new document that writes under a given identity. */
+function documentFrom(state: Uint8Array, clientId: number): Y.Doc {
   const copy = new Y.Doc();
-  Y.applyUpdate(copy, Y.encodeStateAsUpdate(document));
+  Y.applyUpdate(copy, state);
   copy.clientID = clientId;
   return copy;
 }

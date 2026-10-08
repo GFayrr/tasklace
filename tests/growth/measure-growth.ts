@@ -6,15 +6,15 @@ export const LARGE_TASK_COUNT = SMALL_TASK_COUNT * SIZE_FACTOR;
 export const BATCH_SIZE = 50;
 export const MEASURED_RUNS = 7;
 
-/** Runs a function once to warm it up, then returns the median of several timed runs in milliseconds. */
-export function medianDuration(run: () => void): number {
-  run();
-  const durations = Array.from({ length: MEASURED_RUNS }, () => {
+/** Runs a function once to warm it up, then returns the median of several timed runs in milliseconds, each run receiving its index and the warm-up the number of runs, so that each run can work on its own copy. */
+export function medianDuration(run: (index: number) => void, runs: number = MEASURED_RUNS): number {
+  run(runs);
+  const durations = Array.from({ length: runs }, (_unused, index) => {
     const start = performance.now();
-    run();
+    run(index);
     return performance.now() - start;
   }).sort((left, right) => left - right);
-  return durations[Math.floor(MEASURED_RUNS / 2)] ?? Number.POSITIVE_INFINITY;
+  return durations[Math.floor(runs / 2)] ?? Number.POSITIVE_INFINITY;
 }
 
 /** Returns how many times longer the same operation takes on the large input than on the small one. */

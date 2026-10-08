@@ -11,17 +11,28 @@ import {
   TAGS_ROOT,
   TASKS_ROOT,
 } from '../shared/shared-document';
-import { mergeSharedUpdate } from '../shared/shared-project';
+import { mergeSharedUpdate, readSharedProject } from '../shared/shared-project';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { at } from '../testing/civil-time';
 import { hideListContent } from '../testing/hidden-list-content';
-import { projectArbitrary } from '../testing/project-arbitrary';
-import { link, milestone, project, summary, workTask } from '../testing/project-builder';
+import { livedState, randomEditsArbitrary } from '../testing/lived-document';
+import { projectArbitrary, richProjectArbitrary } from '../testing/project-arbitrary';
+import {
+  link,
+  milestone,
+  project,
+  summary,
+  workTask,
+  TEST_DOCUMENT_ID,
+} from '../testing/project-builder';
 import { crc32 } from './crc32';
 import {
+  checkStateToSave,
   encodeTasklaceFile,
+  encodeTasklaceState,
   HEADER_BYTES,
   openTasklaceFile,
+  readTasklaceDocument,
   readTasklaceFile,
   type Compressor,
 } from './tasklace-file';
@@ -69,7 +80,14 @@ const SAMPLE: Project = project(
 
 /** Writes a project as a .tasklace file with the stand-in compressor. */
 function fileOf(input: Project): Uint8Array {
-  return encodeTasklaceFile(createSharedDocument(input), storingCompressor);
+  return encodeTasklaceFile(createSharedDocument(input, TEST_DOCUMENT_ID), storingCompressor);
+}
+
+/** Decodes a Yjs state into a new document. */
+function documentOf(state: Uint8Array): Y.Doc {
+  const document = new Y.Doc();
+  Y.applyUpdate(document, state);
+  return document;
 }
 
 /** Returns a copy of a file with some header fields or its payload replaced, and a recomputed checksum, as an attacker would. */
@@ -129,13 +147,14 @@ function taskEntry(document: Y.Doc, id: string): Y.Map<unknown> {
 
 /** Writes the sample project as a file after changing its shared document. */
 function tampered(change: (document: Y.Doc) => void): Uint8Array {
-  const document = createSharedDocument(SAMPLE);
+  const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
   change(document);
   return encodeTasklaceFile(document, storingCompressor);
 }
 
 /** Sorts the lists of a project by identifier. */
 function sorted(input: Project): Project {
+  /** Returns items ordered by identifier. */
   const byId = <T extends { readonly id: string }>(items: readonly T[]): T[] =>
     [...items].sort((left, right) => compareStrings(left.id, right.id));
   return {
@@ -148,7 +167,7 @@ function sorted(input: Project): Project {
 
 describe('tasklace file', () => {
   it('reads back what it wrote, as a shared document and as a session', () => {
-    const document = createSharedDocument(SAMPLE);
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const file = encodeTasklaceFile(document, storingCompressor);
     const read = readTasklaceFile(file, storingCompressor);
     expect(read.ok && readSharedData(read.value)).toEqual(readSharedData(document));
@@ -158,7 +177,7 @@ describe('tasklace file', () => {
 
   it('reads back every generated project unchanged', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
     fc.assert(
-      fc.property(projectArbitrary, ({ project: input }) => {
+      fc.property(fc.oneof(projectArbitrary, richProjectArbitrary), ({ project: input }) => {
         const opened = openTasklaceFile(fileOf(input), storingCompressor);
         expect(opened.ok && opened.value.project()).toEqual(sorted(input));
       }),
@@ -166,7 +185,7 @@ describe('tasklace file', () => {
   });
 
   it('keeps the Yjs history, so that copies made before still merge after reading', () => {
-    const document = createSharedDocument(SAMPLE);
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const peer = new Y.Doc();
     Y.applyUpdate(peer, Y.encodeStateAsUpdate(document));
     const read = readTasklaceFile(
@@ -188,7 +207,7 @@ describe('tasklace file', () => {
 
   it('leaves the text of deleted content out of the file', () => {
     const secret = 'SECRET-FORMER-NAME';
-    const document = createSharedDocument(SAMPLE);
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     taskEntry(document, 'b').set('name', secret);
     expect(containsText(encodeTasklaceFile(document, storingCompressor), secret)).toBe(true);
     taskEntry(document, 'b').set('name', 'Public name');
@@ -217,6 +236,62 @@ describe('tasklace file', () => {
     });
     const clean = openTasklaceFile(fileOf(SAMPLE), storingCompressor);
     expect(clean.ok && clean.value.openingRepairs).toEqual([]);
+  });
+
+  it('reads a file with the identifier of its document, refusing a file without one', () => {
+    const source = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    const read = readTasklaceDocument(
+      encodeTasklaceFile(source, storingCompressor),
+      storingCompressor,
+    );
+    expect(read.ok && read.value.documentId).toBe(TEST_DOCUMENT_ID);
+    expect(read.ok && readSharedData(documentOf(read.value.state))).toEqual(readSharedData(source));
+    const anonymous = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    anonymous.getMap('project').delete('documentId');
+    expect(
+      readTasklaceDocument(encodeTasklaceFile(anonymous, storingCompressor), storingCompressor),
+    ).toEqual(
+      failure({ code: 'INVALID_PROJECT', issues: [{ path: 'documentId', code: 'MISSING_FIELD' }] }),
+    );
+  });
+
+  it(
+    'gives a validated state holding exactly the document the file opens, as its encoding would, for documents that lived',
+    { timeout: PROPERTY_TEST_TIMEOUT_MS },
+    () => {
+      fc.assert(
+        fc.property(
+          fc.oneof(projectArbitrary, richProjectArbitrary),
+          randomEditsArbitrary,
+          ({ project: generated }, edits) => {
+            const file = encodeTasklaceFile(
+              documentOf(livedState(generated, edits)),
+              storingCompressor,
+            );
+            const read = readTasklaceDocument(file, storingCompressor);
+            const opened = readTasklaceFile(file, storingCompressor);
+            if (!read.ok || !opened.ok) {
+              throw new Error('The file was refused.');
+            }
+            expect(Y.encodeStateAsUpdate(documentOf(read.value.state))).toEqual(
+              Y.encodeStateAsUpdate(opened.value),
+            );
+          },
+        ),
+      );
+    },
+  );
+
+  it('opens a session knowing the identifier of the document', () => {
+    const opened = openTasklaceFile(fileOf(SAMPLE), storingCompressor);
+    expect(opened.ok && opened.value.documentId).toBe(TEST_DOCUMENT_ID);
+  });
+
+  it('writes the same file from a document and from its encoded state', () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    expect(encodeTasklaceState(Y.encodeStateAsUpdate(document), storingCompressor)).toEqual(
+      encodeTasklaceFile(document, storingCompressor),
+    );
   });
 
   it('starts with the signature, the version and no flags', () => {
@@ -294,16 +369,19 @@ describe('reading an untrusted tasklace file', () => {
 
   it('refuses a Yjs state that cannot be decoded or is incomplete', () => {
     const garbage = storedPayload(Uint8Array.from([255, 255, 255, 255, 1, 2, 3]));
-    expect(readCode(rewritten(file, { payload: garbage, declaredSize: garbage.length - 1 }))).toBe(
-      'INVALID_CONTENT',
+    const unreadable = readTasklaceFile(
+      rewritten(file, { payload: garbage, declaredSize: garbage.length - 1 }),
+      storingCompressor,
     );
-    const document = createSharedDocument(SAMPLE);
-    const before = Y.encodeStateVector(document);
+    expect(unreadable.ok || unreadable.error.code).toBe('INVALID_CONTENT');
+    expect(
+      !unreadable.ok && 'reason' in unreadable.error && unreadable.error.reason,
+    ).toBeInstanceOf(Error);
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     document.getMap('project').set('name', 'First');
     const between = Y.encodeStateVector(document);
     document.getMap('project').set('name', 'Second');
     const dependent = storedPayload(Y.encodeStateAsUpdate(document, between));
-    expect(before.length).toBeGreaterThan(0);
     expect(
       readCode(rewritten(file, { payload: dependent, declaredSize: dependent.length - 1 })),
     ).toBe('INVALID_CONTENT');
@@ -334,6 +412,12 @@ describe('reading an untrusted tasklace file', () => {
     const hiddenList = tampered((document) => {
       hideListContent(document.getMap(TASKS_ROOT));
     });
+    const withoutIdentifier = tampered((document) => {
+      document.getMap('project').delete('documentId');
+    });
+    const malformedIdentifier = tampered((document) => {
+      document.getMap('project').set('documentId', '../escape');
+    });
     const unknownRoot = tampered((document) => {
       document.getMap('other').set('x', 1);
     });
@@ -354,6 +438,8 @@ describe('reading an untrusted tasklace file', () => {
       unknownField,
       badHiddenField,
       hiddenList,
+      withoutIdentifier,
+      malformedIdentifier,
       unknownRoot,
       plainEntry,
       tooManyTags,
@@ -379,4 +465,85 @@ describe('reading an untrusted tasklace file', () => {
       );
     },
   );
+});
+
+describe('reading a file whose content was altered behind a valid checksum', () => {
+  it(
+    'never throws, refusing the file or giving a valid project',
+    { timeout: PROPERTY_TEST_TIMEOUT_MS },
+    () => {
+      const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+      const file = encodeTasklaceState(state, storingCompressor);
+      fc.assert(
+        fc.property(
+          fc.nat({ max: state.length - 1 }),
+          fc.integer({ min: 0, max: 255 }),
+          (index, value) => {
+            const altered = Uint8Array.from(state);
+            altered[index] = value;
+            const payload = storedPayload(altered);
+            const read = readTasklaceFile(
+              rewritten(file, { payload, declaredSize: altered.length }),
+              storingCompressor,
+            );
+            if (read.ok) {
+              expect(readSharedProject(read.value).ok).toBe(true);
+            }
+          },
+        ),
+      );
+    },
+  );
+});
+
+describe('checking a state before saving it', () => {
+  const OTHER_DOCUMENT_ID = '00000000-0000-4000-8000-0000000000aa';
+
+  it('accepts the complete state of a valid project of the expected document', () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    expect(checkStateToSave(state, TEST_DOCUMENT_ID)).toEqual(success(null));
+  });
+
+  it('refuses the state of another document', () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, OTHER_DOCUMENT_ID));
+    expect(checkStateToSave(state, TEST_DOCUMENT_ID)).toEqual(failure({ code: 'WRONG_DOCUMENT' }));
+  });
+
+  it('refuses a state that cannot be decoded, or that misses an update it depends on', () => {
+    expect(checkStateToSave(Uint8Array.from([255, 255, 255, 1]), TEST_DOCUMENT_ID)).toEqual(
+      failure({ code: 'INVALID_STATE', issues: [] }),
+    );
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    const between = Y.encodeStateVector(document);
+    document.getMap('project').set('name', 'Later');
+    const dependent = Y.encodeStateAsUpdate(document, between);
+    expect(checkStateToSave(dependent, TEST_DOCUMENT_ID)).toEqual(
+      failure({ code: 'INVALID_STATE', issues: [] }),
+    );
+  });
+
+  it('refuses a state holding hidden content, as when reading a file', () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    hideListContent(document.getMap(TASKS_ROOT));
+    expect(checkStateToSave(Y.encodeStateAsUpdate(document), TEST_DOCUMENT_ID)).toEqual(
+      failure({ code: 'INVALID_STATE', issues: [{ path: 'tasks', code: 'WRONG_TYPE' }] }),
+    );
+  });
+
+  it('accepts the state of every generated project', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
+    fc.assert(
+      fc.property(fc.oneof(projectArbitrary, richProjectArbitrary), ({ project: input }) => {
+        const state = Y.encodeStateAsUpdate(createSharedDocument(input, TEST_DOCUMENT_ID));
+        expect(checkStateToSave(state, TEST_DOCUMENT_ID)).toEqual(success(null));
+      }),
+    );
+  });
+
+  it('refuses the state of an invalid project with its problems, without repairing it', () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    document.getMap('project').set('name', '');
+    expect(checkStateToSave(Y.encodeStateAsUpdate(document), TEST_DOCUMENT_ID)).toEqual(
+      failure({ code: 'INVALID_STATE', issues: [{ path: 'name', code: 'EMPTY_TEXT' }] }),
+    );
+  });
 });

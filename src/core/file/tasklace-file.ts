@@ -2,6 +2,7 @@ import * as Y from 'yjs';
 import { MAX_FILE_BYTES, MAX_UNCOMPRESSED_BYTES } from '../limits';
 import { failure, success, type Result } from '../result';
 import { openValidatedSession, type SharedSession } from '../shared/shared-session';
+import { DOCUMENT_ID_KEY, readDocumentId, type DocumentId } from '../shared/shared-document';
 import { validateSharedDocument } from '../shared/shared-project';
 import type { Project } from '../model/project';
 import type { ValidationIssue } from '../validation/validation-issues';
@@ -37,17 +38,27 @@ export type FileError =
   | { readonly code: 'CORRUPTED' }
   | { readonly code: 'DECOMPRESSION_BOMB' }
   | { readonly code: 'DECOMPRESSION_FAILED' }
-  | { readonly code: 'INVALID_CONTENT' }
+  | { readonly code: 'INVALID_CONTENT'; readonly reason?: unknown }
   | { readonly code: 'INVALID_PROJECT'; readonly issues: readonly ValidationIssue[] };
 
+export type StateCheckError =
+  | { readonly code: 'INVALID_STATE'; readonly issues: readonly ValidationIssue[] }
+  | { readonly code: 'WRONG_DOCUMENT' };
+
 interface ValidatedFile {
+  readonly state: Uint8Array;
   readonly document: Y.Doc;
   readonly project: Project;
+  readonly documentId: DocumentId;
 }
 
 /** Writes a shared document as a .tasklace file: a header holding the uncompressed size and a checksum of everything after it, then the compressed Yjs state. */
 export function encodeTasklaceFile(document: Y.Doc, compressor: Compressor): Uint8Array {
-  const state = Y.encodeStateAsUpdate(document);
+  return encodeTasklaceState(Y.encodeStateAsUpdate(document), compressor);
+}
+
+/** Writes an encoded Yjs state as a .tasklace file: a header holding its size and a checksum of everything after it, then the compressed state. */
+export function encodeTasklaceState(state: Uint8Array, compressor: Compressor): Uint8Array {
   const payload = compressor.compress(state);
   const file = new Uint8Array(HEADER_BYTES + payload.length);
   const view = new DataView(file.buffer);
@@ -60,13 +71,33 @@ export function encodeTasklaceFile(document: Y.Doc, compressor: Compressor): Uin
   return file;
 }
 
+/** Checks a shared state before it replaces a project file: it must decode completely, hold exactly a valid shared project, and belong to the expected document, so that a wrong or broken state can never overwrite a good file. */
+export function checkStateToSave(
+  state: Uint8Array,
+  documentId: DocumentId,
+): Result<null, StateCheckError> {
+  const document = decodeState(state);
+  if (!document.ok) {
+    return failure({ code: 'INVALID_STATE', issues: [] });
+  }
+  if (readDocumentId(document.value) !== documentId) {
+    return failure({ code: 'WRONG_DOCUMENT' });
+  }
+  const project = validateSharedDocument(document.value);
+  return project.ok ? success(null) : failure({ code: 'INVALID_STATE', issues: project.error });
+}
+
 /** Reads an untrusted .tasklace file step by step and opens a shared session on it, loading nothing when any check fails. */
 export function openTasklaceFile(
   file: Uint8Array,
   compressor: Compressor,
 ): Result<SharedSession, FileError> {
   const read = readValidatedFile(file, compressor);
-  return read.ok ? success(openValidatedSession(read.value.document, read.value.project)) : read;
+  if (!read.ok) {
+    return read;
+  }
+  const { document, project, documentId } = read.value;
+  return success(openValidatedSession(document, project, documentId));
 }
 
 /** Reads an untrusted .tasklace file into a shared document holding a valid project, checking size, header, checksum, decompression, content and project in this order. */
@@ -78,7 +109,16 @@ export function readTasklaceFile(
   return read.ok ? success(read.value.document) : read;
 }
 
-/** Reads and checks an untrusted .tasklace file, returning its shared document with the project it validated. */
+/** Reads an untrusted .tasklace file as readTasklaceFile does, giving the decompressed Yjs state it validated and the document identifier found in it. */
+export function readTasklaceDocument(
+  file: Uint8Array,
+  compressor: Compressor,
+): Result<{ readonly state: Uint8Array; readonly documentId: DocumentId }, FileError> {
+  const read = readValidatedFile(file, compressor);
+  return read.ok ? success({ state: read.value.state, documentId: read.value.documentId }) : read;
+}
+
+/** Reads and checks an untrusted .tasklace file, returning the state it decompressed, the shared document decoded from it, the project it validated and its identifier. */
 function readValidatedFile(
   file: Uint8Array,
   compressor: Compressor,
@@ -96,9 +136,16 @@ function readValidatedFile(
     return document;
   }
   const project = validateSharedDocument(document.value);
-  return project.ok
-    ? success({ document: document.value, project: project.value })
-    : failure({ code: 'INVALID_PROJECT', issues: project.error });
+  if (!project.ok) {
+    return failure({ code: 'INVALID_PROJECT', issues: project.error });
+  }
+  const documentId = readDocumentId(document.value);
+  return documentId === null
+    ? failure({
+        code: 'INVALID_PROJECT',
+        issues: [{ path: DOCUMENT_ID_KEY, code: 'MISSING_FIELD' }],
+      })
+    : success({ state: state.value, document: document.value, project: project.value, documentId });
 }
 
 /** Checks the size, signature, version, flags and checksum of a file and returns the uncompressed size it declares. */
@@ -149,13 +196,13 @@ function decompressPayload(
   return state.value.length === declaredSize ? state : failure({ code: 'DECOMPRESSION_FAILED' });
 }
 
-/** Decodes a Yjs state into a new document, refusing a state that cannot be read or that depends on missing updates. */
+/** Decodes a Yjs state into a new document, refusing a state that cannot be read, with the reason Yjs gives, or that depends on missing updates. */
 function decodeState(state: Uint8Array): Result<Y.Doc, FileError> {
   const document = new Y.Doc();
   try {
     Y.applyUpdate(document, state);
-  } catch {
-    return failure({ code: 'INVALID_CONTENT' });
+  } catch (error) {
+    return failure({ code: 'INVALID_CONTENT', reason: error });
   }
   const complete = document.store.pendingStructs === null && document.store.pendingDs === null;
   return complete ? success(document) : failure({ code: 'INVALID_CONTENT' });

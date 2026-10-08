@@ -25,6 +25,33 @@ jobs:
       - run: npm run lint
       - run: npm test
 
+  end-to-end:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run the application tests on a virtual screen (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run test:e2e
+      - name: Run the application tests (Windows)
+        if: runner.os == 'Windows'
+        run: npm run test:e2e
+      - name: Keep the traces of failed application tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: application-test-results-${{ runner.os }}
+          path: test-results/
+          retention-days: 7
+
   growth-and-benchmarks:
     runs-on: ubuntu-latest
     steps:

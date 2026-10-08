@@ -91,7 +91,7 @@ describe('parseCsvDate', () => {
   });
 
   it.each([
-    '05/10/2026 14:30',
+    '05/10/2026 14:10',
     '05/10/2026 14:00:30',
     '31/02/2026',
     '05/13/2026',
@@ -168,5 +168,14 @@ describe('cached date reading and writing', () => {
         },
       ),
     );
+  });
+
+  it('reads a text too long to be a date the same way each time without keeping it', () => {
+    const parseDate = createDateParser(FRENCH);
+    const long = `05/10/2026${' '.repeat(100)}x`;
+    const expected = parseCsvDate(long, FRENCH);
+    expect(expected).toEqual(failure('INVALID_DATE'));
+    expect(parseDate(long)).toEqual(expected);
+    expect(parseDate(long)).toEqual(expected);
   });
 });

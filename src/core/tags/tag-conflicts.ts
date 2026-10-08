@@ -5,7 +5,7 @@ import { compareStrings } from '../compare-strings';
 import { MAX_TASKS } from '../limits';
 import type { Tag, TagId, Task, TaskId } from '../model/project';
 import { computePlacementSlots, worksFullDays, type Placement } from '../scheduling/task-placement';
-import type { ProjectHour } from '../time';
+import { fromQuarters, toQuarters, type ProjectHour } from '../time';
 
 export interface TagConflict {
   readonly tagId: TagId;
@@ -72,7 +72,7 @@ export function detectTagConflicts(
   };
 }
 
-/** Returns the time a task really works: whole blocks when it works full days, since they then hold only its working hours, its exact slots otherwise. */
+/** Returns the time a task really works: whole blocks when it works full days, since they then hold only its working hours, its exact slots otherwise, throwing when they cannot be computed for a placement the schedule made. */
 function workIntervals(
   task: Task,
   placement: Placement | undefined,
@@ -85,7 +85,10 @@ function workIntervals(
     return placement.segments;
   }
   const slots = computePlacementSlots(calendar, task, placement);
-  return slots.ok ? slots.value.flat() : placement.segments;
+  if (!slots.ok) {
+    throw new Error(`The working slots of task ${task.id} could not be computed: ${slots.error}.`);
+  }
+  return slots.value.flat();
 }
 
 /** Joins the consecutive time slots of a task separated only by time without any working hour, which never changes the conflicts found. */
@@ -120,14 +123,14 @@ function appendSlotEvents(
   eventsByTag.set(tagId, events);
 }
 
-/** Packs an event into one number whose natural order is by time, then ends before starts. */
+/** Packs an event into one number whose natural order is by time, counted in quarter hours, then ends before starts. */
 function encodeEvent(time: ProjectHour, kind: number, taskIndex: number): number {
-  return (time * EVENT_KINDS + kind) * TASK_INDEX_BASE + taskIndex;
+  return (toQuarters(time) * EVENT_KINDS + kind) * TASK_INDEX_BASE + taskIndex;
 }
 
 /** Returns the instant of an encoded event. */
 function eventTime(key: number): ProjectHour {
-  return Math.floor(key / TASK_INDEX_BASE / EVENT_KINDS);
+  return fromQuarters(Math.floor(key / TASK_INDEX_BASE / EVENT_KINDS));
 }
 
 /** Walks the events of one tag in time order and groups the periods where two tasks or more are active. */
@@ -139,6 +142,7 @@ function sweepConflicts(
   const sortedKeys = Float64Array.from(keys).sort();
   const active = new Set<number>();
   const conflicts: TagConflict[] = [];
+  /** Records a finished conflict of the tag. */
   const close = (group: ConflictGroup): void => {
     conflicts.push({ tagId, ...finishGroup(group, taskIds) });
   };

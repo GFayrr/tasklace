@@ -66,6 +66,13 @@ describe('createDefaultTags and nextPaletteColor', () => {
     expect(nextPaletteColor(12)).toBe(TAG_PALETTE[0]);
     expect(nextPaletteColor(25)).toBe(TAG_PALETTE[1]);
   });
+
+  it.each([-1, 0.5, Number.NaN])(
+    'gives the first color for the position %d, which is not a count',
+    (position) => {
+      expect(nextPaletteColor(position)).toBe(TAG_PALETTE[0]);
+    },
+  );
 });
 
 describe('areConfusable', () => {

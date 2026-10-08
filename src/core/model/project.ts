@@ -8,6 +8,7 @@ export type TagId = string;
 export interface TaskSegment {
   readonly durationHours: number;
   readonly gapDaysBefore: number;
+  readonly startNoEarlierThan: ProjectHour | null;
 }
 
 interface TaskBase {
@@ -51,6 +52,8 @@ export interface Dependency {
   readonly successorId: TaskId;
   readonly type: DependencyType;
   readonly lagHours: number;
+  readonly predecessorBlock: number | null;
+  readonly successorBlock: number | null;
 }
 
 export interface Tag {
@@ -63,6 +66,7 @@ export interface Tag {
 export interface ProjectOptions {
   readonly criticalPathEnabled: boolean;
   readonly dateConstraintsEnabled: boolean;
+  readonly baselineEnabled: boolean;
   readonly alwaysShowPatterns: boolean;
 }
 

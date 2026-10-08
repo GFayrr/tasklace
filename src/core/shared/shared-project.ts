@@ -12,8 +12,10 @@ import {
 import type { ValidationIssue } from '../validation/validation-issues';
 import { repairProject, type RepairCode } from './repair-project';
 import {
+  DOCUMENT_ID_KEY,
   findSchemaIssues,
   LOCAL_ORIGIN,
+  readDocumentId,
   readSharedData,
   readSharedTaskUnions,
   REMOTE_ORIGIN,
@@ -30,9 +32,10 @@ export interface SharedRepair {
 }
 
 export type MergeFailure =
-  | { readonly kind: 'malformedUpdate'; readonly reason: string }
+  | { readonly kind: 'malformedUpdate'; readonly error: unknown }
   | { readonly kind: 'incompleteUpdate' }
-  | { readonly kind: 'invalidProject'; readonly issues: readonly ValidationIssue[] };
+  | { readonly kind: 'invalidProject'; readonly issues: readonly ValidationIssue[] }
+  | { readonly kind: 'repairFailed'; readonly error: unknown };
 
 interface TrialMerge {
   readonly repairs: readonly SharedRepair[];
@@ -47,6 +50,11 @@ const MERGE_LIST_LIMITS: ListLimits = {
   tags: NOMINAL_LIST_LIMITS.tags * MERGE_LIST_LIMIT_FACTOR,
 };
 const FULL_PROGRESS = 100;
+
+export const DOCUMENT_ID_CHANGED: ValidationIssue = {
+  path: DOCUMENT_ID_KEY,
+  code: 'READ_ONLY_FIELD',
+};
 const HALF_PROGRESS = 50;
 
 /** Checks a shared document exactly as it is, without any repair: schema, hidden task fields and the complete project. */
@@ -146,16 +154,23 @@ export function repairDocumentProject(
   });
 }
 
-/** Merges an update into a throwaway copy of a document and repairs it there under the document's repair identity, returning what the document is missing, and turning any exception raised by untrusted bytes into a failure. */
+/** Merges an update into a throwaway copy of a document and repairs it there under the repair identity of the document, returning what the document lacks, an exception from the bytes being a malformed update and one from the repair a failed repair. */
 function tryUpdate(document: Y.Doc, update: Uint8Array): Result<TrialMerge, MergeFailure> {
   const trial = new Y.Doc();
   try {
     Y.applyUpdate(trial, Y.encodeStateAsUpdate(document));
     Y.applyUpdate(trial, update);
-    if (trial.store.pendingStructs !== null || trial.store.pendingDs !== null) {
-      return failure({ kind: 'incompleteUpdate' });
-    }
-    trial.clientID = repairClientId(document);
+  } catch (error) {
+    return malformedUpdate(error);
+  }
+  if (trial.store.pendingStructs !== null || trial.store.pendingDs !== null) {
+    return failure({ kind: 'incompleteUpdate' });
+  }
+  if (readDocumentId(trial) !== readDocumentId(document)) {
+    return failure({ kind: 'invalidProject', issues: [DOCUMENT_ID_CHANGED] });
+  }
+  trial.clientID = repairClientId(document);
+  try {
     const repairs = repairSharedDocument(trial);
     if (!repairs.ok) {
       return failure({ kind: 'invalidProject', issues: repairs.error });
@@ -163,9 +178,13 @@ function tryUpdate(document: Y.Doc, update: Uint8Array): Result<TrialMerge, Merg
     const mergedUpdate = Y.encodeStateAsUpdate(trial, Y.encodeStateVector(document));
     return success({ repairs: repairs.value, mergedUpdate });
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return failure({ kind: 'malformedUpdate', reason });
+    return failure({ kind: 'repairFailed', error });
   }
+}
+
+/** Turns an exception raised while applying untrusted bytes into a malformed update failure, keeping the whole exception for the log. */
+export function malformedUpdate(error: unknown): Result<never, MergeFailure> {
+  return failure({ kind: 'malformedUpdate', error });
 }
 
 /** Returns the identity under which a document writes its merge repairs, stable for the document and different from its own, so that repairs can travel inside a received update. */

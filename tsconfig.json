@@ -16,9 +16,10 @@
     "noPropertyAccessFromIndexSignature": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
+    "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "vitest.config.ts", "vitest.perf.config.ts", "vitest.growth.config.ts"]
+  "include": ["src/core", "vitest.config.ts", "vitest.perf.config.ts", "vitest.growth.config.ts"]
 }

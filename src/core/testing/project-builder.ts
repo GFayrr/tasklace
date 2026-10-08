@@ -1,4 +1,4 @@
-import { DEFAULT_CALENDAR } from '../calendar/default-calendar';
+import { TEST_CALENDAR } from './test-calendar';
 import type {
   Dependency,
   DependencyType,
@@ -9,7 +9,10 @@ import type {
   WorkTask,
 } from '../model/project';
 import { scheduleProject, type Schedule } from '../scheduling/schedule-project';
+import type { ProjectHour } from '../time';
 import { at } from './civil-time';
+
+export const TEST_DOCUMENT_ID = '00000000-0000-4000-8000-000000000001';
 
 export const PROJECT_START = at(2026, 9, 28, 9);
 
@@ -21,7 +24,7 @@ export function workTask(id: string, overrides: Partial<WorkTask> = {}): WorkTas
     name: id,
     parentId: null,
     sortKey: id,
-    segments: [{ durationHours: 7, gapDaysBefore: 0 }],
+    segments: [{ durationHours: 7, gapDaysBefore: 0, startNoEarlierThan: null }],
     hoursPerDay: null,
     dailyStartHour: null,
     progressPercent: 0,
@@ -36,12 +39,17 @@ export function workTask(id: string, overrides: Partial<WorkTask> = {}): WorkTas
 /** Builds a work task made of several blocks with the given durations and gaps in days. */
 export function splitTask(
   id: string,
-  blocks: readonly (readonly [durationHours: number, gapDaysBefore: number])[],
+  blocks: readonly (readonly [
+    durationHours: number,
+    gapDaysBefore: number,
+    startNoEarlierThan?: ProjectHour,
+  ])[],
   overrides: Partial<WorkTask> = {},
 ): WorkTask {
-  const segments = blocks.map(([durationHours, gapDaysBefore]) => ({
+  const segments = blocks.map(([durationHours, gapDaysBefore, startNoEarlierThan]) => ({
     durationHours,
     gapDaysBefore,
+    startNoEarlierThan: startNoEarlierThan ?? null,
   }));
   return workTask(id, { segments, ...overrides });
 }
@@ -75,7 +83,33 @@ export function link(
   type: DependencyType = 'finishToStart',
   lagHours = 0,
 ): Dependency {
-  return { id: `${predecessorId}-${successorId}`, predecessorId, successorId, type, lagHours };
+  return {
+    id: `${predecessorId}-${successorId}`,
+    predecessorId,
+    successorId,
+    type,
+    lagHours,
+    predecessorBlock: null,
+    successorBlock: null,
+  };
+}
+
+/** Builds a dependency from or to blocks of split tasks, the block numbers counting from 0. */
+export function blockLink(
+  predecessorId: string,
+  successorId: string,
+  blocks: { readonly from?: number; readonly to?: number },
+  type: DependencyType = 'finishToStart',
+  lagHours = 0,
+): Dependency {
+  const from = blocks.from ?? null;
+  const to = blocks.to ?? null;
+  return {
+    ...link(predecessorId, successorId, type, lagHours),
+    id: `${predecessorId}${from === null ? '' : `_${String(from)}`}-${successorId}${to === null ? '' : `_${String(to)}`}`,
+    predecessorBlock: from,
+    successorBlock: to,
+  };
 }
 
 /** Builds a project starting on Monday 28 September 2026 at 09:00 with the default calendar. */
@@ -87,10 +121,11 @@ export function project(
   return {
     name: 'Test project',
     startDate: PROJECT_START,
-    calendar: DEFAULT_CALENDAR,
+    calendar: TEST_CALENDAR,
     options: {
       criticalPathEnabled: false,
       dateConstraintsEnabled: false,
+      baselineEnabled: false,
       alwaysShowPatterns: false,
     },
     tasks,

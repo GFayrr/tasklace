@@ -9,11 +9,11 @@ import { LARGE_PROJECT_SEED, buildLargeProject } from './large-project';
 import { createRandom } from './random';
 
 const LARGE_PROJECT_FINGERPRINT =
-  '6293639069451349d290768e94b6a820845c94e611e22092fd28a430baa4eb29';
+  '28a7245c71c77b2ee66fccf8920bd27d3281b02f55f75ec855b62d04391db0f2';
 
-const SCHEDULE_FINGERPRINT = 'd9e0b7193d5ae304f964f64bb82993bc5d47e6af0ab1d403b0191befa720a576';
+const SCHEDULE_FINGERPRINT = '04da93f6c20d9d0f9bbd12c17e74b6444fb3fae72c73cb60c0bedd557553a7b5';
 const ADVANCED_SCHEDULE_FINGERPRINT =
-  'f1ba8fcd33f596a158c122dd27a51c3e629900b08c6f7cddec0d48477c72bd33';
+  'a9e6e2466beb7952ec26140f9da5f7cce4a1b61edf2f1c3657a9e921bead2ade';
 
 /** Returns the SHA-256 fingerprint of a value serialized as JSON. */
 function fingerprint(value: unknown): string {
@@ -115,6 +115,7 @@ describe('large project schedule', () => {
       options: {
         criticalPathEnabled: true,
         dateConstraintsEnabled: true,
+        baselineEnabled: false,
         alwaysShowPatterns: false,
       },
     };

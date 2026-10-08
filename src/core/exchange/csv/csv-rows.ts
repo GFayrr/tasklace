@@ -1,3 +1,4 @@
+import { isQuarterHours } from '../../time';
 import { MAX_DEPENDENCIES, MAX_SEGMENTS_PER_TASK } from '../../limits';
 import type { TaskSegment } from '../../model/project';
 import { failure, success, type Result } from '../../result';
@@ -19,6 +20,7 @@ import {
   parseBlocks,
   parsePredecessors,
   readWbsNumber,
+  type BlockWait,
   type PredecessorReference,
   type WbsNumber,
 } from './task-notations';
@@ -27,6 +29,7 @@ export type CsvWarningCode =
   | 'UNKNOWN_COLUMN'
   | 'EXTRA_CELLS'
   | 'IGNORED_VALUE'
+  | 'IGNORED_LINKS'
   | 'START_DIFFERS'
   | 'END_DIFFERS'
   | 'PROGRESS_DIFFERS';
@@ -47,6 +50,7 @@ export interface ParsedRow {
   readonly predecessors: readonly PredecessorReference[];
   readonly tagName: string | null;
   readonly blocks: readonly TaskSegment[] | null;
+  readonly blockWaits: readonly BlockWait[];
 }
 
 export interface ParsedTable {
@@ -66,7 +70,7 @@ interface RowContext {
   readonly budget: { remainingPredecessors: number };
 }
 
-const DURATION_PATTERN = /^(\d{1,9})\s*h?$/i;
+const DURATION_PATTERN = /^(\d{1,9}(?:[.,]\d{1,2})?)\s*h?$/i;
 const PROGRESS_PATTERN = /^(\d{1,9})\s*%?$/;
 const DECIMAL_RADIX = 10;
 
@@ -124,32 +128,39 @@ function readColumns(
   return columns;
 }
 
-/** Reads the cells of one row into typed values, spending the predecessors it holds from the budget of the whole table. */
+/** Reads the cells of one row into typed values, spending the predecessors and block waits it holds from the budget of the whole table. */
 function readRow(row: CsvRow, context: RowContext): ParsedRow {
   if (row.hasExtraCells) {
     context.warnings.push({ path: rowPath(row.rowNumber), code: 'EXTRA_CELLS' });
   }
+  /** Returns the text of a cell of the row in a column, its formula guard removed, or an empty text for a column the table lacks. */
   const cell = (column: CsvColumn): string => {
     const index = context.columns.get(column);
     return index === undefined ? '' : restoreFormula(row.cells[index] ?? '');
   };
+  /** Reads a cell of the row in a column, recording the problem found when it cannot be read. */
   const read = <T>(column: CsvColumn, parse: (text: string) => Result<T, CellIssue>): T | null =>
     readCell(cell(column), rowPath(row.rowNumber, column), parse, context.issues);
   const { budget, parseDate } = context;
   const predecessors =
     read('predecessors', (text) => parsePredecessors(text, budget.remainingPredecessors)) ?? [];
   budget.remainingPredecessors -= predecessors.length;
+  const blocks = read('blocks', (text) =>
+    parseBlocks(text, MAX_SEGMENTS_PER_TASK, budget.remainingPredecessors),
+  );
+  budget.remainingPredecessors -= blocks?.waits.length ?? 0;
   return {
     rowNumber: row.rowNumber,
     wbs: read('wbs', parseWbs),
     name: cell('name'),
     start: read('start', parseDate),
     end: read('end', parseDate),
-    durationHours: read('duration', (text) => parseNumber(text, DURATION_PATTERN)),
+    durationHours: read('duration', parseDuration),
     progressPercent: read('progress', (text) => parseNumber(text, PROGRESS_PATTERN)),
     predecessors,
     tagName: read('tag', success),
-    blocks: read('blocks', (text) => parseBlocks(text, MAX_SEGMENTS_PER_TASK)),
+    blocks: blocks?.segments ?? null,
+    blockWaits: blocks?.waits ?? [],
   };
 }
 
@@ -197,6 +208,13 @@ function columnPath(index: number): string {
 function parseWbs(text: string): Result<WbsNumber, CellIssue> {
   const wbs = readWbsNumber(text);
   return wbs === null ? failure('INVALID_NOTATION') : success(wbs);
+}
+
+/** Reads a duration in hours made of whole quarter hours, with a comma or a dot as decimal mark and an optional unit. */
+function parseDuration(text: string): Result<number, CellIssue> {
+  const match = DURATION_PATTERN.exec(text);
+  const hours = match === null ? Number.NaN : Number((match[1] ?? '').replace(',', '.'));
+  return isQuarterHours(hours) ? success(hours) : failure('INVALID_NUMBER');
 }
 
 /** Reads a whole number written with digits and an optional unit. */

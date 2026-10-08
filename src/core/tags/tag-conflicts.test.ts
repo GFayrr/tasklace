@@ -30,7 +30,11 @@ function tagged(
   durationHours: number,
   overrides: Partial<WorkTask> = {},
 ): Task {
-  return workTask(id, { segments: [{ durationHours, gapDaysBefore: 0 }], tagId, ...overrides });
+  return workTask(id, {
+    segments: [{ durationHours, gapDaysBefore: 0, startNoEarlierThan: null }],
+    tagId,
+    ...overrides,
+  });
 }
 
 /** Describes a conflict as "tag start → end tasks" for readable assertions. */

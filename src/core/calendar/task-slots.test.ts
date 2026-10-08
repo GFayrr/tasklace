@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { MAX_TASK_DURATION_HOURS } from '../limits';
 import { at, compileOrThrow, format } from '../testing/civil-time';
 import { END_PROJECT_HOUR } from '../time';
-import { DEFAULT_CALENDAR } from './default-calendar';
-import { computeTaskSlots, type TaskPlacement, type TimeSlot } from './task-slots';
+import { TEST_CALENDAR } from '../testing/test-calendar';
+import {
+  computeSegmentBounds,
+  computeTaskSlots,
+  type TaskPlacement,
+  type TimeSlot,
+} from './task-slots';
 
-const calendar = compileOrThrow(DEFAULT_CALENDAR);
+const calendar = compileOrThrow(TEST_CALENDAR);
 
 /** Builds a task placement with full working days unless told otherwise. */
 function placement(overrides: Partial<TaskPlacement>): TaskPlacement {
@@ -87,10 +92,13 @@ describe('computeTaskSlots', () => {
       calendar,
       placement({ start: at(2026, 1, 1), durationHours: MAX_TASK_DURATION_HOURS, hoursPerDay: 7 }),
     );
-    expect(result.ok && result.value.length).toBeGreaterThan(0);
+    const slots = result.ok ? result.value : [];
+    const hours = slots.reduce((total, slot) => total + (slot.end - slot.start), 0);
+    expect(hours).toBe(MAX_TASK_DURATION_HOURS);
+    expect(slots[0]?.start).toBe(at(2026, 1, 1, 9));
   });
 
-  it.each([-1, 0.5, Number.NaN, MAX_TASK_DURATION_HOURS + 1])(
+  it.each([-1, 0.3, Number.NaN, MAX_TASK_DURATION_HOURS + 1])(
     'rejects the invalid duration %d',
     (durationHours) => {
       expect(computeTaskSlots(calendar, placement({ durationHours }))).toEqual({
@@ -100,7 +108,7 @@ describe('computeTaskSlots', () => {
     },
   );
 
-  it.each([0, -2, 2.5, 8, Number.NaN])('rejects %d hours per day', (hoursPerDay) => {
+  it.each([0, -2, 2.3, 8, Number.NaN])('rejects %d hours per day', (hoursPerDay) => {
     expect(computeTaskSlots(calendar, placement({ hoursPerDay }))).toEqual({
       ok: false,
       error: 'INVALID_HOURS_PER_DAY',
@@ -110,7 +118,7 @@ describe('computeTaskSlots', () => {
   it.each([
     ['a negative hour', -1, 1],
     ['hour 24', 24, 1],
-    ['a fractional hour', 9.5, 1],
+    ['a time that is not a whole quarter hour', 9.1, 1],
     ['an hour leaving too few working hours', 16, 2],
     ['an hour after the working day', 18, 1],
     ['an hour past the first working hour for a full-day task', 10, null],
@@ -141,5 +149,39 @@ describe('computeTaskSlots', () => {
       placement({ start: at(2200, 12, 30, 9), durationHours: 100 }),
     );
     expect(result).toEqual({ ok: false, error: 'BEYOND_PLANNING_HORIZON' });
+  });
+});
+
+describe('slots across midnight and empty blocks', () => {
+  const ROUND_THE_CLOCK = compileOrThrow({
+    ...TEST_CALENDAR,
+    workingWeekdays: [0, 1, 2, 3, 4, 5, 6],
+    workingTimeRanges: [{ startHour: 0, endHour: 24 }],
+  });
+
+  it('joins the work of days that follow one another without a pause into one slot', () => {
+    const slots = computeTaskSlots(
+      ROUND_THE_CLOCK,
+      placement({ start: at(2026, 9, 28), durationHours: 48 }),
+    );
+    expect(slots.ok && formatSlots(slots.value)).toEqual(['2026-09-28 00:00 → 2026-09-30 00:00']);
+  });
+
+  it('refuses a block without duration', () => {
+    expect(computeSegmentBounds(calendar, placement({ durationHours: 0 }))).toEqual({
+      ok: false,
+      error: 'INVALID_DURATION',
+    });
+  });
+
+  it('gives the bounds of a block of one day, and of several days, as its slots would', () => {
+    for (const durationHours of [3, 7, 10.25, 30]) {
+      const slots = computeTaskSlots(calendar, placement({ durationHours }));
+      const bounds = computeSegmentBounds(calendar, placement({ durationHours }));
+      if (!slots.ok || !bounds.ok) {
+        throw new Error('Unexpected failure');
+      }
+      expect(bounds.value).toEqual({ start: slots.value[0]?.start, end: slots.value.at(-1)?.end });
+    }
   });
 });

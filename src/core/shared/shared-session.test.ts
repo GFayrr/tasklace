@@ -4,11 +4,18 @@ import * as Y from 'yjs';
 import { compareStrings } from '../compare-strings';
 import { MAX_HIERARCHY_DEPTH, MAX_TAGS } from '../limits';
 import type { DependencyType, Project, Tag, Task } from '../model/project';
-import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
+import { CONVERGENCE_TEST_TIMEOUT_MS, PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { hideListContent } from '../testing/hidden-list-content';
-import { link, milestone, project, summary, workTask } from '../testing/project-builder';
+import {
+  link,
+  milestone,
+  project,
+  summary,
+  workTask,
+  TEST_DOCUMENT_ID,
+} from '../testing/project-builder';
 import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
-import { applyOperation, type SharedOperation } from './shared-operations';
+import { applyOperation, taskOfCalendarIssue, type SharedOperation } from './shared-operations';
 import { applySharedChange, mergeSharedUpdate, readSharedProject } from './shared-project';
 import { openSharedSession, type SharedSession } from './shared-session';
 
@@ -37,7 +44,7 @@ const BASE_PROJECT: Project = project(
 
 /** Opens sessions on participants sharing the same project, each with a fixed client identifier. */
 function openSessions(base: Project, count: number): SharedSession[] {
-  const origin = createSharedDocument(base);
+  const origin = createSharedDocument(base, TEST_DOCUMENT_ID);
   return Array.from({ length: count }, (_unused, index) => {
     const document = new Y.Doc();
     document.clientID = index + 1;
@@ -119,16 +126,19 @@ describe('shared session', () => {
     expect(session?.project()).toEqual(
       readSharedProject(session?.document ?? new Y.Doc()).ok && session?.project(),
     );
-    const broken = createSharedDocument(BASE_PROJECT);
+    const broken = createSharedDocument(BASE_PROJECT, TEST_DOCUMENT_ID);
     broken.getMap(TASKS_ROOT).set('z', 'not a task');
     expect(openSharedSession(broken).ok).toBe(false);
   });
 
   it('never keeps a reference to a missing tag, from the opening on', () => {
-    const imported = createSharedDocument({
-      ...BASE_PROJECT,
-      tasks: [...BASE_PROJECT.tasks, workTask('lost', { tagId: 'deleted' })],
-    });
+    const imported = createSharedDocument(
+      {
+        ...BASE_PROJECT,
+        tasks: [...BASE_PROJECT.tasks, workTask('lost', { tagId: 'deleted' })],
+      },
+      TEST_DOCUMENT_ID,
+    );
     const session = openSharedSession(imported);
     expect(session.ok && session.value.openingRepairs).toEqual([
       { code: 'TAG_CLEARED', id: 'lost' },
@@ -234,7 +244,7 @@ describe('shared session edge cases', () => {
   it.each<[string, SharedOperation]>([
     [
       'a dependency with an invalid lag',
-      { type: 'putDependency', dependency: { ...link('c', 'm'), lagHours: 0.5 } },
+      { type: 'putDependency', dependency: { ...link('c', 'm'), lagHours: 0.3 } },
     ],
     [
       'a tag with an invalid color',
@@ -244,7 +254,7 @@ describe('shared session edge cases', () => {
     const session = openOne();
     const result = session.apply(operation);
     expect(result.ok).toBe(false);
-    expect(!result.ok && result.error[0]?.path).toMatch(/^(dependencies|tags)\.(c-m|red)\./);
+    expect(!result.ok && result.error[0].path).toMatch(/^(dependencies|tags)\.(c-m|red)\./);
     expect(applyBoth(openOne(), operation)).toBe(false);
   });
 
@@ -315,6 +325,32 @@ describe('shared session edge cases', () => {
     ).toBe(false);
   });
 
+  it('knows its document identifier and refuses an update that changes it, through the fast path', () => {
+    const [source, victim] = openSessions(BASE_PROJECT, 2);
+    if (source === undefined || victim === undefined) {
+      throw new Error('Missing session');
+    }
+    expect(victim.documentId).toBe(TEST_DOCUMENT_ID);
+    const malicious = copyOf(source.document);
+    malicious.clientID = 77;
+    malicious.getMap('project').set('documentId', '00000000-0000-4000-8000-000000000002');
+    const update = Y.encodeStateAsUpdate(malicious, Y.encodeStateVector(victim.document));
+    expect(victim.merge(update)).toEqual({
+      ok: false,
+      error: { kind: 'invalidProject', issues: [{ path: 'documentId', code: 'READ_ONLY_FIELD' }] },
+    });
+    expect(victim.document.getMap('project').get('documentId')).toBe(TEST_DOCUMENT_ID);
+  });
+
+  it('refuses to open a document without identifier', () => {
+    const document = copyOf(createSharedDocument(BASE_PROJECT, TEST_DOCUMENT_ID));
+    document.getMap('project').delete('documentId');
+    expect(openSharedSession(document)).toEqual({
+      ok: false,
+      error: [{ path: 'documentId', code: 'MISSING_FIELD' }],
+    });
+  });
+
   it.each<[string, (malicious: Y.Doc) => Y.Map<unknown>]>([
     ['a root', (malicious) => malicious.getMap(TASKS_ROOT)],
     ['the project', (malicious) => malicious.getMap('project')],
@@ -331,6 +367,27 @@ describe('shared session edge cases', () => {
     const before = readSharedData(victim.document);
     expect(victim.merge(update).ok).toBe(false);
     expect(readSharedData(victim.document)).toEqual(before);
+  });
+
+  it('names the task a shorter working day refuses, and no task for any other issue', () => {
+    const opened = openSharedSession(
+      createSharedDocument(project([workTask('long', { hoursPerDay: 6 })], []), TEST_DOCUMENT_ID),
+    );
+    if (!opened.ok) {
+      throw new Error(JSON.stringify(opened.error));
+    }
+    const refused = opened.value.apply({
+      type: 'updateProject',
+      fields: { calendar: { ...BASE_PROJECT.calendar, workingTimeRanges: MORNING_ONLY } },
+    });
+    expect(refused).toEqual({
+      ok: false,
+      error: [{ path: 'tasks.long', code: 'INVALID_HOURS_PER_DAY' }],
+    });
+    expect(refused.ok ? null : refused.error.map(taskOfCalendarIssue)).toEqual(['long']);
+    expect(
+      taskOfCalendarIssue({ path: 'calendar.workingWeekdays', code: 'EMPTY_LIST' }),
+    ).toBeNull();
   });
 
   it('rounds, clears and fits tasks in one fast merge, reporting repairs in order', () => {
@@ -380,7 +437,10 @@ type OperationShape =
       readonly from: number;
       readonly to: number;
       readonly kind: DependencyType;
+      readonly fromBlock: number | null;
+      readonly toBlock: number | null;
     }
+  | { readonly type: 'blocks'; readonly task: number; readonly count: number }
   | { readonly type: 'unlink'; readonly index: number }
   | { readonly type: 'putTag'; readonly id: string }
   | { readonly type: 'removeTag'; readonly id: string }
@@ -433,6 +493,13 @@ const operationArbitrary: fc.Arbitrary<OperationShape> = fc.oneof(
       'finishToFinish',
       'startToFinish',
     ),
+    fromBlock: fc.option(fc.nat({ max: 2 })),
+    toBlock: fc.option(fc.nat({ max: 2 })),
+  }),
+  fc.record({
+    type: fc.constant('blocks' as const),
+    task: position,
+    count: fc.integer({ min: 1, max: 3 }),
   }),
   fc.record({ type: fc.constant('unlink' as const), index: position }),
   fc.record({ type: fc.constant('putTag' as const), id: tagId }),
@@ -485,6 +552,7 @@ function stepArbitrary(peerCount: number): fc.Arbitrary<Step> {
 /** Turns a random operation shape into a concrete operation on the current project. */
 function toOperation(shape: OperationShape, current: Project, newId: string): SharedOperation {
   const tasks = current.tasks;
+  /** Picks a task by a generated position, or nothing when there is no task. */
   const pick = (index: number): Task | undefined => tasks[index % Math.max(tasks.length, 1)];
   const task = 'task' in shape ? pick(shape.task) : undefined;
   switch (shape.type) {
@@ -535,8 +603,30 @@ function toOperation(shape: OperationShape, current: Project, newId: string): Sh
       const to = pick(shape.to);
       return from === undefined || to === undefined
         ? noOperation()
-        : { type: 'putDependency', dependency: { ...link(from.id, to.id, shape.kind), id: newId } };
+        : {
+            type: 'putDependency',
+            dependency: {
+              ...link(from.id, to.id, shape.kind),
+              id: newId,
+              predecessorBlock: shape.fromBlock,
+              successorBlock: shape.toBlock,
+            },
+          };
     }
+    case 'blocks':
+      return task?.kind === 'task'
+        ? {
+            type: 'putTask',
+            task: {
+              ...task,
+              segments: Array.from({ length: shape.count }, (_unused, index) => ({
+                durationHours: 3,
+                gapDaysBefore: index === 0 ? 0 : 1,
+                startNoEarlierThan: null,
+              })),
+            },
+          }
+        : noOperation();
     case 'unlink':
       return {
         type: 'removeDependency',
@@ -634,41 +724,49 @@ function playStep(
   }
 }
 
+const CONVERGENCE_RUNS = 150;
+
 describe('shared session properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
-  it('takes exactly the decisions of the full validation and repair, and converges', () => {
-    const counters = { edits: 0, repairs: 0 };
-    fc.assert(
-      fc.property(
-        fc
-          .integer({ min: 2, max: 3 })
-          .chain((peerCount) =>
-            fc.tuple(
-              fc.constant(peerCount),
-              fc.array(stepArbitrary(peerCount), { minLength: 15, maxLength: 35 }),
+  it(
+    'takes exactly the decisions of the full validation and repair, and converges',
+    {
+      timeout: CONVERGENCE_TEST_TIMEOUT_MS,
+    },
+    () => {
+      const counters = { edits: 0, repairs: 0 };
+      fc.assert(
+        fc.property(
+          fc
+            .integer({ min: 2, max: 3 })
+            .chain((peerCount) =>
+              fc.tuple(
+                fc.constant(peerCount),
+                fc.array(stepArbitrary(peerCount), { minLength: 15, maxLength: 35 }),
+              ),
             ),
-          ),
-        ([peerCount, steps]) => {
-          const sessions = openSessions(BASE_PROJECT, peerCount);
-          const updates: Uint8Array[] = [];
-          steps.forEach((step, index) => {
-            playStep(sessions, updates, step, index, counters);
-          });
-          for (let round = 0; round <= peerCount; round += 1) {
-            for (const [from, to] of sessions.flatMap((left) =>
-              sessions.filter((right) => right !== left).map((right) => [left, right] as const),
-            )) {
-              counters.repairs += syncBoth(from, to) ? 1 : 0;
+          ([peerCount, steps]) => {
+            const sessions = openSessions(BASE_PROJECT, peerCount);
+            const updates: Uint8Array[] = [];
+            steps.forEach((step, index) => {
+              playStep(sessions, updates, step, index, counters);
+            });
+            for (let round = 0; round <= peerCount; round += 1) {
+              for (const [from, to] of sessions.flatMap((left) =>
+                sessions.filter((right) => right !== left).map((right) => [left, right] as const),
+              )) {
+                counters.repairs += syncBoth(from, to) ? 1 : 0;
+              }
             }
-          }
-          const [first, ...others] = sessions.map((session) => readSharedData(session.document));
-          others.forEach((data) => {
-            expect(data).toEqual(first);
-          });
-        },
-      ),
-      { numRuns: 60 },
-    );
-    expect(counters.edits).toBeGreaterThan(0);
-    expect(counters.repairs).toBeGreaterThan(0);
-  });
+            const [first, ...others] = sessions.map((session) => readSharedData(session.document));
+            others.forEach((data) => {
+              expect(data).toEqual(first);
+            });
+          },
+        ),
+        { numRuns: CONVERGENCE_RUNS },
+      );
+      expect(counters.edits).toBeGreaterThan(0);
+      expect(counters.repairs).toBeGreaterThan(0);
+    },
+  );
 });

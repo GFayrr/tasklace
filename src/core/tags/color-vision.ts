@@ -58,6 +58,7 @@ export function oklabDistance(
 
 /** Converts a #RRGGBB color into linear RGB channels between 0 and 1. */
 function toLinearRgb(hexColor: string): LinearRgb {
+  /** Reads one color channel of the hexadecimal color as a linear value. */
   const channel = (offset: number): number =>
     toLinearChannel(
       Number.parseInt(hexColor.slice(offset, offset + CHANNEL_LENGTH), HEX_RADIX) / CHANNEL_MAX,

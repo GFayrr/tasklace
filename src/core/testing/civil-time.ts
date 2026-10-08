@@ -25,6 +25,7 @@ export function dayOf(year: number, month: number, day: number): DayIndex {
 /** Formats a project hour as "YYYY-MM-DD HH:00" to make assertions readable. */
 export function format(hour: ProjectHour): string {
   const { year, month, day, hour: hourOfDay } = fromProjectHour(hour);
+  /** Writes a number on two digits. */
   const pad = (value: number): string => String(value).padStart(2, '0');
   return `${String(year)}-${pad(month)}-${pad(day)} ${pad(hourOfDay)}:00`;
 }

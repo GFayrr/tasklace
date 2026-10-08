@@ -1,3 +1,4 @@
+import { MAX_TAGS } from '../limits';
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import * as Y from 'yjs';
@@ -7,7 +8,14 @@ import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { at } from '../testing/civil-time';
 import { hideListContent } from '../testing/hidden-list-content';
 import { projectArbitrary } from '../testing/project-arbitrary';
-import { link, milestone, project, summary, workTask } from '../testing/project-builder';
+import {
+  link,
+  milestone,
+  project,
+  summary,
+  workTask,
+  TEST_DOCUMENT_ID,
+} from '../testing/project-builder';
 import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
 import {
   applySharedChange,
@@ -42,7 +50,7 @@ const BASE_PROJECT: Project = project(
 
 /** Creates participants sharing the same project, each with a fixed client identifier. */
 function createPeers(base: Project, count: number): Y.Doc[] {
-  const origin = createSharedDocument(base);
+  const origin = createSharedDocument(base, TEST_DOCUMENT_ID);
   return Array.from({ length: count }, (_unused, index) => {
     const peer = new Y.Doc();
     peer.clientID = index + 1;
@@ -127,7 +135,7 @@ describe('shared document', () => {
       ],
     };
     const input = { ...BASE_PROJECT, baseline };
-    const read = projectOf(createSharedDocument(input));
+    const read = projectOf(createSharedDocument(input, TEST_DOCUMENT_ID));
     expect({
       ...read,
       tasks: byId(read.tasks),
@@ -144,7 +152,7 @@ describe('shared document', () => {
   it('gives back every generated project', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
     fc.assert(
       fc.property(projectArbitrary, ({ project: input }) => {
-        const read = projectOf(createSharedDocument(input));
+        const read = projectOf(createSharedDocument(input, TEST_DOCUMENT_ID));
         expect(byId(read.tasks)).toEqual(byId(input.tasks));
         expect(byId(read.dependencies)).toEqual(byId(input.dependencies));
         expect(read.calendar).toEqual(input.calendar);
@@ -331,7 +339,7 @@ describe('merging untrusted updates', () => {
   });
 
   it('repairs nothing on a valid document', () => {
-    expect(repairSharedDocument(createSharedDocument(BASE_PROJECT))).toEqual({
+    expect(repairSharedDocument(createSharedDocument(BASE_PROJECT, TEST_DOCUMENT_ID))).toEqual({
       ok: true,
       value: [],
     });
@@ -361,6 +369,8 @@ function mergeTampered(from: Y.Doc, to: Y.Doc, tamper: (malicious: Y.Doc) => voi
   };
 }
 
+const OTHER_DOCUMENT_ID = '00000000-0000-4000-8000-000000000002';
+
 describe('merging updates that break the shared schema', () => {
   it.each<[string, (malicious: Y.Doc) => void]>([
     ['an unknown field on a task', (malicious) => taskEntry(malicious, 'a').set('junk', 'x')],
@@ -382,6 +392,20 @@ describe('merging updates that break the shared schema', () => {
       (malicious) => malicious.getMap(TASKS_ROOT).set('z', { kind: 'task' }),
     ],
     ['a nested shared type', (malicious) => taskEntry(malicious, 'a').set('name', new Y.Text('a'))],
+    [
+      'another document identifier',
+      (malicious) => malicious.getMap('project').set('documentId', OTHER_DOCUMENT_ID),
+    ],
+    [
+      'a removed document identifier',
+      (malicious) => {
+        malicious.getMap('project').delete('documentId');
+      },
+    ],
+    [
+      'a malformed document identifier',
+      (malicious) => malicious.getMap('project').set('documentId', 'Not-A-UUID'),
+    ],
     [
       'list content in a root',
       (malicious) => {
@@ -427,8 +451,11 @@ describe('merging updates that break the shared schema', () => {
 
 describe('merging within limits and budgets', () => {
   it('trims tags added offline beyond the limit, keeping the smallest identifiers', () => {
+    const perSide = (MAX_TAGS * 3) / 4;
+    const keptOfRight = MAX_TAGS - perSide;
+    /** Builds as many tags as each side adds, with identifiers that start with a prefix. */
     const tags = (prefix: string): Tag[] =>
-      Array.from({ length: 150 }, (_unused, position) => ({
+      Array.from({ length: perSide }, (_unused, position) => ({
         ...DESIGN,
         id: `${prefix}${String(position).padStart(3, '0')}`,
       }));
@@ -440,11 +467,12 @@ describe('merging within limits and budgets', () => {
     change(right, (current) => ({ ...current, tags: tags('b') }));
     const repairs = sync(right, left);
     syncAll([left, right]);
-    expect(repairs).toHaveLength(100);
-    expect(repairs.every((repair) => repair.code === 'TAG_REMOVED' && repair.id >= 'b050')).toBe(
-      true,
-    );
-    expect(projectOf(left).tags).toHaveLength(200);
+    expect(repairs).toHaveLength(2 * perSide - MAX_TAGS);
+    const firstRemoved = `b${String(keptOfRight).padStart(3, '0')}`;
+    expect(
+      repairs.every((repair) => repair.code === 'TAG_REMOVED' && repair.id >= firstRemoved),
+    ).toBe(true);
+    expect(projectOf(left).tags).toHaveLength(MAX_TAGS);
     expect(readSharedData(left)).toEqual(readSharedData(right));
   });
 
@@ -747,8 +775,10 @@ function convert(task: Task, kind: Task['kind']): Task {
 function toChange(operation: Operation, newId: string): (current: Project) => Project {
   return (current) => {
     const tasks = byId(current.tasks);
+    /** Picks a task by a generated position, or nothing when there is no task. */
     const pick = (position: number): Task | undefined =>
       tasks[position % Math.max(tasks.length, 1)];
+    /** Picks a tag by a generated position, or null for no tag. */
     const tagId = (position: number | null): string | null =>
       position === null ? null : (byId(current.tags)[position]?.id ?? null);
     switch (operation.type) {

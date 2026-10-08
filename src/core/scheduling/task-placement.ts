@@ -9,23 +9,26 @@ import { lastWorkingHourEnd, subtractWorkingHours } from '../calendar/working-ti
 import { MAX_SEGMENTS_PER_TASK, MAX_SEGMENT_GAP_DAYS } from '../limits';
 import type { SchedulableTask, TaskSegment, WorkTask } from '../model/project';
 import { failure, success, type Result } from '../result';
+import { blockResumption } from './block-links';
 import {
   END_PROJECT_HOUR,
   MIN_PROJECT_HOUR,
-  dayIndexOf,
+  QUARTER_HOUR,
+  fromQuarters,
   isProjectHour,
-  startOfDay,
+  isQuarterHours,
+  toQuarters,
   type ProjectHour,
 } from '../time';
+
+const HALF = 2;
 
 export interface ScheduledSegment {
   readonly start: ProjectHour;
   readonly end: ProjectHour;
 }
 
-export interface Placement {
-  readonly start: ProjectHour;
-  readonly end: ProjectHour;
+export interface Placement extends ScheduledSegment {
   readonly segments: readonly ScheduledSegment[];
 }
 
@@ -77,14 +80,13 @@ export function placeTaskEarliest(
   const boundary = findFirstStartWhere(
     calendar,
     task,
-    earliestStart,
-    endBound,
+    { low: earliestStart, high: endBound, beyondIsTrue: false },
     (placement) => placement.end >= endBound,
   );
   return boundary.ok ? placeTask(calendar, task, boundary.value) : boundary;
 }
 
-/** Places a task at the latest start that still starts and ends no later than the given bounds. */
+/** Places a task at the latest start that still starts and ends no later than the given bounds, refusing with BEYOND_PLANNING_HORIZON a task that would have to start before the first supported year. */
 export function placeTaskLatest(
   calendar: CompiledCalendar,
   task: SchedulableTask,
@@ -94,37 +96,40 @@ export function placeTaskLatest(
   if (task.kind === 'milestone') {
     return placeTask(calendar, task, Math.min(latestStart, latestEnd));
   }
-  const direct = worksContinuously(calendar, task)
-    ? latestContinuousStart(calendar, task, latestStart, latestEnd)
-    : null;
-  if (direct !== null) {
-    return placeTask(calendar, task, direct);
+  if (worksContinuously(calendar, task)) {
+    const direct = latestContinuousStart(calendar, task, latestStart, latestEnd);
+    return direct.ok ? placeTask(calendar, task, direct.value) : direct;
   }
-  const upperBound = Math.min(latestEnd, END_PROJECT_HOUR - 1);
+  const upperBound = Math.min(latestEnd, END_PROJECT_HOUR - QUARTER_HOUR);
   const firstLate = findFirstStartWhere(
     calendar,
     task,
-    MIN_PROJECT_HOUR,
-    upperBound,
+    { low: MIN_PROJECT_HOUR, high: upperBound, beyondIsTrue: true },
     (placement) => placement.start > latestStart || placement.end > latestEnd,
   );
   if (!firstLate.ok) {
     return firstLate;
   }
-  return placeTask(calendar, task, Math.max(firstLate.value - 1, MIN_PROJECT_HOUR));
+  return firstLate.value <= MIN_PROJECT_HOUR
+    ? failure('BEYOND_PLANNING_HORIZON')
+    : placeTask(calendar, task, firstLate.value - QUARTER_HOUR);
 }
 
-/** Computes on demand the exact working time slots of every block of a placed work task. */
+/** Computes on demand the exact working time slots of every block of a placed work task, refusing a placement with a block the task does not have. */
 export function computePlacementSlots(
   calendar: CompiledCalendar,
   task: WorkTask,
   placement: Placement,
-): Result<TimeSlot[][], TaskSlotsErrorCode> {
+): Result<TimeSlot[][], PlacementErrorCode> {
   const slotsByBlock: TimeSlot[][] = [];
   for (const [index, segment] of placement.segments.entries()) {
+    const block = task.segments[index];
+    if (block === undefined) {
+      return failure('INVALID_SEGMENTS');
+    }
     const slots = computeTaskSlots(calendar, {
       start: segment.start,
-      durationHours: task.segments[index]?.durationHours ?? 0,
+      durationHours: block.durationHours,
       hoursPerDay: task.hoursPerDay,
       dailyStartHour: task.dailyStartHour,
     });
@@ -138,9 +143,9 @@ export function computePlacementSlots(
 
 /** Tells whether a task works every working hour of its working days, so that each block covers all working time between its bounds. */
 export function worksFullDays(calendar: CompiledCalendar, task: WorkTask): boolean {
-  const [firstWorkingHour] = calendar.workingHoursOfDay;
+  const [firstWorkingHour] = calendar.workingQuarterStartHours;
   return (
-    (task.hoursPerDay === null || task.hoursPerDay === calendar.workingHoursOfDay.length) &&
+    (task.hoursPerDay === null || task.hoursPerDay === calendar.workingHoursPerDay) &&
     (task.dailyStartHour === null || task.dailyStartHour <= firstWorkingHour)
   );
 }
@@ -150,16 +155,19 @@ function worksContinuously(calendar: CompiledCalendar, task: WorkTask): boolean 
   return task.segments.length === 1 && worksFullDays(calendar, task);
 }
 
-/** Computes directly the latest start of a continuously worked task, or null when out of range. */
+/** Computes directly the latest start of a continuously worked task, failing when it would fall before the first supported year. */
 function latestContinuousStart(
   calendar: CompiledCalendar,
   task: WorkTask,
   latestStart: ProjectHour,
   latestEnd: ProjectHour,
-): ProjectHour | null {
+): Result<ProjectHour, PlacementErrorCode> {
   const byEnd = subtractWorkingHours(calendar, latestEnd, totalDurationHours(task));
-  const byStart = subtractWorkingHours(calendar, latestStart + 1, 1);
-  return byEnd.ok && byStart.ok ? Math.min(byEnd.value, byStart.value) : null;
+  if (!byEnd.ok) {
+    return byEnd;
+  }
+  const byStart = subtractWorkingHours(calendar, latestStart + QUARTER_HOUR, QUARTER_HOUR);
+  return byStart.ok ? success(Math.min(byEnd.value, byStart.value)) : byStart;
 }
 
 /** Sums the durations of every block of a work task. */
@@ -167,29 +175,30 @@ function totalDurationHours(task: WorkTask): number {
   return task.segments.reduce((total, segment) => total + segment.durationHours, 0);
 }
 
-/** Finds by binary search the first start in a range whose placement satisfies a monotonic predicate. */
+/** Finds by binary search the first quarter hour of a range whose placement satisfies a monotonic predicate, a placement past the last supported year counting as satisfying it when asked, as any later start would too. */
 function findFirstStartWhere(
   calendar: CompiledCalendar,
   task: WorkTask,
-  low: ProjectHour,
-  high: ProjectHour,
+  range: { readonly low: ProjectHour; readonly high: ProjectHour; readonly beyondIsTrue: boolean },
   predicate: (placement: Placement) => boolean,
 ): Result<ProjectHour, PlacementErrorCode> {
-  let lastFalse = low - 1;
-  let firstTrue = high;
+  let lastFalse = toQuarters(range.low) - 1;
+  let firstTrue = toQuarters(range.high);
   while (firstTrue - lastFalse > 1) {
-    const middle = (lastFalse + firstTrue) >> 1;
-    const placement = placeTask(calendar, task, middle);
-    if (!placement.ok) {
+    const middle = Math.floor((lastFalse + firstTrue) / HALF);
+    const placement = placeTask(calendar, task, fromQuarters(middle));
+    const beyond =
+      range.beyondIsTrue && !placement.ok && placement.error === 'BEYOND_PLANNING_HORIZON';
+    if (!placement.ok && !beyond) {
       return placement;
     }
-    if (predicate(placement.value)) {
+    if (beyond || (placement.ok && predicate(placement.value))) {
       firstTrue = middle;
     } else {
       lastFalse = middle;
     }
   }
-  return success(firstTrue);
+  return success(fromQuarters(firstTrue));
 }
 
 /** Tells whether a task has a supported number of blocks with valid durations and gaps. */
@@ -199,21 +208,21 @@ function hasValidSegments(segments: readonly TaskSegment[]): boolean {
   }
   return segments.every(
     (segment, index) =>
-      Number.isInteger(segment.durationHours) &&
-      segment.durationHours >= 1 &&
+      isQuarterHours(segment.durationHours) &&
+      segment.durationHours >= QUARTER_HOUR &&
       isValidGap(segment.gapDaysBefore, index === 0),
   );
 }
 
-/** Tells whether a gap before a block is valid: none for the first block, whole days for the others. */
+/** Tells whether a gap before a block is valid: none for the first block, whole days for the others, zero meaning right after the previous block. */
 function isValidGap(gapDays: number, isFirstSegment: boolean): boolean {
   if (isFirstSegment) {
     return gapDays === 0;
   }
-  return Number.isInteger(gapDays) && gapDays >= 1 && gapDays <= MAX_SEGMENT_GAP_DAYS;
+  return Number.isInteger(gapDays) && gapDays >= 0 && gapDays <= MAX_SEGMENT_GAP_DAYS;
 }
 
-/** Places every block of a work task, each one resuming its gap in days after the previous one. */
+/** Places every block of a work task, each one resuming no earlier than its gap in days after the previous one, nor before its own start date, and never before the previous one ends. */
 function placeSegments(
   calendar: CompiledCalendar,
   task: WorkTask,
@@ -224,7 +233,7 @@ function placeSegments(
   for (const segment of task.segments) {
     const previous = segments.at(-1);
     if (previous !== undefined) {
-      resumeFrom = startOfDay(dayIndexOf(previous.end - 1) + segment.gapDaysBefore);
+      resumeFrom = blockResumption(previous.end, segment);
     }
     const placed = placeSegment(calendar, task, segment, resumeFrom);
     if (!placed.ok) {

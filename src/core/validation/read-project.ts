@@ -40,6 +40,7 @@ import {
   DAYS_PER_WEEK,
   END_PROJECT_HOUR,
   HOURS_PER_DAY,
+  QUARTER_HOUR,
   MAX_DAY_INDEX,
   MIN_DAY_INDEX,
   MIN_PROJECT_HOUR,
@@ -59,6 +60,7 @@ import {
   readEnum,
   readIdentifier,
   readInteger,
+  readQuarterHours,
   readNullable,
   readPatternString,
   readPlainObject,
@@ -78,7 +80,7 @@ export interface ValueCodec {
 
 export const STORED_VALUE_CODEC: ValueCodec = {
   readInstant: (field, issues) =>
-    readInteger(field, issues, MIN_PROJECT_HOUR, END_PROJECT_HOUR - 1),
+    readQuarterHours(field, issues, MIN_PROJECT_HOUR, END_PROJECT_HOUR - QUARTER_HOUR),
   readDay: (field, issues) => readInteger(field, issues, MIN_DAY_INDEX, MAX_DAY_INDEX),
   readWeekday: (field, issues) => {
     const day = readInteger(field, issues, SUNDAY, SATURDAY);
@@ -99,7 +101,12 @@ const PROJECT_KEYS = [
 const CALENDAR_KEYS = ['workingWeekdays', 'workingTimeRanges', 'nonWorkingPeriods'];
 const TIME_RANGE_KEYS = ['startHour', 'endHour'];
 const DAY_RANGE_KEYS = ['firstDay', 'lastDay'];
-const OPTION_KEYS = ['criticalPathEnabled', 'dateConstraintsEnabled', 'alwaysShowPatterns'];
+const OPTION_KEYS = [
+  'criticalPathEnabled',
+  'dateConstraintsEnabled',
+  'baselineEnabled',
+  'alwaysShowPatterns',
+];
 export const TAG_KEYS = ['id', 'name', 'color', 'representsPersonOrTeam'];
 const SUMMARY_KEYS = ['id', 'kind', 'name', 'parentId', 'sortKey'];
 const MILESTONE_KEYS = [
@@ -129,11 +136,19 @@ export const TASK_KEYS_BY_KIND: Readonly<Record<Task['kind'], readonly string[]>
   milestone: MILESTONE_KEYS,
   task: WORK_TASK_KEYS,
 };
-const SEGMENT_KEYS = ['durationHours', 'gapDaysBefore'];
+const SEGMENT_KEYS = ['durationHours', 'gapDaysBefore', 'startNoEarlierThan'];
 const BASELINE_KEYS = ['takenAt', 'entries'];
 const BASELINE_ENTRY_KEYS = ['taskId', 'start', 'end', 'durationHours'];
 const MAX_BASELINE_DURATION_HOURS = END_PROJECT_HOUR - MIN_PROJECT_HOUR;
-export const DEPENDENCY_KEYS = ['id', 'predecessorId', 'successorId', 'type', 'lagHours'];
+export const DEPENDENCY_KEYS = [
+  'id',
+  'predecessorId',
+  'successorId',
+  'type',
+  'lagHours',
+  'predecessorBlock',
+  'successorBlock',
+];
 const TASK_KINDS = ['task', 'milestone', 'summary'] as const;
 const DEPENDENCY_TYPES: readonly DependencyType[] = [
   'finishToStart',
@@ -158,7 +173,8 @@ const CALENDAR_ERROR_LISTS: Readonly<Record<CalendarErrorCode, keyof WorkingCale
 };
 const SORT_KEY_PATTERN = /^[0-9A-Za-z]+$/;
 const FULL_PROGRESS = 100;
-const LAST_HOUR_OF_DAY = HOURS_PER_DAY - 1;
+const LAST_QUARTER_OF_DAY = HOURS_PER_DAY - QUARTER_HOUR;
+const MIN_HOURS_PER_DAY = 1;
 
 /** Validates untrusted data and turns it into a project, or lists the problems found with their locations. */
 export function readProject(
@@ -204,6 +220,7 @@ function readProjectFields(
   if (record === undefined) {
     return undefined;
   }
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const project = {
     name: readText(child('name'), issues, MAX_PROJECT_NAME_LENGTH),
@@ -232,6 +249,7 @@ function readCalendar(
   if (record === undefined) {
     return undefined;
   }
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const calendar = {
     workingWeekdays: readList(child('workingWeekdays'), issues, DAYS_PER_WEEK, codec.readWeekday),
@@ -251,20 +269,25 @@ function readCalendar(
   return allDefined(calendar) ? calendar : undefined;
 }
 
-/** Reads one daily working time range made of whole hours. */
+/** Reads one daily working time range made of whole quarter hours. */
 function readTimeRange(field: Field, issues: IssueList): TimeRange | undefined {
   const record = readRecord(field, issues, TIME_RANGE_KEYS);
   if (record === undefined) {
     return undefined;
   }
   const range = {
-    startHour: readInteger(
+    startHour: readQuarterHours(
       childField(record, 'startHour', field.path),
       issues,
       0,
-      LAST_HOUR_OF_DAY,
+      LAST_QUARTER_OF_DAY,
     ),
-    endHour: readInteger(childField(record, 'endHour', field.path), issues, 1, HOURS_PER_DAY),
+    endHour: readQuarterHours(
+      childField(record, 'endHour', field.path),
+      issues,
+      QUARTER_HOUR,
+      HOURS_PER_DAY,
+    ),
   };
   return allDefined(range) ? range : undefined;
 }
@@ -288,10 +311,12 @@ function readOptions(field: Field, issues: IssueList): ProjectOptions | undefine
   if (record === undefined) {
     return undefined;
   }
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const options = {
     criticalPathEnabled: readBoolean(child('criticalPathEnabled'), issues),
     dateConstraintsEnabled: readBoolean(child('dateConstraintsEnabled'), issues),
+    baselineEnabled: readBoolean(child('baselineEnabled'), issues),
     alwaysShowPatterns: readBoolean(child('alwaysShowPatterns'), issues),
   };
   return allDefined(options) ? options : undefined;
@@ -303,6 +328,7 @@ function readTag(field: Field, issues: IssueList): Tag | undefined {
   if (record === undefined) {
     return undefined;
   }
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const tag = {
     id: readIdentifier(child('id'), issues),
@@ -345,6 +371,7 @@ function readTask(field: Field, issues: IssueList, codec: ValueCodec): Task | un
 
 /** Reads the fields shared by every kind of task. */
 function readTaskBase(record: UnknownRecord, path: string, issues: IssueList) {
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, path);
   return {
     id: readIdentifier(child('id'), issues),
@@ -368,6 +395,7 @@ function readDatedFields(
   issues: IssueList,
   codec: ValueCodec,
 ) {
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, path);
   return {
     ...readTaskBase(record, path, issues),
@@ -404,25 +432,32 @@ function readWorkTask(
   codec: ValueCodec,
 ): WorkTask | undefined {
   reportUnknownKeys(record, path, issues, WORK_TASK_KEYS);
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, path);
+  /** Reads the hours per day of a task, from one hour to a whole day, on a quarter hour. */
   const readHoursPerDay = (item: Field, list: IssueList): number | undefined =>
-    readInteger(item, list, 1, HOURS_PER_DAY);
+    readQuarterHours(item, list, MIN_HOURS_PER_DAY, HOURS_PER_DAY);
+  /** Reads the daily start hour of a task, on a quarter hour of the day. */
   const readDailyStart = (item: Field, list: IssueList): number | undefined =>
-    readInteger(item, list, 0, LAST_HOUR_OF_DAY);
+    readQuarterHours(item, list, 0, LAST_QUARTER_OF_DAY);
   const task = {
     kind: 'task' as const,
     ...readDatedFields(record, path, issues, codec),
-    segments: readSegments(child('segments'), issues),
+    segments: readSegments(child('segments'), issues, codec),
     hoursPerDay: readNullable(child('hoursPerDay'), issues, readHoursPerDay),
     dailyStartHour: readNullable(child('dailyStartHour'), issues, readDailyStart),
   };
   return allDefined(task) ? task : undefined;
 }
 
-/** Reads the blocks of a task: at least one, no gap before the first, at least one whole day before each other, and a total duration within the limit. */
-function readSegments(field: Field, issues: IssueList): TaskSegment[] | undefined {
+/** Reads the blocks of a task: at least one, no gap or start date of its own for the first, a gap of zero or more whole days and an optional start date for each other, and a total duration within the limit. */
+function readSegments(
+  field: Field,
+  issues: IssueList,
+  codec: ValueCodec,
+): TaskSegment[] | undefined {
   const segments = readList(field, issues, MAX_SEGMENTS_PER_TASK, (item, list, index) =>
-    readSegment(item, list, index === 0),
+    readSegment(item, list, index === 0, codec),
   );
   if (segments === undefined) {
     return undefined;
@@ -444,18 +479,23 @@ function totalDurationHours(segments: readonly TaskSegment[]): number {
 }
 
 /** Reads one block of a task. */
-function readSegment(field: Field, issues: IssueList, isFirst: boolean): TaskSegment | undefined {
+function readSegment(
+  field: Field,
+  issues: IssueList,
+  isFirst: boolean,
+  codec: ValueCodec,
+): TaskSegment | undefined {
   const record = readRecord(field, issues, SEGMENT_KEYS);
   if (record === undefined) {
     return undefined;
   }
-  const minimumGap = isFirst ? 0 : 1;
+  const minimumGap = 0;
   const maximumGap = isFirst ? 0 : MAX_SEGMENT_GAP_DAYS;
   const segment = {
-    durationHours: readInteger(
+    durationHours: readQuarterHours(
       childField(record, 'durationHours', field.path),
       issues,
-      1,
+      QUARTER_HOUR,
       MAX_TASK_DURATION_HOURS,
     ),
     gapDaysBefore: readInteger(
@@ -464,8 +504,31 @@ function readSegment(field: Field, issues: IssueList, isFirst: boolean): TaskSeg
       minimumGap,
       maximumGap,
     ),
+    startNoEarlierThan: readBlockStart(
+      childField(record, 'startNoEarlierThan', field.path),
+      issues,
+      isFirst,
+      codec,
+    ),
   };
   return allDefined(segment) ? segment : undefined;
+}
+
+/** Reads the optional start date of a block, absent or null meaning none, which the first block never has since the task start date stands for it. */
+function readBlockStart(
+  field: Field,
+  issues: IssueList,
+  isFirst: boolean,
+  codec: ValueCodec,
+): ProjectHour | null | undefined {
+  if (field.value === undefined || field.value === null) {
+    return null;
+  }
+  if (isFirst) {
+    issues.add(field.path, 'OUT_OF_RANGE');
+    return undefined;
+  }
+  return codec.readInstant(field, issues);
 }
 
 /** Reads one dependency between two tasks. */
@@ -474,15 +537,26 @@ function readDependency(field: Field, issues: IssueList): Dependency | undefined
   if (record === undefined) {
     return undefined;
   }
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const dependency = {
     id: readIdentifier(child('id'), issues),
     predecessorId: readIdentifier(child('predecessorId'), issues),
     successorId: readIdentifier(child('successorId'), issues),
     type: readEnum(child('type'), issues, DEPENDENCY_TYPES),
-    lagHours: readInteger(child('lagHours'), issues, -MAX_LAG_HOURS, MAX_LAG_HOURS),
+    lagHours: readQuarterHours(child('lagHours'), issues, -MAX_LAG_HOURS, MAX_LAG_HOURS),
+    predecessorBlock: readBlockReference(child('predecessorBlock'), issues),
+    successorBlock: readBlockReference(child('successorBlock'), issues),
   };
   return allDefined(dependency) ? dependency : undefined;
+}
+
+/** Reads the block of a split task a dependency starts from or leads to, an absent or null value meaning the whole task. */
+function readBlockReference(field: Field, issues: IssueList): number | null | undefined {
+  if (field.value === undefined || field.value === null) {
+    return null;
+  }
+  return readInteger(field, issues, 0, MAX_SEGMENTS_PER_TASK - 1);
 }
 
 /** Reads a baseline plan: when it was taken and the frozen dates of each task, at most once per task. */
@@ -514,12 +588,13 @@ function readBaselineEntry(
   if (record === undefined) {
     return undefined;
   }
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const entry = {
     taskId: readIdentifier(child('taskId'), issues),
     start: codec.readInstant(child('start'), issues),
     end: codec.readInstant(child('end'), issues),
-    durationHours: readInteger(child('durationHours'), issues, 0, MAX_BASELINE_DURATION_HOURS),
+    durationHours: readQuarterHours(child('durationHours'), issues, 0, MAX_BASELINE_DURATION_HOURS),
   };
   if (entry.start !== undefined && entry.end !== undefined && entry.end < entry.start) {
     issues.add(`${field.path}.end`, 'OUT_OF_RANGE');

@@ -9,13 +9,18 @@ import {
   readProjectShape,
   STORED_VALUE_CODEC,
 } from '../validation/read-project';
-import type { ValidationIssue, ValidationIssueCode } from '../validation/validation-issues';
+import {
+  requireIssues,
+  type ValidationIssue,
+  type ValidationIssueCode,
+  type ValidationIssues,
+} from '../validation/validation-issues';
 import {
   countAncestors,
   dependenciesOf,
   findAncestorProblem,
-  isReachable,
-  pairKey,
+  closesCycle,
+  loopsThroughTask,
   putDependency,
   putTag,
   putTask,
@@ -25,8 +30,10 @@ import {
   subtreeHeight,
   type ProjectState,
 } from './project-state';
+import { blockPairKey, isKnownBlock, unitCountOf } from '../scheduling/block-links';
 import type { ProjectHeader } from './shared-document';
 
+const CALENDAR_TASK_PATH = 'tasks.';
 export type SharedOperation =
   | { readonly type: 'putTask'; readonly task: Task }
   | { readonly type: 'removeTasks'; readonly ids: readonly TaskId[] }
@@ -43,7 +50,7 @@ export interface TouchedItems {
   header: boolean;
 }
 
-type Check = Result<TouchedItems, readonly ValidationIssue[]>;
+type Check = Result<TouchedItems, ValidationIssues>;
 
 /** Applies an operation to a whole project, the reference that the incremental checks must agree with. */
 export function applyOperation(project: Project, operation: SharedOperation): Project {
@@ -132,14 +139,16 @@ function putTaskChecked(state: ProjectState, input: Task): Check {
   const [read] = shape.ok ? shape.value.tasks : [];
   const task = read === undefined ? undefined : withKnownTag(read, (id) => state.tags.has(id));
   if (task === undefined) {
-    return failure(relocate(shape.ok ? [] : shape.error, 'tasks[0]', `tasks.${input.id}`));
+    return failure(
+      requireIssues(relocate(shape.ok ? [] : shape.error, 'tasks[0]', `tasks.${input.id}`)),
+    );
   }
   const previous = state.tasks.get(task.id);
   if (previous === undefined && state.tasks.size >= MAX_TASKS) {
     return refuse('tasks', 'TOO_MANY_ITEMS');
   }
   putTask(state, task);
-  const problem = findTaskProblem(state, task);
+  const problem = findTaskProblem(state, task, previous);
   if (problem !== null) {
     restoreTask(state, task.id, previous);
     return refuse(`tasks.${task.id}`, problem);
@@ -147,8 +156,12 @@ function putTaskChecked(state: ProjectState, input: Task): Check {
   return success(touched({ tasks: [task.id] }));
 }
 
-/** Returns the first structural problem a task already placed in the state causes, or null. */
-export function findTaskProblem(state: ProjectState, task: Task): ValidationIssueCode | null {
+/** Returns the first structural problem a task already placed in the state causes, or null, given its previous version. */
+export function findTaskProblem(
+  state: ProjectState,
+  task: Task,
+  previous?: Task,
+): ValidationIssueCode | null {
   const ancestorProblem = findAncestorProblem(state, task);
   if (ancestorProblem !== null) {
     return ancestorProblem;
@@ -162,7 +175,32 @@ export function findTaskProblem(state: ProjectState, task: Task): ValidationIssu
   if (task.kind === 'summary' && dependenciesOf(state, task.id).length > 0) {
     return 'SUMMARY_DEPENDENCY';
   }
+  const linkProblem = findBlockLinkProblem(state, task, previous);
+  if (linkProblem !== null) {
+    return linkProblem;
+  }
   return task.kind === 'task' ? findDailyPatternProblem(state, task) : null;
+}
+
+/** Returns the problem the links of a task cause: a link to a block it does not have, or a loop through its blocks when their number changed. */
+function findBlockLinkProblem(
+  state: ProjectState,
+  task: Task,
+  previous: Task | undefined,
+): ValidationIssueCode | null {
+  const links = dependenciesOf(state, task.id);
+  const unknownBlock = links.some(
+    (link) =>
+      (link.predecessorId === task.id && !isKnownBlock(task, link.predecessorBlock)) ||
+      (link.successorId === task.id && !isKnownBlock(task, link.successorBlock)),
+  );
+  if (unknownBlock) {
+    return 'UNKNOWN_BLOCK';
+  }
+  if (previous === undefined || unitCountOf(previous) === unitCountOf(task)) {
+    return null;
+  }
+  return loopsThroughTask(state, task) ? 'DEPENDENCY_CYCLE' : null;
 }
 
 /** Returns the problem of a work task whose daily pattern does not fit the project calendar, or null. */
@@ -212,7 +250,9 @@ function putDependencyChecked(state: ProjectState, input: Dependency): Check {
   const [dependency] = shape.ok ? shape.value.dependencies : [];
   if (dependency === undefined) {
     return failure(
-      relocate(shape.ok ? [] : shape.error, 'dependencies[0]', `dependencies.${input.id}`),
+      requireIssues(
+        relocate(shape.ok ? [] : shape.error, 'dependencies[0]', `dependencies.${input.id}`),
+      ),
     );
   }
   const previous = state.dependencies.get(dependency.id);
@@ -247,10 +287,16 @@ export function findDependencyProblem(
   if (predecessor.kind === 'summary' || successor.kind === 'summary') {
     return 'SUMMARY_DEPENDENCY';
   }
-  if (state.pairs.has(pairKey(dependency))) {
+  if (
+    !isKnownBlock(predecessor, dependency.predecessorBlock) ||
+    !isKnownBlock(successor, dependency.successorBlock)
+  ) {
+    return 'UNKNOWN_BLOCK';
+  }
+  if (state.pairs.has(blockPairKey(dependency))) {
     return 'DUPLICATE_DEPENDENCY';
   }
-  return isReachable(state, successor.id, predecessor.id) ? 'DEPENDENCY_CYCLE' : null;
+  return closesCycle(state, dependency) ? 'DEPENDENCY_CYCLE' : null;
 }
 
 /** Adds or replaces a tag after checking its fields. */
@@ -258,7 +304,9 @@ function putTagChecked(state: ProjectState, input: Tag): Check {
   const shape = readItemShape(state.header, { tags: [input] });
   const [tag] = shape.ok ? shape.value.tags : [];
   if (tag === undefined) {
-    return failure(relocate(shape.ok ? [] : shape.error, 'tags[0]', `tags.${input.id}`));
+    return failure(
+      requireIssues(relocate(shape.ok ? [] : shape.error, 'tags[0]', `tags.${input.id}`)),
+    );
   }
   if (!state.tags.has(tag.id) && state.tags.size >= MAX_TAGS) {
     return refuse('tags', 'TOO_MANY_ITEMS');
@@ -294,7 +342,7 @@ function updateProjectChecked(state: ProjectState, fields: Partial<ProjectHeader
     STORED_VALUE_CODEC,
   );
   if (!read.ok) {
-    return failure(read.error);
+    return failure(requireIssues(read.error));
   }
   const previous = state.header;
   state.header = { ...read.value, baseline: header.baseline };
@@ -306,12 +354,19 @@ function updateProjectChecked(state: ProjectState, fields: Partial<ProjectHeader
   return success({ ...touched({}), header: true });
 }
 
+/** Returns the task a refused change of the calendar is about, or null when the issue is about no task. */
+export function taskOfCalendarIssue(issue: ValidationIssue): TaskId | null {
+  return issue.path.startsWith(CALENDAR_TASK_PATH)
+    ? issue.path.slice(CALENDAR_TASK_PATH.length)
+    : null;
+}
+
 /** Returns the first work task whose daily pattern no longer fits the calendar, as an issue, or null. */
 function findCalendarProblem(state: ProjectState): ValidationIssue | null {
   for (const task of state.tasks.values()) {
     const problem = task.kind === 'task' ? findDailyPatternProblem(state, task) : null;
     if (problem !== null) {
-      return { path: `tasks.${task.id}`, code: problem };
+      return { path: `${CALENDAR_TASK_PATH}${task.id}`, code: problem };
     }
   }
   return null;

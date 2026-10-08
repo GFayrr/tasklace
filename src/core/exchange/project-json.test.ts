@@ -5,7 +5,11 @@ import { MAX_PROJECT_TEXT_UTF16_UNITS, MAX_TAG_NAME_LENGTH } from '../limits';
 import type { Project, Task, WorkTask } from '../model/project';
 import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { at, dayOf } from '../testing/civil-time';
-import { projectArbitrary } from '../testing/project-arbitrary';
+import {
+  interleavedProjectArbitrary,
+  projectArbitrary,
+  richProjectArbitrary,
+} from '../testing/project-arbitrary';
 import { link, milestone, project, splitTask, summary, workTask } from '../testing/project-builder';
 import { END_PROJECT_HOUR, MIN_PROJECT_HOUR } from '../time';
 import { createIssueList, type ValidationIssue } from '../validation/validation-issues';
@@ -20,6 +24,7 @@ import {
 type Data = Record<string, unknown>;
 
 const DEEP_NESTING = 100_000;
+const LONGEST_ENGINE_STRING = 2 ** 29 - 24;
 
 const SAMPLE_PROJECT: Project = project(
   [
@@ -129,6 +134,33 @@ describe('exportProjectJson', () => {
     expect(second).toMatchObject({ startNoEarlierThan: null, deadline: '2026-11-02T12:00' });
   });
 
+  it('writes the start date of a later block in clear text, leaves out an empty one, and refuses one written as a number', () => {
+    const dated = project([
+      splitTask('a', [
+        [7, 0],
+        [7, 1, at(2026, 10, 6, 13)],
+      ]),
+    ]);
+    const content = JSON.parse(exportProjectJson(dated)) as Data;
+    const [task] = (content['project'] as Data)['tasks'] as Data[];
+    expect(task?.['segments']).toEqual([
+      { durationHours: 7, gapDaysBefore: 0 },
+      { durationHours: 7, gapDaysBefore: 1, startNoEarlierThan: '2026-10-06T13:00' },
+    ]);
+    const segments = task?.['segments'] as Data[];
+    const numbered = { ...segments[1], startNoEarlierThan: at(2026, 10, 6, 13) };
+    const forged = {
+      ...content,
+      project: {
+        ...(content['project'] as Data),
+        tasks: [{ ...task, segments: [segments[0], numbered] }],
+      },
+    };
+    expect(importIssues(forged)).toEqual(
+      issue('project.tasks[0].segments[1].startNoEarlierThan', 'WRONG_TYPE'),
+    );
+  });
+
   it('writes the extreme dates of the supported period', () => {
     const extreme = project([], [], { startDate: at(2020, 1, 1, 0) });
     expect((JSON.parse(exportProjectJson(extreme)) as { project: Data }).project['startDate']).toBe(
@@ -152,13 +184,16 @@ describe('importProjectJson: round trip', () => {
     { timeout: PROPERTY_TEST_TIMEOUT_MS },
     () => {
       fc.assert(
-        fc.property(projectArbitrary, ({ project: input }) => {
-          const text = exportProjectJson(input);
-          const imported = importProjectJson(text);
-          expect(imported).toEqual({ ok: true, value: input });
-          const written = imported.ok ? exportProjectJson(imported.value) : '';
-          expect(JSON.parse(written)).toEqual(JSON.parse(text));
-        }),
+        fc.property(
+          fc.oneof(projectArbitrary, interleavedProjectArbitrary, richProjectArbitrary),
+          ({ project: input }) => {
+            const text = exportProjectJson(input);
+            const imported = importProjectJson(text);
+            expect(imported).toEqual({ ok: true, value: input });
+            const written = imported.ok ? exportProjectJson(imported.value) : '';
+            expect(JSON.parse(written)).toEqual(JSON.parse(text));
+          },
+        ),
       );
     },
   );
@@ -235,13 +270,9 @@ describe('importProjectJson: text and header', () => {
     },
   );
 
-  it('rejects a text longer than the maximum size before parsing it, and only then', () => {
-    expect(importIssues(' '.repeat(MAX_PROJECT_TEXT_UTF16_UNITS + 1))).toEqual(
-      issue('', 'TOO_LARGE'),
-    );
-    expect(importIssues(' '.repeat(MAX_PROJECT_TEXT_UTF16_UNITS))).toEqual(
-      issue('', 'INVALID_JSON'),
-    );
+  it('never refuses for its size a text the JavaScript engine can hold, its limit lying above the longest string', () => {
+    expect(MAX_PROJECT_TEXT_UTF16_UNITS).toBeGreaterThanOrEqual(LONGEST_ENGINE_STRING);
+    expect(importIssues(' '.repeat(LONGEST_ENGINE_STRING))).toEqual(issue('', 'INVALID_JSON'));
   });
 
   it.each(['[]', 'null', '42', '"tasklace"', 'true'])('rejects the document %s', (text) => {
@@ -357,7 +388,7 @@ describe('importProjectJson: values', () => {
     '2026-00-10T09:00',
     '2026-09-00T09:00',
     '2026-09-28T24:00',
-    '2026-09-28T09:30',
+    '2026-09-28T09:10',
     '2026-09-28T09:00:00',
     '2026-09-28T09:00Z',
     '2026-09-28 09:00',
@@ -459,14 +490,14 @@ const tagArbitrary = fc.record({
 const fullRangeInstant = fc.integer({ min: MIN_PROJECT_HOUR, max: END_PROJECT_HOUR - 1 });
 
 /** Picks a daily start hour that leaves a work task enough working hours in the day. */
-function dailyStartArbitrary(task: WorkTask, hoursOfDay: readonly number[]) {
-  const hoursPerDay = task.hoursPerDay ?? hoursOfDay.length;
-  return fc.option(fc.constantFrom(...hoursOfDay.slice(0, hoursOfDay.length - hoursPerDay + 1)));
+function dailyStartArbitrary(task: WorkTask, quartersOfDay: readonly number[]) {
+  const quarters = (task.hoursPerDay ?? quartersOfDay.length / 4) * 4;
+  return fc.option(fc.constantFrom(...quartersOfDay.slice(0, quartersOfDay.length - quarters + 1)));
 }
 
 /** Adds random tags, date constraints, daily start hours and options to a generated project. */
 function enrichProject(input: Project): fc.Arbitrary<Project> {
-  const hoursOfDay = unwrap(compileCalendar(input.calendar)).workingHoursOfDay;
+  const hoursOfDay = unwrap(compileCalendar(input.calendar)).workingQuarterStartHours;
   const tags = fc.uniqueArray(tagArbitrary, {
     maxLength: MAX_GENERATED_TAGS,
     selector: (tag) => tag.id,
@@ -494,6 +525,7 @@ function enrichProject(input: Project): fc.Arbitrary<Project> {
     const options = fc.record({
       criticalPathEnabled: fc.boolean(),
       dateConstraintsEnabled: fc.boolean(),
+      baselineEnabled: fc.boolean(),
       alwaysShowPatterns: fc.boolean(),
     });
     return fc.tuple(tasks, options).map(([enrichedTasks, enrichedOptions]) => ({

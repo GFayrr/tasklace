@@ -8,54 +8,157 @@ Tasklace is built in nine steps. Each step, or sub-step, is developed on its own
 | 2    | Scheduling engine                                          | Done    |
 | 3    | Tags and person or team conflicts                          | Done    |
 | 4    | Shared model, project file, validation, JSON and CSV       | Done    |
-| 5    | Secure Electron shell and Svelte user interface            | Planned |
+| 5    | Secure Electron shell and Svelte user interface            | Done    |
 | 6    | PDF export and comparison of the page splitting strategies | Planned |
 | 7    | Real-time collaboration on the local network               | Planned |
 | 8    | End-to-end encrypted relay                                 | Planned |
 | 9    | Distribution                                               | Planned |
 
-## Step 4: shared model, project file, validation, JSON and CSV
+## Step 5: secure Electron shell and Svelte user interface
 
-Step 4 introduces Yjs. It is split into four sub-steps, each with its own commit and pull request.
+Step 5 turns the core into a desktop application. It is developed on its own branch, one sub-step after the other, each sub-step merged into that branch through its own reviewed pull request. The sub-steps that do not shape the look of the application come first.
 
-### 4a. Project validation and JSON exchange (done)
+### 5a. Tooling and secure shell (done)
 
-- Hand-written validator that turns unknown data into a safe `Project`, or returns every problem with its location (for example `tasks[12].segments[0].durationHours`): types and required fields, value ranges, text lengths and valid Unicode, references between objects, calendar, daily working pattern and structure (cycles).
-- Versioned JSON export and import, with dates in clear text (`2026-09-28T09:00`); the export is compact since 4c.
-- A single UTF-8 byte order mark is removed at the very start of imported text; JSON export never writes one.
+- Electron, electron-vite and Playwright; development, build and end-to-end test commands.
+- Main process: a single window with context isolation, sandbox, no Node.js in the page and web security; a strict content security policy; no remote content; navigation, new windows and permission requests refused; a single running instance; external links opened only for an allowlist of `https` addresses.
+- Preload bridge: a minimal, typed API exposed with `contextBridge`; every channel is listed and every message is validated by the main process with hand-written validators.
+- Lint rules keep the page away from Node.js and Electron, and the core pure.
+- End-to-end tests check the security settings in the running application; continuous integration runs them on Linux and Windows.
 
-### 4b. Shared Yjs model and baseline plan (done)
+### 5b. Files and isolated decoding (done)
 
-- Two-way mapping between `Project` and the Yjs document (name, start date, calendar, options, baseline, tasks, dependencies, tags), with changes grouped in transactions.
-- Task order by hand-written fractional indices, so that two simultaneous insertions at the same place never contradict each other.
-- Deterministic repair of merged data that became invalid, run as soon as updates are merged and before anything is saved; running it again changes nothing, and the user is informed. For example:
-  - a task pointing at a deleted tag loses its tag;
-  - in a dependency cycle, the dependency with the greatest identifier is removed;
-  - in a hierarchy loop, the task of the loop with the smallest identifier is moved to the root.
-- Baseline plan: a single frozen snapshot per project, stored as one Yjs value with the time it was taken.
-- Property-based tests: random concurrent edits and merges always end in the same valid state for every participant.
-- Every received update is first tried on a copy: an update that arrives before the one it depends on is held back, and an update that is unreadable, breaks the document schema or would leave an invalid project is refused, the document staying untouched.
-- Adds the `yjs` dependency; `y-protocols` comes with the network protocol in step 7.
-- A shared session keeps a validated, indexed copy of the project: local edits and received updates are checked and repaired only where they change things, falling back to the whole repair when a structural rule is broken, so that editing and merging stay far below one frame on 10,000 tasks.
+- The real zlib compressor, with a capped output size, in the main process; file sizes checked in bytes before reading.
+- Opening a `.tasklace` file and importing JSON or CSV run in a worker thread whose memory is capped, so that a forged file can only stop that worker; the application then shows a clear error.
+- The shared project stays in the page; the main process alone chooses paths through dialogs, and knows the file and the document of each window.
+- Automatic saving two seconds after the last change and before a window closes, written to a temporary file then renamed. A project without a file yet is kept in its local copy only, so that saving automatically never opens a dialog.
+- Every document has a stable, hidden identifier; its local copy, kept for offline work and future collaboration, is written at each save with an index of where its file lives.
+- The three most recent projects; open, save, save as, import and export dialogs.
+- The regional format of the system (list separator, date order, clock) is read by the main process for CSV exchange; every file error has an English message in the translation file.
 
-### 4c. `.tasklace` project file (done)
+### 5c. Interface foundations (done)
 
-- Container: 16-byte header (`TSKL` signature, format version, reserved flags, CRC-32 checksum, declared uncompressed size), then the compressed Yjs state, whose deleted content Yjs has already removed.
-- Compression is injected into the core; the real `node:zlib` implementation, with a capped output size, will live in `src/main/` (step 5).
-- Defensive reading, in this order, before anything is loaded: maximum size, signature, version, flags, checksum, declared size, capped decompression against decompression bombs, guarded Yjs decoding, strict schema and complete validation (4a), without any repair.
-- Maximum sizes measured on the largest possible project, then fixed as powers of two above it: 128 MiB for a file, 512 MiB once decompressed.
-- Opening a file will run in a separate process with capped memory, so that a forged file can never bring the application down.
-- Fast compression (zlib level 1): the file is slightly larger, but saving, which happens automatically, is much faster.
-- JSON export is compact, so that the largest possible project stays within the 256 Mi-unit import limit.
-- Test files generated in memory: random, truncated, altered, wrong version or flags, lying declared size, decompression bomb, hidden content.
+- Svelte 5 interface, with its compiler, type checker, formatter and linter; no inline style or script, so the strict content security policy is kept.
+- Sober light theme "Sand & Graphite" (warm neutrals, graphite actions, so that the task bars carry the color): every color is a style variable, ready for custom themes, and a test checks the WCAG AA contrasts. Jost font embedded with its license (Latin and Latin Extended).
+- Translation structure: typed keys in `en.json`, loaded on demand; a test refuses any visible text written directly in a component. Dates and numbers follow the regional format.
+- Scheduling in a Web Worker, one computation at a time, the latest change only, so that no older result is ever shown.
+- Undo and redo local to each user, never undoing the changes of others; an undone step made invalid by them is repaired like a received update.
+- Welcome screen with the recent projects, toolbar (new, open, import, export as CSV or JSON, save, undo, redo, editable project name, save status), tag legend with the task count and dates of the project, messages that explain errors without blocking anything; keyboard shortcuts.
 
-### 4d. CSV import and export (done)
+### 5d. Task table and timeline (done)
 
-- Export of the task table for Excel or LibreOffice, in WBS order: WBS, name, start, end, duration in hours, progress, predecessors, tag and blocks (filled only for split tasks, such as `4h; +2d 3h`). UTF-8 with a byte order mark so that Excel reads accents correctly; separator, date order and clock taken from the regional settings.
-- Import creates a new project with the default calendar, starting at the earliest start of the table. Only the name column is required; columns may come in any order, and a row holding only a name is a section heading.
-- A start date becomes a "not before" constraint only where the schedule would otherwise start the task earlier; end dates are recomputed, and each start, end or summary progress the schedule does not follow gets its own warning.
-- Unknown tags are created with the next palette color. Dates are read in the regional date order or in ISO form. A duration or progress column counted in another unit (days, minutes…) is refused rather than misread.
-- Line-by-line validation with the same complete checks as JSON; each error gives its row, and its column when a single cell is at fault. Limits on rows, predecessors and blocks are checked before anything is built, so that an oversized file is refused without exhausting memory. The separator is detected automatically, and a single leading byte order mark is removed.
-- Predecessors are imported and exported as `1.2FS+2h`: WBS number, dependency type (FS, SS, FF, SF) and lag.
-- Protection against formula injection: a cell starting with `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed with an apostrophe on export, which the import removes.
-- Import limited to 128 Mi UTF-16 units, above the export of the largest allowed project.
+- Task table in WBS order (WBS, name, duration, start, end, progress, predecessors), drawing only the visible rows, with the WBS and name columns kept in view; summaries can be collapsed.
+- Canvas timeline: two-level time scale, hour, day, week and month zooms keeping the middle instant, shaded non-working periods, today line, split blocks, progress, milestone diamonds, summary bars, dependency arrows, tag colors and patterns, conflict outlines.
+- Editing from the toolbar, the keyboard and the table: add, delete, rename, indent (Alt+Shift+→) and outdent (Alt+Shift+←), reorder (Alt+↑ and Alt+↓), turn into a milestone, type a duration in hours or working days, a start date, a progress or predecessors in the notation of the CSV table.
+- On the timeline: move a bar to set its start date, stretch its end to change its duration, drag from the handle of the selected bar to another bar to link them; bars align to the quarter hour at the hour zoom, to the day otherwise.
+- Every change is checked by the shared session as one step, undone in one step, and explained when refused; the zoom sits in the status bar.
+- Only the visible rows of the table and of the timeline are drawn; on 10,000 tasks, a change refreshes what the interface shows within a frame, checked by a benchmark.
+
+### 5d, after testing: quarter hours, date picker, tags and task details (done)
+
+- Quarter-hour precision everywhere: durations shown in hours and minutes, typed in hours, minutes or working days; a task may last less than an hour.
+- Date and time picker built into the application for the start and end of a task; the end can be typed too.
+- A task placed before the project start moves that start, with a message that can be undone.
+- Tag column with a list of its own, and a task details panel (tag, blocks, hours per day, daily start time).
+- Messages fade away on their own; days off show as a thin pale band inside bars, the pause of a split task as a dotted line; the default menu of Electron is removed.
+
+### 5d, after testing: split tasks linked block by block (done)
+
+- A block of a split task can wait for another task or for a block of it, and a task can wait for a block, with the same link types and lags; the days before a block become a minimum, 0 meaning the same day.
+- Scheduling, critical path and collaborative repairs reason block by block, at the same cost.
+- Notation `3#2` (block 2 of task 3) in the predecessors, and `+0d 3h after 2.1` in the Blocks column of the CSV table.
+- "Block n waits for" in the task details; one link handle per block on the timeline, and a link dropped on a block makes that block wait.
+- After review: a link is always written in its shortest form; no link is ever lost silently (exports and edits that would lose one are refused with an explanation); the details panel refuses to overwrite a task changed meanwhile; changing the blocks of a much-linked task stays linear.
+
+### 5d, after testing: block start dates and file names (done)
+
+- A later block of a split task can be given its own "do not start before" date and time, in the task details or by dragging it alone on the timeline; the blocks after it follow.
+- Saving and exporting add the missing extension, suggest the name of the project, and ask before replacing a file the added extension leads to; an export can never overwrite a project file.
+- Imports and exports say what they did; an untitled imported project takes the name of its file.
+- Failed application tests keep a trace, and a window that does not close is described instead of blocking the test run.
+- A window closed while its interface is still starting now closes at once (it used to stay open forever).
+- Moving a whole task moves the dates of its later blocks with it.
+
+### 5d, after the project review: file safety and full test coverage (done)
+
+- One file action at a time: opening, importing, creating, saving or exporting while another runs is refused with a message, and the open project is saved before another replaces it (or kept open when that save fails); automatic and manual saves are sent one after the other.
+- The main process switches to a new, opened or imported project only once the interface has accepted it, so that both always agree on the project of the window.
+- A window whose last save fails stays open and offers to save elsewhere, close without saving or cancel; a page that crashes or cannot start offers to reload or close the window, and a page that stops responding while closing offers to wait or close anyway.
+- Every failure the main process meets while handling a file is reported, and unexpected errors of the interface are shown; failed imports, import warnings and repairs list each problem with its row, column or task.
+- Errors and warnings of the application, of its pages and of its file worker are written to a log file in the user data folder, kept under 1 MiB.
+- Files are read through a single handle with a bounded size; the state is checked before writing; a file saved without its local copy is kept, with a warning; a damaged local copy index is kept aside.
+- A schedule worker that fails is replaced and asked again for the latest project; a failure that repeats leaves a lasting message.
+- The table writes and reads dates only as ISO (2026-10-05 14:30); CSV keeps the regional format.
+- Recent projects are listed once per path, with their folder; summaries fold and unfold with Alt+Left / Alt+Right.
+- Every file of `src/` except the entry points and workers, which the end-to-end tests cover, is unit tested to at least 90 % of its lines, branches, functions and statements, Svelte components included; new property tests (date constraints turned off, weighted progress, tag conflicts, order of the data); new end-to-end journeys (automatic save, keyboard outline, dragging a block, crashed page, shortcuts during a dialog, unexpected errors) and an opening benchmark (under 2 s for 10,000 tasks).
+
+### 5d, after the full analysis: blocked file actions, explained failures and stricter types (done)
+
+- While a file is opened, imported, created, saved or exported, the whole window waits: no change, shortcut or other file action can slip in and be lost.
+- A schedule that cannot be computed says why, cause by cause, with the task, link or tag concerned.
+- Failures that used to pass unnoticed are reported or logged: a repair that fails while merging or undoing, an unreadable list of recent projects, a schedule worker that cannot start, a log that cannot be set aside, unexpected answers between the processes.
+- A change is refused rather than applied on guessed values: a calendar that cannot be compiled, or a bar dragged or a date typed in the table while the dates are still being updated after the last change.
+- A file shortcut pressed while a cell is being edited keeps the typed value; a damaged list of recent projects keeps its valid entries; a failure to record a recent project never undoes an open or a save that succeeded.
+- Types now tie each channel of the bridge to its answer, each file task to its result and each refusal to its message, so that a mismatch no longer compiles.
+- Tests cover the session as the entry point of the network, the baseline plan in random projects, and every branch that only random tests reached before.
+
+### 5e. Project settings and advanced options
+
+Done in three parts, each with its mockups approved first.
+
+#### 5e-1. Project settings (done)
+
+- A "Project settings" button next to the project name, and Ctrl+, open a dialog with tabs: General and Calendar, then Tags (5e-2) and Advanced options (5e-3).
+- General: project name and project start; after a move, the dialog tells how many tasks it moved.
+- Calendar: working days, ranges of working hours to the quarter hour with the resulting hours per day, days off. Each change applies at once and can be undone with Ctrl+Z, even with the dialog open.
+- A date or time applies when the field is left or Enter is pressed. A refused change is explained beside the part that was changed, naming the task at stake when its hours no longer fit the working day, and the field shows the value of the project again.
+- The toolbar still fits on one line at 1,280 pixels.
+
+#### 5e-2. Tags and conflicts (done)
+
+- A Tags tab in the project settings: one line per tag with its color, name, "Person or team" and delete button. Names are unique; colors come from the twelve tested colors or from the color picker of the system.
+- A tag whose color is too close to others is shown with a pattern, in the settings, on the bars and now in the legend; a tag that can no longer be told apart gets a warning.
+- Deleting a tag that tasks use asks first; its tasks keep their dates and have no tag. Undo brings it back.
+- A "N conflicts" button after the legend opens the list of conflicts; a click on a line selects its first task and scrolls the table and the timeline to it.
+- A project can have up to 256 tags.
+
+#### 5e-3. Advanced options
+
+Done in three parts, each with its mockups approved first. Every advanced feature is off by default and turned on in the Advanced options tab of the project settings.
+
+##### 5e-3a. Advanced options tab and critical path (done)
+
+- The Advanced options tab: one switch per feature, each explained in a sentence. Critical path, date constraints, the baseline and always showing patterns all work.
+- With the critical path on, the table shows the total and free float of every task, with a hint on each header; the timeline underlines critical tasks in graphite and draws how far other tasks can slip as a dashed line; the legend explains the mark.
+- When a task would have to start before 2020, the first year handled, to finish on time, the dates are still worked out: only the floats concerned are unknown, shown as "?", and one message explains why and what to do.
+
+##### 5e-3b. Date constraints (done)
+
+- With date constraints on, the details of a task or milestone have a "Date constraints" frame with a "Must finish on" date and a deadline, to the quarter hour. When the option is off, the frame is hidden and the dates already entered are kept, ignored by the plan.
+- One "N conflicts" button counts every conflict; its list has two parts, "People and teams" and "Dates", a part with nothing in it being hidden. Each date line names the task, its end and the date it misses, in the order of the table; a click selects the task and scrolls to its end.
+- A task that misses one of its dates gets the red outline of a conflict on the timeline, milestones included, and a red "End" cell with an icon whose tooltip names each date missed.
+- Each deadline is drawn on the row of its task as an upright line topped by a small triangle, graphite when met and red when missed, with a "Deadline" key in the legend. The timeline widens to the deadlines, always keeping the whole project in view.
+
+##### 5e-3c. Baseline (done)
+
+- A Baseline switch, off by default; under it, "Set baseline" freezes the start, end and duration of every task, then the strip tells when it was set and offers to set it again or to clear it, each after a question. Ctrl+Z undoes either. Turning the switch off hides the baseline and keeps it.
+- Tasks whose dates cannot be frozen are counted below the strip; an empty summary has nothing to freeze and is not counted.
+- On the timeline, a thin pale ghost at the top of each row shows where the task was planned, and a small hollow diamond where a milestone was; the timeline widens to the frozen dates of the tasks that still exist, always keeping the whole project in view.
+- A Variance column after End gives in working days how much later (+, in the warning color) or earlier (−) each task now ends, any gap showing as at least a quarter of a day; a dash for a task not in the baseline or a summary without dates.
+- The legend keys are short ("Critical", "Baseline", "Deadline"), each explained in a tooltip.
+
+### After the review of the whole step (done)
+
+The whole step was reviewed once finished, then corrected in four parts, each tested on its own.
+
+- Defects and silent failures: a page reloaded after a crash starts without the project of the old page; crashes, unresponsive pages and a bridge that cannot load are logged and let the window close; errors and objects sent by the page reach the log in full; a programming error is never reported as a disk problem; the log is written before the application quits; a schedule request the worker does not recognise fails instead of waiting forever; a damaged list of recent projects no longer shifts the entries; refusals explain the real cause. Two channels of the bridge that nothing used were removed.
+- Restructuring: the state of the settings window and the selection have their own small interfaces, refusal codes are gathered in one module, the arguments of every channel of the bridge are typed, and the two confirmation dialogs share one component.
+- Tests: end-to-end journeys for a project kept across a restart, the recent projects, a CSV round trip through the menus and the project settings; tests that waited for time now follow events; the entry points of the processes keep only their wiring, their logic being tested; exact values instead of thresholds; growth checks for the visible cells and for forged CSV cells.
+- Texts: every function, inner ones included, has a one-sentence comment, and one interface vocabulary: the plan is the tasks, the dates are worked out, a time is on a quarter hour (:00, :15, :30 or :45). Two repository tests keep both.
+
+## After version 1
+
+- Custom themes: a documented theme template, so that a school or a company can apply its own visual identity to the application. To be considered only once the project is finished.
+  - A `themes` folder, easy to open from the application, where a theme file is simply dropped.
+  - A theme is a plain data file (colors only, never code or style sheets), validated like any untrusted file.
+  - Official themes must pass WCAG AA contrasts. A custom theme whose contrasts fail is still accepted, with a warning: its authors remain responsible for their colors.

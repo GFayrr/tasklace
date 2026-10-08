@@ -1,0 +1,292 @@
+import * as Y from 'yjs';
+import type { Project } from '../../core/model/project';
+import { createSharedDocument, isDocumentId } from '../../core/shared/shared-document';
+import {
+  openSharedSession,
+  openSharedSessionFromState,
+  type SharedSession,
+  type StateOpeningFailure,
+} from '../../core/shared/shared-session';
+import {
+  ISSUE_FAILURE_CODES,
+  type BridgeResult,
+  type ExchangeKind,
+  type ExportedFile,
+  type FileFailure,
+  type ImportWarning,
+  type OpenedProject,
+  type SavedProject,
+  type TasklaceBridge,
+} from '../../preload/bridge-contract';
+import type { ValidationIssue } from '../../core/validation/validation-issues';
+import type { Result } from '../../core/result';
+import { createAutosave, type Timer } from './autosave';
+
+export type ProjectBridge = Pick<
+  TasklaceBridge,
+  | 'newProject'
+  | 'openProject'
+  | 'openRecentProject'
+  | 'importProject'
+  | 'adoptProject'
+  | 'saveProject'
+  | 'saveProjectAs'
+  | 'exportProject'
+>;
+
+export type ActionFailure =
+  | FileFailure
+  | { readonly code: 'BUSY' }
+  | { readonly code: 'UNSAVED_PROJECT'; readonly cause: ActionFailure | null };
+
+export type ActionResult<T> = Result<T, ActionFailure>;
+
+type IssueFailure = Extract<FileFailure, { readonly issues: readonly ValidationIssue[] }>;
+
+/** Returns the problems a failed file action found, none for a failure that lists none. */
+export function issuesOf(failure: ActionFailure): readonly ValidationIssue[] {
+  return carriesIssues(failure) ? failure.issues : [];
+}
+
+/** Tells whether a failure is one of those that list the problems found. */
+function carriesIssues(failure: ActionFailure): failure is IssueFailure {
+  const codes: readonly string[] = ISSUE_FAILURE_CODES;
+  return codes.includes(failure.code);
+}
+
+export interface OpenedSession {
+  readonly session: SharedSession;
+  readonly fileName: string;
+  readonly warnings: readonly ImportWarning[];
+}
+
+export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'failed';
+
+export interface ProjectFilesListener {
+  readonly failed: (error: unknown) => void;
+  readonly saveStatus: (status: SaveStatus) => void;
+  readonly localCopyFailed: () => void;
+  readonly fileActionRunning: (running: boolean) => void;
+}
+
+export interface ProjectFiles {
+  readonly session: () => SharedSession | null;
+  readonly hasFile: () => boolean;
+  readonly create: (project: Project) => Promise<ActionResult<SharedSession>>;
+  readonly open: () => Promise<ActionResult<OpenedSession>>;
+  readonly openRecent: (index: number) => Promise<ActionResult<OpenedSession>>;
+  readonly importFile: (kind: ExchangeKind) => Promise<ActionResult<OpenedSession>>;
+  readonly save: () => Promise<ActionResult<SavedProject>>;
+  readonly saveAs: () => Promise<ActionResult<SavedProject>>;
+  readonly exportFile: (
+    kind: ExchangeKind,
+    text: string,
+    suggestedName: string,
+  ) => Promise<ActionResult<ExportedFile>>;
+  readonly flush: () => Promise<void>;
+}
+
+export class FileActionError extends Error {
+  /** Carries the failure of a file action the user did not start, such as an automatic save. */
+  constructor(readonly failure: ActionFailure) {
+    super(`File action failed: ${failure.code}`);
+  }
+}
+
+interface Current {
+  readonly session: SharedSession;
+  hasFile: boolean;
+}
+
+const NOTHING_TO_SAVE: ActionResult<never> = { ok: false, error: { code: 'NO_PROJECT' } };
+
+/** Keeps the project of the page in a shared document, saving it automatically a little after each change, to its file or to its local copy only while it has none, sending one save at a time, running one file action at a time, saving the open project before another replaces it and taking a new project only once the main process has adopted it, telling whether the latest changes are saved. */
+export function createProjectFiles(
+  bridge: ProjectBridge,
+  listener: ProjectFilesListener,
+  timer?: Timer,
+): ProjectFiles {
+  let current: Current | null = null;
+  let changeCount = 0;
+  let busy = false;
+  let lastSave: Promise<unknown> = Promise.resolve();
+  /** Sends the latest state of the project to be saved after the saves already sent, one at a time. */
+  const sendSave = (
+    saving: (state: Uint8Array) => Promise<BridgeResult<SavedProject>>,
+  ): Promise<ActionResult<SavedProject>> => {
+    const sent = lastSave.then((): Promise<ActionResult<SavedProject>> => {
+      const state = current === null ? null : Y.encodeStateAsUpdate(current.session.document);
+      return state === null ? Promise.resolve(NOTHING_TO_SAVE) : saving(state);
+    });
+    lastSave = sent.catch(() => undefined);
+    return sent;
+  };
+  /** Saves the project and keeps its status up to date, the status never staying on saving. */
+  const trackSave = async (
+    saving: (state: Uint8Array) => Promise<BridgeResult<SavedProject>>,
+  ): Promise<ActionResult<SavedProject>> => {
+    if (current === null) {
+      return NOTHING_TO_SAVE;
+    }
+    const savedChanges = changeCount;
+    listener.saveStatus('saving');
+    let result: ActionResult<SavedProject> = { ok: false, error: { code: 'TASK_FAILED' } };
+    try {
+      result = await sendSave(saving);
+    } finally {
+      listener.saveStatus(saveStatusAfter(result, changeCount === savedChanges));
+    }
+    if (result.ok && !result.value.localCopySaved) {
+      listener.localCopyFailed();
+    }
+    return result;
+  };
+  /** Saves the open project, throwing when the save fails. */
+  const saveCurrent = async (): Promise<void> => {
+    const result = await trackSave(bridge.saveProject);
+    if (!result.ok && result !== NOTHING_TO_SAVE) {
+      throw new FileActionError(result.error);
+    }
+  };
+  const autosave = createAutosave(saveCurrent, listener.failed, timer);
+  /** Marks the project changed and asks the automatic save to save it a little later. */
+  const changed = (): void => {
+    changeCount += 1;
+    listener.saveStatus('unsaved');
+    autosave.changed();
+  };
+  /** Runs a file action unless another one runs, keeping the project from changing meanwhile. */
+  const exclusive = async <T>(action: () => Promise<ActionResult<T>>): Promise<ActionResult<T>> => {
+    if (busy) {
+      return { ok: false, error: { code: 'BUSY' } };
+    }
+    busy = true;
+    listener.fileActionRunning(true);
+    try {
+      return await action();
+    } finally {
+      busy = false;
+      listener.fileActionRunning(false);
+    }
+  };
+  /** Finishes the pending save of the open project before another one replaces it, telling why when it fails. */
+  const saveBeforeSwitching = async (): Promise<ActionResult<null>> => {
+    try {
+      await autosave.flush();
+      return { ok: true, value: null };
+    } catch (error) {
+      console.error('The open project could not be saved before another replaced it:', error);
+      const cause = error instanceof FileActionError ? error.failure : null;
+      return { ok: false, error: { code: 'UNSAVED_PROJECT', cause } };
+    }
+  };
+  /** Tells the main process that the page accepted a project, which only then becomes the project of the window. */
+  const adopt = async (
+    session: SharedSession,
+    hasFile: boolean,
+  ): Promise<ActionResult<SharedSession>> => {
+    const adopted = await bridge.adoptProject(session.documentId);
+    if (!adopted.ok) {
+      return adopted;
+    }
+    current?.session.document.off('update', changed);
+    current = { session, hasFile };
+    session.document.on('update', changed);
+    listener.saveStatus('saved');
+    return { ok: true, value: session };
+  };
+  /** Opens a project the main process reads, after saving the open one, and adopts it. */
+  const load = async (
+    opening: () => Promise<BridgeResult<OpenedProject>>,
+    hasFile: boolean,
+  ): Promise<ActionResult<OpenedSession>> => {
+    const saved = await saveBeforeSwitching();
+    if (!saved.ok) {
+      return saved;
+    }
+    const opened = await opening();
+    if (!opened.ok) {
+      return opened;
+    }
+    const read = openedSession(opened.value);
+    if (!read.ok) {
+      return read;
+    }
+    const session = await adopt(read.value, hasFile);
+    if (!session.ok) {
+      return session;
+    }
+    const { fileName, warnings } = opened.value;
+    return { ok: true, value: { session: session.value, fileName, warnings } };
+  };
+  /** Creates a new project under the identifier the main process gives, after saving the open one, and adopts it. */
+  const create = async (project: Project): Promise<ActionResult<SharedSession>> => {
+    const saved = await saveBeforeSwitching();
+    if (!saved.ok) {
+      return saved;
+    }
+    const documentId = await bridge.newProject();
+    if (!isDocumentId(documentId)) {
+      console.error('The main process gave a new project an invalid identifier:', documentId);
+      return { ok: false, error: { code: 'TASK_FAILED' } };
+    }
+    const session = openSharedSession(createSharedDocument(project, documentId));
+    if (!session.ok) {
+      return { ok: false, error: { code: 'INVALID_PROJECT', issues: session.error } };
+    }
+    return adopt(session.value, false);
+  };
+  /** Saves the project to a file the user chooses, under the name of the project. */
+  const saveAs = async (): Promise<ActionResult<SavedProject>> => {
+    const name = current?.session.project().name ?? '';
+    const result = await trackSave((state) => bridge.saveProjectAs(state, name));
+    if (current !== null) {
+      current.hasFile ||= result.ok;
+    }
+    return result;
+  };
+  return {
+    session: () => current?.session ?? null,
+    hasFile: () => current?.hasFile === true,
+    create: (project) => exclusive(() => create(project)),
+    open: () => exclusive(() => load(bridge.openProject, true)),
+    openRecent: (index) => exclusive(() => load(() => bridge.openRecentProject(index), true)),
+    importFile: (kind) => exclusive(() => load(() => bridge.importProject(kind), false)),
+    save: () =>
+      exclusive(() => (current?.hasFile === true ? trackSave(bridge.saveProject) : saveAs())),
+    saveAs: () => exclusive(saveAs),
+    exportFile: (kind, text, suggestedName) =>
+      exclusive(() => bridge.exportProject(kind, text, suggestedName)),
+    flush: autosave.flush,
+  };
+}
+
+/** Opens a session on the state of an opened project, refusing a state that cannot be read, an invalid project, or a document other than the one the main process announced, logging why when the content is at fault. */
+function openedSession(opened: OpenedProject): ActionResult<SharedSession> {
+  const session = openSharedSessionFromState(opened.state);
+  if (!session.ok) {
+    return { ok: false, error: openingFailure(session.error) };
+  }
+  if (session.value.documentId !== opened.documentId) {
+    console.error('The opened project does not hold the document the main process announced.');
+    return { ok: false, error: { code: 'INVALID_CONTENT' } };
+  }
+  return session;
+}
+
+/** Tells why the state of an opened project could not be opened: unreadable content, logged, or the problems of an invalid project. */
+function openingFailure(failure: StateOpeningFailure): ActionFailure {
+  if (failure.kind === 'unreadableState') {
+    console.error('The opened project could not be decoded:', failure.error);
+    return { code: 'INVALID_CONTENT' };
+  }
+  return { code: 'INVALID_PROJECT', issues: failure.issues };
+}
+
+/** Returns the save status after a save: saved, or still unsaved when changes came during it or the user canceled, or failed. */
+function saveStatusAfter(result: ActionResult<SavedProject>, noChangeSince: boolean): SaveStatus {
+  if (result.ok) {
+    return noChangeSince ? 'saved' : 'unsaved';
+  }
+  return result.error.code === 'CANCELLED' ? 'unsaved' : 'failed';
+}

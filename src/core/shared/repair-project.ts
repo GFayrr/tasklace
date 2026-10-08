@@ -10,10 +10,19 @@ import {
 } from '../limits';
 import type { Dependency, Project, Task, TaskId, WorkTask } from '../model/project';
 import { failure, success, type Result } from '../result';
+import {
+  blockKey,
+  blockPairKey,
+  isKnownBlock,
+  predecessorBlockOf,
+  successorBlockOf,
+  unitCountOf,
+} from '../scheduling/block-links';
 
 export type RepairCode =
   | 'TASK_REMOVED'
   | 'DEPENDENCY_REMOVED'
+  | 'BLOCK_LINK_CLEARED'
   | 'TAG_REMOVED'
   | 'TAG_CLEARED'
   | 'MOVED_TO_ROOT'
@@ -43,6 +52,7 @@ const REPAIR_STEPS: readonly RepairStep[] = [
   (project, remaining) => repeatRepair(project, remaining, findLoopTask, moveOneToRoot),
   (project, remaining) => repeatRepair(project, remaining, findTooDeepTask, moveOneToRoot),
   singleRound(removeInvalidDependencies),
+  singleRound(clearUnknownBlocks),
   singleRound(removeDuplicateDependencies),
   breakDependencyCycles,
   singleRound(fitDailyPatterns),
@@ -221,6 +231,7 @@ function moveToRoot(project: Project, ids: ReadonlySet<TaskId>): RepairedProject
 /** Removes every dependency whose tasks no longer exist, are the same task or include a summary. */
 function removeInvalidDependencies(project: Project): RepairedProject {
   const kindById = new Map(project.tasks.map((task) => [task.id, task.kind]));
+  /** Tells whether a task exists and can carry a link, that is whether it is not a summary. */
   const isLinkable = (id: TaskId): boolean => {
     const kind = kindById.get(id);
     return kind !== undefined && kind !== 'summary';
@@ -234,13 +245,44 @@ function removeInvalidDependencies(project: Project): RepairedProject {
   return removeDependencies(project, new Set(removed.map((dependency) => dependency.id)));
 }
 
-/** Keeps only the dependency with the smallest identifier between the same two tasks. */
+/** Points every link that names a block its task no longer has at the whole task instead. */
+function clearUnknownBlocks(project: Project): RepairedProject {
+  const taskById = new Map(project.tasks.map((task) => [task.id, task]));
+  /** Tells whether a task exists and has the block a link names. */
+  const isKnown = (taskId: TaskId, block: number | null): boolean => {
+    const task = taskById.get(taskId);
+    return task !== undefined && isKnownBlock(task, block);
+  };
+  const cleared = new Set<string>();
+  const dependencies = project.dependencies.map((dependency): Dependency => {
+    const predecessorBlock = isKnown(dependency.predecessorId, dependency.predecessorBlock)
+      ? dependency.predecessorBlock
+      : null;
+    const successorBlock = isKnown(dependency.successorId, dependency.successorBlock)
+      ? dependency.successorBlock
+      : null;
+    if (
+      predecessorBlock === dependency.predecessorBlock &&
+      successorBlock === dependency.successorBlock
+    ) {
+      return dependency;
+    }
+    cleared.add(dependency.id);
+    return { ...dependency, predecessorBlock, successorBlock };
+  });
+  return {
+    project: { ...project, dependencies },
+    repairs: sortedRepairs('BLOCK_LINK_CLEARED', cleared),
+  };
+}
+
+/** Keeps only the dependency with the smallest identifier between the same two tasks or blocks. */
 function removeDuplicateDependencies(project: Project): RepairedProject {
   const keptPairs = new Set<string>();
   const byId = [...project.dependencies].sort((left, right) => compareStrings(left.id, right.id));
   const removedIds = new Set<string>();
   for (const dependency of byId) {
-    const pair = JSON.stringify([dependency.predecessorId, dependency.successorId]);
+    const pair = blockPairKey(dependency);
     if (keptPairs.has(pair)) {
       removedIds.add(dependency.id);
     }
@@ -249,57 +291,95 @@ function removeDuplicateDependencies(project: Project): RepairedProject {
   return removeDependencies(project, removedIds);
 }
 
-/** Removes, cycle after cycle, the dependency with the greatest identifier of each dependency cycle, re-examining only the tasks still blocked by a cycle, or returns null when the rounds run out. */
+/** Removes, cycle after cycle, the dependency with the greatest identifier of each loop through the blocks of the tasks, re-examining only the blocks still caught behind a loop, or returns null when the rounds run out. */
 function breakDependencyCycles(project: Project, remainingRounds: number): RepairStepResult | null {
-  const linkable = new Set(
-    project.tasks.filter((task) => task.kind !== 'summary').map((task) => task.id),
-  );
-  let blocked = findBlockedTasks(linkable, project.dependencies);
-  let links = linksWithin(blocked, project.dependencies);
+  const { units, edges } = blockNetwork(project);
+  let blocked = findBlockedUnits(units, edges);
+  let left = edgesWithin(blocked, edges);
   const removedIds = new Set<string>();
-  for (let cycle = findCycle(blocked, links); cycle !== null; cycle = findCycle(blocked, links)) {
+  for (let cycle = findCycle(blocked, left); cycle !== null; cycle = findCycle(blocked, left)) {
     if (removedIds.size >= remainingRounds) {
       return null;
     }
-    const greatest = cycle.reduce((kept, dependency) =>
-      compareStrings(dependency.id, kept.id) > 0 ? dependency : kept,
+    const greatest = cycle.reduce((kept, edge) =>
+      compareStrings(edge.id, kept.id) > 0 ? edge : kept,
     );
     removedIds.add(greatest.id);
-    const left = links.filter((link) => link.id !== greatest.id);
-    blocked = findBlockedTasks(blocked, left);
-    links = linksWithin(blocked, left);
+    left = left.filter((edge) => edge.id !== greatest.id);
+    blocked = findBlockedUnits(blocked, left);
+    left = edgesWithin(blocked, left);
   }
   return { ...removeDependencies(project, removedIds), rounds: removedIds.size };
 }
 
-/** Keeps the dependencies whose two tasks both belong to a set. */
-function linksWithin(tasks: ReadonlySet<TaskId>, links: readonly Dependency[]): Dependency[] {
-  return links.filter((link) => tasks.has(link.predecessorId) && tasks.has(link.successorId));
+interface BlockEdge {
+  readonly id: string;
+  readonly from: string;
+  readonly to: string;
 }
 
-/** Returns the tasks that can never be ordered because they are in or behind a dependency cycle, by peeling off tasks without remaining predecessors. */
-function findBlockedTasks(tasks: ReadonlySet<TaskId>, links: readonly Dependency[]): Set<TaskId> {
-  const remaining = new Map<TaskId, number>([...tasks].map((id) => [id, 0]));
-  const outgoing = new Map<TaskId, TaskId[]>();
-  for (const link of linksWithin(tasks, links)) {
-    remaining.set(link.successorId, (remaining.get(link.successorId) ?? 0) + 1);
-    const successors = outgoing.get(link.predecessorId) ?? [];
-    successors.push(link.successorId);
-    outgoing.set(link.predecessorId, successors);
+/** Lists every block of the linkable tasks and the edges between them: from each block to the next block of its task, which has an empty identifier, and along each dependency. */
+function blockNetwork(project: Project): {
+  readonly units: Set<string>;
+  readonly edges: BlockEdge[];
+} {
+  const countById = new Map(
+    project.tasks.flatMap((task) =>
+      task.kind === 'summary' ? [] : [[task.id, unitCountOf(task)] as const],
+    ),
+  );
+  const units = new Set<string>();
+  const edges: BlockEdge[] = [];
+  countById.forEach((count, taskId) => {
+    for (let block = 0; block < count; block += 1) {
+      units.add(blockKey(taskId, block));
+      if (block > 0) {
+        edges.push({ id: '', from: blockKey(taskId, block - 1), to: blockKey(taskId, block) });
+      }
+    }
+  });
+  for (const dependency of project.dependencies) {
+    const fromCount = countById.get(dependency.predecessorId);
+    const toCount = countById.get(dependency.successorId);
+    if (fromCount !== undefined && toCount !== undefined) {
+      edges.push({
+        id: dependency.id,
+        from: blockKey(dependency.predecessorId, predecessorBlockOf(dependency, fromCount)),
+        to: blockKey(dependency.successorId, successorBlockOf(dependency, toCount)),
+      });
+    }
   }
-  const ready = [...remaining].flatMap(([id, count]) => (count === 0 ? [id] : []));
-  for (let id = ready.pop(); id !== undefined; id = ready.pop()) {
-    remaining.delete(id);
-    releaseSuccessors(outgoing.get(id) ?? [], remaining, ready);
+  return { units, edges };
+}
+
+/** Keeps the edges whose two blocks both belong to a set. */
+function edgesWithin(units: ReadonlySet<string>, edges: readonly BlockEdge[]): BlockEdge[] {
+  return edges.filter((edge) => units.has(edge.from) && units.has(edge.to));
+}
+
+/** Returns the blocks that can never be ordered because they are in or behind a loop, by peeling off blocks without remaining predecessors. */
+function findBlockedUnits(units: ReadonlySet<string>, edges: readonly BlockEdge[]): Set<string> {
+  const remaining = new Map<string, number>([...units].map((unit) => [unit, 0]));
+  const outgoing = new Map<string, string[]>();
+  for (const edge of edgesWithin(units, edges)) {
+    remaining.set(edge.to, (remaining.get(edge.to) ?? 0) + 1);
+    const successors = outgoing.get(edge.from) ?? [];
+    successors.push(edge.to);
+    outgoing.set(edge.from, successors);
+  }
+  const ready = [...remaining].flatMap(([unit, count]) => (count === 0 ? [unit] : []));
+  for (let unit = ready.pop(); unit !== undefined; unit = ready.pop()) {
+    remaining.delete(unit);
+    releaseSuccessors(outgoing.get(unit) ?? [], remaining, ready);
   }
   return new Set(remaining.keys());
 }
 
 /** Decrements the remaining predecessors of each successor and queues those left with none. */
 function releaseSuccessors(
-  successors: readonly TaskId[],
-  remaining: Map<TaskId, number>,
-  ready: TaskId[],
+  successors: readonly string[],
+  remaining: Map<string, number>,
+  ready: string[],
 ): void {
   for (const successor of successors) {
     const count = (remaining.get(successor) ?? 0) - 1;
@@ -310,39 +390,40 @@ function releaseSuccessors(
   }
 }
 
-/** Returns the dependencies of one cycle, found by walking back from the blocked task with the smallest identifier along the incoming dependency with the smallest identifier, or null when no cycle is left. */
+/** Returns the dependencies of one loop, found by walking back from the blocked block with the smallest key along the incoming edge with the smallest identifier, the edge to the next block of a task coming first, or null when no loop is left. */
 function findCycle(
-  blocked: ReadonlySet<TaskId>,
-  links: readonly Dependency[],
-): readonly [Dependency, ...Dependency[]] | null {
-  const incoming = new Map<TaskId, Dependency>();
-  for (const link of [...links].sort((left, right) => compareStrings(left.id, right.id))) {
-    if (!incoming.has(link.successorId)) {
-      incoming.set(link.successorId, link);
+  blocked: ReadonlySet<string>,
+  edges: readonly BlockEdge[],
+): readonly [BlockEdge, ...BlockEdge[]] | null {
+  const incoming = new Map<string, BlockEdge>();
+  for (const edge of [...edges].sort((left, right) => compareStrings(left.id, right.id))) {
+    if (!incoming.has(edge.to)) {
+      incoming.set(edge.to, edge);
     }
   }
   const start = [...blocked].sort(compareStrings)[0];
-  return start === undefined ? null : walkBackToCycle(start, incoming);
+  const loop = start === undefined ? null : walkBackToCycle(start, incoming);
+  const [first, ...rest] = (loop ?? []).filter((edge) => edge.id !== '');
+  return first === undefined ? null : [first, ...rest];
 }
 
-/** Follows one incoming dependency after another from a blocked task and returns the dependencies of the cycle it reaches, or null. */
+/** Follows one incoming edge after another from a blocked block and returns the edges of the loop it reaches, or null. */
 function walkBackToCycle(
-  start: TaskId,
-  incoming: ReadonlyMap<TaskId, Dependency>,
-): readonly [Dependency, ...Dependency[]] | null {
-  const stepByTask = new Map<TaskId, number>();
-  const path: Dependency[] = [];
-  let taskId: TaskId | undefined = start;
-  while (taskId !== undefined && !stepByTask.has(taskId)) {
-    stepByTask.set(taskId, path.length);
-    const dependency = incoming.get(taskId);
-    if (dependency !== undefined) {
-      path.push(dependency);
+  start: string,
+  incoming: ReadonlyMap<string, BlockEdge>,
+): BlockEdge[] | null {
+  const stepByUnit = new Map<string, number>();
+  const path: BlockEdge[] = [];
+  let unit: string | undefined = start;
+  while (unit !== undefined && !stepByUnit.has(unit)) {
+    stepByUnit.set(unit, path.length);
+    const edge = incoming.get(unit);
+    if (edge !== undefined) {
+      path.push(edge);
     }
-    taskId = dependency?.predecessorId;
+    unit = edge?.from;
   }
-  const [first, ...rest] = taskId === undefined ? [] : path.slice(stepByTask.get(taskId));
-  return first === undefined ? null : [first, ...rest];
+  return unit === undefined ? null : path.slice(stepByUnit.get(unit));
 }
 
 /** Removes a set of dependencies and reports each removal. */
@@ -376,7 +457,7 @@ export function fitDailyPattern(
   task: WorkTask,
   calendar: CompiledCalendar,
 ): { readonly task: Task; readonly repairs: readonly Repair[] } {
-  const hoursPerWorkingDay = calendar.workingHoursOfDay.length;
+  const hoursPerWorkingDay = calendar.workingHoursPerDay;
   const tooManyHours = task.hoursPerDay !== null && task.hoursPerDay > hoursPerWorkingDay;
   const reduced = tooManyHours ? { ...task, hoursPerDay: hoursPerWorkingDay } : task;
   const window = computeDailyWindow(calendar, reduced);

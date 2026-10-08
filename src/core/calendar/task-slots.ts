@@ -3,10 +3,13 @@ import type { TimeRange } from '../model/calendar';
 import { failure, success, type Result } from '../result';
 import {
   HOURS_PER_DAY,
+  QUARTER_HOUR,
   dayIndexOf,
   hourOfDay,
   isProjectHour,
+  isQuarterHours,
   startOfDay,
+  toQuarters,
   type DayIndex,
   type ProjectHour,
 } from '../time';
@@ -18,6 +21,9 @@ import {
   workingHoursFrom,
   type WorkingTimeErrorCode,
 } from './working-time';
+import { valueAt } from '../table-value';
+
+const MIN_HOURS_PER_DAY = 1;
 
 export interface TaskPlacement {
   readonly start: ProjectHour;
@@ -74,22 +80,26 @@ export function computeSegmentBounds(
     window.value,
     placement.durationHours,
   );
-  const start = startOfDay(firstDay) + (firstDayHours[0] ?? 0);
-  const remaining = placement.durationHours - firstDayHours.length;
+  const start = startOfDay(firstDay) + valueAt(firstDayHours, 0);
+  const remaining = toQuarters(placement.durationHours) - firstDayHours.length;
   if (remaining === 0) {
-    return success({ start, end: startOfDay(firstDay) + (firstDayHours.at(-1) ?? 0) + 1 });
+    return success({
+      start,
+      end: startOfDay(firstDay) + valueAt(firstDayHours, firstDayHours.length - 1) + QUARTER_HOUR,
+    });
   }
-  const dailyHours = window.value.length;
-  const extraDays = Math.ceil(remaining / dailyHours);
+  const dailyQuarters = window.value.length;
+  const extraDays = Math.ceil(remaining / dailyQuarters);
   const lastDay = workingDayAfter(calendar, firstDay, extraDays);
   if (lastDay === null) {
     return failure('BEYOND_PLANNING_HORIZON');
   }
-  const lastDayHours = remaining - (extraDays - 1) * dailyHours;
-  return success({ start, end: startOfDay(lastDay) + (window.value[lastDayHours - 1] ?? 0) + 1 });
+  const lastDayQuarters = remaining - (extraDays - 1) * dailyQuarters;
+  const lastQuarter = valueAt(window.value, lastDayQuarters - 1);
+  return success({ start, end: startOfDay(lastDay) + lastQuarter + QUARTER_HOUR });
 }
 
-/** Checks the start and duration of a block and returns the hours of the day it works on after its first day. */
+/** Checks the start and duration of a block and returns the start of the quarter hours of the day it works on after its first day. */
 function checkPlacement(
   calendar: CompiledCalendar,
   placement: TaskPlacement,
@@ -103,35 +113,31 @@ function checkPlacement(
   return computeDailyWindow(calendar, placement);
 }
 
-/** Tells whether a task duration is a whole, non-negative and supported number of hours. */
+/** Tells whether a task duration is a whole, non-negative and supported number of quarter hours. */
 function isValidDuration(durationHours: number): boolean {
   return (
-    Number.isInteger(durationHours) &&
-    durationHours >= 0 &&
-    durationHours <= MAX_TASK_DURATION_HOURS
+    isQuarterHours(durationHours) && durationHours >= 0 && durationHours <= MAX_TASK_DURATION_HOURS
   );
 }
 
-/** Returns the hours of the day a task works on after its first day, or why its daily pattern does not fit the calendar. */
+/** Returns the start of the quarter hours of the day a task works on after its first day, or why its daily pattern does not fit the calendar. */
 export function computeDailyWindow(
   calendar: CompiledCalendar,
   { hoursPerDay, dailyStartHour }: Pick<TaskPlacement, 'hoursPerDay' | 'dailyStartHour'>,
 ): Result<readonly number[], DailyWindowErrorCode> {
-  const hoursPerWorkingDay = calendar.workingHoursOfDay.length;
+  const hoursPerWorkingDay = calendar.workingHoursPerDay;
   const taskHoursPerDay = hoursPerDay ?? hoursPerWorkingDay;
-  if (
-    !Number.isInteger(taskHoursPerDay) ||
-    taskHoursPerDay < 1 ||
-    taskHoursPerDay > hoursPerWorkingDay
-  ) {
+  const tooFew = hoursPerDay !== null && hoursPerDay < MIN_HOURS_PER_DAY;
+  if (!isQuarterHours(taskHoursPerDay) || tooFew || taskHoursPerDay > hoursPerWorkingDay) {
     return failure('INVALID_HOURS_PER_DAY');
   }
   const firstHour = dailyStartHour ?? 0;
-  if (!Number.isInteger(firstHour) || firstHour < 0 || firstHour >= HOURS_PER_DAY) {
+  if (!isQuarterHours(firstHour) || firstHour < 0 || firstHour >= HOURS_PER_DAY) {
     return failure('INVALID_DAILY_START_HOUR');
   }
-  const window = workingHoursFrom(calendar, firstHour).slice(0, taskHoursPerDay);
-  return window.length === taskHoursPerDay ? success(window) : failure('INVALID_DAILY_START_HOUR');
+  const quarters = toQuarters(taskHoursPerDay);
+  const window = workingHoursFrom(calendar, firstHour).slice(0, quarters);
+  return window.length === quarters ? success(window) : failure('INVALID_DAILY_START_HOUR');
 }
 
 /** Builds the time slots of a task, day after day, until its duration is used up. */
@@ -153,7 +159,7 @@ function collectTaskSlots(
   );
   let day: DayIndex | null = dayIndexOf(firstHour.value);
   appendRanges(slots, startOfDay(day), toRanges(firstDayHours));
-  let remaining = placement.durationHours - firstDayHours.length;
+  let remaining = toQuarters(placement.durationHours) - firstDayHours.length;
   const fullDayRanges = toRanges(window);
   while (remaining > 0) {
     day = nextWorkingDay(calendar, day + 1);
@@ -168,29 +174,29 @@ function collectTaskSlots(
   return success(slots);
 }
 
-/** Lists the hours of the day worked on the first day, starting no earlier than the daily window. */
+/** Lists the start of the quarter hours of the day worked on the first day, starting no earlier than the daily window. */
 function firstDayHoursOfDay(
   calendar: CompiledCalendar,
   firstHour: ProjectHour,
   window: readonly number[],
   durationHours: number,
 ): number[] {
-  const earliestHourOfDay = Math.max(hourOfDay(firstHour), window[0] ?? 0);
+  const earliestHourOfDay = Math.max(hourOfDay(firstHour), valueAt(window, 0));
   return workingHoursFrom(calendar, earliestHourOfDay).slice(
     0,
-    Math.min(window.length, durationHours),
+    Math.min(window.length, toQuarters(durationHours)),
   );
 }
 
-/** Groups sorted hours of the day into continuous ranges. */
-function toRanges(hoursOfDay: readonly number[]): TimeRange[] {
+/** Groups the sorted starts of quarter hours of the day into continuous ranges. */
+function toRanges(quartersOfDay: readonly number[]): TimeRange[] {
   const ranges: TimeRange[] = [];
-  for (const hour of hoursOfDay) {
+  for (const quarter of quartersOfDay) {
     const last = ranges.at(-1);
-    if (last?.endHour === hour) {
-      ranges[ranges.length - 1] = { startHour: last.startHour, endHour: hour + 1 };
+    if (last?.endHour === quarter) {
+      ranges[ranges.length - 1] = { startHour: last.startHour, endHour: quarter + QUARTER_HOUR };
     } else {
-      ranges.push({ startHour: hour, endHour: hour + 1 });
+      ranges.push({ startHour: quarter, endHour: quarter + QUARTER_HOUR });
     }
   }
   return ranges;

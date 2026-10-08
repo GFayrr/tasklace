@@ -1,7 +1,11 @@
 import fc from 'fast-check';
-import { compileCalendar } from '../calendar/compile-calendar';
+import { compileCalendar, type CompiledCalendar } from '../calendar/compile-calendar';
+import { MAX_HIERARCHY_DEPTH } from '../limits';
+import { TAG_PALETTE } from '../tags/tag-palette';
 import type { Dependency, DependencyType, Project, SchedulableTask, Task } from '../model/project';
-import { calendarArbitrary, instantArbitrary, unwrap } from './arbitraries';
+import { fromQuarters, QUARTER_HOUR, QUARTERS_PER_HOUR, toQuarters } from '../time';
+import { calendarArbitrary, instantArbitrary, quarterHoursArbitrary, unwrap } from './arbitraries';
+import { analyzeProjectStructure } from '../scheduling/project-structure';
 import { milestone, project, summary, workTask } from './project-builder';
 
 const MAX_TASKS = 20;
@@ -22,8 +26,9 @@ export interface GeneratedProject {
 }
 
 const blockArbitrary = fc.record({
-  durationHours: fc.integer({ min: 1, max: MAX_BLOCK_HOURS }),
-  gapDaysBefore: fc.integer({ min: 1, max: MAX_GAP_DAYS }),
+  durationHours: quarterHoursArbitrary(QUARTER_HOUR, MAX_BLOCK_HOURS),
+  gapDaysBefore: fc.integer({ min: 0, max: MAX_GAP_DAYS }),
+  startNoEarlierThan: fc.option(instantArbitrary),
 });
 
 const taskShapeArbitrary = fc.record({
@@ -39,7 +44,9 @@ const dependencyShapeArbitrary = fc.record({
   from: fc.nat(),
   to: fc.nat(),
   type: fc.constantFrom(...DEPENDENCY_TYPES),
-  lagHours: fc.integer({ min: -MAX_LAG, max: MAX_LAG }),
+  lagHours: quarterHoursArbitrary(-MAX_LAG, MAX_LAG),
+  fromBlock: fc.option(fc.nat()),
+  toBlock: fc.option(fc.nat()),
 });
 
 type TaskShape = typeof taskShapeArbitrary extends fc.Arbitrary<infer Shape> ? Shape : never;
@@ -61,20 +68,29 @@ function buildTask(index: number, shape: TaskShape, hoursPerWorkingDay: number):
   const segments = shape.blocks.map((block, blockIndex) => ({
     durationHours: block.durationHours,
     gapDaysBefore: blockIndex === 0 ? 0 : block.gapDaysBefore,
+    startNoEarlierThan: blockIndex === 0 ? null : block.startNoEarlierThan,
   }));
   const hoursPerDay =
-    shape.hoursPerDayRatio === null
+    shape.hoursPerDayRatio === null || hoursPerWorkingDay < 1
       ? null
-      : Math.max(1, Math.round(shape.hoursPerDayRatio * hoursPerWorkingDay));
+      : fromQuarters(
+          Math.max(
+            QUARTERS_PER_HOUR,
+            Math.round(shape.hoursPerDayRatio * toQuarters(hoursPerWorkingDay)),
+          ),
+        );
   return workTask(id, { ...common, segments, hoursPerDay });
 }
 
-/** Turns random link shapes into forward links between distinct tasks, one per pair, so that the network is acyclic. */
-function buildDependencies(taskCount: number, shapes: readonly DependencyShape[]): Dependency[] {
+/** Turns random link shapes into forward links between distinct tasks, one per pair, some of them to or from a block of a split task, so that the network is acyclic even block by block. */
+function buildDependencies(
+  leaves: readonly SchedulableTask[],
+  shapes: readonly DependencyShape[],
+): Dependency[] {
   const byPair = new Map<string, Dependency>();
   for (const shape of shapes) {
-    const from = shape.from % taskCount;
-    const to = shape.to % taskCount;
+    const from = shape.from % leaves.length;
+    const to = shape.to % leaves.length;
     if (from < to) {
       const predecessorId = `t${String(from).padStart(2, '0')}`;
       const successorId = `t${String(to).padStart(2, '0')}`;
@@ -85,10 +101,20 @@ function buildDependencies(taskCount: number, shapes: readonly DependencyShape[]
         successorId,
         type: shape.type,
         lagHours: shape.lagHours,
+        predecessorBlock: blockOf(leaves[from], shape.fromBlock),
+        successorBlock: blockOf(leaves[to], shape.toBlock),
       });
     }
   }
   return [...byPair.values()];
+}
+
+/** Picks a block of a split work task, or the whole task for any other task or no pick. */
+function blockOf(task: SchedulableTask | undefined, pick: number | null): number | null {
+  if (task?.kind !== 'task' || task.segments.length < 2 || pick === null) {
+    return null;
+  }
+  return pick % task.segments.length;
 }
 
 export const projectArbitrary: fc.Arbitrary<GeneratedProject> = calendarArbitrary.chain(
@@ -101,12 +127,12 @@ export const projectArbitrary: fc.Arbitrary<GeneratedProject> = calendarArbitrar
         dependencyShapes: fc.array(dependencyShapeArbitrary, { maxLength: MAX_TASKS * 2 }),
       })
       .map(({ startDate, taskShapes, dependencyShapes }) => {
-        const hoursPerWorkingDay = calendar.workingHoursOfDay.length;
+        const hoursPerWorkingDay = calendar.workingHoursPerDay;
         const leaves = taskShapes.map((shape, index) =>
           buildTask(index, shape, hoursPerWorkingDay),
         );
         const summaries: Task[] = [summary('s0'), summary('s1', { parentId: 's0' }), summary('s2')];
-        const dependencies = buildDependencies(leaves.length, dependencyShapes);
+        const dependencies = buildDependencies(leaves, dependencyShapes);
         return {
           project: project([...summaries, ...leaves], dependencies, {
             startDate,
@@ -114,10 +140,232 @@ export const projectArbitrary: fc.Arbitrary<GeneratedProject> = calendarArbitrar
             options: {
               criticalPathEnabled: true,
               dateConstraintsEnabled: false,
+              baselineEnabled: false,
               alwaysShowPatterns: false,
             },
           }),
         };
       });
   },
+);
+
+/** Generates projects where a task runs between two blocks of a split task, waiting for one block and making the next one wait for it, with random types, lags and gaps, keeping only projects without loops. */
+export const interleavedProjectArbitrary: fc.Arbitrary<GeneratedProject> = projectArbitrary
+  .chain((generated) =>
+    fc.record({
+      generated: fc.constant(generated),
+      splitPick: fc.nat(),
+      insidePick: fc.nat(),
+      blockPick: fc.nat(),
+      leaving: fc.constantFrom(...DEPENDENCY_TYPES),
+      entering: fc.constantFrom(...DEPENDENCY_TYPES),
+      lags: fc.tuple(
+        quarterHoursArbitrary(-MAX_LAG, MAX_LAG),
+        quarterHoursArbitrary(-MAX_LAG, MAX_LAG),
+      ),
+    }),
+  )
+  .map(({ generated, splitPick, insidePick, blockPick, leaving, entering, lags }) =>
+    withTaskBetweenBlocks(generated.project, {
+      splitPick,
+      insidePick,
+      blockPick,
+      leaving,
+      entering,
+      lags,
+    }),
+  )
+  .filter((generated) => analyzeProjectStructure(generated.project).ok);
+
+/** Adds to a project a task running between two consecutive blocks of a split task, or leaves it unchanged when it has no split task or no other task. */
+function withTaskBetweenBlocks(
+  input: Project,
+  picks: {
+    readonly splitPick: number;
+    readonly insidePick: number;
+    readonly blockPick: number;
+    readonly leaving: DependencyType;
+    readonly entering: DependencyType;
+    readonly lags: readonly [number, number];
+  },
+): GeneratedProject {
+  const split = input.tasks.filter((task) => task.kind === 'task' && task.segments.length > 1);
+  const splitTask = split[picks.splitPick % Math.max(split.length, 1)];
+  const others = input.tasks.filter((task) => task.kind !== 'summary' && task.id !== splitTask?.id);
+  const inside = others[picks.insidePick % Math.max(others.length, 1)];
+  if (splitTask?.kind !== 'task' || inside === undefined) {
+    return { project: input };
+  }
+  const block = picks.blockPick % (splitTask.segments.length - 1);
+  const kept = input.dependencies.filter(
+    (link) =>
+      ![splitTask.id, inside.id].includes(link.predecessorId) ||
+      ![splitTask.id, inside.id].includes(link.successorId),
+  );
+  const between: Dependency[] = [
+    {
+      id: `between-out-${splitTask.id}`,
+      predecessorId: splitTask.id,
+      predecessorBlock: block,
+      successorId: inside.id,
+      successorBlock: null,
+      type: picks.leaving,
+      lagHours: picks.lags[0],
+    },
+    {
+      id: `between-in-${splitTask.id}`,
+      predecessorId: inside.id,
+      predecessorBlock: null,
+      successorId: splitTask.id,
+      successorBlock: block + 1,
+      type: picks.entering,
+      lagHours: picks.lags[1],
+    },
+  ];
+  return { project: { ...input, dependencies: [...kept, ...between] } };
+}
+
+const MAX_RICH_TAGS = 6;
+const MAX_BASELINE_OFFSET_QUARTERS = 400;
+const GONE_TASK_ID = 'gone';
+
+const baselineShapeArbitrary = fc.option(
+  fc.record({
+    offset: fc.nat({ max: MAX_BASELINE_OFFSET_QUARTERS }),
+    length: fc.nat({ max: MAX_BASELINE_OFFSET_QUARTERS }),
+    withGoneTask: fc.boolean(),
+  }),
+  { nil: null },
+);
+const MAX_GENERATED_NAME = 20;
+const CONTROL_CHARACTER = /\p{Cc}/u;
+
+/** Generates names of any script, emoji included, that a project accepts: well formed, without control characters and not blank. */
+const nameArbitrary = fc
+  .string({ unit: 'grapheme', minLength: 1, maxLength: MAX_GENERATED_NAME })
+  .filter((text) => text.trim() !== '' && text.isWellFormed() && !CONTROL_CHARACTER.test(text));
+
+const richTaskArbitrary = fc.record({
+  name: nameArbitrary,
+  tagPick: fc.option(fc.nat()),
+  mustFinishOn: fc.option(instantArbitrary),
+  deadline: fc.option(instantArbitrary),
+  dailyStartPick: fc.option(fc.nat()),
+});
+
+/** Picks a daily start time that leaves a work task enough working time each day, or none when the task uses the hours of the project or no pick is given. */
+function dailyStartOf(
+  task: SchedulableTask,
+  calendar: CompiledCalendar,
+  pick: number | null,
+): number | null {
+  if (task.kind !== 'task' || task.hoursPerDay === null || pick === null) {
+    return null;
+  }
+  const starts = calendar.workingQuarterStartHours;
+  const choices = starts.length - toQuarters(task.hoursPerDay) + 1;
+  return starts[pick % Math.max(choices, 1)] ?? null;
+}
+
+/** Builds a baseline plan freezing every task of a project at the same dates, with an entry for a task deleted since when asked, or no baseline when no shape is given. */
+function baselineOf(
+  base: Project,
+  shape: {
+    readonly offset: number;
+    readonly length: number;
+    readonly withGoneTask: boolean;
+  } | null,
+): Project['baseline'] {
+  if (shape === null) {
+    return null;
+  }
+  const start = base.startDate + fromQuarters(shape.offset);
+  const end = start + fromQuarters(shape.length);
+  const ids = [...base.tasks.map((task) => task.id), ...(shape.withGoneTask ? [GONE_TASK_ID] : [])];
+  return {
+    takenAt: base.startDate,
+    entries: ids.map((taskId) => ({
+      taskId,
+      start,
+      end,
+      durationHours: fromQuarters(shape.length),
+    })),
+  };
+}
+
+/** Generates projects using every feature a file can hold: tags, some of them people or teams, date constraints enabled or not, daily start times, Unicode names, summaries nested up to the deepest allowed level and an optional baseline plan, sometimes with an entry for a deleted task. */
+export const richProjectArbitrary: fc.Arbitrary<GeneratedProject> = projectArbitrary.chain(
+  ({ project: base }) =>
+    fc
+      .record({
+        projectName: nameArbitrary,
+        tags: fc.uniqueArray(
+          fc.record({
+            name: nameArbitrary,
+            color: fc.constantFrom(...TAG_PALETTE),
+            person: fc.boolean(),
+          }),
+          { maxLength: MAX_RICH_TAGS, selector: (tag) => tag.name },
+        ),
+        tasks: fc.array(richTaskArbitrary, {
+          minLength: base.tasks.length,
+          maxLength: base.tasks.length,
+        }),
+        depth: fc.integer({ min: 0, max: MAX_HIERARCHY_DEPTH - 1 }),
+        dateConstraintsEnabled: fc.boolean(),
+        baselineEnabled: fc.boolean(),
+        alwaysShowPatterns: fc.boolean(),
+        baseline: baselineShapeArbitrary,
+      })
+      .map((extra) => {
+        const calendar = unwrap(compileCalendar(base.calendar));
+        const tags = extra.tags.map((tag, index) => ({
+          id: `g${String(index)}`,
+          name: tag.name,
+          color: tag.color,
+          representsPersonOrTeam: tag.person,
+        }));
+        const chain: Task[] = Array.from({ length: extra.depth }, (_, level) =>
+          summary(`d${String(level)}`, { parentId: level === 0 ? null : `d${String(level - 1)}` }),
+        );
+        const deepest = chain.at(-1)?.id ?? null;
+        const tasks = base.tasks.map((task, index): Task => {
+          const shape = extra.tasks[index];
+          if (shape === undefined || task.kind === 'summary') {
+            return { ...task, name: shape?.name ?? task.name };
+          }
+          const tagId =
+            shape.tagPick === null || tags.length === 0
+              ? null
+              : (tags[shape.tagPick % tags.length]?.id ?? null);
+          const moved = deepest !== null && task.id === 't00' ? { parentId: deepest } : {};
+          const constraints = { mustFinishOn: shape.mustFinishOn, deadline: shape.deadline };
+          if (task.kind === 'milestone') {
+            return { ...task, ...moved, name: shape.name, tagId, ...constraints };
+          }
+          return {
+            ...task,
+            ...moved,
+            name: shape.name,
+            tagId,
+            ...constraints,
+            dailyStartHour: dailyStartOf(task, calendar, shape.dailyStartPick),
+          };
+        });
+        return {
+          project: {
+            ...base,
+            name: extra.projectName,
+            tags,
+            tasks: [...chain, ...tasks],
+            baseline: baselineOf(base, extra.baseline),
+            options: {
+              criticalPathEnabled: true,
+              dateConstraintsEnabled: extra.dateConstraintsEnabled,
+              baselineEnabled: extra.baselineEnabled,
+              alwaysShowPatterns: extra.alwaysShowPatterns,
+            },
+          },
+        };
+      }),
 );

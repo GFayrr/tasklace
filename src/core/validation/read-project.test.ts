@@ -65,7 +65,12 @@ const RICH_PROJECT: Project = project(
   {
     name: 'Rentrée 2026',
     tags: [DESIGN_TAG, ALICE_TAG],
-    options: { criticalPathEnabled: true, dateConstraintsEnabled: true, alwaysShowPatterns: false },
+    options: {
+      criticalPathEnabled: true,
+      dateConstraintsEnabled: true,
+      baselineEnabled: false,
+      alwaysShowPatterns: false,
+    },
     calendar: {
       workingWeekdays: [1, 2, 3, 4, 5, 6],
       workingTimeRanges: [
@@ -148,10 +153,15 @@ describe('readProject: valid input', () => {
       hoursPerDay: 24,
       dailyStartHour: 0,
       segments: [
-        { durationHours: MAX_TASK_DURATION_HOURS - MAX_SEGMENTS_PER_TASK + 1, gapDaysBefore: 0 },
+        {
+          durationHours: MAX_TASK_DURATION_HOURS - MAX_SEGMENTS_PER_TASK + 1,
+          gapDaysBefore: 0,
+          startNoEarlierThan: null,
+        },
         ...Array.from({ length: MAX_SEGMENTS_PER_TASK - 1 }, () => ({
           durationHours: 1,
           gapDaysBefore: MAX_SEGMENT_GAP_DAYS,
+          startNoEarlierThan: null,
         })),
       ],
     };
@@ -205,6 +215,17 @@ describe('readProject: shape of the data', () => {
       'dependencies',
       'baseline',
     ]);
+  });
+
+  it('requires every option, the baseline switch included', () => {
+    const options = { ...(projectWith({})['options'] as Data) };
+    delete options['baselineEnabled'];
+    expect(issuesOf(projectWith({ options }))).toEqual(
+      issue('options.baselineEnabled', 'MISSING_FIELD'),
+    );
+    expect(issuesOf(projectWith({ options: { ...options, baselineEnabled: 'yes' } }))).toEqual(
+      issue('options.baselineEnabled', 'WRONG_TYPE'),
+    );
   });
 
   it('reports unknown fields at every level', () => {
@@ -295,7 +316,7 @@ describe('readProject: values', () => {
     [{ name: 'x'.repeat(101) }, 'name', 'TOO_LONG'],
     [{ startDate: MIN_PROJECT_HOUR - 1 }, 'startDate', 'OUT_OF_RANGE'],
     [{ startDate: END_PROJECT_HOUR }, 'startDate', 'OUT_OF_RANGE'],
-    [{ startDate: 1.5 }, 'startDate', 'WRONG_TYPE'],
+    [{ startDate: 1.3 }, 'startDate', 'WRONG_TYPE'],
     [{ startDate: '2026-09-28T09:00' }, 'startDate', 'WRONG_TYPE'],
     [
       { options: { ...RICH_PROJECT.options, criticalPathEnabled: 1 } },
@@ -366,16 +387,67 @@ describe('readProject: values', () => {
     );
   });
 
+  it('rejects a tag that is not an object', () => {
+    expect(issuesOf(projectWith({ tags: [42] }))).toEqual(issue('tags[0]', 'WRONG_TYPE'));
+  });
+
   it.each([
     [{ id: 'a/b' }, 'dependencies[0].id', 'INVALID_IDENTIFIER'],
     [{ predecessorId: '' }, 'dependencies[0].predecessorId', 'INVALID_IDENTIFIER'],
     [{ type: 'FS' }, 'dependencies[0].type', 'OUT_OF_RANGE'],
     [{ lagHours: MAX_LAG_HOURS + 1 }, 'dependencies[0].lagHours', 'OUT_OF_RANGE'],
-    [{ lagHours: 0.5 }, 'dependencies[0].lagHours', 'WRONG_TYPE'],
+    [{ lagHours: 0.3 }, 'dependencies[0].lagHours', 'WRONG_TYPE'],
+    [{ predecessorBlock: -1 }, 'dependencies[0].predecessorBlock', 'OUT_OF_RANGE'],
+    [{ predecessorBlock: 1.5 }, 'dependencies[0].predecessorBlock', 'WRONG_TYPE'],
+    [{ successorBlock: '1' }, 'dependencies[0].successorBlock', 'WRONG_TYPE'],
+    [{ successorBlock: true }, 'dependencies[0].successorBlock', 'WRONG_TYPE'],
+    [{ successorBlock: MAX_SEGMENTS_PER_TASK }, 'dependencies[0].successorBlock', 'OUT_OF_RANGE'],
   ] as const)('rejects the dependency %j at %s', (overrides, path, code) => {
     expect(issuesOf(projectWith({ dependencies: [{ ...link('a', 'b'), ...overrides }] }))).toEqual(
       issue(path, code),
     );
+  });
+});
+
+describe('readProject: start dates of blocks', () => {
+  /** Builds two blocks of seven hours with the given start dates. */
+  const blocks = (first: unknown, second: unknown) => [
+    { durationHours: 7, gapDaysBefore: 0, startNoEarlierThan: first },
+    { durationHours: 7, gapDaysBefore: 1, startNoEarlierThan: second },
+  ];
+
+  it('reads the start date of a later block, a missing one meaning none', () => {
+    const later = at(2026, 10, 6, 13);
+    const read = readProject(taskWith(1, { segments: blocks(null, later) }), STORED_VALUE_CODEC);
+    expect(read.ok && read.value.tasks[1]).toMatchObject({
+      segments: [{ startNoEarlierThan: null }, { startNoEarlierThan: later }],
+    });
+    const bare = [
+      { durationHours: 7, gapDaysBefore: 0 },
+      { durationHours: 7, gapDaysBefore: 1 },
+    ];
+    const missing = readProject(taskWith(1, { segments: bare }), STORED_VALUE_CODEC);
+    expect(missing.ok && missing.value.tasks[1]).toMatchObject({
+      segments: [{ startNoEarlierThan: null }, { startNoEarlierThan: null }],
+    });
+  });
+
+  it('refuses a start date on the first block, which the task start date stands for, and a wrong value', () => {
+    expect(issuesOf(taskWith(1, { segments: blocks(at(2026, 10, 6, 13), null) }))).toEqual(
+      issue('tasks[1].segments[0].startNoEarlierThan', 'OUT_OF_RANGE'),
+    );
+    expect(issuesOf(taskWith(1, { segments: blocks(null, 'soon') }))).toEqual(
+      issue('tasks[1].segments[1].startNoEarlierThan', 'WRONG_TYPE'),
+    );
+  });
+});
+
+describe('readProject: links to blocks', () => {
+  it('reads a missing block reference as the whole task', () => {
+    const { id, predecessorId, successorId, type, lagHours } = link('a', 'b');
+    const bare = { id, predecessorId, successorId, type, lagHours };
+    const result = readProject(projectWith({ dependencies: [bare] }), STORED_VALUE_CODEC);
+    expect(result.ok && result.value.dependencies).toEqual([link('a', 'b')]);
   });
 });
 
@@ -401,14 +473,18 @@ describe('readProject: tasks', () => {
     [
       1,
       {
-        segments: new Array(MAX_SEGMENTS_PER_TASK + 1).fill({ durationHours: 1, gapDaysBefore: 1 }),
+        segments: new Array(MAX_SEGMENTS_PER_TASK + 1).fill({
+          durationHours: 1,
+          gapDaysBefore: 1,
+          startNoEarlierThan: null,
+        }),
       },
       'tasks[1].segments',
       'TOO_MANY_ITEMS',
     ],
     [
       1,
-      { segments: [{ durationHours: 1, gapDaysBefore: 1 }] },
+      { segments: [{ durationHours: 1, gapDaysBefore: 1, startNoEarlierThan: null }] },
       'tasks[1].segments[0].gapDaysBefore',
       'OUT_OF_RANGE',
     ],
@@ -416,8 +492,8 @@ describe('readProject: tasks', () => {
       1,
       {
         segments: [
-          { durationHours: 1, gapDaysBefore: 0 },
-          { durationHours: 1, gapDaysBefore: 0 },
+          { durationHours: 1, gapDaysBefore: 0, startNoEarlierThan: null },
+          { durationHours: 1, gapDaysBefore: -1, startNoEarlierThan: null },
         ],
       },
       'tasks[1].segments[1].gapDaysBefore',
@@ -427,8 +503,8 @@ describe('readProject: tasks', () => {
       1,
       {
         segments: [
-          { durationHours: 1, gapDaysBefore: 0 },
-          { durationHours: 1, gapDaysBefore: MAX_SEGMENT_GAP_DAYS + 1 },
+          { durationHours: 1, gapDaysBefore: 0, startNoEarlierThan: null },
+          { durationHours: 1, gapDaysBefore: MAX_SEGMENT_GAP_DAYS + 1, startNoEarlierThan: null },
         ],
       },
       'tasks[1].segments[1].gapDaysBefore',
@@ -436,13 +512,21 @@ describe('readProject: tasks', () => {
     ],
     [
       1,
-      { segments: [{ durationHours: 0, gapDaysBefore: 0 }] },
+      { segments: [{ durationHours: 0, gapDaysBefore: 0, startNoEarlierThan: null }] },
       'tasks[1].segments[0].durationHours',
       'OUT_OF_RANGE',
     ],
     [
       1,
-      { segments: [{ durationHours: MAX_TASK_DURATION_HOURS + 1, gapDaysBefore: 0 }] },
+      {
+        segments: [
+          {
+            durationHours: MAX_TASK_DURATION_HOURS + 1,
+            gapDaysBefore: 0,
+            startNoEarlierThan: null,
+          },
+        ],
+      },
       'tasks[1].segments[0].durationHours',
       'OUT_OF_RANGE',
     ],
@@ -671,8 +755,8 @@ describe('readProject: holes, totals and scheduling', () => {
 
   it('rejects blocks whose total duration exceeds the maximum task duration', () => {
     const segments = [
-      { durationHours: MAX_TASK_DURATION_HOURS, gapDaysBefore: 0 },
-      { durationHours: 1, gapDaysBefore: 1 },
+      { durationHours: MAX_TASK_DURATION_HOURS, gapDaysBefore: 0, startNoEarlierThan: null },
+      { durationHours: 1, gapDaysBefore: 1, startNoEarlierThan: null },
     ];
     expect(issuesOf(taskWith(1, { segments }))).toEqual(issue('tasks[1].segments', 'OUT_OF_RANGE'));
   });
@@ -687,24 +771,30 @@ describe('readProject: holes, totals and scheduling', () => {
       'blocks spread far beyond the planning period',
       taskWith(1, {
         segments: [
-          { durationHours: 1, gapDaysBefore: 0 },
+          { durationHours: 1, gapDaysBefore: 0, startNoEarlierThan: null },
           ...Array.from({ length: MAX_SEGMENTS_PER_TASK - 1 }, () => ({
             durationHours: 1,
             gapDaysBefore: MAX_SEGMENT_GAP_DAYS,
+            startNoEarlierThan: null,
           })),
         ],
       }),
+      'INVALID_INSTANT',
     ],
     [
       'a calendar without any working day',
       calendarWith({ nonWorkingPeriods: [{ firstDay: MIN_DAY_INDEX, lastDay: MAX_DAY_INDEX }] }),
+      'BEYOND_PLANNING_HORIZON',
     ],
-  ])('accepts %s and lets scheduling fail with a typed error', (_label, data) => {
+  ] as const)('accepts %s and lets scheduling fail with a typed error', (_label, data, code) => {
     const read = readProject(data, STORED_VALUE_CODEC);
     if (!read.ok) {
       throw new Error(JSON.stringify(read.error));
     }
-    expect(scheduleProject(read.value).ok).toBe(false);
+    expect(scheduleProject(read.value)).toEqual({
+      ok: false,
+      error: { kind: 'task', error: { code, taskId: 'a' } },
+    });
   });
 });
 
@@ -715,6 +805,7 @@ describe('readProject: baseline', () => {
     end: at(2026, 9, 28, 17),
     durationHours: 7,
   };
+  /** Builds the data of a project holding a baseline with these entries. */
   const withBaseline = (entries: readonly unknown[]): Data =>
     projectWith({ baseline: { takenAt: at(2026, 9, 27, 18), entries } });
 

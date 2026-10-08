@@ -2,11 +2,9 @@ import type { Task, TaskId } from '../model/project';
 import type { ProjectHour } from '../time';
 import type { Placement } from './task-placement';
 
-export interface SummarySchedule {
-  readonly start: ProjectHour | null;
-  readonly end: ProjectHour | null;
-  readonly progressPercent: number | null;
-}
+export type SummarySchedule =
+  | { readonly start: null; readonly end: null; readonly progressPercent: null }
+  | { readonly start: ProjectHour; readonly end: ProjectHour; readonly progressPercent: number };
 
 interface Aggregate {
   readonly start: ProjectHour | null;
@@ -112,12 +110,13 @@ function pickDate(
   return right === null ? left : pick(left, right);
 }
 
-/** Turns an aggregate into dates and a duration-weighted progress, milestones counting only alone. */
+/** Turns an aggregate into dates and a duration-weighted progress, milestones counting only alone, a summary with nothing dated inside having neither, and a dated summary without work holding at least one milestone. */
 function toSummarySchedule(aggregate: Aggregate): SummarySchedule {
   const { start, end, workHours, weightedProgress, milestoneCount, milestoneProgress } = aggregate;
-  if (workHours > 0) {
-    return { start, end, progressPercent: weightedProgress / workHours };
+  if (start === null || end === null) {
+    return { start: null, end: null, progressPercent: null };
   }
-  const progressPercent = milestoneCount > 0 ? milestoneProgress / milestoneCount : null;
+  const progressPercent =
+    workHours > 0 ? weightedProgress / workHours : milestoneProgress / milestoneCount;
   return { start, end, progressPercent };
 }

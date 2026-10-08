@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CALENDAR } from '../calendar/default-calendar';
+import { TEST_CALENDAR } from '../testing/test-calendar';
 import type { Dependency, Project, Task, WorkTask } from '../model/project';
 import { at, format } from '../testing/civil-time';
 import {
@@ -17,6 +17,7 @@ import { scheduleProject, type Schedule } from './schedule-project';
 const ALL_OPTIONS = {
   criticalPathEnabled: true,
   dateConstraintsEnabled: true,
+  baselineEnabled: false,
   alwaysShowPatterns: false,
 };
 
@@ -41,9 +42,19 @@ function datesAfterScheduling(
 
 /** Builds a work task of a given duration in hours. */
 function taskOf(id: string, durationHours: number, overrides: Partial<WorkTask> = {}): Task {
-  return workTask(id, { segments: [{ durationHours, gapDaysBefore: 0 }], ...overrides });
+  return workTask(id, {
+    segments: [{ durationHours, gapDaysBefore: 0, startNoEarlierThan: null }],
+    ...overrides,
+  });
 }
 
+const UNKNOWN_FLOAT = {
+  lateStart: null,
+  lateFinish: null,
+  totalFloatHours: null,
+  freeFloatHours: null,
+  isCritical: true,
+} as const;
 describe('scheduleProject: dates', () => {
   it('starts a task without predecessor at the project start', () => {
     expect(datesAfterScheduling('a', [taskOf('a', 7)])).toBe('2026-09-28 09:00 → 2026-09-28 17:00');
@@ -292,11 +303,13 @@ describe('scheduleProject: critical path', () => {
         options: {
           criticalPathEnabled: true,
           dateConstraintsEnabled: false,
+          baselineEnabled: false,
           alwaysShowPatterns: false,
         },
       }),
     );
-    const summaryOf = (id: string): [number, number, boolean] | undefined => {
+    /** Returns the total float, free float and critical flag of a task, or nothing for a task without float. */
+    const summaryOf = (id: string): [number | null, number | null, boolean] | undefined => {
       const taskFloat = schedule.floats?.get(id);
       return (
         taskFloat && [taskFloat.totalFloatHours, taskFloat.freeFloatHours, taskFloat.isCritical]
@@ -349,7 +362,7 @@ describe('scheduleProject: critical path', () => {
 describe('scheduleProject: failures', () => {
   it('reports an invalid calendar', () => {
     const result = scheduleProject(
-      project([], [], { calendar: { ...DEFAULT_CALENDAR, workingWeekdays: [] } }),
+      project([], [], { calendar: { ...TEST_CALENDAR, workingWeekdays: [] } }),
     );
     expect(result).toEqual({
       ok: false,
@@ -400,5 +413,154 @@ describe('scheduleProject: failures', () => {
       ok: false,
       error: { kind: 'task', error: { code: 'BEYOND_PLANNING_HORIZON', taskId: 'b' } },
     });
+  });
+
+  it('dates a summary from its dated children only, an empty summary after them adding nothing', () => {
+    const plan = project([
+      summary('outer', { sortKey: 'a' }),
+      workTask('work', { parentId: 'outer', sortKey: 'b' }),
+      summary('empty', { parentId: 'outer', sortKey: 'c' }),
+    ]);
+    const schedule = scheduleOrThrow(plan);
+    const work = schedule.placements.get('work');
+    expect(schedule.summaries.get('empty')).toEqual({
+      start: null,
+      end: null,
+      progressPercent: null,
+    });
+    expect(schedule.summaries.get('outer')).toEqual({
+      start: work?.start,
+      end: work?.end,
+      progressPercent: 0,
+    });
+  });
+
+  it('leaves out a lead that would only limit a task after the last supported year', () => {
+    /** Builds a plan of two tasks linked with a long lead, starting at a given date. */
+    const planFrom = (startDate: number): Project =>
+      project([workTask('a'), workTask('b')], [link('a', 'b', 'finishToStart', -60)], {
+        startDate,
+        options: {
+          criticalPathEnabled: true,
+          dateConstraintsEnabled: false,
+          baselineEnabled: false,
+          alwaysShowPatterns: false,
+        },
+      });
+    /** Returns the floats and critical flags of the two tasks of a plan. */
+    const summary = (plan: Project) => {
+      const floats = scheduleOrThrow(plan).floats;
+      return ['a', 'b'].map((id) => {
+        const taskFloat = floats?.get(id);
+        return [taskFloat?.totalFloatHours, taskFloat?.freeFloatHours, taskFloat?.isCritical];
+      });
+    };
+    expect(summary(planFrom(at(2200, 12, 26)))).toEqual([
+      [0, 0, true],
+      [0, 0, true],
+    ]);
+    expect(summary(planFrom(at(2100, 12, 27)))).toEqual(summary(planFrom(at(2200, 12, 26))));
+  });
+
+  it('passes an unknown float on to every task before it, and to no other task', () => {
+    /** Builds a plan with the critical path and the date constraints on, starting at the first supported week. */
+    const constrained = (tasks: Project['tasks'], dependencies: Project['dependencies']) =>
+      project(tasks, dependencies, {
+        startDate: at(2020, 1, 6, 9),
+        options: {
+          criticalPathEnabled: true,
+          dateConstraintsEnabled: true,
+          baselineEnabled: false,
+          alwaysShowPatterns: false,
+        },
+      });
+    const plan = constrained(
+      [
+        workTask('a'),
+        workTask('b'),
+        workTask('c', {
+          segments: [{ durationHours: 200, gapDaysBefore: 0, startNoEarlierThan: null }],
+          mustFinishOn: at(2020, 1, 6, 10),
+        }),
+        milestone('m'),
+        workTask('free', {
+          segments: [{ durationHours: 7, gapDaysBefore: 0, startNoEarlierThan: null }],
+        }),
+        workTask('part', {
+          hoursPerDay: 2,
+          segments: [{ durationHours: 20, gapDaysBefore: 0, startNoEarlierThan: null }],
+          mustFinishOn: at(2020, 1, 6, 10),
+        }),
+      ],
+      [link('a', 'b'), link('b', 'c', 'startToStart'), link('m', 'c')],
+    );
+    const floats = scheduleOrThrow(plan).floats;
+    for (const id of ['a', 'b', 'c', 'm', 'part']) {
+      expect(floats?.get(id)).toEqual(UNKNOWN_FLOAT);
+    }
+    expect(floats?.get('free')).toEqual({
+      lateStart: 439334,
+      lateFinish: 439358,
+      totalFloatHours: 200,
+      freeFloatHours: 200,
+      isCritical: false,
+    });
+  });
+
+  it('gives an unknown float to a split task when only its first block would start before the first supported year', () => {
+    const plan = project(
+      [
+        workTask('split', {
+          segments: [
+            { durationHours: 100, gapDaysBefore: 0, startNoEarlierThan: null },
+            { durationHours: 7, gapDaysBefore: 30, startNoEarlierThan: null },
+          ],
+          mustFinishOn: at(2020, 2, 14, 17),
+        }),
+      ],
+      [],
+      {
+        startDate: at(2020, 1, 6, 9),
+        options: {
+          criticalPathEnabled: true,
+          dateConstraintsEnabled: true,
+          baselineEnabled: false,
+          alwaysShowPatterns: false,
+        },
+      },
+    );
+    expect(scheduleOrThrow(plan).floats?.get('split')).toEqual(UNKNOWN_FLOAT);
+  });
+
+  it('gives an unknown float, critical, to a task that would have to start before the first supported year', () => {
+    const plan = project(
+      [
+        workTask('a', {
+          segments: [{ durationHours: 200, gapDaysBefore: 0, startNoEarlierThan: null }],
+          mustFinishOn: at(2020, 1, 6, 10),
+        }),
+        workTask('split', {
+          segments: [
+            { durationHours: 100, gapDaysBefore: 0, startNoEarlierThan: null },
+            { durationHours: 100, gapDaysBefore: 1, startNoEarlierThan: null },
+          ],
+          mustFinishOn: at(2020, 1, 6, 10),
+        }),
+      ],
+      [],
+      {
+        startDate: at(2020, 1, 6, 9),
+        options: {
+          criticalPathEnabled: true,
+          dateConstraintsEnabled: true,
+          baselineEnabled: false,
+          alwaysShowPatterns: false,
+        },
+      },
+    );
+    const floats = scheduleOrThrow(plan).floats;
+    for (const id of ['a', 'split']) {
+      expect(floats?.get(id)).toEqual(UNKNOWN_FLOAT);
+    }
   });
 });

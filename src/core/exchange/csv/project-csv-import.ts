@@ -43,6 +43,7 @@ interface ScheduledProject {
 const DEFAULT_OPTIONS = {
   criticalPathEnabled: false,
   dateConstraintsEnabled: false,
+  baselineEnabled: false,
   alwaysShowPatterns: false,
 };
 const LIST_PATH_PATTERN = /^(tasks|dependencies|tags)(?:\[(\d+)\](?:\.([A-Za-z]+))?)?(?![A-Za-z])/;
@@ -143,10 +144,11 @@ function relocateIssue(issue: ValidationIssue, plan: TaskPlan): ValidationIssue 
     const planned = plan.tasks[index];
     return { ...issue, path: planned === undefined ? issue.path : taskIssuePath(planned, field) };
   }
-  const items = list === 'tags' ? plan.tags : plan.dependencies;
-  const rowNumber = items[index]?.rowNumber;
-  const column = list === 'tags' ? 'tag' : 'predecessors';
-  return { ...issue, path: rowNumber === undefined ? issue.path : rowPath(rowNumber, column) };
+  const planned = list === 'tags' ? plan.tags[index] : plan.dependencies[index];
+  return {
+    ...issue,
+    path: planned === undefined ? issue.path : rowPath(planned.rowNumber, planned.column),
+  };
 }
 
 /** Returns the cell a field of a task comes from, or the whole row for a field no single cell holds. */

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
-import { MAX_DEPENDENCIES, MAX_HIERARCHY_DEPTH, MAX_TAGS, MAX_TASKS } from '../limits';
+import {
+  MAX_DEPENDENCIES,
+  MAX_HIERARCHY_DEPTH,
+  MAX_MERGE_REPAIR_ROUNDS,
+  MAX_TAGS,
+  MAX_TASKS,
+} from '../limits';
 import type { Dependency, Project, Tag, Task } from '../model/project';
 import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { link, milestone, project, summary, workTask } from '../testing/project-builder';
@@ -129,6 +135,22 @@ describe('repairProject', () => {
       { code: 'DEPENDENCY_REMOVED', id: 'e-d' },
     ]);
     expect(isValid(result.project)).toBe(true);
+  });
+
+  it('removes the dependency with the greatest identifier wherever it stands in the cycle', () => {
+    const result = repair(
+      [workTask('a'), workTask('b'), workTask('c')],
+      [
+        { ...link('a', 'b'), id: 'k' },
+        { ...link('b', 'c'), id: 'z' },
+        { ...link('c', 'a'), id: 'm' },
+      ],
+    );
+    expect(result.repairs).toEqual([{ code: 'DEPENDENCY_REMOVED', id: 'z' }]);
+    expect(result.project.dependencies.map((dependency) => dependency.id).sort()).toEqual([
+      'k',
+      'm',
+    ]);
   });
 
   it('fits hours per day and daily start hours to the calendar', () => {
@@ -280,6 +302,7 @@ describe('repairProject properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () =
           }),
         ),
         ({ broken, tasks, dependencies }) => {
+          /** Returns items ordered by identifier. */
           const byId = <T extends { readonly id: string }>(items: readonly T[]): T[] =>
             [...items].sort((left, right) => (left.id < right.id ? -1 : 1));
           const first = unwrap(repairProject(broken));
@@ -290,5 +313,22 @@ describe('repairProject properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () =
         },
       ),
     );
+  });
+
+  it('gives up when breaking the cycles needs more rounds than allowed', () => {
+    const pairs = Array.from(
+      { length: MAX_MERGE_REPAIR_ROUNDS + 1 },
+      (_, index) => [`p${String(index)}`, `q${String(index)}`] as const,
+    );
+    const tasks = pairs.flatMap(([first, second]) => [workTask(first), workTask(second)]);
+    const dependencies = pairs.flatMap(([first, second]) => [
+      link(first, second),
+      link(second, first),
+    ]);
+    expect(repairProject(project(tasks, dependencies))).toEqual({
+      ok: false,
+      error: 'TOO_MANY_REPAIRS',
+    });
+    expect(repairProject(project(tasks.slice(2), dependencies.slice(2))).ok).toBe(true);
   });
 });

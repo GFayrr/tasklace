@@ -61,7 +61,7 @@ describe('analyzeProjectStructure', () => {
       'PARENT_NOT_SUMMARY',
     ],
   ])('rejects %s', (_label, tasks, code) => {
-    expect(errorCodes(tasks)).toContain(code);
+    expect(errorCodes(tasks)).toEqual([code]);
   });
 
   it('rejects a summary that is its own parent', () => {
@@ -94,7 +94,11 @@ describe('analyzeProjectStructure', () => {
       [link('a', 'b'), { ...link('b', 'm'), id: 'a-b' }],
       'DUPLICATE_DEPENDENCY_ID',
     ],
-    ['a fractional lag', [link('a', 'b', 'finishToStart', 1.5)], 'INVALID_LAG'],
+    [
+      'a lag that is not a whole quarter hour',
+      [link('a', 'b', 'finishToStart', 1.3)],
+      'INVALID_LAG',
+    ],
     ['a NaN lag', [link('a', 'b', 'finishToStart', Number.NaN)], 'INVALID_LAG'],
     [
       'a lag above the maximum',
