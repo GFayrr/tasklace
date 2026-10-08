@@ -15,6 +15,7 @@ import {
   logWorkerErrors,
   type LogConsole,
   type LogFile,
+  writeLogBeforeQuitting,
 } from './log-file';
 import { FakeWebContents } from './testing/fake-electron';
 
@@ -152,6 +153,7 @@ describe('logPageMessages', () => {
     const contents = new FakeWebContents();
     const log = memoryLog();
     logPageMessages(contents as unknown as WebContents, log);
+    /** Sends a message of a given level from the page console. */
     const message = (level: string, text: string) => {
       contents.emit('console-message', {
         level,
@@ -183,5 +185,38 @@ describe('logWorkerErrors', () => {
     stream.write('Read failed\n');
     expect(log.entries).toEqual(['error: Worker: Read failed']);
     expect(shown).toEqual(['Read failed\n']);
+  });
+});
+
+describe('writeLogBeforeQuitting', () => {
+  it('holds the end of the application until the log has written what it was given, then ends it at once', async () => {
+    const listeners: ((event: { preventDefault: () => void }) => void)[] = [];
+    let exits = 0;
+    let release: () => void = () => undefined;
+    const written = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    writeLogBeforeQuitting(
+      {
+        on: (_event, listener) => listeners.push(listener),
+        exit: () => {
+          exits += 1;
+        },
+      },
+      { write: () => undefined, written: () => written },
+    );
+    let held = false;
+    for (const listener of listeners) {
+      listener({
+        preventDefault: () => {
+          held = true;
+        },
+      });
+    }
+    expect([held, exits]).toEqual([true, 0]);
+    release();
+    await written;
+    await Promise.resolve();
+    expect(exits).toBe(1);
   });
 });

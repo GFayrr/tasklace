@@ -49,7 +49,7 @@ test('asks before replacing a changed project that has no file, and canceling ke
   await expect(prompt).toBeHidden();
   await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('Thesis');
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await prompt.getByRole('button', { name: "Don't save" }).click();
+  await prompt.getByRole('button', { name: 'Do not save' }).click();
   await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('Untitled project');
 });
 
@@ -80,7 +80,7 @@ test('asks before the window closes, keeping it open on cancel', async () => {
   expect(application.windows()).toHaveLength(1);
   const closed = new Promise((resolve) => page.once('close', resolve));
   await closeWindow();
-  await Promise.all([closed, clickClosing(prompt.getByRole('button', { name: "Don't save" }))]);
+  await Promise.all([closed, clickClosing(prompt.getByRole('button', { name: 'Do not save' }))]);
 });
 
 /** Clicks a button that closes the window, ignoring the error raised because the page closes during the click. */
@@ -127,6 +127,7 @@ async function recordCrashEvents(): Promise<void> {
   await application.evaluate(({ app, BrowserWindow }) => {
     const events: string[] = [];
     const started = Date.now();
+    /** Records an event with the time it happened. */
     const record = (text: string): void => {
       events.push(`${String(Date.now() - started)} ms ${text}`);
     };
@@ -205,6 +206,7 @@ test('offers to reload a window whose page crashed, which starts again with noth
   } catch (error) {
     throw new Error(`${String(error)}\n${await crashReport()}`);
   }
+  /** Tells whether the window shows the welcome screen of a started page. */
   const welcomed = (): Promise<unknown> =>
     application.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0]?.webContents.executeJavaScript(
@@ -226,7 +228,7 @@ test('never shows a second question while one is open, shortcuts waiting until i
   await expect(page.getByRole('dialog')).toHaveCount(1);
   expect(await suggestedPath(application)).toBeNull();
   const closed = new Promise((resolve) => page.once('close', resolve));
-  await Promise.all([closed, clickClosing(prompt.getByRole('button', { name: "Don't save" }))]);
+  await Promise.all([closed, clickClosing(prompt.getByRole('button', { name: 'Do not save' }))]);
 });
 
 test('shows unexpected errors of the interface to the user and writes them to the log', async () => {
@@ -246,6 +248,19 @@ test('shows unexpected errors of the interface to the user and writes them to th
   await expect
     .poll(async () => readFile(join(userData, 'logs', 'tasklace.log'), 'utf8').catch(() => ''))
     .toMatch(/ERROR Page: .*Rejected on purpose[\s\S]*ERROR Page: .*Thrown on purpose/);
+});
+
+test('writes the objects and the causes the interface logs, not only their names', async () => {
+  await page.evaluate(() => {
+    const cause = new Error('Inner cause on purpose');
+    console.error('Logged on purpose:', { code: 'X', issues: [{ path: 'a' }] });
+    console.error('Wrapped on purpose:', new Error('Outer error on purpose', { cause }));
+  });
+  await expect
+    .poll(async () => readFile(join(userData, 'logs', 'tasklace.log'), 'utf8').catch(() => ''))
+    .toMatch(
+      /ERROR Page: Logged on purpose: \{"code":"X","issues":\[\{"path":"a"\}\]\}[\s\S]*ERROR Page: Wrapped on purpose: Error: Outer error on purpose \| .*Caused by: Error: Inner cause on purpose/,
+    );
 });
 
 test('closes a window at once while its interface is still starting', async () => {

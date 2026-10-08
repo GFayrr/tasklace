@@ -31,7 +31,9 @@ export function buildLargeProject(
 ): Project {
   const random = createRandom(seed);
   const dependencyCount = taskCount * DEPENDENCIES_PER_TASK;
+  /** Returns the identifier of the task at an index. */
   const idOf = (index: number): string => `t${String(index)}`;
+  /** Returns the tag of the person given the task at an index. */
   const tagOf = (index: number): string => `person${String(index % PERSON_COUNT)}`;
   const tasks: Task[] = Array.from({ length: taskCount }, (_value, index) => {
     const roll = random();

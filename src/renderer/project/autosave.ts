@@ -27,6 +27,7 @@ export function createAutosave(
   let waiting: unknown = null;
   let unsaved = false;
   let running: Promise<void> = Promise.resolve();
+  /** Saves at once what changed, without waiting for the delay. */
   const saveNow = (): Promise<void> => {
     if (waiting !== null) {
       timer.clear(waiting);

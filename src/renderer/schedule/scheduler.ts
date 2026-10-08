@@ -38,12 +38,14 @@ export function createScheduler(
   let pending: Project | null = null;
   let failures = 0;
   let port: SchedulePort | null = null;
+  /** Stops the worker in use, if any. */
   const closePort = (): void => {
     if (port !== null) {
       stop(port);
       port = null;
     }
   };
+  /** Stops computing after too many failures and tells the listener why. */
   const giveUp = (error: unknown): void => {
     inFlight = null;
     pending = null;
@@ -51,6 +53,7 @@ export function createScheduler(
     closePort();
     listener.failed(error);
   };
+  /** Sends a project to the worker, creating the worker first when there is none. */
   const send = (project: Project): void => {
     generation += 1;
     inFlight = { generation, project };
@@ -61,6 +64,7 @@ export function createScheduler(
       giveUp(error);
     }
   };
+  /** Sends the project waiting for the worker, telling whether there was one. */
   const sendPending = (): boolean => {
     if (pending === null) {
       return false;
@@ -70,6 +74,7 @@ export function createScheduler(
     send(next);
     return true;
   };
+  /** Replaces a worker that failed and sends it the latest project, giving up after too many failures in a row. */
   const fail = (error: unknown): void => {
     const latest = pending ?? inFlight?.project ?? null;
     inFlight = null;
@@ -88,6 +93,7 @@ export function createScheduler(
     console.error('The schedule worker failed and was restarted:', error);
     send(latest);
   };
+  /** Listens to the answers and errors of a new worker. */
   const connect = (created: SchedulePort): SchedulePort => {
     created.onmessage = (event) => {
       const response = event.data;

@@ -7,6 +7,7 @@ import { createSharedDocument } from '../../src/core/shared/shared-document';
 import { link, project, TEST_DOCUMENT_ID, workTask } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 import { closeDiscarding, launchApplication } from './application';
+import { addTaskButton } from './table';
 import { answerDialogs } from './dialogs';
 
 const SAMPLE = {
@@ -130,7 +131,7 @@ test('keeps the project from changing while another one is being opened', async 
   await page.getByRole('menuitem', { name: 'Open a file…' }).click();
   const shell = page.locator('.shell');
   await expect(shell).toHaveAttribute('aria-busy', 'true');
-  await page.getByRole('button', { name: 'Add task' }).click({ force: true });
+  await addTaskButton(page).click({ force: true });
   await page.keyboard.press('Control+z');
   await expect(rows).toHaveCount(rowsBefore);
   await application.evaluate(() => {
@@ -142,7 +143,7 @@ test('keeps the project from changing while another one is being opened', async 
   await expect(shell).toHaveAttribute('aria-busy', 'false');
   await expect(rows).toHaveCount(rowsBefore);
   await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Add task' }).click();
+  await addTaskButton(page).click();
   await expect(rows).toHaveCount(rowsBefore + 1);
 });
 
@@ -174,11 +175,29 @@ test('lets messages fade away on their own, but keeps them while the pointer res
   await page.getByRole('button', { name: /Open…/ }).click();
   const alert = page.getByRole('alert');
   await expect(alert).toBeVisible();
+  /** Describes the fading animation of the message: whether it fades, its duration and its state. */
+  const fade = () =>
+    alert.evaluate((element) => {
+      const [animation] = element.getAnimations();
+      return animation === undefined
+        ? null
+        : {
+            fades:
+              animation instanceof CSSAnimation && animation.animationName.endsWith('notice-fade'),
+            duration: animation.effect?.getTiming().duration,
+            state: animation.playState,
+          };
+    });
   await alert.hover();
-  await page.waitForTimeout(11_000);
-  await expect(alert).toBeVisible();
+  await expect.poll(fade).toEqual({ fades: true, duration: 10_000, state: 'paused' });
   await page.mouse.move(0, 0);
-  await expect(alert).toBeHidden({ timeout: 12_000 });
+  await expect.poll(fade).toEqual({ fades: true, duration: 10_000, state: 'running' });
+  await alert.evaluate((element) => {
+    for (const animation of element.getAnimations()) {
+      animation.finish();
+    }
+  });
+  await expect(alert).toBeHidden();
 });
 
 test('changes the calendar in the project settings, each change applied at once and undone after', async () => {

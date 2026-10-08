@@ -4,6 +4,7 @@ import { loadMessages } from '../i18n/messages';
 import { durationEditorText, formatDuration, parseDuration } from './durations';
 
 const messages = await loadMessages('en');
+/** Writes a number in American English. */
 const english = (value: number) => new Intl.NumberFormat('en-US').format(value);
 
 describe('formatDuration', () => {

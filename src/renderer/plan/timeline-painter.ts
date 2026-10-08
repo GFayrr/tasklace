@@ -449,6 +449,7 @@ function piecesOf(
     hourAt(scene.frame, left),
     hourAt(scene.frame, right),
   );
+  /** Converts a period of hours into pixels on the timeline. */
   const toPixels = (interval: HourInterval): PixelInterval => ({
     start: xOf(scene.frame, interval.start),
     end: xOf(scene.frame, interval.end),

@@ -8,7 +8,11 @@ import { failure, success } from '../core/result';
 import { IPC_CHANNELS } from '../preload/bridge-contract';
 import { isResultOf, type FileTask, type FileTaskResult } from './file-tasks';
 import { RefusedRequest } from './ipc-trust';
-import { registerProjectFileHandlers, windowProjectKind } from './project-files';
+import {
+  forgetWindowProject,
+  registerProjectFileHandlers,
+  windowProjectKind,
+} from './project-files';
 import type { FakeIpcMain } from './testing/fake-electron';
 
 const dialogs = vi.hoisted(() => ({
@@ -19,6 +23,19 @@ const dialogs = vi.hoisted(() => ({
 }));
 
 const recording = vi.hoisted((): { failure: Error | null } => ({ failure: null }));
+const examining = vi.hoisted((): { failure: Error | null } => ({ failure: null }));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...original,
+    stat: (...values: Parameters<typeof original.stat>) => {
+      const failure = examining.failure;
+      examining.failure = null;
+      return failure === null ? original.stat(...values) : Promise.reject(failure);
+    },
+  };
+});
 
 vi.mock('./recent-projects', async (importOriginal) => {
   const original = await importOriginal<typeof import('./recent-projects')>();
@@ -188,9 +205,17 @@ describe('opening projects', () => {
     runTask.mockResolvedValueOnce(success(LOADED));
     expect(await request(IPC_CHANNELS.openRecentProject, {}, 0)).toMatchObject({ ok: true });
     expect(tasks.at(-1)).toEqual({ kind: 'openProject', path });
-    expect(await request(IPC_CHANNELS.openRecentProject, {}, 2)).toEqual(
-      failure({ code: 'READ_FAILED' }),
-    );
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await request(IPC_CHANNELS.openRecentProject, {}, 2)).toEqual(
+        failure({ code: 'READ_FAILED' }),
+      );
+      expect(logged.mock.calls).toEqual([
+        ['The page asked for recent project 2, but only 1 are known.'],
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
     await expect(request(IPC_CHANNELS.openRecentProject, {}, 'first')).rejects.toThrow(
       RefusedRequest,
     );
@@ -354,9 +379,10 @@ describe('adopting projects', () => {
     expect(await quietly(() => request(IPC_CHANNELS.adoptProject, sender, OTHER_ID))).toEqual(
       notOffered,
     );
-    expect(await request(IPC_CHANNELS.saveProject, sender, STATE)).toEqual(
-      failure({ code: 'NO_PROJECT' }),
-    );
+    expect(await quietly(() => request(IPC_CHANNELS.saveProject, sender, STATE))).toEqual({
+      answer: failure({ code: 'NO_PROJECT' }),
+      logged: [['A page asked to save a project its window does not hold.']],
+    });
     expect(await request(IPC_CHANNELS.adoptProject, sender, documentId)).toEqual(success(null));
     expect(await quietly(() => request(IPC_CHANNELS.adoptProject, sender, documentId))).toEqual(
       notOffered,
@@ -446,9 +472,10 @@ describe('new and imported projects', () => {
 
 describe('saving projects', () => {
   it('refuses to save for a page without project, or a state that is not bytes', async () => {
-    expect(await request(IPC_CHANNELS.saveProject, {}, STATE)).toEqual(
-      failure({ code: 'NO_PROJECT' }),
-    );
+    expect(await quietly(() => request(IPC_CHANNELS.saveProject, {}, STATE))).toEqual({
+      answer: failure({ code: 'NO_PROJECT' }),
+      logged: [['A page asked to save a project its window does not hold.']],
+    });
     await expect(request(IPC_CHANNELS.saveProject, {}, 'state')).rejects.toThrow(RefusedRequest);
     await expect(request(IPC_CHANNELS.saveProjectAs, {}, STATE, 42)).rejects.toThrow(
       RefusedRequest,
@@ -520,6 +547,7 @@ describe('saving projects', () => {
     const savingFirst = request(IPC_CHANNELS.saveProject, first, STATE);
     const savingSecond = request(IPC_CHANNELS.saveProject, second, STATE);
     await new Promise((resolve) => setTimeout(resolve, 0));
+    /** Lists the paths of the save tasks run so far. */
     const saves = () => tasks.flatMap((task) => (task.kind === 'saveProject' ? [task.path] : []));
     expect(saves()).toHaveLength(1);
     finish(success(SAVED));
@@ -552,6 +580,24 @@ describe('exporting projects', () => {
     expect(await request(IPC_CHANNELS.exportProject, {}, 'json', '{}', 'Plan')).toEqual(
       success({ fileName: 'plan.json' }),
     );
+    expect(await readFile(join(folder, 'plan.json'), 'utf8')).toBe('{}');
+  });
+
+  it('counts a file that cannot be examined as absent, warning, and writes the export', async () => {
+    chooseToSave(join(folder, 'plan'));
+    const denied = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    examining.failure = denied;
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      expect(await request(IPC_CHANNELS.exportProject, {}, 'json', '{}', 'Plan')).toEqual(
+        success({ fileName: 'plan.json' }),
+      );
+      expect(warned.mock.calls).toEqual([
+        ['A file could not be examined, so it counts as absent:', denied],
+      ]);
+    } finally {
+      warned.mockRestore();
+    }
     expect(await readFile(join(folder, 'plan.json'), 'utf8')).toBe('{}');
   });
 
@@ -598,5 +644,27 @@ describe('the kind of project a window holds', () => {
     expect(windowProjectKind(fresh as WebContents)).toBe('none');
     await request(IPC_CHANNELS.adoptProject, fresh, documentId);
     expect(windowProjectKind(fresh as WebContents)).toBe('withoutFile');
+  });
+
+  it('is none again once the page reloads, and the project it was offered can no longer be adopted', async () => {
+    const opened = await openedIn(join(folder, 'Plan.tasklace'));
+    forgetWindowProject(opened as WebContents);
+    expect(windowProjectKind(opened as WebContents)).toBe('none');
+    const fresh = {};
+    const documentId = await request(IPC_CHANNELS.newProject, fresh);
+    forgetWindowProject(fresh as WebContents);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await request(IPC_CHANNELS.adoptProject, fresh, documentId)).toEqual({
+        ok: false,
+        error: { code: 'TASK_FAILED' },
+      });
+      expect(logged.mock.calls).toEqual([
+        ['The page adopted a project that was not offered to it.'],
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
+    expect(windowProjectKind(fresh as WebContents)).toBe('none');
   });
 });

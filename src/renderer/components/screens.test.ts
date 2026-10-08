@@ -204,7 +204,7 @@ describe('Toolbar', () => {
     const root = render(Toolbar, { app });
     const details = button(root, english.tasks.details);
     expect(details.disabled).toBe(true);
-    app.selectedTaskId = 'a';
+    app.select('a');
     update();
     expect(details.disabled).toBe(false);
     click(details);
@@ -251,6 +251,7 @@ describe('Toolbar', () => {
     control.recent = [{ name: 'Old', folder: '/school' }];
     await app.loadRecentProjects();
     const root = render(Toolbar, { app });
+    /** Opens a menu of the toolbar and chooses the item that starts with a text. */
     const choose = (menu: string, item: string): void => {
       click(button(root, menu));
       const entry = [...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
@@ -261,6 +262,7 @@ describe('Toolbar', () => {
       }
       click(entry);
     };
+    /** Chooses an item of a menu and waits until the action it starts settles. */
     const chooseAndWait = async (menu: string, item: string): Promise<void> => {
       choose(menu, item);
       await settle();

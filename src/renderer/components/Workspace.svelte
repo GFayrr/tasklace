@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { failure } from '../../core/result';
   import type { Project, TaskId } from '../../core/model/project';
   import type { AppState, DrawingPart } from '../app/app-state.svelte';
   import { createTableFormatters } from '../plan/table-format';
@@ -134,11 +135,10 @@
   }
 
   $effect(() => {
-    const request = app.revealRequest;
+    const request = app.revealRequest === null ? null : app.takeRevealRequest();
     if (request === null) {
       return;
     }
-    app.revealRequest = null;
     const row = untrack(() => outline.rowIndexById.get(request.taskId));
     if (row !== undefined) {
       reveal(row);
@@ -156,7 +156,7 @@
 
   /** Selects a task. */
   function selectTask(id: TaskId): void {
-    app.selectedTaskId = id;
+    app.select(id);
   }
 
   /** Scrolls the least needed to show a row. */
@@ -237,9 +237,11 @@
     const startX = event.clientX;
     const startWidth = shownWidth;
     handle.setPointerCapture(event.pointerId);
+    /** Resizes the task table as the pointer moves. */
     const move = (moved: PointerEvent): void => {
       setTableWidth(startWidth + moved.clientX - startX);
     };
+    /** Stops resizing the task table. */
     const stop = (): void => {
       handle.removeEventListener('pointermove', move);
       handle.removeEventListener('pointerup', stop);
@@ -291,6 +293,9 @@
       moved={moveBar}
       stretched={stretchBar}
       linked={linkBar}
+      linkedToSummary={() => {
+        app.edit(() => failure('SUMMARY_DEPENDENCY'));
+      }}
       opened={openDetails}
       drawingFailed={(part: DrawingPart) => {
         app.reportDrawingProblem(part);

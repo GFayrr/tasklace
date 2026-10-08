@@ -10,6 +10,7 @@ import {
   IPC_CHANNELS,
   type BridgeResult,
   type ChannelAnswers,
+  type ChannelArguments,
   type ResultChannel,
   type RecentProject,
   type TasklaceBridge,
@@ -21,8 +22,6 @@ const DATE_SEPARATOR_VALUES: readonly unknown[] = DATE_SEPARATORS;
 const UNEXPECTED_ANSWER: BridgeResult<never> = { ok: false, error: { code: 'TASK_FAILED' } };
 
 const bridge: TasklaceBridge = {
-  appVersion: async () => String(await ipcRenderer.invoke(IPC_CHANNELS.appVersion)),
-  openExternal: async (url) => (await ipcRenderer.invoke(IPC_CHANNELS.openExternal, url)) === true,
   regionalFormat: async () => {
     const format: unknown = await ipcRenderer.invoke(IPC_CHANNELS.regionalFormat);
     if (!isRegionalFormat(format)) {
@@ -43,11 +42,11 @@ const bridge: TasklaceBridge = {
       console.error('The main process sent recent projects that are not a list:', projects);
       return UNEXPECTED_ANSWER;
     }
-    const recent = projects.filter(isRecentProject);
-    if (recent.length !== projects.length) {
+    if (!projects.every(isRecentProject)) {
       console.error('The main process sent recent projects of an unexpected shape:', projects);
+      return UNEXPECTED_ANSWER;
     }
-    return { ok: true, value: recent };
+    return { ok: true, value: projects };
   },
   importProject: (kind) => request(IPC_CHANNELS.importProject, kind),
   adoptProject: (documentId) => request(IPC_CHANNELS.adoptProject, documentId),
@@ -90,7 +89,7 @@ contextBridge.exposeInMainWorld(BRIDGE_NAME, bridge);
 /** Sends a file request to the main process and gives back its result, an answer of any other shape being logged and counting as a failed task. */
 async function request<C extends ResultChannel>(
   channel: C,
-  ...values: unknown[]
+  ...values: ChannelArguments[C]
 ): Promise<ChannelAnswers[C] | BridgeResult<never>> {
   const result: unknown = await ipcRenderer.invoke(channel, ...values);
   if (isAnswerOf(channel, result)) {
@@ -110,6 +109,7 @@ function isAnswerOf<C extends ResultChannel>(
 
 /** Tells whether an answer is a regional format, each field holding one of its allowed values. */
 function isRegionalFormat(value: unknown): value is RegionalFormat {
+  /** Reads a field of the answer, whatever its shape. */
   const field = (name: string): unknown => Reflect.get(Object(value), name);
   return (
     LIST_SEPARATORS.includes(field('listSeparator')) &&

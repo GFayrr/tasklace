@@ -262,7 +262,10 @@ describe('instants at the edges of the supported period', () => {
       ok: true,
       value: at(2026, 9, 28, 17),
     });
-    expect(lastWorkingHourEnd(calendar, MIN_PROJECT_HOUR).ok).toBe(false);
+    expect(lastWorkingHourEnd(calendar, MIN_PROJECT_HOUR)).toEqual({
+      ok: false,
+      error: 'BEYOND_PLANNING_HORIZON',
+    });
   });
 
   it('counts working hours backwards, and reports an instant outside the supported period either way', () => {

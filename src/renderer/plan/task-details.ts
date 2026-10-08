@@ -13,7 +13,7 @@ import { HOURS_PER_DAY, QUARTER_HOUR, type ProjectHour } from '../../core/time';
 import { formatTimeOfDay, parseTimeOfDay } from './time-of-day';
 import { hourFromPicker } from './cell-editing';
 import { durationEditorText, parseDuration } from './durations';
-import type { EditError } from './task-commands';
+import type { InterfaceRefusal } from './edit-refusal';
 
 export interface BlockDraft {
   readonly duration: string;
@@ -35,15 +35,6 @@ export interface TaskDraft {
   readonly blocks: readonly BlockDraft[];
   readonly basis: string;
 }
-
-export type DetailsError =
-  | EditError
-  | 'INVALID_BLOCK'
-  | 'INVALID_GAP'
-  | 'INVALID_HOURS_PER_DAY'
-  | 'INVALID_DAILY_START'
-  | 'INVALID_MUST_FINISH_ON'
-  | 'INVALID_DEADLINE';
 
 const PROGRESS_PATTERN = /^\d{1,3}$/;
 const GAP_PATTERN = /^\d{1,4}$/;
@@ -116,7 +107,7 @@ export function taskFromDraft(
   draft: TaskDraft,
   dayHours: number,
   options: ProjectOptions,
-): Result<Task, DetailsError> {
+): Result<Task, InterfaceRefusal> {
   const name = draft.name.trim();
   if (name === '') {
     return failure('INVALID_NAME');
@@ -210,7 +201,7 @@ function readConstraints(
   draft: TaskDraft,
 ): Result<
   { readonly mustFinishOn: ProjectHour | null; readonly deadline: ProjectHour | null },
-  DetailsError
+  InterfaceRefusal
 > {
   const mustFinishOn = readPickerInstant(draft.mustFinishOn);
   if (mustFinishOn === undefined) {
@@ -243,7 +234,7 @@ function readDailyPattern(
   dayHours: number,
 ): Result<
   { readonly hoursPerDay: number | null; readonly dailyStartHour: number | null },
-  DetailsError
+  InterfaceRefusal
 > {
   const written = draft.hoursPerDay.trim();
   const hoursPerDay = written === '' ? null : parseDuration(written, HOURS_PER_DAY);
@@ -267,7 +258,7 @@ function readTime(text: string): number | null | undefined {
 function readBlocks(
   blocks: readonly BlockDraft[],
   dayHours: number,
-): Result<TaskSegment[], DetailsError> {
+): Result<TaskSegment[], InterfaceRefusal> {
   const segments: TaskSegment[] = [];
   for (const [index, block] of blocks.entries()) {
     const durationHours = parseDuration(block.duration, dayHours);

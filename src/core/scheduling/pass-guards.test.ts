@@ -53,6 +53,7 @@ function withBrokenPlacement(
   placements: PlacementsByIndex,
   taskIndex: number,
   part: 'start' | 'end',
+  instant = END_PROJECT_HOUR,
 ): PlacementsByIndex {
   return placements.map((placement, index) => {
     if (index !== taskIndex || placement === undefined) {
@@ -60,9 +61,9 @@ function withBrokenPlacement(
     }
     const segments = placement.segments.map((segment) => ({
       ...segment,
-      [part]: END_PROJECT_HOUR,
+      [part]: instant,
     }));
-    return { ...placement, [part]: END_PROJECT_HOUR, segments };
+    return { ...placement, [part]: instant, segments };
   });
 }
 
@@ -154,17 +155,42 @@ describe('the backward pass facing inconsistent inputs', () => {
     const missing = placements.map((placement, index) =>
       index === taskIndex ? undefined : placement,
     );
-    const floats = runBackwardPass(context, graph, missing);
-    expect(floats.ok).toBe(false);
-    expect(!floats.ok && floats.error.code).toBe(INVALID);
+    expect(runBackwardPass(context, graph, missing)).toEqual({
+      ok: false,
+      error: { code: INVALID, taskId: 'b' },
+    });
   });
 
-  it.each(['start', 'end'] as const)('reports an early %s outside the plannable range', (part) => {
-    const { context, graph, placements } = prepared();
-    for (const taskId of ['a', 'm']) {
+  it.each([
+    ['a', 'start', 'a'],
+    ['a', 'end', 'm'],
+    ['m', 'start', 'b'],
+    ['m', 'end', 'm'],
+  ] as const)(
+    'reports an early %s %s outside the plannable range on task %s',
+    (taskId, part, reported) => {
+      const { context, graph, placements } = prepared();
       const broken = withBrokenPlacement(placements, unitOf(graph, taskId).taskIndex, part);
-      expect(runBackwardPass(context, graph, broken).ok).toBe(false);
-    }
+      expect(runBackwardPass(context, graph, broken)).toEqual({
+        ok: false,
+        error: { code: INVALID, taskId: reported },
+      });
+    },
+  );
+
+  it('reports a free float whose link would reach past the last supported year', () => {
+    const lagged = project([workTask('a'), workTask('c')], [{ ...link('a', 'c'), lagHours: 5 }]);
+    const { context, graph, placements } = prepared(lagged);
+    const late = withBrokenPlacement(
+      placements,
+      unitOf(graph, 'a').taskIndex,
+      'end',
+      END_PROJECT_HOUR - 1,
+    );
+    expect(runBackwardPass(context, graph, late)).toEqual({
+      ok: false,
+      error: { code: 'BEYOND_PLANNING_HORIZON', taskId: 'a' },
+    });
   });
 
   it('refuses a task whose block was never placed late', () => {
@@ -182,6 +208,9 @@ describe('the backward pass facing inconsistent inputs', () => {
     const lone = project([workTask('a'), workTask('z')]);
     const { context, graph, placements } = prepared(lone);
     const broken = withBrokenPlacement(placements, unitOf(graph, 'a').taskIndex, 'end');
-    expect(runBackwardPass(context, graph, broken).ok).toBe(false);
+    expect(runBackwardPass(context, graph, broken)).toEqual({
+      ok: false,
+      error: { code: INVALID, taskId: 'a' },
+    });
   });
 });

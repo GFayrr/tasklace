@@ -4,6 +4,7 @@ import { link, project, TEST_DOCUMENT_ID, workTask } from '../testing/project-bu
 import { createSharedDocument, readSharedData } from './shared-document';
 import { mergeSharedUpdate } from './shared-project';
 import { openSharedSession, type SharedSession } from './shared-session';
+import { sessionOn } from '../testing/session-copy';
 
 const repairing = vi.hoisted(() => ({ broken: false, skipped: false, fittingBroken: false }));
 
@@ -42,18 +43,10 @@ afterEach(() => {
 function expectConsistent(session: SharedSession): void {
   const reopened = openSharedSession(session.document);
   expect(reopened.ok && reopened.value.project()).toEqual(session.project());
-  expect(session.apply({ type: 'putDependency', dependency: link('a', 'zzz') }).ok).toBe(false);
-}
-
-/** Opens a session on a copy of a document, failing the test when it is refused. */
-function sessionOn(document: Y.Doc): SharedSession {
-  const copy = new Y.Doc();
-  Y.applyUpdate(copy, Y.encodeStateAsUpdate(document));
-  const session = openSharedSession(copy);
-  if (!session.ok) {
-    throw new Error(JSON.stringify(session.error));
-  }
-  return session.value;
+  expect(session.apply({ type: 'putDependency', dependency: link('a', 'zzz') })).toEqual({
+    ok: false,
+    error: [{ path: 'dependencies.a-zzz', code: 'UNKNOWN_DEPENDENCY_TASK' }],
+  });
 }
 
 /** Returns the update a peer sends after changing the calendar, a change that repairs the whole project. */
@@ -106,11 +99,12 @@ describe('a merge whose repair raises an exception', () => {
     const origin = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const session = sessionOn(origin);
     const garbage = Uint8Array.from([255, 255, 255, 255, 1]);
-    expect(session.merge(garbage)).toMatchObject({ ok: false, error: { kind: 'malformedUpdate' } });
-    expect(mergeSharedUpdate(session.document, garbage)).toMatchObject({
-      ok: false,
-      error: { kind: 'malformedUpdate' },
-    });
+    for (const merged of [session.merge(garbage), mergeSharedUpdate(session.document, garbage)]) {
+      expect(merged.ok || merged.error.kind).toBe('malformedUpdate');
+      expect(
+        !merged.ok && merged.error.kind === 'malformedUpdate' && merged.error.error,
+      ).toBeInstanceOf(Error);
+    }
   });
 
   it('refuses a full merge that the repair leaves invalid, leaving the document as it was', () => {

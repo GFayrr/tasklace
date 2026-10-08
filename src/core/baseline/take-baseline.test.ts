@@ -40,6 +40,7 @@ describe('takeBaseline', () => {
     );
     const schedule = scheduleOrThrow(input);
     const taken = takeBaseline(input, schedule, compileOrThrow(TEST_CALENDAR), TAKEN_AT);
+    /** Returns the placement of a task in the schedule. */
     const placementOf = (id: string) => schedule.placements.get(id);
     expect(taken.skipped).toEqual([]);
     expect(taken.baseline.takenAt).toBe(TAKEN_AT);

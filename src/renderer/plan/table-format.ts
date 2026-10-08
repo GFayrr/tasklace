@@ -72,6 +72,7 @@ export function taskCells(
   formatters: TableFormatters,
   messages: Messages,
 ): TaskCells {
+  /** Writes a number of hours as a duration. */
   const hours = (count: number) => formatDuration(count, messages, formatters.number);
   if (task.kind === 'summary') {
     const dates = schedule?.summaries.get(task.id);
@@ -108,6 +109,7 @@ export function floatCells(
   if (taskFloat === undefined) {
     return NO_FLOAT;
   }
+  /** Writes a float in hours with its sign, or nothing for an unknown float. */
   const hours = (count: number | null) => signedHours(count, formatters, messages);
   return {
     total: hours(taskFloat.totalFloatHours),
@@ -155,7 +157,7 @@ export function dateConflictTitles(
   return titles;
 }
 
-/** Writes how many working days a task now ends after (+) or before (−) its end in the baseline, a dash for a task the baseline does not hold or a summary without dates, nothing while its end is not known yet and a question mark when the gap cannot be counted. */
+/** Writes how many working days a task now ends after (+) or before (−) its end in the baseline, a dash for a task the baseline lacks or a summary without dates, nothing until its end is known and a question mark when the gap cannot be counted. */
 export function varianceCell(
   task: Task,
   entry: BaselineEntry | undefined,

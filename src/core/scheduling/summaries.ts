@@ -110,7 +110,7 @@ function pickDate(
   return right === null ? left : pick(left, right);
 }
 
-/** Turns an aggregate into dates and a duration-weighted progress, milestones counting only alone, a summary with nothing dated inside having neither dates nor progress; since every placed work task lasts, a dated summary without work holds at least one milestone. */
+/** Turns an aggregate into dates and a duration-weighted progress, milestones counting only alone, a summary with nothing dated inside having neither, and a dated summary without work holding at least one milestone. */
 function toSummarySchedule(aggregate: Aggregate): SummarySchedule {
   const { start, end, workHours, weightedProgress, milestoneCount, milestoneProgress } = aggregate;
   if (start === null || end === null) {

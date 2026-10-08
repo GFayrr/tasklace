@@ -220,6 +220,7 @@ function readProjectFields(
   if (record === undefined) {
     return undefined;
   }
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const project = {
     name: readText(child('name'), issues, MAX_PROJECT_NAME_LENGTH),
@@ -248,6 +249,7 @@ function readCalendar(
   if (record === undefined) {
     return undefined;
   }
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const calendar = {
     workingWeekdays: readList(child('workingWeekdays'), issues, DAYS_PER_WEEK, codec.readWeekday),
@@ -309,6 +311,7 @@ function readOptions(field: Field, issues: IssueList): ProjectOptions | undefine
   if (record === undefined) {
     return undefined;
   }
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const options = {
     criticalPathEnabled: readBoolean(child('criticalPathEnabled'), issues),
@@ -325,6 +328,7 @@ function readTag(field: Field, issues: IssueList): Tag | undefined {
   if (record === undefined) {
     return undefined;
   }
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const tag = {
     id: readIdentifier(child('id'), issues),
@@ -367,6 +371,7 @@ function readTask(field: Field, issues: IssueList, codec: ValueCodec): Task | un
 
 /** Reads the fields shared by every kind of task. */
 function readTaskBase(record: UnknownRecord, path: string, issues: IssueList) {
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, path);
   return {
     id: readIdentifier(child('id'), issues),
@@ -390,6 +395,7 @@ function readDatedFields(
   issues: IssueList,
   codec: ValueCodec,
 ) {
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, path);
   return {
     ...readTaskBase(record, path, issues),
@@ -426,9 +432,12 @@ function readWorkTask(
   codec: ValueCodec,
 ): WorkTask | undefined {
   reportUnknownKeys(record, path, issues, WORK_TASK_KEYS);
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, path);
+  /** Reads the hours per day of a task, from one hour to a whole day, on a quarter hour. */
   const readHoursPerDay = (item: Field, list: IssueList): number | undefined =>
     readQuarterHours(item, list, MIN_HOURS_PER_DAY, HOURS_PER_DAY);
+  /** Reads the daily start hour of a task, on a quarter hour of the day. */
   const readDailyStart = (item: Field, list: IssueList): number | undefined =>
     readQuarterHours(item, list, 0, LAST_QUARTER_OF_DAY);
   const task = {
@@ -528,6 +537,7 @@ function readDependency(field: Field, issues: IssueList): Dependency | undefined
   if (record === undefined) {
     return undefined;
   }
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const dependency = {
     id: readIdentifier(child('id'), issues),
@@ -578,6 +588,7 @@ function readBaselineEntry(
   if (record === undefined) {
     return undefined;
   }
+  /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const entry = {
     taskId: readIdentifier(child('taskId'), issues),

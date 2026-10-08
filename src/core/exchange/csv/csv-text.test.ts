@@ -84,7 +84,9 @@ describe('parseCsv', () => {
   });
 
   it('refuses more columns or rows than the limits, and accepts them exactly', () => {
+    /** Writes a header of a given number of columns. */
     const columns = (count: number) => Array.from({ length: count }, () => 'h').join(',');
+    /** Writes a table with a header and a given number of rows. */
     const rows = (count: number) => `h${'\nx'.repeat(count)}`;
     expect(parseCsv(columns(LIMITS.maxColumns), ',', LIMITS, keepAllColumns).ok).toBe(true);
     expect(parseCsv(columns(LIMITS.maxColumns + 1), ',', LIMITS, keepAllColumns)).toEqual(
@@ -195,6 +197,7 @@ describe('parseCsv keeping selected columns', () => {
                 ? [index]
                 : [],
             );
+            /** Returns numbers in increasing order. */
             const sorted = (values: ReadonlySet<number>) =>
               [...values].sort((left, right) => left - right);
             expect(sorted(selected.filledBlankColumns)).toEqual(filled);

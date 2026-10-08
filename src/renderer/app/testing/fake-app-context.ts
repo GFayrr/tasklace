@@ -15,7 +15,7 @@ import type {
 import english from '../../locales/en.json';
 import type { Scheduler, ScheduleListener } from '../../schedule/scheduler';
 import { SAND_GRAPHITE } from '../../theme/sand-graphite';
-import type { AppContext } from '../app-state.svelte';
+import { AppState, type AppContext } from '../app-state.svelte';
 
 export const OPENED_DOCUMENT_ID = '22222222-2222-4222-8222-222222222222';
 export const FRENCH_FORMAT = {
@@ -88,13 +88,12 @@ export function fakeBridge(): {
     imports: [],
     exports: [],
   };
+  /** Records a call of the bridge and answers it with a value. */
   const called = <T>(name: string, value: T): Promise<T> => {
     control.calls.push(name);
     return Promise.resolve(value);
   };
   const bridge: TasklaceBridge = {
-    appVersion: () => called('appVersion', '1.0.0'),
-    openExternal: () => called('openExternal', true),
     regionalFormat: () => called('regionalFormat', FRENCH_FORMAT),
     newProject: () => called('newProject', control.newDocumentId),
     openProject: () => called('openProject', control.openResult),
@@ -167,6 +166,7 @@ export function manualScheduler(): {
     requests: [],
     automatic: true,
   };
+  /** Creates a scheduler that records each request and answers it at once while it is automatic. */
   const create = (listener: ScheduleListener): Scheduler => {
     current = listener;
     return {
@@ -205,4 +205,14 @@ export function fakeAppContext() {
 /** Waits one turn of the event loop, so that every pending promise callback has run. */
 export async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** Opens a project in a new application state, with a fake bridge and a scheduler that answers at once, then lets its schedule arrive. */
+export async function openedAppOf(project: Project, overrides: Partial<AppContext> = {}) {
+  const fake = fakeAppContext();
+  const app = new AppState({ ...fake.context, ...overrides });
+  fake.control.openResult = openedProjectOf(project);
+  await app.open();
+  await settle();
+  return { app, ...fake };
 }

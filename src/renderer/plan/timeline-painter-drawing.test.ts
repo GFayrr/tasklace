@@ -236,6 +236,7 @@ describe('paintTimelineBody', () => {
     };
     const outline = buildPlanOutline(dated.tasks, new Set());
     const scene = { rows: outline.rows, rowIndexById: outline.rowIndexById };
+    /** Returns where the deadline mark of a task is drawn and its color. */
     const lineOf = (id: string, deadline: ProjectHour, color: string) => {
       const top = (outline.rowIndexById.get(id) ?? -1) * ROW_HEIGHT;
       return { x: xOf(FRAME, deadline), top, color };
@@ -248,6 +249,7 @@ describe('paintTimelineBody', () => {
       ...scene,
       deadlines: { missedTaskIds: new Set(['n']) },
     });
+    /** Tells whether a drawing call draws a deadline mark. */
     const isMark = (call: CanvasCall) =>
       call.name === 'fillRect' && call.args[2] === 2 && call.args[3] === ROW_HEIGHT - 4;
     const drawnMarks = calls.flatMap((call, index) =>
@@ -297,7 +299,9 @@ describe('paintTimelineBody', () => {
       ],
       ['n', { taskId: 'n', start: at(2026, 10, 1, 9), end: at(2026, 10, 1, 9), durationHours: 0 }],
     ]);
+    /** Returns the top of the row of a task on the timeline. */
     const rowTop = (id: string) => (OUTLINE.rowIndexById.get(id) ?? -1) * ROW_HEIGHT;
+    /** Returns the top of the ghost bar of a task on the timeline. */
     const ghostTop = (id: string) => rowTop(id) + 2;
     const pale = paleColor(THEME.textSecondary);
     const calls = paintBody({ baseline: entries });
@@ -351,6 +355,7 @@ describe('paintTimelineBody', () => {
     ]);
     const pale = paleColor(THEME.textSecondary);
     const below = { ...VIEWPORT, top: ((OUTLINE.rowIndexById.get('a') ?? -1) + 1) * ROW_HEIGHT };
+    /** Lists the left edges of the ghost bars drawn in a viewport. */
     const ghosts = (viewport: Viewport) =>
       callsOf(paintBody({ baseline: entries }, viewport), 'fillRect')
         .filter((call) => call.fillStyle === pale && call.args[3] === 3)
@@ -554,12 +559,14 @@ describe('paintTimelineBody', () => {
     const day = { ...VIEWPORT, left: xOf(FRAME, at(2026, 9, 28)), width: 24 * 4 };
     const calls = paintBody({ zoom: 'hour' }, day);
     const shaded = callsOf(calls, 'fillRect').filter((call) => call.fillStyle === THEME.nonWorking);
+    /** Returns the rectangle covering a period over the whole height of the viewport. */
     const span = (from: ProjectHour, to: ProjectHour) => [
       xOf(FRAME, from),
       0,
       xOf(FRAME, to) - xOf(FRAME, from),
       VIEWPORT.height,
     ];
+    /** Returns an hour of the reference day. */
     const hour = (value: number) => at(2026, 9, 28, value);
     expect(shaded.map((call) => call.args)).toEqual([
       span(hour(0), hour(9)),

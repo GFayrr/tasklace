@@ -1,30 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AUTOSAVE_DELAY_MS, createAutosave, type Timer } from './autosave';
-
-/** A timer driven by hand, keeping only the last callback set. */
-function manualTimer(): Timer & { readonly fire: () => void; readonly pending: () => boolean } {
-  let callback: (() => void) | null = null;
-  return {
-    set: (next) => {
-      callback = next;
-      return next;
-    },
-    clear: () => {
-      callback = null;
-    },
-    fire: () => {
-      const current = callback;
-      callback = null;
-      current?.();
-    },
-    pending: () => callback !== null,
-  };
-}
-
-/** Waits for pending promise callbacks to run. */
-async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
+import { AUTOSAVE_DELAY_MS, createAutosave } from './autosave';
+import { manualTimer } from './testing/manual-timer';
+import { settle } from '../app/testing/fake-app-context';
 
 describe('createAutosave', () => {
   it('waits two seconds after the last change with the timer of the page', async () => {

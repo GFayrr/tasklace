@@ -17,7 +17,7 @@ describe('adding a task to a project at its limit', () => {
       project([workTask('a'), workTask('b')], [], { name: 'Full' }),
     );
     await app.open();
-    app.selectedTaskId = 'a';
+    app.select('a');
     const before = app.project;
     app.addTask();
     expect(app.project).toBe(before);

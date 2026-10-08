@@ -377,6 +377,7 @@ describe('projects using every feature', () => {
               expect(taskFloat.freeFloatHours).toBeLessThanOrEqual(taskFloat.totalFloatHours);
             }
           }
+          /** Tells whether a link acts on the start of the first block of its successor. */
           const actsOnFirstBlock = (dependency: Project['dependencies'][number]) =>
             (dependency.type === 'finishToStart' || dependency.type === 'startToStart') &&
             (dependency.successorBlock ?? 0) === 0;
@@ -399,6 +400,7 @@ describe('projects using every feature', () => {
         expect(second.summaries).toEqual(first.summaries);
         expect(second.floats).toEqual(first.floats);
         expect(second.wbsNumbers).toEqual(first.wbsNumbers);
+        /** Lists the date conflicts of a schedule by task and code, in order. */
         const byTask = (conflicts: Schedule['conflicts']) =>
           conflicts.map((conflict) => `${conflict.taskId}:${conflict.code}`).sort();
         expect(byTask(second.conflicts)).toEqual(byTask(first.conflicts));
@@ -410,6 +412,7 @@ describe('projects using every feature', () => {
 
 describe('a generated project whose latest dates fall before the supported years', () => {
   it('keeps its schedule, the floats it cannot work out being unknown', () => {
+    /** Builds a block with a duration and the calendar days before it. */
     const block = (durationHours: number, gapDaysBefore: number) => ({
       durationHours,
       gapDaysBefore,

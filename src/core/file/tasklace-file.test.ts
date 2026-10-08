@@ -154,6 +154,7 @@ function tampered(change: (document: Y.Doc) => void): Uint8Array {
 
 /** Sorts the lists of a project by identifier. */
 function sorted(input: Project): Project {
+  /** Returns items ordered by identifier. */
   const byId = <T extends { readonly id: string }>(items: readonly T[]): T[] =>
     [...items].sort((left, right) => compareStrings(left.id, right.id));
   return {
@@ -368,16 +369,19 @@ describe('reading an untrusted tasklace file', () => {
 
   it('refuses a Yjs state that cannot be decoded or is incomplete', () => {
     const garbage = storedPayload(Uint8Array.from([255, 255, 255, 255, 1, 2, 3]));
-    expect(readCode(rewritten(file, { payload: garbage, declaredSize: garbage.length - 1 }))).toBe(
-      'INVALID_CONTENT',
+    const unreadable = readTasklaceFile(
+      rewritten(file, { payload: garbage, declaredSize: garbage.length - 1 }),
+      storingCompressor,
     );
+    expect(unreadable.ok || unreadable.error.code).toBe('INVALID_CONTENT');
+    expect(
+      !unreadable.ok && 'reason' in unreadable.error && unreadable.error.reason,
+    ).toBeInstanceOf(Error);
     const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
-    const before = Y.encodeStateVector(document);
     document.getMap('project').set('name', 'First');
     const between = Y.encodeStateVector(document);
     document.getMap('project').set('name', 'Second');
     const dependent = storedPayload(Y.encodeStateAsUpdate(document, between));
-    expect(before.length).toBeGreaterThan(0);
     expect(
       readCode(rewritten(file, { payload: dependent, declaredSize: dependent.length - 1 })),
     ).toBe('INVALID_CONTENT');

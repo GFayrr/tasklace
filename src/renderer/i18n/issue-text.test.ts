@@ -80,6 +80,7 @@ describe('issueText', () => {
 describe('repairText', () => {
   it('names the task an adjustment concerns while it still exists', () => {
     const names = new Map([['a', 'Write report']]);
+    /** Returns the name of a task, or null for an unknown task. */
     const name = (id: string) => names.get(id) ?? null;
     expect(repairText(english, { code: 'TAG_CLEARED', id: 'a' }, name)).toBe(
       `Task “Write report”: ${english.repairCodes.TAG_CLEARED}`,

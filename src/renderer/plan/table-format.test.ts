@@ -148,6 +148,7 @@ describe('floatCells', () => {
 });
 
 describe('dateConflictTitles', () => {
+  /** Writes an instant as its hours after the reference day. */
   const moment = (hour: number) => `@${String(hour - at(2026, 10, 23))}`;
 
   it('names every date a task misses, in one tooltip per task', () => {
@@ -195,6 +196,7 @@ describe('varianceCell', () => {
     end,
     durationHours: 7,
   });
+  /** Returns the variance cell of a task whose baseline ends at a given hour. */
   const cellOf = (id: string, end: number) =>
     varianceCell(taskOf(id), frozen(id, end), SCHEDULE, CALENDAR, FORMATTERS, messages);
 

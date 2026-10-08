@@ -6,6 +6,7 @@ import { createSharedDocument } from './shared-document';
 import type { SharedOperation } from './shared-operations';
 import { mergeSharedUpdate } from './shared-project';
 import { openSharedSession, type SharedSession } from './shared-session';
+import { sessionOn } from '../testing/session-copy';
 
 vi.mock('../limits', async (importOriginal) => {
   const original = await importOriginal<typeof import('../limits')>();
@@ -92,16 +93,4 @@ describe('a session at the limits of a project', () => {
 /** Builds a category tag with an identifier. */
 function tagOf(id: string): Tag {
   return { id, name: id, color: '#336699', representsPersonOrTeam: false };
-}
-
-/** Opens a session on a copy of a document, failing the test when it is refused. */
-function sessionOn(document: Y.Doc, clientId: number): SharedSession {
-  const copy = new Y.Doc();
-  copy.clientID = clientId;
-  Y.applyUpdate(copy, Y.encodeStateAsUpdate(document));
-  const session = openSharedSession(copy);
-  if (!session.ok) {
-    throw new Error(JSON.stringify(session.error));
-  }
-  return session.value;
 }

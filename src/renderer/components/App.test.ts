@@ -76,7 +76,7 @@ describe('App', () => {
   it('commits the cell being edited before a file shortcut, so that the save holds the typed value', async () => {
     const { app, root, control } = await renderApp(true);
     const grid = single(root, '[role="grid"]');
-    app.selectedTaskId = 'a';
+    app.select('a');
     update();
     press(grid, 'Enter');
     await settle();
@@ -123,7 +123,7 @@ describe('App', () => {
     app.openDetails('a');
     update();
     press(window, 'o', { ctrlKey: true });
-    app.detailsTaskId = null;
+    app.closeDetails();
     app.openReport({ title: 'T', entries: [] });
     update();
     press(window, 'o', { ctrlKey: true });
@@ -288,6 +288,7 @@ describe('Workspace', () => {
     expect(app.schedule).not.toBeNull();
     const middle = shape.row * ROW_HEIGHT + ROW_HEIGHT / 2;
     const x = shape.start + 4 - scrollLeft;
+    /** Drags the pointer on the timeline from one place to another on the same row. */
     const dragTo = (from: number, to: number) => {
       pointer(scroller, 'pointerdown', from, middle);
       pointer(scroller, 'pointermove', to, middle);
@@ -324,7 +325,7 @@ describe('Workspace', () => {
     const { app, root, scroller } = await renderSized();
     resize(scroller, 800, ROW_HEIGHT);
     const grid = single(root, '[role="grid"]');
-    app.selectedTaskId = 'a';
+    app.select('a');
     update();
     press(grid, 'ArrowDown');
     expect(scroller.scrollTop).toBe(ROW_HEIGHT);
@@ -372,6 +373,7 @@ describe('Workspace', () => {
     vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
     vi.setSystemTime(TODAY);
     const { scroller } = await renderSized();
+    /** Returns where the line of today is drawn on the timeline. */
     const todayLineX = (): number => {
       const lines = drawFrames().filter(
         (call) =>

@@ -13,7 +13,7 @@ import english from '../locales/en.json';
 import { toggleProjectOption } from '../plan/project-commands';
 import { draftFromTask } from '../plan/task-details';
 import { AppState } from './app-state.svelte';
-import { fakeAppContext, openedProjectOf, settle } from './testing/fake-app-context';
+import { fakeAppContext, openedAppOf, settle } from './testing/fake-app-context';
 
 const ALICE: Tag = { id: 'alice', name: 'Alice', color: '#4a3aa7', representsPersonOrTeam: true };
 const OPTIONS = {
@@ -40,14 +40,9 @@ const PLAN = project(
 );
 const WRITING_END = at(2026, 9, 28, 17);
 
-/** Opens the plan, where Writing misses its deadline, Defense cannot finish on its date and Alice works twice at once. */
-async function openedApp() {
-  const fake = fakeAppContext();
-  const app = new AppState(fake.context);
-  fake.control.openResult = openedProjectOf(PLAN);
-  await app.open();
-  await settle();
-  return { app, ...fake };
+/** Opens the plan in an application state. */
+function openedApp() {
+  return openedAppOf(PLAN);
 }
 
 describe('date conflicts in the application state', () => {
@@ -81,7 +76,7 @@ describe('date conflicts in the application state', () => {
     expect(app.conflictCount).toBe(1);
     app.undo();
     await settle();
-    app.selectedTaskId = 'busy';
+    app.select('busy');
     app.deleteSelected();
     await settle();
     expect([app.conflictLines, app.conflictCount]).toEqual([[], 2]);
@@ -143,10 +138,10 @@ describe('date conflicts in the application state', () => {
       throw new Error('No date conflict');
     }
     scheduler.automatic = false;
-    app.selectedTaskId = 'defense';
+    app.select('defense');
     app.deleteSelected();
     await settle();
-    app.revealRequest = null;
+    app.takeRevealRequest();
     app.showDateConflict(line);
     expect(app.revealRequest).toBeNull();
     expect(app.notices.map((notice) => [notice.kind, notice.text])).toEqual([
@@ -165,7 +160,7 @@ describe('date conflicts in the application state', () => {
       app.editSettings((context) => toggleProjectOption(context, 'dateConstraintsEnabled')),
     ).toBeNull();
     await settle();
-    app.detailsTaskId = 'free';
+    app.openDetails('free');
     expect(app.saveDetails({ ...draft, deadline: '2026-10-02T15:00' })).toBe(
       english.editErrors.TASK_CHANGED,
     );
@@ -179,7 +174,7 @@ describe('date conflicts in the application state', () => {
       throw new Error('Missing task');
     }
     const draft = draftFromTask(task, () => '', app.detailsBasis('free'));
-    app.detailsTaskId = 'free';
+    app.openDetails('free');
     expect(app.saveDetails({ ...draft, deadline: 'soon' })).toBe(
       english.editErrors.INVALID_DEADLINE,
     );
@@ -194,7 +189,7 @@ describe('date conflicts in the application state', () => {
     if (saved === undefined) {
       throw new Error('Missing task');
     }
-    app.detailsTaskId = 'free';
+    app.openDetails('free');
     const hidden = draftFromTask(saved, () => '', app.detailsBasis('free'));
     expect(app.saveDetails({ ...hidden, deadline: '', name: 'Kept' })).toBeNull();
     await settle();

@@ -45,7 +45,7 @@ import {
 import { readRecentProjects, recordRecentProject } from './recent-projects';
 import { writeFileSafely } from './safe-write';
 import { createSerialQueue } from './serial-queue';
-import { isSystemError } from './stored-files';
+import { isMissingFile, isSystemError } from './stored-files';
 import { regionalFormatOf } from './system-regional-format';
 
 export interface ProjectFileServices {
@@ -85,6 +85,12 @@ const projects = new WeakMap<WebContents, WindowProject>();
 const saveInOrder = createSerialQueue();
 const offered = new WeakMap<WebContents, WindowProject>();
 
+/** Forgets the project of the window of a page about to reload, the reloaded page starting without any project. */
+export function forgetWindowProject(sender: WebContents): void {
+  projects.delete(sender);
+  offered.delete(sender);
+}
+
 /** Tells what the window of a page holds: no project, a project saved to a file, or a project kept only on this computer. */
 export function windowProjectKind(sender: WebContents): WindowProjectKind {
   const project = projects.get(sender);
@@ -94,11 +100,13 @@ export function windowProjectKind(sender: WebContents): WindowProjectKind {
   return project.path === null ? 'withoutFile' : 'withFile';
 }
 
-/** Answers the project file requests of the bridge: new, open, recent, import, adopt, save, save as and export, the main process alone choosing paths through dialogs and knowing the file and document of each window, which changes only once the page has accepted the project offered to it. */
+/** Answers the project file requests of the bridge (new, open, recent, import, adopt, save, save as, export), the main process alone choosing paths and knowing the project of each window, which changes only once its page adopts it. */
 export function registerProjectFileHandlers(services: ProjectFileServices): void {
+  /** Registers the answer of a channel, which checks first that the page asking is trusted. */
   const handle = <C extends InvokeChannel>(channel: C, answer: ChannelHandler<C>): void => {
     handleChannel(services.assertTrusted, channel, answer);
   };
+  /** Registers the answer of a file action channel, an unexpected failure becoming a task failure. */
   const handleFileAction = <C extends ResultChannel>(
     channel: C,
     answer: (event: IpcMainInvokeEvent, ...values: unknown[]) => Promise<ChannelAnswers[C]>,
@@ -134,7 +142,7 @@ export function registerProjectFileHandlers(services: ProjectFileServices): void
   );
 }
 
-/** Answers a file request of the bridge (open, open recent, import, save, save as, export), turning an Error other than a refused message into a file failure the page can tell the user about and logging it, a thrown value that is not an Error being thrown again. */
+/** Answers a file request of the bridge, turning an Error other than a refusal into a logged task failure the page can report, and throwing again a value that is not an Error. */
 async function answerOrFail(
   channel: string,
   answer: () => Promise<BridgeResult<unknown>>,
@@ -196,8 +204,15 @@ async function openRecent(
   value: unknown,
 ): Promise<BridgeResult<OpenedProject>> {
   const index = readRecentIndex(value) ?? refuseMessage();
-  const path = (await readRecentProjects(recentStore(services)))[index];
-  return path === undefined ? failure({ code: 'READ_FAILED' }) : openPath(services, sender, path);
+  const paths = await readRecentProjects(recentStore(services));
+  const path = paths[index];
+  if (path === undefined) {
+    console.error(
+      `The page asked for recent project ${String(index)}, but only ${String(paths.length)} are known.`,
+    );
+    return failure({ code: 'READ_FAILED' });
+  }
+  return openPath(services, sender, path);
 }
 
 /** Lists the recent projects by name and folder, a list that cannot be read being logged and reported, so that the page keeps the list it shows and tells the user. */
@@ -283,6 +298,7 @@ async function saveProject(
   const state = readProjectState(value) ?? refuseMessage();
   const project = projects.get(sender);
   if (project === undefined) {
+    console.error('A page asked to save a project its window does not hold.');
     return failure({ code: 'NO_PROJECT' });
   }
   const path =
@@ -434,7 +450,11 @@ async function fileExists(path: string): Promise<boolean> {
     await stat(path);
     return true;
   } catch (error) {
+    if (isMissingFile(error)) {
+      return false;
+    }
     if (isSystemError(error)) {
+      console.warn('A file could not be examined, so it counts as absent:', error);
       return false;
     }
     throw error;

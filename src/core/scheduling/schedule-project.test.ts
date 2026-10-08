@@ -308,6 +308,7 @@ describe('scheduleProject: critical path', () => {
         },
       }),
     );
+    /** Returns the total float, free float and critical flag of a task, or nothing for a task without float. */
     const summaryOf = (id: string): [number | null, number | null, boolean] | undefined => {
       const taskFloat = schedule.floats?.get(id);
       return (
@@ -435,6 +436,7 @@ describe('scheduleProject: failures', () => {
   });
 
   it('leaves out a lead that would only limit a task after the last supported year', () => {
+    /** Builds a plan of two tasks linked with a long lead, starting at a given date. */
     const planFrom = (startDate: number): Project =>
       project([workTask('a'), workTask('b')], [link('a', 'b', 'finishToStart', -60)], {
         startDate,
@@ -445,6 +447,7 @@ describe('scheduleProject: failures', () => {
           alwaysShowPatterns: false,
         },
       });
+    /** Returns the floats and critical flags of the two tasks of a plan. */
     const summary = (plan: Project) => {
       const floats = scheduleOrThrow(plan).floats;
       return ['a', 'b'].map((id) => {
@@ -460,6 +463,7 @@ describe('scheduleProject: failures', () => {
   });
 
   it('passes an unknown float on to every task before it, and to no other task', () => {
+    /** Builds a plan with the critical path and the date constraints on, starting at the first supported week. */
     const constrained = (tasks: Project['tasks'], dependencies: Project['dependencies']) =>
       project(tasks, dependencies, {
         startDate: at(2020, 1, 6, 9),
@@ -494,8 +498,13 @@ describe('scheduleProject: failures', () => {
     for (const id of ['a', 'b', 'c', 'm', 'part']) {
       expect(floats?.get(id)).toEqual(UNKNOWN_FLOAT);
     }
-    expect(floats?.get('free')?.totalFloatHours).toBeGreaterThan(0);
-    expect(floats?.get('free')?.isCritical).toBe(false);
+    expect(floats?.get('free')).toEqual({
+      lateStart: 439334,
+      lateFinish: 439358,
+      totalFloatHours: 200,
+      freeFloatHours: 200,
+      isCritical: false,
+    });
   });
 
   it('gives an unknown float to a split task when only its first block would start before the first supported year', () => {

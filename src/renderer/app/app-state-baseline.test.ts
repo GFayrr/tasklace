@@ -5,7 +5,7 @@ import english from '../locales/en.json';
 import { toggleProjectOption } from '../plan/project-commands';
 import { setDuration } from '../plan/task-commands';
 import { AppState } from './app-state.svelte';
-import { fakeAppContext, openedProjectOf, settle } from './testing/fake-app-context';
+import { fakeAppContext, openedAppOf, openedProjectOf, settle } from './testing/fake-app-context';
 
 const NOW = new Date(2026, 9, 6, 10, 40);
 const PLAN = project(
@@ -34,14 +34,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** Opens the plan, whose baseline is turned on but not set, in an application state. */
-async function openedApp() {
-  const fake = fakeAppContext();
-  const app = new AppState({ ...fake.context, now: () => new Date() });
-  fake.control.openResult = openedProjectOf(PLAN);
-  await app.open();
-  await settle();
-  return { app, ...fake };
+/** Opens the plan in an application state. */
+function openedApp() {
+  return openedAppOf(PLAN, { now: () => new Date() });
 }
 
 describe('the baseline in the application state', () => {
@@ -51,6 +46,7 @@ describe('the baseline in the application state', () => {
     expect(app.setBaseline()).toBeNull();
     await settle();
     const schedule = scheduleOrThrow(PLAN);
+    /** Returns the baseline entry the schedule gives a task. */
     const entry = (id: string) => {
       const placement = schedule.placements.get(id);
       return { taskId: id, start: placement?.start, end: placement?.end, durationHours: 7 };
@@ -105,7 +101,7 @@ describe('the baseline in the application state', () => {
     } finally {
       logged.mockRestore();
     }
-    expect([app.project?.baseline, app.baselineNotice]).toEqual([null, null]);
+    expect([app.project?.baseline, app.settings.baselineNotice]).toEqual([null, null]);
   });
 
   it('refuses to date a baseline with a clock outside the supported years, logging it', async () => {
@@ -152,10 +148,12 @@ describe('the baseline in the application state', () => {
       logged.mockRestore();
     }
     expect(app.project?.baseline?.entries).toEqual([]);
-    expect(app.baselineNotice).toBe(english.notices.baselineSkipped.other.replace('{count}', '2'));
+    expect(app.settings.baselineNotice).toBe(
+      english.notices.baselineSkipped.other.replace('{count}', '2'),
+    );
     expect(app.notices).toEqual([]);
     expect(app.clearBaseline()).toBeNull();
-    expect(app.baselineNotice).toBeNull();
+    expect(app.settings.baselineNotice).toBeNull();
   });
 
   it('replaces the baseline with the plan as it is now, Ctrl+Z bringing back the first one', async () => {

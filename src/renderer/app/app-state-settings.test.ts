@@ -8,7 +8,7 @@ import type { BridgeResult, OpenedProject } from '../../preload/bridge-contract'
 import english from '../locales/en.json';
 import { removeTimeRange, setTimeRange, setWorkingWeekday } from '../plan/project-commands';
 import { AppState } from './app-state.svelte';
-import { fakeAppContext, openedProjectOf, settle } from './testing/fake-app-context';
+import { fakeAppContext, openedAppOf, openedProjectOf, settle } from './testing/fake-app-context';
 
 const PLAN = project(
   [
@@ -27,12 +27,8 @@ const PLAN = project(
 const MOVED = english.settings.tasksMoved;
 
 /** Opens the plan in an application state. */
-async function openedApp() {
-  const fake = fakeAppContext();
-  const app = new AppState(fake.context);
-  fake.control.openResult = openedProjectOf(PLAN);
-  await app.open();
-  return { app, ...fake };
+function openedApp() {
+  return openedAppOf(PLAN);
 }
 
 /** Returns the open project, failing the test when there is none. */
@@ -57,16 +53,16 @@ describe('opening the project settings', () => {
   it('opens only with a project, by its method or its shortcut, and closes clearing the message', async () => {
     const empty = new AppState(fakeAppContext().context);
     empty.openSettings();
-    expect(empty.settingsOpen).toBe(false);
+    expect(empty.settings.isOpen).toBe(false);
     const { app } = await openedApp();
-    const resets = app.settingsResets;
+    const resets = app.settings.resets;
     await app.run('openSettings');
-    expect([app.settingsOpen, app.settingsResets]).toEqual([true, resets + 1]);
+    expect([app.settings.isOpen, app.settings.resets]).toEqual([true, resets + 1]);
     expect(app.moveProjectStart('2026-10-05T09:00')).toBeNull();
     await settle();
-    expect(app.settingsNotice).toBe(MOVED.other.replace('{count}', '2'));
-    app.closeSettings();
-    expect([app.settingsOpen, app.settingsNotice, app.settingsResets]).toEqual([
+    expect(app.settings.notice).toBe(MOVED.other.replace('{count}', '2'));
+    app.settings.close();
+    expect([app.settings.isOpen, app.settings.notice, app.settings.resets]).toEqual([
       false,
       null,
       resets + 2,
@@ -80,7 +76,7 @@ describe('opening the project settings', () => {
     await settle();
     control.openResult = openedProjectOf(project([workTask('z')], [], { name: 'Next' }));
     await app.open();
-    expect([app.project?.name, app.settingsOpen, app.settingsNotice]).toEqual([
+    expect([app.project?.name, app.settings.isOpen, app.settings.notice]).toEqual([
       'Next',
       false,
       null,
@@ -90,23 +86,23 @@ describe('opening the project settings', () => {
   it('stays open once when a refused value holds them, until a change is applied', async () => {
     const { app } = await openedApp();
     app.openSettings();
-    app.holdSettingsOpen();
-    expect(app.closeSettingsUnlessHeld()).toBe(false);
-    expect(app.settingsOpen).toBe(true);
-    expect(app.closeSettingsUnlessHeld()).toBe(true);
-    expect(app.settingsOpen).toBe(false);
+    app.settings.hold();
+    expect(app.settings.closeUnlessHeld()).toBe(false);
+    expect(app.settings.isOpen).toBe(true);
+    expect(app.settings.closeUnlessHeld()).toBe(true);
+    expect(app.settings.isOpen).toBe(false);
     app.openSettings();
     expect(app.editSettings((context) => removeTimeRange(context, 1))).not.toBeNull();
-    expect(app.closeSettingsUnlessHeld()).toBe(true);
+    expect(app.settings.closeUnlessHeld()).toBe(true);
     app.openSettings();
-    app.holdSettingsOpen();
+    app.settings.hold();
     expect(app.editSettings((context) => setWorkingWeekday(context, 6, true))).toBeNull();
-    expect(app.closeSettingsUnlessHeld()).toBe(true);
+    expect(app.settings.closeUnlessHeld()).toBe(true);
     app.openSettings();
-    app.holdSettingsOpen();
-    app.closeSettings();
+    app.settings.hold();
+    app.settings.close();
     app.openSettings();
-    expect(app.closeSettingsUnlessHeld()).toBe(true);
+    expect(app.settings.closeUnlessHeld()).toBe(true);
   });
 });
 
@@ -206,14 +202,14 @@ describe('moving the project start', () => {
     expect(app.moveProjectStart('2026-10-12T09:00')).toBeNull();
     expect(app.project?.startDate).toBe(at(2026, 10, 12, 9));
     await settle();
-    expect(app.settingsNotice).toBe(MOVED.other.replace('{count}', '2'));
+    expect(app.settings.notice).toBe(MOVED.other.replace('{count}', '2'));
     expect(app.moveProjectStart('2026-10-13T09:00')).toBeNull();
     await settle();
-    expect(app.settingsNotice).toBe(MOVED.other.replace('{count}', '2'));
+    expect(app.settings.notice).toBe(MOVED.other.replace('{count}', '2'));
     expect(app.moveProjectStart('2026-09-21T09:00')).toBeNull();
     await settle();
     expect(app.project?.startDate).toBe(at(2026, 9, 21, 9));
-    expect(app.settingsNotice).toBe(MOVED.other.replace('{count}', '2'));
+    expect(app.settings.notice).toBe(MOVED.other.replace('{count}', '2'));
     expect(app.notices).toEqual([]);
   });
 
@@ -224,7 +220,7 @@ describe('moving the project start', () => {
     await app.open();
     expect(app.moveProjectStart('2026-10-05T09:00')).toBeNull();
     await settle();
-    expect(app.settingsNotice).toBe(MOVED.one.replace('{count}', '1'));
+    expect(app.settings.notice).toBe(MOVED.one.replace('{count}', '1'));
   });
 
   it('counts none when every task keeps its own date', async () => {
@@ -236,7 +232,7 @@ describe('moving the project start', () => {
     await app.open();
     expect(app.moveProjectStart('2026-10-05T09:00')).toBeNull();
     await settle();
-    expect(app.settingsNotice).toBe(MOVED.other.replace('{count}', '0'));
+    expect(app.settings.notice).toBe(MOVED.other.replace('{count}', '0'));
   });
 
   it('refuses a date that cannot be read or is not on a quarter hour, telling no move afterwards', async () => {
@@ -246,7 +242,7 @@ describe('moving the project start', () => {
     }
     expect(app.editSettings((context) => setWorkingWeekday(context, 6, true))).toBeNull();
     await settle();
-    expect(app.settingsNotice).toBeNull();
+    expect(app.settings.notice).toBeNull();
   });
 
   it('tells nothing when the schedule shown was not up to date before the move', async () => {
@@ -257,7 +253,7 @@ describe('moving the project start', () => {
     expect(app.moveProjectStart('2026-10-12T09:00')).toBeNull();
     await settle();
     deliverSchedule(app, scheduler);
-    expect(app.settingsNotice).toBeNull();
+    expect(app.settings.notice).toBeNull();
   });
 
   it('counts from the schedule before a series of moves made before any new schedule', async () => {
@@ -267,7 +263,7 @@ describe('moving the project start', () => {
     expect(app.moveProjectStart('2026-10-19T09:00')).toBeNull();
     expect(app.moveProjectStart('later')).toBe(english.editErrors.INVALID_DATE);
     deliverSchedule(app, scheduler);
-    expect(app.settingsNotice).toBe(MOVED.other.replace('{count}', '2'));
+    expect(app.settings.notice).toBe(MOVED.other.replace('{count}', '2'));
   });
 
   it('tells nothing when another change comes before the new schedule', async () => {
@@ -276,7 +272,7 @@ describe('moving the project start', () => {
     expect(app.moveProjectStart('2026-10-12T09:00')).toBeNull();
     expect(app.editSettings((context) => setWorkingWeekday(context, 6, true))).toBeNull();
     deliverSchedule(app, scheduler);
-    expect(app.settingsNotice).toBeNull();
+    expect(app.settings.notice).toBeNull();
   });
 
   it('shows in the settings why the schedule failed, forgets the move, and clears the reason once computed', async () => {
@@ -285,24 +281,24 @@ describe('moving the project start', () => {
     app.openSettings();
     expect(app.moveProjectStart('2026-10-12T09:00')).toBeNull();
     scheduler.listener().scheduled({ ok: false, error: { kind: 'startDate' } }, openProject(app));
-    expect(app.settingsAlert).toBe(english.scheduleFailures.startDate);
+    expect(app.settings.alert).toBe(english.scheduleFailures.startDate);
     expect(app.notices.map((notice) => notice.text)).toEqual([english.scheduleFailures.startDate]);
     expect(app.editSettings((context) => setWorkingWeekday(context, 6, true))).toBeNull();
     deliverSchedule(app, scheduler);
-    expect([app.settingsAlert, app.settingsNotice]).toEqual([null, null]);
+    expect([app.settings.alert, app.settings.notice]).toEqual([null, null]);
   });
 
   it('shows in the open settings that the scheduler stopped, and nothing in closed ones', async () => {
     const { app, scheduler } = await openedApp();
     scheduler.automatic = false;
     scheduler.listener().failed(new Error('Worker lost'));
-    expect(app.settingsAlert).toBeNull();
+    expect(app.settings.alert).toBeNull();
     app.openSettings();
     expect(app.moveProjectStart('2026-10-12T09:00')).toBeNull();
     scheduler.listener().failed(new Error('Worker lost'));
-    expect(app.settingsAlert).toBe(english.notices.scheduleStopped);
+    expect(app.settings.alert).toBe(english.notices.scheduleStopped);
     deliverSchedule(app, scheduler);
-    expect([app.settingsAlert, app.settingsNotice]).toEqual([null, null]);
+    expect([app.settings.alert, app.settings.notice]).toEqual([null, null]);
   });
 
   it('forgets what the settings showed on undo and redo', async () => {
@@ -310,17 +306,17 @@ describe('moving the project start', () => {
     app.openSettings();
     expect(app.moveProjectStart('2026-10-12T09:00')).toBeNull();
     await settle();
-    const resets = app.settingsResets;
+    const resets = app.settings.resets;
     app.undo();
     await settle();
-    expect([app.project?.startDate, app.settingsNotice, app.settingsResets]).toEqual([
+    expect([app.project?.startDate, app.settings.notice, app.settings.resets]).toEqual([
       PLAN.startDate,
       null,
       resets + 1,
     ]);
     app.redo();
     await settle();
-    expect([app.project?.startDate, app.settingsNotice, app.settingsResets]).toEqual([
+    expect([app.project?.startDate, app.settings.notice, app.settings.resets]).toEqual([
       at(2026, 10, 12, 9),
       null,
       resets + 2,

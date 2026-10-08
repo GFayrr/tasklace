@@ -159,6 +159,7 @@ function taskToJson(task: Task) {
   if (task.kind === 'summary') {
     return task;
   }
+  /** Writes a date for the JSON export, or null for none. */
   const clearDate = (hour: ProjectHour | null): string | null =>
     hour === null ? null : formatDateTime(hour);
   const dates = {

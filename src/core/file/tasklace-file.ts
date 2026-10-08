@@ -38,7 +38,7 @@ export type FileError =
   | { readonly code: 'CORRUPTED' }
   | { readonly code: 'DECOMPRESSION_BOMB' }
   | { readonly code: 'DECOMPRESSION_FAILED' }
-  | { readonly code: 'INVALID_CONTENT' }
+  | { readonly code: 'INVALID_CONTENT'; readonly reason?: unknown }
   | { readonly code: 'INVALID_PROJECT'; readonly issues: readonly ValidationIssue[] };
 
 export type StateCheckError =
@@ -196,13 +196,13 @@ function decompressPayload(
   return state.value.length === declaredSize ? state : failure({ code: 'DECOMPRESSION_FAILED' });
 }
 
-/** Decodes a Yjs state into a new document, refusing a state that cannot be read or that depends on missing updates. */
+/** Decodes a Yjs state into a new document, refusing a state that cannot be read, with the reason Yjs gives, or that depends on missing updates. */
 function decodeState(state: Uint8Array): Result<Y.Doc, FileError> {
   const document = new Y.Doc();
   try {
     Y.applyUpdate(document, state);
-  } catch {
-    return failure({ code: 'INVALID_CONTENT' });
+  } catch (error) {
+    return failure({ code: 'INVALID_CONTENT', reason: error });
   }
   const complete = document.store.pendingStructs === null && document.store.pendingDs === null;
   return complete ? success(document) : failure({ code: 'INVALID_CONTENT' });

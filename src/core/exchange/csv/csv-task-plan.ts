@@ -259,6 +259,7 @@ function planDependencies(
   issues: IssueList,
 ): PlannedItem<Dependency>[] {
   const dependencies: PlannedItem<Dependency>[] = [];
+  /** Adds a link read from a cell, numbered in the order the cells are read. */
   const add = (row: ParsedRow, column: CsvColumn, link: Omit<Dependency, 'id'>): void => {
     const id = `${DEPENDENCY_ID_PREFIX}${String(dependencies.length + 1)}`;
     dependencies.push({ item: { id, ...link }, rowNumber: row.rowNumber, column });

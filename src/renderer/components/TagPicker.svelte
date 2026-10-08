@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Tag, TagId } from '../../core/model/project';
+  import { pixels } from './css-length';
 
   interface Props {
     readonly tags: readonly Tag[];
@@ -72,9 +73,9 @@
   tabindex="-1"
   aria-label={label}
   aria-activedescendant={optionId(active)}
-  style:left="{anchor.left}px"
-  style:top="{anchor.bottom + GAP_PIXELS}px"
-  style:min-width="{anchor.width}px"
+  style:left={pixels(anchor.left)}
+  style:top={pixels(anchor.bottom + GAP_PIXELS)}
+  style:min-width={pixels(anchor.width)}
   bind:this={list}
   onkeydown={listKey}
 >

@@ -34,6 +34,7 @@ const SPLIT = splitTask(
   },
 );
 
+/** Writes no wait for any block. */
 const NO_WAITS = (): string => '';
 const ON = {
   criticalPathEnabled: false,

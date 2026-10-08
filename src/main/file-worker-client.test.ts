@@ -1,5 +1,5 @@
 import { Worker } from 'node:worker_threads';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runInFileWorker } from './file-worker-client';
 
 const TASK = { kind: 'openProject', path: '/nowhere' } as const;
@@ -23,6 +23,31 @@ describe('runInFileWorker', () => {
       TASK,
     );
     expect(result).toEqual({ ok: true, value: { kind: 'loaded' } });
+  });
+
+  it('reports a task that cannot be sent as failed, logging why and stopping its worker', async () => {
+    let started: Worker | null = null;
+    const factory = workerRunning(
+      "require('node:worker_threads').parentPort.once('message', () => {});",
+    );
+    const unsendable = { kind: 'openProject', path: '/nowhere', extra: () => undefined } as const;
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const result = await runInFileWorker(() => {
+        started = factory();
+        return started;
+      }, unsendable);
+      expect(result).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
+      expect(
+        logged.mock.calls.map((call: unknown[]) => [String(call[0]), (call[1] as Error).name]),
+      ).toEqual([['The file task openProject failed:', 'DataCloneError']]);
+    } finally {
+      logged.mockRestore();
+    }
+    const worker = started as Worker | null;
+    await vi.waitFor(() => {
+      expect(worker?.threadId).toBe(-1);
+    });
   });
 
   it('reports a worker that runs out of memory as too complex, the caller surviving', async () => {

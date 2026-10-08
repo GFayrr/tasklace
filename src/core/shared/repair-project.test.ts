@@ -302,6 +302,7 @@ describe('repairProject properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () =
           }),
         ),
         ({ broken, tasks, dependencies }) => {
+          /** Returns items ordered by identifier. */
           const byId = <T extends { readonly id: string }>(items: readonly T[]): T[] =>
             [...items].sort((left, right) => (left.id < right.id ? -1 : 1));
           const first = unwrap(repairProject(broken));

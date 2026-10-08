@@ -453,6 +453,7 @@ describe('merging within limits and budgets', () => {
   it('trims tags added offline beyond the limit, keeping the smallest identifiers', () => {
     const perSide = (MAX_TAGS * 3) / 4;
     const keptOfRight = MAX_TAGS - perSide;
+    /** Builds as many tags as each side adds, with identifiers that start with a prefix. */
     const tags = (prefix: string): Tag[] =>
       Array.from({ length: perSide }, (_unused, position) => ({
         ...DESIGN,
@@ -774,8 +775,10 @@ function convert(task: Task, kind: Task['kind']): Task {
 function toChange(operation: Operation, newId: string): (current: Project) => Project {
   return (current) => {
     const tasks = byId(current.tasks);
+    /** Picks a task by a generated position, or nothing when there is no task. */
     const pick = (position: number): Task | undefined =>
       tasks[position % Math.max(tasks.length, 1)];
+    /** Picks a tag by a generated position, or null for no tag. */
     const tagId = (position: number | null): string | null =>
       position === null ? null : (byId(current.tags)[position]?.id ?? null);
     switch (operation.type) {

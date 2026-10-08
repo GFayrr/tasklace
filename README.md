@@ -73,7 +73,7 @@ What Tasklace already supports:
 - [x] Scheduling engine: dependencies, summaries, split tasks, critical path
 - [x] Tags and person or team conflict detection
 - [x] Project file format, validation, JSON and CSV import and export
-- [ ] Desktop application and user interface
+- [x] Desktop application and user interface
 - [ ] PDF export
 - [ ] Real-time collaboration on the local network
 - [ ] End-to-end encrypted relay and deployment guide
@@ -110,7 +110,7 @@ The following commands are for development only.
 | `npm run format`       | Format the code with Prettier                           |
 | `npm run format:check` | Check formatting without changing files                 |
 
-The test suite covers edge cases extensively and uses property-based testing to check scheduling invariants and data exchange on thousands of random projects, and to make sure that no malformed input is ever accepted. Continuous integration runs formatting, linting and tests on Windows and Linux for every push and pull request.
+The test suite covers edge cases extensively and uses property-based testing to check scheduling invariants and data exchange on thousands of random projects, and to make sure that no malformed input is ever accepted. Continuous integration runs formatting, linting, unit tests and end-to-end tests on Windows and Linux, and the growth checks of key operations, for every push and pull request.
 
 ## Project structure
 
@@ -135,7 +135,7 @@ tests/file/          .tasklace files with real compression, decompression bombs
 tests/fixtures/      large test projects generated from fixed seeds
 tests/growth/        growth checks of key operations, run in CI
 tests/perf/          performance benchmark
-tests/repository/    repository hygiene checks
+tests/repository/    repository checks: small text fixtures, no text written in a component, comments, wording
 ```
 
 ## Maintainers

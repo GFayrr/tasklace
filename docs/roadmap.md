@@ -2,17 +2,17 @@
 
 Tasklace is built in nine steps. Each step, or sub-step, is developed on its own branch, tested, reviewed and merged into `main` through a pull request.
 
-| Step | Content                                                    | Status      |
-| ---- | ---------------------------------------------------------- | ----------- |
-| 1    | Foundations and working-time calendar                      | Done        |
-| 2    | Scheduling engine                                          | Done        |
-| 3    | Tags and person or team conflicts                          | Done        |
-| 4    | Shared model, project file, validation, JSON and CSV       | Done        |
-| 5    | Secure Electron shell and Svelte user interface            | In progress |
-| 6    | PDF export and comparison of the page splitting strategies | Planned     |
-| 7    | Real-time collaboration on the local network               | Planned     |
-| 8    | End-to-end encrypted relay                                 | Planned     |
-| 9    | Distribution                                               | Planned     |
+| Step | Content                                                    | Status  |
+| ---- | ---------------------------------------------------------- | ------- |
+| 1    | Foundations and working-time calendar                      | Done    |
+| 2    | Scheduling engine                                          | Done    |
+| 3    | Tags and person or team conflicts                          | Done    |
+| 4    | Shared model, project file, validation, JSON and CSV       | Done    |
+| 5    | Secure Electron shell and Svelte user interface            | Done    |
+| 6    | PDF export and comparison of the page splitting strategies | Planned |
+| 7    | Real-time collaboration on the local network               | Planned |
+| 8    | End-to-end encrypted relay                                 | Planned |
+| 9    | Distribution                                               | Planned |
 
 ## Step 5: secure Electron shell and Svelte user interface
 
@@ -52,7 +52,7 @@ Step 5 turns the core into a desktop application. It is developed on its own bra
 - Editing from the toolbar, the keyboard and the table: add, delete, rename, indent (Alt+Shift+→) and outdent (Alt+Shift+←), reorder (Alt+↑ and Alt+↓), turn into a milestone, type a duration in hours or working days, a start date, a progress or predecessors in the notation of the CSV table.
 - On the timeline: move a bar to set its start date, stretch its end to change its duration, drag from the handle of the selected bar to another bar to link them; bars align to the quarter hour at the hour zoom, to the day otherwise.
 - Every change is checked by the shared session as one step, undone in one step, and explained when refused; the zoom sits in the status bar.
-- 60 frames per second while scrolling 10,000 tasks; a change refreshes what the interface shows within a frame.
+- Only the visible rows of the table and of the timeline are drawn; on 10,000 tasks, a change refreshes what the interface shows within a frame, checked by a benchmark.
 
 ### 5d, after testing: quarter hours, date picker, tags and task details (done)
 
@@ -108,7 +108,7 @@ Done in three parts, each with its mockups approved first.
 
 #### 5e-1. Project settings (done)
 
-- A "Project settings" button next to the project name, and Ctrl+, open a dialog with tabs: General and Calendar now, Tags and Advanced options shown as coming soon.
+- A "Project settings" button next to the project name, and Ctrl+, open a dialog with tabs: General and Calendar, then Tags (5e-2) and Advanced options (5e-3).
 - General: project name and project start; after a move, the dialog tells how many tasks it moved.
 - Calendar: working days, ranges of working hours to the quarter hour with the resulting hours per day, days off. Each change applies at once and can be undone with Ctrl+Z, even with the dialog open.
 - A date or time applies when the field is left or Enter is pressed. A refused change is explained beside the part that was changed, naming the task at stake when its hours no longer fit the working day, and the field shows the value of the project again.
@@ -130,7 +130,7 @@ Done in three parts, each with its mockups approved first. Every advanced featur
 
 - The Advanced options tab: one switch per feature, each explained in a sentence. Critical path, date constraints, the baseline and always showing patterns all work.
 - With the critical path on, the table shows the total and free float of every task, with a hint on each header; the timeline underlines critical tasks in graphite and draws how far other tasks can slip as a dashed line; the legend explains the mark.
-- When a task would have to start before 2020, the first year handled, to finish on time, the plan stays available: only the floats concerned are unknown, shown as "?", and one message explains why and what to do.
+- When a task would have to start before 2020, the first year handled, to finish on time, the dates are still worked out: only the floats concerned are unknown, shown as "?", and one message explains why and what to do.
 
 ##### 5e-3b. Date constraints (done)
 
@@ -146,6 +146,15 @@ Done in three parts, each with its mockups approved first. Every advanced featur
 - On the timeline, a thin pale ghost at the top of each row shows where the task was planned, and a small hollow diamond where a milestone was; the timeline widens to the frozen dates of the tasks that still exist, always keeping the whole project in view.
 - A Variance column after End gives in working days how much later (+, in the warning color) or earlier (−) each task now ends, any gap showing as at least a quarter of a day; a dash for a task not in the baseline or a summary without dates.
 - The legend keys are short ("Critical", "Baseline", "Deadline"), each explained in a tooltip.
+
+### After the review of the whole step (done)
+
+The whole step was reviewed once finished, then corrected in four parts, each tested on its own.
+
+- Defects and silent failures: a page reloaded after a crash starts without the project of the old page; crashes, unresponsive pages and a bridge that cannot load are logged and let the window close; errors and objects sent by the page reach the log in full; a programming error is never reported as a disk problem; the log is written before the application quits; a schedule request the worker does not recognise fails instead of waiting forever; a damaged list of recent projects no longer shifts the entries; refusals explain the real cause. Two channels of the bridge that nothing used were removed.
+- Restructuring: the state of the settings window and the selection have their own small interfaces, refusal codes are gathered in one module, the arguments of every channel of the bridge are typed, and the two confirmation dialogs share one component.
+- Tests: end-to-end journeys for a project kept across a restart, the recent projects, a CSV round trip through the menus and the project settings; tests that waited for time now follow events; the entry points of the processes keep only their wiring, their logic being tested; exact values instead of thresholds; growth checks for the visible cells and for forged CSV cells.
+- Texts: every function, inner ones included, has a one-sentence comment, and one interface vocabulary: the plan is the tasks, the dates are worked out, a time is on a quarter hour (:00, :15, :30 or :45). Two repository tests keep both.
 
 ## After version 1
 

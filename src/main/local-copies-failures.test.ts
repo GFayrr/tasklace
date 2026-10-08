@@ -7,6 +7,7 @@ const asideFailure = vi.hoisted((): { error: Error | null } => ({ error: null })
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:fs/promises')>();
+  /** Renames a file, failing when a damaged index is set aside while the test asks for that failure. */
   const rename = (from: string, to: string): Promise<void> =>
     asideFailure.error !== null && to.includes('.damaged-')
       ? Promise.reject(asideFailure.error)

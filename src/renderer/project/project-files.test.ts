@@ -4,15 +4,17 @@ import { createSharedDocument, readDocumentId } from '../../core/shared/shared-d
 import type { SharedSession } from '../../core/shared/shared-session';
 import { project, TEST_DOCUMENT_ID, workTask } from '../../core/testing/project-builder';
 import type { BridgeResult, OpenedProject, SavedProject } from '../../preload/bridge-contract';
-import type { Timer } from './autosave';
 import {
   createProjectFiles,
   FileActionError,
+  issuesOf,
   type ProjectBridge,
   type ProjectFiles,
   type ProjectFilesListener,
   type SaveStatus,
 } from './project-files';
+import { manualTimer } from './testing/manual-timer';
+import { settle } from '../app/testing/fake-app-context';
 
 const OTHER_ID = '00000000-0000-4000-8000-000000000002';
 const SAMPLE = project([workTask('a')]);
@@ -29,25 +31,6 @@ function listening(overrides: Partial<ProjectFilesListener>): ProjectFilesListen
   return { ...QUIET, ...overrides };
 }
 
-/** A timer driven by hand. */
-function manualTimer(): Timer & { readonly fire: () => void } {
-  let callback: (() => void) | null = null;
-  return {
-    set: (next) => {
-      callback = next;
-      return next;
-    },
-    clear: () => {
-      callback = null;
-    },
-    fire: () => {
-      const current = callback;
-      callback = null;
-      current?.();
-    },
-  };
-}
-
 /** A bridge answering from fixed results and recording the saves it receives with the names they suggest. */
 function fakeBridge(
   openResult: BridgeResult<OpenedProject>,
@@ -59,6 +42,7 @@ function fakeBridge(
   const events: string[] = [];
   const adopted: string[] = [];
   const adoption = { result: { ok: true, value: null } as BridgeResult<null> };
+  /** Creates a fake save of the bridge that records what was saved and with which suggested name. */
   const record = (as: boolean) => (state: Uint8Array, name?: string) => {
     const document = new Y.Doc();
     Y.applyUpdate(document, state);
@@ -106,11 +90,6 @@ async function createdOn(files: ProjectFiles): Promise<SharedSession> {
     throw new Error(JSON.stringify(created.error));
   }
   return created.value;
-}
-
-/** Waits for pending promise callbacks to run. */
-async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe('createProjectFiles', () => {
@@ -269,6 +248,15 @@ describe('createProjectFiles', () => {
     expect(saves).toEqual([]);
   });
 
+  it('fails a save the main process cannot place, instead of taking it for a page without project', async () => {
+    const { bridge } = fakeBridge(openedOf(OTHER_ID), { ok: false, error: { code: 'NO_PROJECT' } });
+    const files = createProjectFiles(bridge, QUIET, manualTimer());
+    const session = await createdOn(files);
+    expect(await files.save()).toEqual({ ok: false, error: { code: 'NO_PROJECT' } });
+    session.apply({ type: 'updateProject', fields: { name: 'Changed' } });
+    await expect(files.flush()).rejects.toThrow(FileActionError);
+  });
+
   it('keeps the open project when it cannot be saved before a new one is created', async () => {
     const timer = manualTimer();
     const failures: unknown[] = [];
@@ -378,6 +366,7 @@ describe('createProjectFiles', () => {
   it('never leaves the save status on saving when the bridge throws', async () => {
     const statuses: SaveStatus[] = [];
     const { bridge } = fakeBridge(openedOf(OTHER_ID));
+    /** Fails as a broken bridge would. */
     const broken = () => Promise.reject(new Error('broken bridge'));
     const throwing = { ...bridge, saveProject: broken, saveProjectAs: broken };
     const files = createProjectFiles(
@@ -579,5 +568,17 @@ describe('createProjectFiles', () => {
     expect(sentNames).toEqual(['First', 'Second']);
     answers[1]?.(SAVED);
     expect(await manual).toEqual(SAVED);
+  });
+});
+
+describe('issuesOf', () => {
+  it('gives the problems of the failures that list them, and none for the others', () => {
+    const issues = [{ path: 'name', code: 'EMPTY_TEXT' as const }];
+    expect(issuesOf({ code: 'INVALID_PROJECT', issues })).toBe(issues);
+    expect(issuesOf({ code: 'INVALID_IMPORT', issues })).toBe(issues);
+    expect(issuesOf({ code: 'INVALID_STATE', issues })).toBe(issues);
+    expect(issuesOf({ code: 'WRITE_FAILED' })).toEqual([]);
+    expect(issuesOf({ code: 'BUSY' })).toEqual([]);
+    expect(issuesOf({ code: 'UNSAVED_PROJECT', cause: null })).toEqual([]);
   });
 });

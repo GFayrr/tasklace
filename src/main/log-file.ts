@@ -36,6 +36,7 @@ export function createLogFile(
   const runInOrder = createSerialQueue();
   let size: number | null = null;
   let last: Promise<void> = Promise.resolve();
+  /** Appends a line to the log, setting the log aside first when the line would make it too large. */
   const append = async (line: string): Promise<void> => {
     const bytes = ENCODER.encode(line).length;
     size ??= await prepare(folder, path);
@@ -122,4 +123,19 @@ async function prepare(folder: string, path: string): Promise<number> {
     }
     throw error;
   }
+}
+
+export interface QuittingApplication {
+  on(event: 'will-quit', listener: (event: { preventDefault: () => void }) => void): unknown;
+  exit(): void;
+}
+
+/** Holds the end of the application until the log has written every line it was given, then ends it at once, since asking to quit again would start the quitting over, so that the last errors before quitting are never lost. */
+export function writeLogBeforeQuitting(application: QuittingApplication, log: LogFile): void {
+  application.on('will-quit', (event) => {
+    event.preventDefault();
+    void log.written().finally(() => {
+      application.exit();
+    });
+  });
 }

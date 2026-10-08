@@ -97,6 +97,15 @@ describe('ReportDialog', () => {
     update();
     expect(app.report).toBeNull();
   });
+
+  it('forgets the report as soon as Escape cancels the dialog, before it is closed', () => {
+    const app = createApp();
+    const root = render(ReportDialog, { app });
+    app.openReport({ title: 'T', entries: [] });
+    update();
+    dialogIn(root).dispatchEvent(new Event('cancel', { cancelable: true }));
+    expect(app.report).toBeNull();
+  });
 });
 
 describe('ClosePrompt', () => {

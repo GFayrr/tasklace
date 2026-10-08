@@ -25,37 +25,15 @@ import {
 import type { Placement } from '../../core/scheduling/task-placement';
 import { keyBetween, spreadKeys } from '../../core/shared/fractional-index';
 import type { SharedOperation } from '../../core/shared/shared-operations';
+import type { EditError, EditRefusal } from './edit-refusal';
 import { dayIndexOf, QUARTER_HOUR, startOfDay, type ProjectHour } from '../../core/time';
 import { relinkBlocks } from './block-links';
 import { parseDuration } from './durations';
 import { predecessorText, taskIdOfNumber, type PlanOutline } from './plan-outline';
 
-export type EditError =
-  | 'NOT_POSSIBLE'
-  | 'INVALID_NAME'
-  | 'INVALID_DURATION'
-  | 'INVALID_DATE'
-  | 'INVALID_END'
-  | 'OUT_OF_RANGE'
-  | 'INVALID_PROGRESS'
-  | 'INVALID_PREDECESSORS'
-  | 'UNKNOWN_TASK_NUMBER'
-  | 'UNKNOWN_BLOCK'
-  | 'LINKS_WOULD_MERGE'
-  | 'WAITS_NEED_TWO_BLOCKS'
-  | 'TASK_CHANGED'
-  | ScheduleRefusal
-  | 'INVALID_TIME'
-  | 'NO_ROOM_FOR_RANGE'
-  | 'EMPTY_TAG_NAME'
-  | 'DUPLICATE_TAG_NAME'
-  | 'TOO_MANY_TAGS'
-  | 'SCHEDULE_FAILED'
-  | 'CLOCK_OUT_OF_RANGE';
-
-export type ScheduleRefusal = 'SCHEDULE_PENDING' | 'SCHEDULE_STOPPED';
-
 export type Edit = Result<readonly SharedOperation[], EditError>;
+
+export type EditBuild = (context: EditContext) => Result<readonly SharedOperation[], EditRefusal>;
 
 export interface EditContext {
   readonly project: Project;
@@ -524,7 +502,7 @@ export function moveOnTimeline(
   return moveBlock(context, id, block, { start: dropped(moved.start), previousEnd: previous.end });
 }
 
-/** Asks a later block of a split task not to start before an instant, as when it is dragged alone, its gap in days becoming the number of days from the end of the previous block, a block dropped before that end staying right after it without a date of its own. */
+/** Asks a later block of a split task not to start before an instant, as when it is dragged alone, its gap becoming the days since the end of the previous block, a block dropped before that end staying right after it without a date. */
 export function moveBlock(
   context: EditContext,
   id: TaskId,

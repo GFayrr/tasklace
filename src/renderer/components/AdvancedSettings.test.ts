@@ -146,6 +146,7 @@ describe('the Advanced options tab', () => {
       ),
     };
     const { root, dialog } = await renderAdvanced(late);
+    /** Returns the total float shown on the row of the task Figures. */
     const totalOf = () => {
       const figures = [...root.querySelectorAll('[role="row"]')].find((row) =>
         row.textContent.includes('Figures'),
@@ -180,6 +181,7 @@ describe('the Advanced options tab', () => {
 
   it('shows an unknown float as a question mark explained by the first supported year, the task being critical', async () => {
     const start = 490_896;
+    /** Builds a block with a duration and the calendar days before it. */
     const block = (durationHours: number, gapDaysBefore: number) => ({
       durationHours,
       gapDaysBefore,

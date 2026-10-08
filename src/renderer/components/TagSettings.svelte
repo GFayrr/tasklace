@@ -21,6 +21,7 @@
   import type { Edit, EditContext } from '../plan/task-commands';
   import { commitField } from './commit-field';
   import Icon from './Icon.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import TagSwatch from './TagSwatch.svelte';
 
   interface Deletion {
@@ -47,7 +48,6 @@
   );
   const PALETTE_COLUMNS = 6;
   const SETTINGS_SWATCH_SIZE = 22;
-  const HISTORY_KEYS: ReadonlySet<string> = new Set(['z', 'y']);
   const COLOR_STEPS: Readonly<Record<string, number>> = {
     ArrowLeft: -1,
     ArrowRight: 1,
@@ -58,7 +58,7 @@
   let knownBeforeAdding = $state<ReadonlySet<TagId> | null>(null);
   let deletion = $state<Deletion | null>(null);
   let refusal = $state<Refusal | null>(null);
-  const shownRefusal = $derived(refusal?.resets === app.settingsResets ? refusal : null);
+  const shownRefusal = $derived(refusal?.resets === app.settings.resets ? refusal : null);
   const listRefusal = $derived(
     shownRefusal !== null && !tags.some((tag) => tag.id === shownRefusal.tagId)
       ? shownRefusal.text
@@ -68,7 +68,7 @@
   /** Applies a change of the tags, showing the reason for a refusal beside the tag it is about, or below the list when it is about the list or a tag that is gone, or clearing it once applied, and tells whether it was applied. */
   function change(tagId: TagId | null, build: (context: EditContext) => Edit): boolean {
     const refused = app.editSettings(build);
-    refusal = refused === null ? null : { tagId, text: refused, resets: app.settingsResets };
+    refusal = refused === null ? null : { tagId, text: refused, resets: app.settings.resets };
     return refused === null;
   }
 
@@ -123,19 +123,6 @@
     (next ?? document.querySelector<HTMLElement>('.tags .add'))?.focus();
   }
 
-  /** Keeps undo and redo from changing the tags while the user is asked to confirm a deletion. */
-  function holdHistory(dialog: HTMLDialogElement): () => void {
-    const hold = (event: KeyboardEvent): void => {
-      if ((event.ctrlKey || event.metaKey) && HISTORY_KEYS.has(event.key.toLowerCase())) {
-        event.stopPropagation();
-      }
-    };
-    dialog.addEventListener('keydown', hold);
-    return () => {
-      dialog.removeEventListener('keydown', hold);
-    };
-  }
-
   /** Puts the focus on the color a tag has when its colors open, or on the first color for a color of its own. */
   function focusChosen(palette: HTMLElement): void {
     const chosen = palette.querySelector<HTMLButtonElement>('.color[aria-pressed="true"]');
@@ -171,15 +158,6 @@
     }
     event.preventDefault();
     valueAt(buttons, (index + step + buttons.length) % buttons.length).focus();
-  }
-
-  /** Opens the confirmation dialog as a modal while a deletion waits for an answer, and closes it otherwise. */
-  function followDeletion(dialog: HTMLDialogElement): void {
-    if (deletion !== null && !dialog.open) {
-      dialog.showModal();
-    } else if (deletion === null && dialog.open) {
-      dialog.close();
-    }
   }
 </script>
 
@@ -226,7 +204,7 @@
               return;
             }
             field.value = tag.name;
-            app.holdSettingsOpen();
+            app.settings.hold();
           },
         )}
       />
@@ -315,39 +293,26 @@
   </button>
 </div>
 
-<dialog
-  class="confirm"
-  aria-labelledby="tag-delete-title"
-  {@attach followDeletion}
-  {@attach holdHistory}
-  onclose={(event) => {
-    if (!event.currentTarget.open) {
-      deletion = null;
+<ConfirmDialog
+  question={deletion === null
+    ? null
+    : {
+        title: fillMessage(text.deleteTitle, { name: deletion.name }),
+        body: countMessage(text.deleteBody, deletion.count, app.locale),
+        confirm: text.deleteConfirm,
+        danger: true,
+      }}
+  titleId="tag-delete-title"
+  cancel={text.cancel}
+  confirmed={() => {
+    if (deletion !== null) {
+      confirmDeletion(deletion);
     }
   }}
->
-  {#if deletion !== null}
-    {@const asked = deletion}
-    <h3 id="tag-delete-title">{fillMessage(text.deleteTitle, { name: deletion.name })}</h3>
-    <p>{countMessage(text.deleteBody, deletion.count, app.locale)}</p>
-    <div class="actions">
-      <button
-        type="button"
-        class="button"
-        onclick={() => {
-          deletion = null;
-        }}>{text.cancel}</button
-      >
-      <button
-        type="button"
-        class="button danger"
-        onclick={() => {
-          confirmDeletion(asked);
-        }}>{text.deleteConfirm}</button
-      >
-    </div>
-  {/if}
-</dialog>
+  dismissed={() => {
+    deletion = null;
+  }}
+/>
 
 <style>
   .tags {
@@ -518,54 +483,5 @@
 
   .icon-button:hover {
     background: var(--color-panel);
-  }
-
-  .confirm {
-    width: min(420px, calc(100% - 32px));
-    padding: var(--space-6);
-    color: var(--color-text);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: calc(var(--radius) + 4px);
-  }
-
-  .confirm::backdrop {
-    background: rgb(28 27 25 / 28%);
-  }
-
-  .confirm h3 {
-    margin: 0 0 var(--space-3);
-    font-size: var(--font-size);
-    font-weight: 600;
-  }
-
-  .confirm p {
-    margin: 0 0 var(--space-4);
-  }
-
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-2);
-  }
-
-  .button {
-    height: var(--control-height);
-    padding: 0 var(--space-3);
-    font-weight: 500;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    cursor: pointer;
-  }
-
-  .button:hover {
-    background: var(--color-panel);
-  }
-
-  .button.danger {
-    color: var(--color-action-text);
-    background: var(--color-error);
-    border-color: var(--color-error);
   }
 </style>

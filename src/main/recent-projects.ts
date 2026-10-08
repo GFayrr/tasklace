@@ -10,7 +10,7 @@ export interface RecentStoreReading {
 
 const STORE_VERSION = 1;
 
-/** Parses the untrusted text of the recent projects store, keeping only well-formed absolute paths, normalized and each once within the limit, and tells whether it was damaged, that is unreadable or holding a malformed entry, an empty text, as read for a missing store, counting as undamaged. */
+/** Parses the untrusted text of the recent projects store, keeping well-formed absolute paths, normalized, once each and within the limit, and tells whether it was unreadable or held a malformed entry, an empty text from a missing store being neither. */
 export function readRecentStore(text: string): RecentStoreReading {
   if (text === '') {
     return { paths: [], damaged: false };

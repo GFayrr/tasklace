@@ -57,6 +57,7 @@ function renderTimeline(selectedTaskId: string | null = null, scrollTop = 0, pla
     moved: vi.fn(),
     stretched: vi.fn(),
     linked: vi.fn(),
+    linkedToSummary: vi.fn(),
     opened: vi.fn(),
     drawingFailed: vi.fn(),
   };
@@ -149,7 +150,7 @@ describe('Timeline', () => {
     );
   });
 
-  it('links nothing when dropped on a summary, on the same task or off the rows', () => {
+  it('links nothing when dropped on a summary, on the same task or off the rows, explaining only the summary', () => {
     const { scroller, calls } = renderTimeline('a');
     const from = shapeOf('a');
     const handleX = from.end + LINK_HANDLE_GAP;
@@ -159,6 +160,7 @@ describe('Timeline', () => {
       pointer(scroller, 'pointerup', handleX + 30, y);
     }
     expect(calls.linked).not.toHaveBeenCalled();
+    expect(calls.linkedToSummary).toHaveBeenCalledTimes(1);
   });
 
   it('abandons a drag that is canceled, and ignores buttons other than the main one', () => {

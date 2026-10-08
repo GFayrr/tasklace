@@ -45,7 +45,7 @@
 
   /** Closes the panel without applying anything. */
   function close(): void {
-    app.detailsTaskId = null;
+    app.closeDetails();
     openedFor = null;
     dialog?.close();
   }
@@ -55,6 +55,7 @@
   class="details"
   aria-labelledby="details-title"
   bind:this={dialog}
+  oncancel={close}
   onclose={(event) => {
     if (!event.currentTarget.open) {
       close();

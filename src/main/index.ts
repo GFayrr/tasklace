@@ -1,15 +1,17 @@
-import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { app, BrowserWindow, dialog, protocol, session } from 'electron';
-import { APP_ENTRY_URL, APP_SCHEME, isAppAddress, resolveAppFile } from './app-files';
+import { APP_ENTRY_URL, APP_SCHEME, createAppFileServer, isAppAddress } from './app-files';
 import { MAX_FILE_WORKER_HEAP_MEBIBYTES } from '../core/limits';
 import { contentSecurityPolicy } from './content-security-policy';
 import { flushBeforeClosing, registerFlushHandler } from './close-flush';
 import { runInFileWorker } from './file-worker-client';
-import { registerIpcHandlers } from './ipc-handlers';
 import { createTrustCheck } from './ipc-trust';
-import { registerProjectFileHandlers, windowProjectKind } from './project-files';
+import {
+  forgetWindowProject,
+  registerProjectFileHandlers,
+  windowProjectKind,
+} from './project-files';
 import { CONTENT_SECURITY_POLICY_HEADER, hardenContents, hardenSession } from './security';
 import { MESSAGES } from './messages';
 import { installApplicationMenu } from './platform/application-menu';
@@ -19,11 +21,10 @@ import {
   logPageMessages,
   logProcessErrors,
   logWorkerErrors,
+  writeLogBeforeQuitting,
 } from './log-file';
-import { isMissingFile } from './stored-files';
 import { createMainWindow } from './window';
 
-const NOT_FOUND = 404;
 const developmentUrl = app.isPackaged ? null : (process.env['ELECTRON_RENDERER_URL'] ?? null);
 const developmentOrigin = developmentUrl === null ? null : new URL(developmentUrl).origin;
 const policy = contentSecurityPolicy(developmentUrl !== null);
@@ -39,6 +40,7 @@ const log = createLogFile(
 );
 captureConsole(console, log);
 logProcessErrors(process);
+writeLogBeforeQuitting(app, log);
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -61,9 +63,11 @@ if (app.requestSingleInstanceLock()) {
 /** Protects the session, serves the interface, answers the bridge and opens the window, which saves its project before closing. */
 function start(): void {
   hardenSession(session.defaultSession, policy);
-  protocol.handle(APP_SCHEME, serveAppFile);
+  protocol.handle(
+    APP_SCHEME,
+    createAppFileServer(rendererRoot, { [CONTENT_SECURITY_POLICY_HEADER]: policy }),
+  );
   const assertTrusted = createTrustCheck((address) => isAppAddress(address, developmentOrigin));
-  registerIpcHandlers(assertTrusted);
   registerFlushHandler(assertTrusted);
   registerProjectFileHandlers({
     assertTrusted,
@@ -73,7 +77,7 @@ function start(): void {
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath);
   logPageMessages(window.webContents, log);
-  flushBeforeClosing(window, windowProjectKind);
+  flushBeforeClosing(window, windowProjectKind, forgetWindowProject);
   let closing = false;
   window.once('close', () => {
     closing = true;
@@ -95,24 +99,6 @@ function createFileWorker(): Worker {
   });
   logWorkerErrors(worker.stderr, log, process.stderr);
   return worker;
-}
-
-/** Answers a request of the application scheme with a file of the interface and the content security policy, or not found. */
-async function serveAppFile(request: Request): Promise<Response> {
-  const file = resolveAppFile(rendererRoot, request.url);
-  if (file === null) {
-    return new Response(null, { status: NOT_FOUND });
-  }
-  const headers = { 'Content-Type': file.contentType, [CONTENT_SECURITY_POLICY_HEADER]: policy };
-  return readFile(file.path).then(
-    (content) => new Response(content, { headers }),
-    (error: unknown) => {
-      if (!isMissingFile(error)) {
-        console.error('A file of the interface could not be read:', error);
-      }
-      return new Response(null, { status: NOT_FOUND });
-    },
-  );
 }
 
 /** Brings the first window forward when the application is launched a second time. */

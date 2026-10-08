@@ -32,7 +32,7 @@ export interface SharedRepair {
 }
 
 export type MergeFailure =
-  | { readonly kind: 'malformedUpdate'; readonly reason: string }
+  | { readonly kind: 'malformedUpdate'; readonly error: unknown }
   | { readonly kind: 'incompleteUpdate' }
   | { readonly kind: 'invalidProject'; readonly issues: readonly ValidationIssue[] }
   | { readonly kind: 'repairFailed'; readonly error: unknown };
@@ -154,7 +154,7 @@ export function repairDocumentProject(
   });
 }
 
-/** Merges an update into a throwaway copy of a document and repairs it there under the document's repair identity, returning what the document is missing, an exception raised by the untrusted bytes being a malformed update, and one raised during the repair a failed repair. */
+/** Merges an update into a throwaway copy of a document and repairs it there under the repair identity of the document, returning what the document lacks, an exception from the bytes being a malformed update and one from the repair a failed repair. */
 function tryUpdate(document: Y.Doc, update: Uint8Array): Result<TrialMerge, MergeFailure> {
   const trial = new Y.Doc();
   try {
@@ -182,10 +182,9 @@ function tryUpdate(document: Y.Doc, update: Uint8Array): Result<TrialMerge, Merg
   }
 }
 
-/** Turns an exception raised while applying untrusted bytes into a malformed update failure. */
+/** Turns an exception raised while applying untrusted bytes into a malformed update failure, keeping the whole exception for the log. */
 export function malformedUpdate(error: unknown): Result<never, MergeFailure> {
-  const reason = error instanceof Error ? error.message : String(error);
-  return failure({ kind: 'malformedUpdate', reason });
+  return failure({ kind: 'malformedUpdate', error });
 }
 
 /** Returns the identity under which a document writes its merge repairs, stable for the document and different from its own, so that repairs can travel inside a received update. */

@@ -3,6 +3,7 @@ import type { FileFailureCode } from '../../preload/bridge-contract';
 import {
   countMessage,
   editErrorMessage,
+  issueMessage,
   fileErrorMessage,
   fillMessage,
   loadMessages,
@@ -55,6 +56,30 @@ describe('countMessage', () => {
     expect(countMessage(messages.status.tasks, 0, 'en-US')).toBe('0 tasks');
     expect(countMessage(messages.status.tasks, 12_345, 'en-US')).toBe('12,345 tasks');
     expect(countMessage(messages.status.tasks, 12_345, 'fr-FR')).toBe('12\u202F345 tasks');
+  });
+});
+
+describe('issueMessage', () => {
+  it('explains a problem the project found with its own text, never with the help to write a value', () => {
+    expect(issueMessage(messages, 'INVALID_DURATION')).toBe(messages.issues.INVALID_DURATION);
+    expect(issueMessage(messages, 'INVALID_DATE')).toBe(messages.issues.INVALID_DATE);
+    expect(issueMessage(messages, 'INVALID_HOURS_PER_DAY')).toBe(
+      messages.issues.INVALID_HOURS_PER_DAY,
+    );
+    expect(issueMessage(messages, 'EMPTY_TEXT')).toBe(messages.issues.EMPTY_TEXT);
+  });
+
+  it('keeps the text written for a single change for the problems such a change makes', () => {
+    for (const code of [
+      'DEPENDENCY_CYCLE',
+      'DUPLICATE_DEPENDENCY',
+      'HIERARCHY_TOO_DEEP',
+      'TOO_MANY_ITEMS',
+      'TOO_MANY_TAGS',
+      'UNKNOWN_BLOCK',
+    ] as const) {
+      expect(issueMessage(messages, code)).toBe(messages.editErrors[code]);
+    }
   });
 });
 

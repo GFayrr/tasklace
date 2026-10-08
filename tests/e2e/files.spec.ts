@@ -19,6 +19,7 @@ import {
 import { readIndexText } from '../../src/main/local-copies';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 import { closeDiscarding, launchApplication } from './application';
+import { addTaskButton } from './table';
 import { answerDialogs, askedQuestion, suggestedPath } from './dialogs';
 
 const SAMPLE = project([workTask('a', { name: 'Écrire' }), workTask('b')], [link('a', 'b')]);
@@ -124,6 +125,7 @@ test('refuses forged and oversized files without loading anything, and a cancele
   await writeFile(forged, 'not a project at all');
   await writeFile(huge, '');
   await truncate(huge, MAX_FILE_BYTES + 1);
+  /** Opens a file through the bridge, or cancels the dialog. */
   const open = async (path: string | null) => {
     await answerDialogs(application, { open: path });
     return page.evaluate(async () => window.tasklace?.openProject());
@@ -136,6 +138,7 @@ test('refuses forged and oversized files without loading anything, and a cancele
 test('refuses bridge messages whose content is not valid', async () => {
   const refusals = await page.evaluate(async () => {
     const api = window.tasklace;
+    /** Tells whether a request of the bridge was accepted or refused. */
     const attempt = (action: Promise<unknown> | undefined) =>
       Promise.resolve(action).then(
         () => 'accepted',
@@ -160,6 +163,7 @@ test('refuses bridge messages whose content is not valid', async () => {
 
 test('exports with the extension added and the project name suggested, asking before replacing what the extension leads to', async () => {
   const chosen = join(folder, 'out');
+  /** Exports a JSON file through the bridge, replacing an existing file or not. */
   const exportAs = async (replace: boolean) => {
     await answerDialogs(application, { save: chosen, replace });
     return page.evaluate(async () => {
@@ -184,7 +188,7 @@ test('exports with the extension added and the project name suggested, asking be
 test('tells what was exported and imported, naming an untitled imported project after its file', async () => {
   const exported = join(folder, 'Shared plan');
   await page.getByRole('button', { name: 'New project' }).first().click();
-  await page.getByRole('button', { name: 'Add task' }).click();
+  await addTaskButton(page).click();
   await page.keyboard.press('Enter');
   await answerDialogs(application, { save: exported });
   await page.getByRole('button', { name: 'Export' }).click();
@@ -196,7 +200,7 @@ test('tells what was exported and imported, naming an untitled imported project 
   await page.getByRole('button', { name: 'Import' }).click();
   await page.getByRole('menuitem', { name: 'JSON file…' }).click();
   const prompt = page.getByRole('dialog', { name: 'Save this project?' });
-  await prompt.getByRole('button', { name: "Don't save" }).click();
+  await prompt.getByRole('button', { name: 'Do not save' }).click();
   await expect(
     page.getByRole('status').filter({ hasText: 'Imported Shared plan.json: 1 task.' }),
   ).toBeVisible();
@@ -208,6 +212,7 @@ test('saves as next to the current file under the project name, asking before re
   await writeSampleProject(path);
   const chosen = join(folder, 'Copy');
   await writeFile(`${chosen}.tasklace`, 'kept');
+  /** Opens the sample project and saves it under another name, replacing an existing file or not. */
   const saveAs = async (replace: boolean) => {
     await answerDialogs(application, { open: path, save: chosen, replace });
     return page.evaluate(async () => {

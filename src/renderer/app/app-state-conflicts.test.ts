@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Tag } from '../../core/model/project';
 import { project, scheduleOrThrow, summary, workTask } from '../../core/testing/project-builder';
 import { removeTag, setTagRepresentsPerson } from '../plan/tag-commands';
 import english from '../locales/en.json';
 import { AppState } from './app-state.svelte';
-import { fakeAppContext, openedProjectOf, settle } from './testing/fake-app-context';
+import { fakeAppContext, openedAppOf, openedProjectOf, settle } from './testing/fake-app-context';
 
 const ALICE: Tag = { id: 'alice', name: 'Alice', color: '#4a3aa7', representsPersonOrTeam: true };
 const PLAN = project(
@@ -17,14 +17,9 @@ const PLAN = project(
   { tags: [ALICE] },
 );
 
-/** Opens the plan, whose two tasks of Alice overlap, in an application state. */
-async function openedApp() {
-  const fake = fakeAppContext();
-  const app = new AppState(fake.context);
-  fake.control.openResult = openedProjectOf(PLAN);
-  await app.open();
-  await settle();
-  return { app, ...fake };
+/** Opens the plan in an application state. */
+function openedApp() {
+  return openedAppOf(PLAN);
 }
 
 describe('the list of conflicts', () => {
@@ -57,7 +52,7 @@ describe('the list of conflicts', () => {
     app.showConflict({ ...conflict, taskIds: ['interviews', 'analysis'] });
     expect([app.selectedTaskId, app.collapsed.has('s')]).toEqual(['interviews', false]);
     expect(app.revealRequest).toEqual({ taskId: 'interviews', hour: conflict.start });
-    app.revealRequest = null;
+    app.takeRevealRequest();
     app.showConflict({ ...conflict, taskIds: [] });
     expect([app.selectedTaskId, app.revealRequest]).toEqual(['interviews', null]);
   });
@@ -119,7 +114,7 @@ describe('the list of conflicts', () => {
       throw new Error('No conflict');
     }
     scheduler.automatic = false;
-    app.selectedTaskId = 'analysis';
+    app.select('analysis');
     app.deleteSelected();
     await settle();
     app.showConflict(conflict);
@@ -127,11 +122,41 @@ describe('the list of conflicts', () => {
       'interviews',
       { taskId: 'interviews', hour: conflict.start },
     ]);
-    app.revealRequest = null;
+    app.takeRevealRequest();
     app.showConflict({ ...conflict, taskIds: ['analysis'] });
     expect([app.selectedTaskId, app.revealRequest]).toEqual(['interviews', null]);
     expect(app.notices.map((notice) => [notice.kind, notice.text])).toEqual([
       ['warning', english.editErrors.SCHEDULE_PENDING],
+    ]);
+  });
+
+  it('lists no conflict, tells the user and logs why when the conflicts cannot be described', async () => {
+    const { app, scheduler } = await openedApp();
+    const opened = app.project;
+    if (opened === null) {
+      throw new Error('No project');
+    }
+    const schedule = scheduleOrThrow(opened);
+    const conflict = { tagId: 'ghost', start: 0, end: 1, taskIds: ['analysis'] };
+    const broken = {
+      ...schedule,
+      tagConflicts: { ...schedule.tagConflicts, conflicts: [conflict] },
+    };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      scheduler.listener().scheduled({ ok: true, value: broken }, opened);
+      expect(logged.mock.calls).toEqual([
+        [
+          'The conflicts of people and teams could not be described:',
+          new Error('A conflict is about the unknown tag ghost.'),
+        ],
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
+    expect([app.conflictLines, app.conflictCount]).toEqual([[], 0]);
+    expect(app.notices.map((notice) => [notice.kind, notice.text])).toEqual([
+      ['error', english.notices.peopleConflictsUnavailable],
     ]);
   });
 

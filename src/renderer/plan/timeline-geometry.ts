@@ -8,6 +8,7 @@ import type {
 } from '../../core/model/project';
 import type { Schedule } from '../../core/scheduling/schedule-project';
 import { constrainsSuccessorStart, usesPredecessorStart } from '../../core/scheduling/forward-pass';
+import { valueAt } from '../../core/table-value';
 import { HOURS_PER_DAY, type ProjectHour } from '../../core/time';
 import type { PlanRow } from './plan-outline';
 
@@ -216,7 +217,7 @@ function fillSegments(
   const total = durations.reduce((sum, hours) => sum + hours, 0);
   let remaining = (total * progressPercent) / PERCENT;
   return bars.map((bar, index) => {
-    const hours = durations[index] ?? 0;
+    const hours = valueAt(durations, index);
     const share = hours === 0 ? 0 : Math.min(1, Math.max(0, remaining / hours));
     remaining -= hours;
     return { ...bar, filled: bar.width * share };
@@ -240,7 +241,7 @@ export function deadlinesOf(project: Project): ProjectHour[] {
   return deadlines;
 }
 
-/** Returns the earliest frozen start and the latest frozen end of the tasks a project still has, for the timeline to keep them in view, the entries of deleted tasks being ignored, or nothing without such entries; it reads the entries in an order kept with the baseline, so that it usually stops at the first one. */
+/** Returns the earliest frozen start and latest frozen end of the tasks a project still has, for the timeline to keep them in view, or nothing without such entries, reading them in an order kept with the baseline so that it usually stops at the first. */
 export function baselineMarks(
   baseline: Baseline | null,
   hasTask: (id: TaskId) => boolean,

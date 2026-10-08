@@ -73,6 +73,7 @@ describe('isMissingFile', () => {
 
 describe('isSystemError', () => {
   it('recognizes an error of the system by its code, not an error of the program', () => {
+    /** Builds an error that carries a code. */
     const coded = (code: unknown) => Object.assign(new Error('x'), { code });
     expect(isSystemError(coded('ENOENT'))).toBe(true);
     expect(isSystemError(coded('EACCES'))).toBe(true);

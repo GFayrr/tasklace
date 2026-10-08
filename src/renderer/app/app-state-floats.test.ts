@@ -6,7 +6,7 @@ import { link, project, workTask } from '../../core/testing/project-builder';
 import english from '../locales/en.json';
 import { toggleProjectOption } from '../plan/project-commands';
 import { AppState } from './app-state.svelte';
-import { fakeAppContext, openedProjectOf, settle } from './testing/fake-app-context';
+import { openedAppOf, openedProjectOf, settle } from './testing/fake-app-context';
 
 const START = 490_896;
 const NOTICE = {
@@ -49,16 +49,6 @@ function sparse(waiting: readonly string[]): Project {
   };
 }
 
-/** Opens a plan in an application state. */
-async function openedApp(plan: Project) {
-  const fake = fakeAppContext();
-  const app = new AppState(fake.context);
-  fake.control.openResult = openedProjectOf(plan);
-  await app.open();
-  await settle();
-  return { app, ...fake };
-}
-
 /** Returns the texts of the messages shown. */
 function noticeTexts(app: AppState): string[] {
   return app.notices.map((notice) => notice.text);
@@ -66,7 +56,7 @@ function noticeTexts(app: AppState): string[] {
 
 describe('floats that cannot be worked out', () => {
   it('are told once in a lasting message, replaced when their count changes and removed once none is left', async () => {
-    const { app } = await openedApp(sparse(['a']));
+    const { app } = await openedAppOf(sparse(['a']));
     expect(app.schedule?.floats?.get('a')?.totalFloatHours).toBeNull();
     expect(app.notices.map((notice) => [notice.kind, notice.text, notice.lasting])).toEqual([
       ['warning', NOTICE.one.replace('{count}', '1'), true],
@@ -94,7 +84,7 @@ describe('floats that cannot be worked out', () => {
   });
 
   it('stay dismissed while their count stays the same, and are told again once it changes', async () => {
-    const { app } = await openedApp(sparse(['a']));
+    const { app } = await openedAppOf(sparse(['a']));
     app.dismiss(app.notices[0]?.id ?? -1);
     expect(app.notices).toEqual([]);
     expect(app.rename('Renamed')).toBe(true);
@@ -114,7 +104,7 @@ describe('floats that cannot be worked out', () => {
   });
 
   it('are forgotten when the schedule fails, which shows its own message', async () => {
-    const { app, scheduler } = await openedApp(sparse(['a']));
+    const { app, scheduler } = await openedAppOf(sparse(['a']));
     expect(app.notices).toHaveLength(1);
     scheduler.automatic = false;
     expect(app.rename('Renamed')).toBe(true);
@@ -128,7 +118,7 @@ describe('floats that cannot be worked out', () => {
   });
 
   it('are forgotten when another project opens', async () => {
-    const { app, control } = await openedApp(sparse(['a']));
+    const { app, control } = await openedAppOf(sparse(['a']));
     expect(app.notices).toHaveLength(1);
     control.openResult = openedProjectOf(project([workTask('z')]));
     await app.open();

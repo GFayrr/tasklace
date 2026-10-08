@@ -5,7 +5,7 @@ import type { ProjectHour } from '../time';
 
 const STEPS_PER_DAY = 4;
 
-/** Returns how many working days a task now ends after (positive) or before (negative) the end it had in the baseline, counted with the working days of the calendar and rounded to the quarter of a day, any gap of working time showing as at least a quarter of a day. */
+/** Returns how many working days a task now ends after (positive) or before (negative) its end in the baseline, rounded to a quarter of a day, any gap of working time showing as at least a quarter of a day. */
 export function endVarianceDays(
   calendar: CompiledCalendar,
   frozenEnd: ProjectHour,
