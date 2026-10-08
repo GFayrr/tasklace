@@ -190,9 +190,12 @@ test('exports a CSV table through the menu and imports it back into the same pla
 test('moves the project start and adds a day off from the settings, then undoes both', async () => {
   await page.getByRole('button', { name: /New project/ }).click();
   await addTask(page, 'Work');
-  await typeInCell(page, 'Work', DURATION_COLUMN, '18');
   /** Returns a cell of the row of the task Work. */
   const cell = (column: number) => taskRow(page, 'Work').getByRole('gridcell').nth(column);
+  await expect(cell(END_COLUMN)).not.toHaveText('');
+  const oneDayEnd = (await cell(END_COLUMN).innerText()).trim();
+  await typeInCell(page, 'Work', DURATION_COLUMN, '18');
+  await expect(cell(END_COLUMN)).not.toHaveText(oneDayEnd);
   const before = [await cell(START_COLUMN).innerText(), await cell(END_COLUMN).innerText()];
 
   await page.getByRole('button', { name: 'Project settings' }).click();

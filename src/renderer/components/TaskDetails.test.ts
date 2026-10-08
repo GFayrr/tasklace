@@ -202,6 +202,13 @@ describe('TaskDetails', () => {
     update();
     expect(app.detailsTaskId).toBeNull();
   });
+
+  it('closes the panel as soon as Escape cancels the dialog, so that a shortcut pressed next is not held back', async () => {
+    const { app, root } = await renderDetails();
+    openFor(app, 'a');
+    dialogIn(root).dispatchEvent(new Event('cancel', { cancelable: true }));
+    expect(app.detailsTaskId).toBeNull();
+  });
 });
 
 describe('TaskDetails fields of work tasks and blocks', () => {

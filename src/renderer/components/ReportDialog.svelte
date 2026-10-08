@@ -19,6 +19,9 @@
   class="report"
   aria-labelledby="report-title"
   bind:this={dialog}
+  oncancel={() => {
+    app.closeReport();
+  }}
   onclose={(event) => {
     if (!event.currentTarget.open) {
       app.closeReport();

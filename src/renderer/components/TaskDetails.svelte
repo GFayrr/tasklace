@@ -55,6 +55,7 @@
   class="details"
   aria-labelledby="details-title"
   bind:this={dialog}
+  oncancel={close}
   onclose={(event) => {
     if (!event.currentTarget.open) {
       close();
