@@ -68,7 +68,7 @@ const ISSUES_EXPLAINED_AS_CHANGES = [
   'UNKNOWN_BLOCK',
 ] as const satisfies readonly (keyof Messages['editErrors'] & ValidationIssueCode)[];
 
-/** Returns the message telling the user why the project refused a change: the text of the problem found, or, for the problems a single change makes, the text written for that change, never the help to write a value that a typed value which could not be read gets. */
+/** Returns why the project refused a change: the text of the problem found, or, for the problems a single change makes, the text written for that change, never the help to write a typed value that could not be read. */
 export function issueMessage(messages: Messages, code: ValidationIssueCode): string {
   const explainedAsChange: readonly string[] = ISSUES_EXPLAINED_AS_CHANGES;
   return explainedAsChange.includes(code)

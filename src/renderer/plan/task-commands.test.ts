@@ -87,6 +87,7 @@ function openPlan(plan: Project = PLAN) {
   }
   const session = opened.value;
   let next = 0;
+  /** Returns the context of a change made on the project as the session holds it now. */
   const context = (): EditContext => {
     const current = session.project();
     return {
@@ -116,6 +117,7 @@ function rowsOf(session: SharedSession): string[] {
 
 /** Orders the lists of a project by identifier, so that two projects compare by content. */
 function normalized(plan: Project): Project {
+  /** Returns items ordered by identifier. */
   const byId = <T extends { readonly id: string }>(items: readonly T[]) =>
     [...items].sort((left, right) => (left.id < right.id ? -1 : 1));
   return {
@@ -474,6 +476,7 @@ describe('moving a later block alone', () => {
   it('chooses on the timeline between moving a later block, moving the whole task, and refusing what the schedule no longer shows', () => {
     const { session, context } = openPlan(SPLIT_WITH_WAIT);
     const placement = scheduleOrThrow(session.project()).placements.get('d');
+    /** Returns the instant one day later. */
     const later = (from: number) => from + 24;
     const asked = writtenTask(moveOnTimeline(context(), 'd', 1, placement, later));
     expect(asked).toMatchObject({
@@ -500,6 +503,7 @@ describe('moving a later block alone', () => {
     );
     expect(writtenTask(stretched)).toMatchObject({ segments: [{ durationHours: 14 }] });
     const notPossible = { ok: false, error: 'NOT_POSSIBLE' };
+    /** Returns the instant one day later. */
     const later = (end: number) => end + 24;
     expect(
       stretchOnTimeline(context(), 'c', { placement: undefined, calendar: CALENDAR }, later),
@@ -572,6 +576,7 @@ describe('block edits refused with a reason', () => {
 
   it('tells which block names a task or block that does not exist', () => {
     const { context } = openPlan(SPLIT_WITH_WAIT);
+    /** Lists the waits of two blocks, the second one waiting for a given text. */
     const waits = (second: string) => [
       { origin: 0, waitsFor: '' },
       { origin: 1, waitsFor: second },

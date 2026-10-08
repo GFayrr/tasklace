@@ -82,7 +82,7 @@ function actedBlock(
   return chosen === undefined ? placement : { ...chosen, segments: [chosen] };
 }
 
-/** Recomputes, independently from the scheduler, the bounds a block must respect: the project start, the start date of its task for its first block, the resumption after the previous block and its own start date for the others, and the dependencies acting on it. */
+/** Recomputes, apart from the scheduler, the bounds a block must respect: the project start, the start date of its task for the first block, the resumption and its own start date for the others, and the links acting on it. */
 function expectedBounds(
   input: Project,
   calendar: CompiledCalendar,
@@ -188,6 +188,7 @@ describe.each([
       fc.property(arbitrary, ({ project: input }) => {
         const schedule = scheduleGenerated(input);
         const leaves = schedulableTasks(input);
+        /** Returns the tasks a summary contains, through the nested summary too. */
         const descendantsOf = (summaryId: string): SchedulableTask[] =>
           leaves.filter(
             (leaf) => leaf.parentId === summaryId || (summaryId === 's0' && leaf.parentId === 's1'),

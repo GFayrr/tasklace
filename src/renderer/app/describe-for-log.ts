@@ -8,7 +8,7 @@ export interface LogTarget {
   warn: (...values: unknown[]) => void;
 }
 
-/** Writes a value as the text the log keeps: a string as it is, an error with its stack, cause and inner errors, anything else as JSON with its errors written out, or as its plain text when it cannot be written as JSON, such as a value that refers to itself. */
+/** Writes a value as the log keeps it: a string as it is, an error with its stack, cause and inner errors, anything else as JSON with its errors written out, or as plain text when JSON cannot hold it, as for a value referring to itself. */
 export function describeForLog(value: unknown, written = new WeakSet<Error>()): string {
   if (typeof value === 'string') {
     return value;

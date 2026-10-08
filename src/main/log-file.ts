@@ -36,6 +36,7 @@ export function createLogFile(
   const runInOrder = createSerialQueue();
   let size: number | null = null;
   let last: Promise<void> = Promise.resolve();
+  /** Appends a line to the log, setting the log aside first when the line would make it too large. */
   const append = async (line: string): Promise<void> => {
     const bytes = ENCODER.encode(line).length;
     size ??= await prepare(folder, path);

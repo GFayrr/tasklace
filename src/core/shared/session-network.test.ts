@@ -214,6 +214,7 @@ describe('a session receiving updates from the network', () => {
     const origin = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const alice = sessionOn(origin, 1);
     const bob = sessionOn(origin, 2);
+    /** Builds a baseline of the two tasks, taken some hours after the project start. */
     const baselineOf = (hours: number) => ({
       takenAt: SAMPLE.startDate + hours,
       entries: ['a', 'b'].map((taskId) => ({

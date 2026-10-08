@@ -547,6 +547,7 @@ describe('saving projects', () => {
     const savingFirst = request(IPC_CHANNELS.saveProject, first, STATE);
     const savingSecond = request(IPC_CHANNELS.saveProject, second, STATE);
     await new Promise((resolve) => setTimeout(resolve, 0));
+    /** Lists the paths of the save tasks run so far. */
     const saves = () => tasks.flatMap((task) => (task.kind === 'saveProject' ? [task.path] : []));
     expect(saves()).toHaveLength(1);
     finish(success(SAVED));

@@ -19,7 +19,7 @@ const CRASHED_BODIES: Readonly<Record<WindowProjectKind, string>> = {
   withoutFile: MESSAGES.pageProblems.crashedWithoutFileBody,
 };
 
-/** Answers the page telling, once it saved what it had to, whether its window may close, an answer that is not a yes or a no being logged and keeping the window open so that the next close asks again, and offers to reload a page telling that it could not start. */
+/** Answers the page telling whether its window may close once its changes are saved, logging any other answer and keeping the window open so that the next close asks again, and offers to reload a page that could not start. */
 export function registerFlushHandler(assertTrusted: TrustCheck): void {
   ipcMain.on(IPC_CHANNELS.pageStartFailed, (event) => {
     assertTrusted(event);
@@ -66,17 +66,20 @@ export function flushBeforeClosing(
   let bridgeMissing = false;
   let unresponsive = false;
   let askingToWait = false;
+  /** Closes the window once, letting it close for good. */
   const closeNow = (): void => {
     if (!released) {
       released = true;
       window.close();
     }
   };
+  /** Closes the window if a close was asked while its page was saving. */
   const release = (): void => {
     if (requested) {
       closeNow();
     }
   };
+  /** Offers once to close a window whose page no longer answers, closing it if the user agrees. */
   const offerToCloseAnyway = (): void => {
     if (askingToWait) {
       return;

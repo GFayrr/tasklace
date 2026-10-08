@@ -42,6 +42,7 @@ function fakeBridge(
   const events: string[] = [];
   const adopted: string[] = [];
   const adoption = { result: { ok: true, value: null } as BridgeResult<null> };
+  /** Creates a fake save of the bridge that records what was saved and with which suggested name. */
   const record = (as: boolean) => (state: Uint8Array, name?: string) => {
     const document = new Y.Doc();
     Y.applyUpdate(document, state);
@@ -365,6 +366,7 @@ describe('createProjectFiles', () => {
   it('never leaves the save status on saving when the bridge throws', async () => {
     const statuses: SaveStatus[] = [];
     const { bridge } = fakeBridge(openedOf(OTHER_ID));
+    /** Fails as a broken bridge would. */
     const broken = () => Promise.reject(new Error('broken bridge'));
     const throwing = { ...bridge, saveProject: broken, saveProjectAs: broken };
     const files = createProjectFiles(

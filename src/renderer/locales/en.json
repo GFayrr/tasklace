@@ -23,12 +23,12 @@
     "INVALID_PROJECT": "This project contains errors and cannot be opened.",
     "READ_FAILED": "This file could not be read. Check that it still exists and that you are allowed to open it.",
     "WRITE_FAILED": "This file could not be written. Check that the folder still exists and that you are allowed to write in it.",
-    "LOCAL_COPY_FAILED": "The project could not be kept on this computer. Check the free space on your disk, or use Save as to choose a file.",
+    "LOCAL_COPY_FAILED": "The project could not be kept on this computer. Check the free space on your disk, or use “Save as” to choose a file.",
     "TOO_COMPLEX": "This file is too complex to be opened safely.",
     "INVALID_ENCODING": "This file is not UTF-8 text. Save it again as UTF-8, then import it.",
     "INVALID_IMPORT": "This file contains errors and cannot be imported.",
     "NO_PROJECT": "There is no open project to save.",
-    "TASK_FAILED": "Something went wrong with this file. Please try again.",
+    "TASK_FAILED": "Something went wrong with this file. Try again.",
     "WRONG_DOCUMENT": "The project was not saved because this window no longer matches its file. Export the project as JSON to keep your changes, then open it again.",
     "INVALID_STATE": "The project was not saved because it contains an error Tasklace could not repair. Export the project as JSON to keep your changes.",
     "BUSY": "Wait until the current file action is finished, then try again.",
@@ -126,8 +126,8 @@
       "one": "{count} task could not be put in the baseline because its dates could not be worked out.",
       "other": "{count} tasks could not be put in the baseline because their dates could not be worked out."
     },
-    "peopleConflictsUnavailable": "The conflicts of people and teams could not be listed. Change a value to compute the plan again; if it keeps happening, save your project under another name.",
-    "dateConflictsUnavailable": "The tasks that do not meet their dates could not be marked. Change a value to compute the plan again; if it keeps happening, save your project under another name.",
+    "peopleConflictsUnavailable": "The conflicts of people and teams could not be listed. Change a value to work out the dates again; if it keeps happening, save your project under another name.",
+    "dateConflictsUnavailable": "The tasks that do not meet their dates could not be marked. Change a value to work out the dates again; if it keeps happening, save your project under another name.",
     "pickerUnavailable": "The calendar could not open. Type the date instead, such as 2026-10-05 14:30.",
     "drawingUnavailable": {
       "timeline": "The timeline cannot be drawn on this computer. You can still plan your tasks in the table.",
@@ -141,17 +141,17 @@
       "UNKNOWN_BLOCK": "The table could not be written: a link names a block its task does not have. Check the links of the split tasks."
     },
     "unknownFloats": {
-      "one": "The float of {count} task cannot be worked out: to finish on time, it would have to start before {firstYear}, the first year Tasklace handles. Give the calendar more working hours, or turn off the date constraints in the advanced options.",
-      "other": "The float of {count} tasks cannot be worked out: to finish on time, they would have to start before {firstYear}, the first year Tasklace handles. Give the calendar more working hours, or turn off the date constraints in the advanced options."
+      "one": "The float of {count} task cannot be worked out: to finish on time, it would have to start before {firstYear}, the first year Tasklace handles. Give the calendar more working hours, or turn off “Date constraints” in the “Advanced options” tab.",
+      "other": "The float of {count} tasks cannot be worked out: to finish on time, they would have to start before {firstYear}, the first year Tasklace handles. Give the calendar more working hours, or turn off “Date constraints” in the “Advanced options” tab."
     },
     "projectStartMoved": "The project now starts on {date}, so that this task can start earlier.",
     "details": "Details"
   },
   "scheduleFailures": {
-    "calendar": "The schedule could not be computed because the working calendar of the project is not valid.",
-    "startDate": "The schedule could not be computed because the start date of the project is outside the supported years.",
-    "structure": "The schedule could not be computed because the plan contains an error.",
-    "task": "The schedule could not be computed because the task “{name}” cannot be placed."
+    "calendar": "The dates could not be worked out because the working calendar of the project is not valid.",
+    "startDate": "The dates could not be worked out because the start date of the project is outside the supported years.",
+    "structure": "The dates could not be worked out because the plan contains an error.",
+    "task": "The dates could not be worked out because the task “{name}” cannot be placed."
   },
   "table": {
     "label": "Tasks",
@@ -199,7 +199,7 @@
   },
   "tasks": {
     "label": "Task",
-    "add": "Add task",
+    "add": "Add a task",
     "indent": "Indent: put under the task above",
     "outdent": "Outdent: move out of its summary",
     "moveUp": "Move up",
@@ -212,7 +212,7 @@
     "NOT_POSSIBLE": "This change is not possible here.",
     "INVALID_NAME": "A task needs a name.",
     "INVALID_DURATION": "Write the duration in hours, such as 14 or 1 h 30, in minutes, such as 45 min, or in working days, such as 2d.",
-    "INVALID_DATE": "This date could not be read. Write it as 2026-10-05, or as 2026-10-05 14:30 with a time. Times go by quarter hours.",
+    "INVALID_DATE": "This date could not be read. Write it as 2026-10-05, or as 2026-10-05 14:30 with a time on a quarter hour (:00, :15, :30 or :45).",
     "INVALID_PROGRESS": "Write the progress as a whole number from 0 to 100.",
     "INVALID_PREDECESSORS": "Write the predecessors by task number, such as 1.2, 3SS+2h, or 3#2 for block 2 of task 3, each one once.",
     "UNKNOWN_BLOCK": "The task you named has no block with this number. Blocks are counted from 1, on split tasks only.",
@@ -220,8 +220,8 @@
     "WAITS_NEED_TWO_BLOCKS": "This task has a single block, so it cannot wait block by block. Write what it waits for in Predecessors.",
     "TASK_CHANGED": "This task changed while its details were open. Close them and open them again.",
     "SCHEDULE_PENDING": "The dates are still being updated after the last change. Try again in a moment.",
-    "SCHEDULE_STOPPED": "The dates could not be updated after the last change. Change a value in the table to compute them again, then try again.",
-    "INVALID_TIME": "This time could not be read. Write it as 08:30. Times go by quarter hours.",
+    "SCHEDULE_STOPPED": "The dates could not be updated after the last change. Change a value in the table to work them out again, then try again.",
+    "INVALID_TIME": "This time could not be read. Write it as 08:30, on a quarter hour (:00, :15, :30 or :45).",
     "NO_ROOM_FOR_RANGE": "There is no room left in the day for more working hours. Make the latest range end earlier first.",
     "EMPTY_TAG_NAME": "A tag needs a name.",
     "DUPLICATE_TAG_NAME": "Another tag already has this name.",
@@ -240,10 +240,10 @@
     "INVALID_END": "A task has to end after it starts.",
     "INVALID_BLOCK": "Write the duration of each block, such as 4 h or 1 h 30.",
     "INVALID_GAP": "Write the days between two blocks as a whole number, 0 for the same day.",
-    "INVALID_HOURS_PER_DAY": "Hours per day go from 1 hour to the length of a working day, by quarter hours.",
-    "INVALID_DAILY_START": "Write the daily start time as 13:30, on a quarter hour, leaving enough working hours after it.",
-    "INVALID_MUST_FINISH_ON": "The “Must finish on” date could not be read. Pick a date and a time on a quarter hour, or leave it empty.",
-    "INVALID_DEADLINE": "The deadline could not be read. Pick a date and a time on a quarter hour, or leave it empty."
+    "INVALID_HOURS_PER_DAY": "Hours per day go from 1 hour to the length of a working day, in a whole number of quarter hours.",
+    "INVALID_DAILY_START": "Write the daily start time as 13:30, on a quarter hour (:00, :15, :30 or :45), leaving enough working hours after it.",
+    "INVALID_MUST_FINISH_ON": "The “Must finish on” date could not be read. Pick a date and a time on a quarter hour (:00, :15, :30 or :45), or leave it empty.",
+    "INVALID_DEADLINE": "The deadline could not be read. Pick a date and a time on a quarter hour (:00, :15, :30 or :45), or leave it empty."
   },
   "durations": {
     "hours": "{hours} h",
@@ -260,7 +260,7 @@
     "startHint": "Leave empty to start as soon as possible.",
     "dateConstraints": "Date constraints",
     "mustFinishOn": "Must finish on",
-    "mustFinishOnHint": "The plan places the task to end at this time. Leave empty for none.",
+    "mustFinishOnHint": "Tasklace places the task so that it ends at this time. Leave empty for none.",
     "deadline": "Deadline",
     "deadlineHint": "Nothing moves: the task is flagged if it ends later. Leave empty for none.",
     "hoursPerDay": "Hours per day",
@@ -272,7 +272,7 @@
     "blockDuration": "Duration of block {number}",
     "blockGap": "Days after block {previous}",
     "blockWaitsFor": "Block {number} waits for",
-    "blockStart": "Block {number} starts no earlier than",
+    "blockStart": "Block {number} does not start before",
     "blockError": "Block {number}: {message}",
     "blockWaitsForExample": "such as 2, 3#1SS",
     "addBlock": "Add a block",
@@ -285,7 +285,7 @@
     "title": "Save this project?",
     "body": "This project has not been saved to a file yet. Save it before closing it, or its changes will be lost.",
     "save": "Save…",
-    "discard": "Don't save",
+    "discard": "Do not save",
     "cancel": "Cancel",
     "failedTitle": "The project could not be saved",
     "failedBody": "Its latest changes could not be written: {reason} Save it under another name, close without saving, or cancel to keep it open.",
@@ -319,13 +319,13 @@
     "UNSUPPORTED_UNIT": "This column uses a unit Tasklace does not know: durations go in hours and progress in %.",
     "UNKNOWN_REFERENCE": "This refers to a task number that does not exist.",
     "DURATION_MISMATCH": "The duration does not match the sum of the blocks.",
-    "UNSCHEDULABLE": "The project could not be scheduled.",
+    "UNSCHEDULABLE": "The dates of the project could not be worked out.",
     "NO_WORKING_WEEKDAY": "The calendar needs at least one working day.",
     "INVALID_WEEKDAY": "This day of the week is not valid.",
     "DUPLICATE_WEEKDAY": "This working day appears more than once.",
     "NO_WORKING_TIME_RANGE": "The calendar needs at least one range of working hours.",
     "TOO_MANY_WORKING_TIME_RANGES": "The calendar has more ranges of working hours than allowed.",
-    "INVALID_WORKING_TIME_RANGE": "This range of working hours is not valid: it has to end after it starts, by quarter hours.",
+    "INVALID_WORKING_TIME_RANGE": "This range of working hours is not valid: it has to end after it starts, on a quarter hour (:00, :15, :30 or :45).",
     "OVERLAPPING_WORKING_TIME_RANGES": "These ranges of working hours overlap.",
     "TOO_MANY_NON_WORKING_PERIODS": "The calendar has more days off than allowed.",
     "INVALID_NON_WORKING_PERIOD": "This period off is not valid: it has to end on or after the day it starts.",
@@ -341,9 +341,9 @@
     "PARENT_NOT_SUMMARY": "This task is placed under a task that is not a summary.",
     "HIERARCHY_CYCLE": "These tasks are placed under each other in a loop.",
     "HIERARCHY_TOO_DEEP": "Tasks are nested more deeply than allowed.",
-    "INVALID_DURATION": "This duration is not valid: it goes by quarter hours, up to the maximum allowed.",
-    "INVALID_HOURS": "This number of hours is not valid: it goes by quarter hours.",
-    "INVALID_LAG": "This delay is not valid: it goes by quarter hours, up to the maximum allowed.",
+    "INVALID_DURATION": "This duration is not valid: it has to be a whole number of quarter hours, up to the maximum allowed.",
+    "INVALID_HOURS": "This number of hours is not valid: it has to be a whole number of quarter hours.",
+    "INVALID_LAG": "This delay is not valid: it has to be a whole number of quarter hours, up to the maximum allowed.",
     "INVALID_SEGMENTS": "The blocks of this task are not valid.",
     "INVALID_INSTANT": "This date is outside the dates Tasklace can plan.",
     "INVALID_INTERVAL": "This period ends before it starts.",
@@ -360,7 +360,7 @@
     "IGNORED_LINKS": "A summary task cannot wait for other tasks; these links were ignored.",
     "START_DIFFERS": "The start was moved to follow the links and the calendar.",
     "END_DIFFERS": "The end was recalculated from the start, the duration and the calendar.",
-    "PROGRESS_DIFFERS": "The progress of a summary task is computed from its tasks; the value given was ignored."
+    "PROGRESS_DIFFERS": "The progress of a summary task is worked out from its tasks; the value given was ignored."
   },
   "repairCodes": {
     "TASK_REMOVED": "A task was removed because the project had too many tasks.",
@@ -503,7 +503,7 @@
     "setBaselineAgain": "Set again",
     "clearBaseline": "Clear baseline",
     "replaceBaselineTitle": "Replace the baseline?",
-    "replaceBaselineBody": "The baseline set on {date} will be replaced by the plan as it is now. You can undo this with Ctrl+Z.",
+    "replaceBaselineBody": "The baseline set on {date} will be replaced by the dates as they are now. You can undo this with Ctrl+Z.",
     "replaceBaselineConfirm": "Replace the baseline",
     "clearBaselineTitle": "Clear the baseline?",
     "clearBaselineBody": "The baseline marks on the timeline and the Variance column will disappear. You can undo this with Ctrl+Z.",
@@ -518,7 +518,7 @@
     "importWarnings": "What changed during the import",
     "repairs": "What was adjusted",
     "close": "Close",
-    "scheduleFailed": "Why the schedule could not be computed"
+    "scheduleFailed": "Why the dates could not be worked out"
   },
   "startup": {
     "failedTitle": "Tasklace could not start",

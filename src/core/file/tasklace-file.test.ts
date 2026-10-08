@@ -154,6 +154,7 @@ function tampered(change: (document: Y.Doc) => void): Uint8Array {
 
 /** Sorts the lists of a project by identifier. */
 function sorted(input: Project): Project {
+  /** Returns items ordered by identifier. */
   const byId = <T extends { readonly id: string }>(items: readonly T[]): T[] =>
     [...items].sort((left, right) => compareStrings(left.id, right.id));
   return {

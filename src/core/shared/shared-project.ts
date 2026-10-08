@@ -154,7 +154,7 @@ export function repairDocumentProject(
   });
 }
 
-/** Merges an update into a throwaway copy of a document and repairs it there under the document's repair identity, returning what the document is missing, an exception raised by the untrusted bytes being a malformed update, and one raised during the repair a failed repair. */
+/** Merges an update into a throwaway copy of a document and repairs it there under the repair identity of the document, returning what the document lacks, an exception from the bytes being a malformed update and one from the repair a failed repair. */
 function tryUpdate(document: Y.Doc, update: Uint8Array): Result<TrialMerge, MergeFailure> {
   const trial = new Y.Doc();
   try {

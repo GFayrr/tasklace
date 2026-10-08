@@ -24,7 +24,7 @@ export async function launchApplication(userData?: string): Promise<ElectronAppl
   return application;
 }
 
-/** Closes the application unless a test already closed it (Playwright no longer gives the process of a closed application), answering "Don't save" if it asks whether to save a project that has no file yet, keeping the trace of a failed test, and stopping the process with a description of its state when it does not close in time. */
+/** Closes the application unless a test already closed it, answering “Do not save” to the question about a project without file, keeping the trace of a failed test, and stopping a process that does not close in time with a description of its state. */
 export async function closeDiscarding(application: ElectronApplication, page: Page): Promise<void> {
   if (closedApplications.has(application)) {
     return;
@@ -37,7 +37,7 @@ export async function closeDiscarding(application: ElectronApplication, page: Pa
   const closing = application.close();
   void page
     .getByRole('dialog', { name: 'Save this project?' })
-    .getByRole('button', { name: "Don't save" })
+    .getByRole('button', { name: 'Do not save' })
     .click()
     .catch(reportUnlessClosed);
   const timer = new AbortController();
@@ -98,6 +98,7 @@ async function describeStuckApplication(
   application: ElectronApplication,
   page: Page,
 ): Promise<string> {
+  /** Waits for the answer of a probe of a stuck application, giving up after a moment. */
   const answer = (probe: Promise<unknown>) =>
     Promise.race([
       probe.then(String, (error: unknown) => `error ${String(error)}`),

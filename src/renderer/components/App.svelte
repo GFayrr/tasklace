@@ -16,7 +16,7 @@
 
   const SETTINGS_COMMANDS: readonly Command[] = ['undo', 'redo'];
 
-  /** Runs the action of a keyboard shortcut, leaving undo and redo to a text field being edited and committing that field first for any other action, and runs none while a file action runs or a dialog is open, the project settings allowing undo and redo only. */
+  /** Runs the action of a keyboard shortcut, leaving undo and redo to a field being edited and committing it first for other actions, and none while a file action runs or a dialog is open, the settings allowing undo and redo only. */
   function handleKey(event: KeyboardEvent): void {
     const target = event.target;
     const isEditingText =

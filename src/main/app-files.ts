@@ -69,7 +69,7 @@ function decodePath(pathname: string): string | null {
 
 const NOT_FOUND = 404;
 
-/** Creates the handler of the application scheme, which answers with a file of the interface, its type and the given security headers, or not found for an address outside the interface or a file that cannot be read, logging a file that exists but cannot be read. */
+/** Creates the handler of the application scheme, answering with a file of the interface, its type and the security headers, or not found for an address outside the interface or an unreadable file, logged when it exists. */
 export function createAppFileServer(
   rendererRoot: string,
   securityHeaders: Readonly<Record<string, string>>,

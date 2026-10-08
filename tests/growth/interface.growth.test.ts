@@ -33,6 +33,7 @@ describe('growth of what the interface prepares after a change', () => {
   const large = buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT);
 
   it('orders, numbers and links the rows in quasi-linear time', () => {
+    /** Prepares the rows and the links of a project as the interface does after a change. */
     const prepare = (project: typeof small) => () => {
       buildPlanOutline(project.tasks, new Set());
       groupIncoming(project.dependencies);
@@ -45,6 +46,7 @@ describe('growth of what the interface prepares after a change', () => {
 
 describe('growth of the list of conflicts', () => {
   it('describes the conflicts of a project in linear time', () => {
+    /** Makes every tag of a project a person or team. */
     const asPeople = (project: Project): Project => ({
       ...project,
       tags: project.tags.map((tag) => ({ ...tag, representsPersonOrTeam: true })),
@@ -68,6 +70,7 @@ describe('growth of the list of conflicts', () => {
 describe('growth of the dates tasks do not meet', () => {
   it('describes the missed deadlines, their tooltips and the deadlines shown in linear time', async () => {
     const messages = await loadMessages('en');
+    /** Gives every task of a project a deadline at the project start, the date constraints turned on. */
     const late = (project: Project): Project => ({
       ...project,
       options: { ...project.options, dateConstraintsEnabled: true },
@@ -79,11 +82,13 @@ describe('growth of the dates tasks do not meet', () => {
     const large = late(buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT));
     const smallSchedule = scheduleOrThrow(small);
     const largeSchedule = scheduleOrThrow(large);
+    /** Counts the tasks that end after the project start. */
     const lateTasks = (project: Project, schedule: typeof smallSchedule) =>
       [...schedule.placements.values()].filter((placement) => placement.end > project.startDate)
         .length;
     expect(smallSchedule.conflicts).toHaveLength(lateTasks(small, smallSchedule));
     expect(largeSchedule.conflicts).toHaveLength(lateTasks(large, largeSchedule));
+    /** Describes the dates the tasks miss and lists the deadlines shown. */
     const describeDates = (project: Project, schedule: typeof smallSchedule) => () => {
       dateConflictTitles(dateConflictLines(schedule, project), messages, String);
       deadlinesOf(project);
@@ -134,6 +139,7 @@ describe('growth of drawing the timeline', () => {
   it('draws one frame, links included, in at most linear time of the project', () => {
     const small = sceneOf(buildLargeProject(LARGE_PROJECT_SEED, SMALL_TASK_COUNT));
     const large = sceneOf(buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT));
+    /** Draws one frame of a scene. */
     const draw =
       ({ scene, viewport }: ReturnType<typeof sceneOf>) =>
       () => {
@@ -145,6 +151,7 @@ describe('growth of drawing the timeline', () => {
   });
 
   it('draws one frame with the critical path and the floats in at most linear time of the project', () => {
+    /** Turns the critical path on in a project. */
     const withCriticalPath = (project: Project): Project => ({
       ...project,
       options: { ...project.options, criticalPathEnabled: true },
@@ -156,6 +163,7 @@ describe('growth of drawing the timeline', () => {
       withCriticalPath(buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT)),
     );
     expect(large.scene.schedule?.floats?.size).toBe(LARGE_TASK_COUNT);
+    /** Draws one frame of a scene. */
     const draw =
       ({ scene, viewport }: ReturnType<typeof sceneOf>) =>
       () => {
@@ -167,6 +175,7 @@ describe('growth of drawing the timeline', () => {
   });
 
   it('draws one frame with a baseline entry for every task in at most linear time of the project', () => {
+    /** Adds a baseline entry for every row of a scene. */
     const withBaseline = ({ scene, viewport }: ReturnType<typeof sceneOf>) => {
       const entries = new Map(
         scene.rows.map((row) => {
@@ -178,6 +187,7 @@ describe('growth of drawing the timeline', () => {
     };
     const small = withBaseline(sceneOf(buildLargeProject(LARGE_PROJECT_SEED, SMALL_TASK_COUNT)));
     const large = withBaseline(sceneOf(buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT)));
+    /** Draws one frame of a scene. */
     const draw =
       ({ scene, viewport }: ReturnType<typeof sceneOf>) =>
       () => {
@@ -189,6 +199,7 @@ describe('growth of drawing the timeline', () => {
   });
 
   it('draws one frame with a deadline on every task in at most linear time of the project', () => {
+    /** Adds a deadline to every task of a scene. */
     const withDeadlines = ({ scene, viewport }: ReturnType<typeof sceneOf>) => {
       const ids = scene.rows.map((row) => row.task.id);
       const rows = scene.rows.map((row) =>
@@ -201,6 +212,7 @@ describe('growth of drawing the timeline', () => {
     };
     const small = withDeadlines(sceneOf(buildLargeProject(LARGE_PROJECT_SEED, SMALL_TASK_COUNT)));
     const large = withDeadlines(sceneOf(buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT)));
+    /** Draws one frame of a scene. */
     const draw =
       ({ scene, viewport }: ReturnType<typeof sceneOf>) =>
       () => {

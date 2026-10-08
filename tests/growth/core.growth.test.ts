@@ -231,6 +231,7 @@ describe('growth of the variance with the baseline', () => {
 
 describe('growth of reading forged CSV cells', () => {
   it('leaves a huge header unread in a time that does not depend on its length', () => {
+    /** Writes a header of a given length that no column can match. */
     const header = (length: number) => '('.repeat(length);
     const short = header(SHORT_TEXT_LENGTH);
     const long = header(SHORT_TEXT_LENGTH * SIZE_FACTOR);
@@ -243,6 +244,7 @@ describe('growth of reading forged CSV cells', () => {
   });
 
   it('refuses a huge list of predecessors in a time that does not depend on its length, counting only up to the limit', () => {
+    /** Writes a list of predecessors of a given length. */
     const list = (length: number) => '1,'.repeat(length);
     const short = list(SHORT_TEXT_LENGTH);
     const long = list(SHORT_TEXT_LENGTH * SIZE_FACTOR);

@@ -288,6 +288,7 @@ describe('Workspace', () => {
     expect(app.schedule).not.toBeNull();
     const middle = shape.row * ROW_HEIGHT + ROW_HEIGHT / 2;
     const x = shape.start + 4 - scrollLeft;
+    /** Drags the pointer on the timeline from one place to another on the same row. */
     const dragTo = (from: number, to: number) => {
       pointer(scroller, 'pointerdown', from, middle);
       pointer(scroller, 'pointermove', to, middle);
@@ -372,6 +373,7 @@ describe('Workspace', () => {
     vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
     vi.setSystemTime(TODAY);
     const { scroller } = await renderSized();
+    /** Returns where the line of today is drawn on the timeline. */
     const todayLineX = (): number => {
       const lines = drawFrames().filter(
         (call) =>

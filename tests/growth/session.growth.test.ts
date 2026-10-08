@@ -105,6 +105,7 @@ describe('growth of shared session operations with the size of the project', () 
     const largeUpdates = recordRemoteEdits(largeDocument);
     const small = openCopy(smallDocument);
     const large = openCopy(largeDocument);
+    /** Merges the updates of a batch one by one. */
     const merge = (session: SharedSession, updates: readonly Uint8Array[]) =>
       batched(BATCH_SIZE, (index) => {
         const merged = session.merge(updates[index] ?? new Uint8Array());
@@ -116,6 +117,7 @@ describe('growth of shared session operations with the size of the project', () 
   });
 
   it('changes the number of blocks of a task linked to every other task in linear time', () => {
+    /** Prepares a project whose hub task changes its number of blocks at each run. */
     const resplitter = (taskCount: number) => {
       const session = openCopy(hubProject(taskCount));
       const hub = session.project().tasks.find((task) => task.id === HUB_ID);
@@ -138,6 +140,7 @@ describe('growth of shared session operations with the size of the project', () 
   });
 
   it('undoes a local edit in a time that does not depend on the size of the project', () => {
+    /** Prepares a session with enough changes to undo at each run. */
     const undoer = (document: Y.Doc) => {
       const session = openCopy(document);
       const rename = taskRenamer(session);
@@ -161,6 +164,7 @@ describe('growth of opening a shared session and of a full repair', () => {
   it('opens a session on a shared document in linear time', () => {
     const smallState = Y.encodeStateAsUpdate(createSharedDocument(smallProject, TEST_DOCUMENT_ID));
     const largeState = Y.encodeStateAsUpdate(createSharedDocument(largeProject, TEST_DOCUMENT_ID));
+    /** Opens a session from a saved state. */
     const open = (state: Uint8Array) => (): void => {
       const document = new Y.Doc();
       Y.applyUpdate(document, state);

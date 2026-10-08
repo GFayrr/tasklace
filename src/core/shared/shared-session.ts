@@ -249,6 +249,7 @@ function replayStep(
   moves: { readonly step: () => unknown; readonly revert: () => unknown },
 ): Result<readonly SharedRepair[], MergeFailure> {
   const updates: Uint8Array[] = [];
+  /** Keeps the updates the undo manager writes. */
   const collect = (update: Uint8Array, origin: unknown): void => {
     if (origin === manager) {
       updates.push(update);
@@ -442,6 +443,7 @@ function tryMerge(
   if (readDocumentId(shadow) !== session.documentId) {
     return failure({ kind: 'invalidProject', issues: [DOCUMENT_ID_CHANGED] });
   }
+  /** Keeps the updates a repair writes. */
   const collect = (repairUpdate: Uint8Array): void => {
     repairUpdates.push(repairUpdate);
   };
@@ -465,6 +467,7 @@ function applyToShadow(shadow: Y.Doc, update: Uint8Array): ShadowChange {
     headerFields: new Set(),
     structural: false,
   };
+  /** Notes in the indexed state every part of the document a transaction changed. */
   const collect = (transaction: Y.Transaction): void => {
     transaction.changed.forEach((keys, type) => {
       noteChange(shadow, change, type, keys);

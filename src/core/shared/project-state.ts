@@ -57,6 +57,7 @@ export function createProjectState(project: Project): ProjectState {
 
 /** Turns an indexed state back into a project, lists sorted by identifier as a shared document gives them. */
 export function toProject(state: ProjectState): Project {
+  /** Returns items ordered by identifier. */
   const byId = <T extends { readonly id: string }>(items: Iterable<T>): T[] =>
     [...items].sort((left, right) => compareStrings(left.id, right.id));
   return {

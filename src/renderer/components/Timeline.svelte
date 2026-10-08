@@ -155,15 +155,19 @@
 
   /** Listens to the pointer on the scrolling area to select, drag, stretch and link bars, and to open the details of a task. */
   function followPointer(element: HTMLDivElement): () => void {
+    /** Starts a gesture on the timeline. */
     const down = (event: PointerEvent): void => {
       pointerDown(event, element);
     };
+    /** Follows a gesture on the timeline. */
     const move = (event: PointerEvent): void => {
       pointerMove(event, element);
     };
+    /** Ends a gesture on the timeline. */
     const up = (event: PointerEvent): void => {
       pointerUp(event, element);
     };
+    /** Opens the details of the task under the pointer. */
     const open = (event: MouseEvent): void => {
       openAt(event, element);
     };

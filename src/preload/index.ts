@@ -109,6 +109,7 @@ function isAnswerOf<C extends ResultChannel>(
 
 /** Tells whether an answer is a regional format, each field holding one of its allowed values. */
 function isRegionalFormat(value: unknown): value is RegionalFormat {
+  /** Reads a field of the answer, whatever its shape. */
   const field = (name: string): unknown => Reflect.get(Object(value), name);
   return (
     LIST_SEPARATORS.includes(field('listSeparator')) &&

@@ -191,6 +191,7 @@ test('moves the project start and adds a day off from the settings, then undoes 
   await page.getByRole('button', { name: /New project/ }).click();
   await addTask(page, 'Work');
   await typeInCell(page, 'Work', DURATION_COLUMN, '18');
+  /** Returns a cell of the row of the task Work. */
   const cell = (column: number) => taskRow(page, 'Work').getByRole('gridcell').nth(column);
   const before = [await cell(START_COLUMN).innerText(), await cell(END_COLUMN).innerText()];
 

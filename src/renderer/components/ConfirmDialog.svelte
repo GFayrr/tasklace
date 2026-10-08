@@ -29,6 +29,7 @@
 
   /** Keeps undo and redo from changing the project while the user is asked to confirm. */
   function holdHistory(dialog: HTMLDialogElement): () => void {
+    /** Keeps undo and redo shortcuts from reaching the rest of the page. */
     const hold = (event: KeyboardEvent): void => {
       if ((event.ctrlKey || event.metaKey) && HISTORY_KEYS.has(event.key.toLowerCase())) {
         event.stopPropagation();

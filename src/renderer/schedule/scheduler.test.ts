@@ -17,6 +17,7 @@ function manualWorker() {
       terminated = true;
     },
   };
+  /** Answers the oldest request the worker received. */
   const answerNext = () => {
     const response = answerScheduleRequest(received.shift());
     port.onmessage?.(new MessageEvent('message', { data: response }));
@@ -27,6 +28,7 @@ function manualWorker() {
 /** Creates workers on demand, as the scheduler asks for them, keeping each one for the test. */
 function workerPool() {
   const created: ReturnType<typeof manualWorker>[] = [];
+  /** Returns the worker created last, failing the test when none was created. */
   const latest = () => {
     const worker = created.at(-1);
     if (worker === undefined) {
@@ -34,6 +36,7 @@ function workerPool() {
     }
     return worker;
   };
+  /** Creates a worker the test drives by hand. */
   const create = () => {
     const worker = manualWorker();
     created.push(worker);

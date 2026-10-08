@@ -172,7 +172,9 @@ const namedProjectArbitrary = fc
 
 /** Describes a scheduled project by WBS number, independently of its identifiers. */
 function describeByWbs(input: Project, schedule: Schedule) {
+  /** Returns the WBS number of a task, or null for no task. */
   const wbs = (id: string | null) => (id === null ? null : (schedule.wbsNumbers.get(id) ?? '?'));
+  /** Returns the name of a tag, or null for no tag. */
   const tagName = (id: string | null) => input.tags.find((tag) => tag.id === id)?.name ?? null;
   const tasks = input.tasks.map((task) => ({
     wbs: wbs(task.id),
@@ -186,6 +188,7 @@ function describeByWbs(input: Project, schedule: Schedule) {
       task.kind === 'summary' ? schedule.summaries.get(task.id) : schedule.placements.get(task.id),
   }));
   const taskById = new Map(input.tasks.map((task) => [task.id, task]));
+  /** Writes a link as the import writes it, a block its task would name anyway being written as the whole task. */
   const shortest = (dependency: Dependency): Dependency => {
     const predecessor = taskById.get(dependency.predecessorId);
     const successor = taskById.get(dependency.successorId);
@@ -201,6 +204,7 @@ function describeByWbs(input: Project, schedule: Schedule) {
     type: dependency.type,
     lagHours: dependency.lagHours,
   }));
+  /** Orders two values by their JSON text. */
   const byText = (left: object, right: object) =>
     JSON.stringify(left).localeCompare(JSON.stringify(right));
   return { tasks: tasks.sort(byText), dependencies: dependencies.sort(byText) };
@@ -533,6 +537,7 @@ describe('importProjectCsv with links to and from blocks', () => {
   });
 
   it('reads a single waiting block as a link to its whole task, and refuses a block waiting for its own task or twice for the same', () => {
+    /** Imports a French table made of these lines and lists where and why it was refused. */
     const issuesAt = (...lines: string[]) => {
       const refused = importFrench([HEADER, ...lines].join('\n'));
       return refused.ok ? [] : refused.error.map((issue) => `${issue.path} ${issue.code}`);
@@ -852,6 +857,7 @@ describe('importProjectCsv refusing a table', () => {
   });
 
   it('refuses more predecessors than allowed over the whole table, without building them all', () => {
+    /** Writes a list of a given number of predecessors. */
     const many = (count: number) => Array.from({ length: count }, () => '1').join(',');
     const half = MAX_DEPENDENCIES / 2;
     expect(issuesOf('1;A;;;7', `2;B;;;7;;"${many(half)}"`, `3;C;;;7;;"${many(half + 1)}"`)).toEqual(
@@ -860,6 +866,7 @@ describe('importProjectCsv refusing a table', () => {
   });
 
   it('spends the budget of predecessors on what blocks wait for too', () => {
+    /** Writes a list of a given number of references in the Blocks column. */
     const many = (count: number) => Array.from({ length: count }, () => '1').join(' & ');
     const half = MAX_DEPENDENCIES / 2;
     expect(

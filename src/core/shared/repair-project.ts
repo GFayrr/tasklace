@@ -231,6 +231,7 @@ function moveToRoot(project: Project, ids: ReadonlySet<TaskId>): RepairedProject
 /** Removes every dependency whose tasks no longer exist, are the same task or include a summary. */
 function removeInvalidDependencies(project: Project): RepairedProject {
   const kindById = new Map(project.tasks.map((task) => [task.id, task.kind]));
+  /** Tells whether a task exists and can carry a link, that is whether it is not a summary. */
   const isLinkable = (id: TaskId): boolean => {
     const kind = kindById.get(id);
     return kind !== undefined && kind !== 'summary';
@@ -247,6 +248,7 @@ function removeInvalidDependencies(project: Project): RepairedProject {
 /** Points every link that names a block its task no longer has at the whole task instead. */
 function clearUnknownBlocks(project: Project): RepairedProject {
   const taskById = new Map(project.tasks.map((task) => [task.id, task]));
+  /** Tells whether a task exists and has the block a link names. */
   const isKnown = (taskId: TaskId, block: number | null): boolean => {
     const task = taskById.get(taskId);
     return task !== undefined && isKnownBlock(task, block);

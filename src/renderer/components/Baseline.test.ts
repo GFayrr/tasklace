@@ -296,6 +296,7 @@ describe('the baseline in the table and on the timeline', () => {
     const ghosts = drawFrames()
       .filter((call) => call.name === 'fillRect' && call.fillStyle === pale && call.args[3] === 3)
       .map((call) => [call.args[0], call.args[1]]);
+    /** Returns the top of the row of a task on the timeline. */
     const rowOf = (id: string) => (app.outline.rowIndexById.get(id) ?? -1) * ROW_HEIGHT;
     expect(ghosts).toEqual([
       [xOf(frame, baseline?.get('a')?.start ?? Number.NaN), rowOf('a') + 2],
@@ -318,7 +319,9 @@ describe('the baseline in the table and on the timeline', () => {
       ],
     };
     const shown = await renderAdvanced({ ...PLAN, baseline });
+    /** Returns the width of the area the timeline scrolls over. */
     const spacerOf = (root: HTMLElement) => single(root, '.scroller .spacer').style.width;
+    /** Returns the period the timeline covers with these marks. */
     const frameWith = (marks: readonly number[]) =>
       timelineFrame(
         PLAN.startDate,

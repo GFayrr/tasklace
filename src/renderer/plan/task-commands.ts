@@ -502,7 +502,7 @@ export function moveOnTimeline(
   return moveBlock(context, id, block, { start: dropped(moved.start), previousEnd: previous.end });
 }
 
-/** Asks a later block of a split task not to start before an instant, as when it is dragged alone, its gap in days becoming the number of days from the end of the previous block, a block dropped before that end staying right after it without a date of its own. */
+/** Asks a later block of a split task not to start before an instant, as when it is dragged alone, its gap becoming the days since the end of the previous block, a block dropped before that end staying right after it without a date. */
 export function moveBlock(
   context: EditContext,
   id: TaskId,

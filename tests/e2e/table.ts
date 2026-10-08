@@ -5,9 +5,14 @@ export function taskGrid(page: Page): Locator {
   return page.getByRole('grid', { name: 'Tasks' });
 }
 
+/** Returns the button of the toolbar that adds a task, the table having one of the same name below its rows. */
+export function addTaskButton(page: Page): Locator {
+  return page.getByRole('group', { name: 'Task' }).getByRole('button', { name: 'Add a task' });
+}
+
 /** Adds a task with the toolbar and types its name. */
 export async function addTask(page: Page, name: string): Promise<void> {
-  await page.getByRole('button', { name: 'Add task' }).click();
+  await addTaskButton(page).click();
   const editor = taskGrid(page).getByRole('textbox');
   await expect(editor).toBeFocused();
   await expect(editor).toHaveValue('New task');

@@ -195,6 +195,7 @@ describe('the dates tasks do not meet', () => {
 
   it('show the deadline key while deadlines are shown, and disappear with the option', async () => {
     const { app, root } = await renderPlan();
+    /** Lists the texts of the deadline keys of the status bar. */
     const key = () =>
       [...root.querySelectorAll('.status-bar .deadline-key')].map((item) =>
         item.textContent.trim(),
@@ -251,7 +252,9 @@ describe('the dates tasks do not meet', () => {
   it('draw each deadline on the timeline, red only when missed, and outline the tasks and milestones that miss a date', async () => {
     const { app } = await renderPlan();
     const frame = frameOf(app);
+    /** Returns the top of the row of a task on the timeline. */
     const rowTop = (id: string) => (app.outline.rowIndexById.get(id) ?? -1) * ROW_HEIGHT;
+    /** Lists the places where deadline marks are drawn in these calls. */
     const marksOf = (calls: ReturnType<typeof drawFrames>) =>
       calls
         .filter(
@@ -259,6 +262,7 @@ describe('the dates tasks do not meet', () => {
             call.name === 'fillRect' && call.args[2] === 2 && call.args[3] === ROW_HEIGHT - 4,
         )
         .map((call) => [call.args[0], call.args[1], call.fillStyle]);
+    /** Lists the red outlines drawn in these calls. */
     const redStrokes = (calls: ReturnType<typeof drawFrames>) =>
       calls.filter(
         (call) =>
@@ -289,6 +293,7 @@ describe('the dates tasks do not meet', () => {
 
   it('widen the timeline to the deadlines only while date constraints are on', async () => {
     const { app, root } = await renderPlan();
+    /** Returns the width of the area the timeline scrolls over. */
     const spacer = () => single(root, '.scroller .spacer').style.width;
     const withDeadlines = frameOf(app);
     expect(withDeadlines.end).toBe(at(2027, 2, 14));

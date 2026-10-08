@@ -110,6 +110,7 @@ export function createProjectFiles(
   let changeCount = 0;
   let busy = false;
   let lastSave: Promise<unknown> = Promise.resolve();
+  /** Sends the latest state of the project to be saved after the saves already sent, one at a time. */
   const sendSave = (
     saving: (state: Uint8Array) => Promise<BridgeResult<SavedProject>>,
   ): Promise<ActionResult<SavedProject>> => {
@@ -120,6 +121,7 @@ export function createProjectFiles(
     lastSave = sent.catch(() => undefined);
     return sent;
   };
+  /** Saves the project and keeps its status up to date, the status never staying on saving. */
   const trackSave = async (
     saving: (state: Uint8Array) => Promise<BridgeResult<SavedProject>>,
   ): Promise<ActionResult<SavedProject>> => {
@@ -139,6 +141,7 @@ export function createProjectFiles(
     }
     return result;
   };
+  /** Saves the open project, throwing when the save fails. */
   const saveCurrent = async (): Promise<void> => {
     const result = await trackSave(bridge.saveProject);
     if (!result.ok && result !== NOTHING_TO_SAVE) {
@@ -146,11 +149,13 @@ export function createProjectFiles(
     }
   };
   const autosave = createAutosave(saveCurrent, listener.failed, timer);
+  /** Marks the project changed and asks the automatic save to save it a little later. */
   const changed = (): void => {
     changeCount += 1;
     listener.saveStatus('unsaved');
     autosave.changed();
   };
+  /** Runs a file action unless another one runs, keeping the project from changing meanwhile. */
   const exclusive = async <T>(action: () => Promise<ActionResult<T>>): Promise<ActionResult<T>> => {
     if (busy) {
       return { ok: false, error: { code: 'BUSY' } };
@@ -164,6 +169,7 @@ export function createProjectFiles(
       listener.fileActionRunning(false);
     }
   };
+  /** Finishes the pending save of the open project before another one replaces it, telling why when it fails. */
   const saveBeforeSwitching = async (): Promise<ActionResult<null>> => {
     try {
       await autosave.flush();
@@ -174,6 +180,7 @@ export function createProjectFiles(
       return { ok: false, error: { code: 'UNSAVED_PROJECT', cause } };
     }
   };
+  /** Tells the main process that the page accepted a project, which only then becomes the project of the window. */
   const adopt = async (
     session: SharedSession,
     hasFile: boolean,
@@ -188,6 +195,7 @@ export function createProjectFiles(
     listener.saveStatus('saved');
     return { ok: true, value: session };
   };
+  /** Opens a project the main process reads, after saving the open one, and adopts it. */
   const load = async (
     opening: () => Promise<BridgeResult<OpenedProject>>,
     hasFile: boolean,
@@ -211,6 +219,7 @@ export function createProjectFiles(
     const { fileName, warnings } = opened.value;
     return { ok: true, value: { session: session.value, fileName, warnings } };
   };
+  /** Creates a new project under the identifier the main process gives, after saving the open one, and adopts it. */
   const create = async (project: Project): Promise<ActionResult<SharedSession>> => {
     const saved = await saveBeforeSwitching();
     if (!saved.ok) {
@@ -227,6 +236,7 @@ export function createProjectFiles(
     }
     return adopt(session.value, false);
   };
+  /** Saves the project to a file the user chooses, under the name of the project. */
   const saveAs = async (): Promise<ActionResult<SavedProject>> => {
     const name = current?.session.project().name ?? '';
     const result = await trackSave((state) => bridge.saveProjectAs(state, name));

@@ -410,6 +410,7 @@ describe('readProject: values', () => {
 });
 
 describe('readProject: start dates of blocks', () => {
+  /** Builds two blocks of seven hours with the given start dates. */
   const blocks = (first: unknown, second: unknown) => [
     { durationHours: 7, gapDaysBefore: 0, startNoEarlierThan: first },
     { durationHours: 7, gapDaysBefore: 1, startNoEarlierThan: second },
@@ -804,6 +805,7 @@ describe('readProject: baseline', () => {
     end: at(2026, 9, 28, 17),
     durationHours: 7,
   };
+  /** Builds the data of a project holding a baseline with these entries. */
   const withBaseline = (entries: readonly unknown[]): Data =>
     projectWith({ baseline: { takenAt: at(2026, 9, 27, 18), entries } });
 

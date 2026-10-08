@@ -237,9 +237,11 @@
     const startX = event.clientX;
     const startWidth = shownWidth;
     handle.setPointerCapture(event.pointerId);
+    /** Resizes the task table as the pointer moves. */
     const move = (moved: PointerEvent): void => {
       setTableWidth(startWidth + moved.clientX - startX);
     };
+    /** Stops resizing the task table. */
     const stop = (): void => {
       handle.removeEventListener('pointermove', move);
       handle.removeEventListener('pointerup', stop);

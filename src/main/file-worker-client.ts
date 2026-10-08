@@ -6,7 +6,7 @@ export type FileWorkerFactory = () => Worker;
 
 const OUT_OF_MEMORY_CODE = 'ERR_WORKER_OUT_OF_MEMORY';
 
-/** Runs one file task in its own worker, stopped afterwards, turning a worker that runs out of memory into a "too complex" failure, and any other stop, a task that cannot be sent or an answer that is not a result of this task into a task failure, whose cause is logged. */
+/** Runs one file task in its own worker, stopped afterwards, a worker out of memory giving a “too complex” failure and any other stop, unsent task or answer foreign to the task a task failure whose cause is logged. */
 export function runInFileWorker<T extends FileTask>(
   createWorker: FileWorkerFactory,
   task: T,
@@ -14,6 +14,7 @@ export function runInFileWorker<T extends FileTask>(
   return new Promise((resolve) => {
     const worker = createWorker();
     let settled = false;
+    /** Answers the task once, logging the cause of a failure, then stops the worker. */
     const finish = (result: ResultOfTask<T>, cause: unknown = null): void => {
       if (settled) {
         return;

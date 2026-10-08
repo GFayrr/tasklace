@@ -6,7 +6,7 @@ import type { Edit, EditContext } from './task-commands';
 
 const FIRST_NUMBERED_COPY = 2;
 
-/** Adds a category tag named after a base name, numbered when that name is taken, with the first palette color no tag has whatever its case, or the palette color matching the tag count when all are used, refusing a project that has as many tags as allowed. */
+/** Adds a category tag named after a base name, numbered when taken, with the first palette color no tag has whatever its case, or the color matching the tag count when all are used, refusing a project with as many tags as allowed. */
 export function addTag(context: EditContext, baseName: string): Edit {
   const tags = context.project.tags;
   if (tags.length >= MAX_TAGS) {

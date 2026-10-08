@@ -100,11 +100,13 @@ export function windowProjectKind(sender: WebContents): WindowProjectKind {
   return project.path === null ? 'withoutFile' : 'withFile';
 }
 
-/** Answers the project file requests of the bridge: new, open, recent, import, adopt, save, save as and export, the main process alone choosing paths through dialogs and knowing the file and document of each window, which changes only once the page has accepted the project offered to it. */
+/** Answers the project file requests of the bridge (new, open, recent, import, adopt, save, save as, export), the main process alone choosing paths and knowing the project of each window, which changes only once its page adopts it. */
 export function registerProjectFileHandlers(services: ProjectFileServices): void {
+  /** Registers the answer of a channel, which checks first that the page asking is trusted. */
   const handle = <C extends InvokeChannel>(channel: C, answer: ChannelHandler<C>): void => {
     handleChannel(services.assertTrusted, channel, answer);
   };
+  /** Registers the answer of a file action channel, an unexpected failure becoming a task failure. */
   const handleFileAction = <C extends ResultChannel>(
     channel: C,
     answer: (event: IpcMainInvokeEvent, ...values: unknown[]) => Promise<ChannelAnswers[C]>,
@@ -140,7 +142,7 @@ export function registerProjectFileHandlers(services: ProjectFileServices): void
   );
 }
 
-/** Answers a file request of the bridge (open, open recent, import, save, save as, export), turning an Error other than a refused message into a file failure the page can tell the user about and logging it, a thrown value that is not an Error being thrown again. */
+/** Answers a file request of the bridge, turning an Error other than a refusal into a logged task failure the page can report, and throwing again a value that is not an Error. */
 async function answerOrFail(
   channel: string,
   answer: () => Promise<BridgeResult<unknown>>,

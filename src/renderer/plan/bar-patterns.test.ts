@@ -49,6 +49,7 @@ describe('createPatternCache', () => {
   /** Builds a tile whose drawing context can be withheld. */
   function tileFactory(withContext: boolean) {
     const tiles: { width: number; height: number }[] = [];
+    /** Creates a pattern tile whose drawing context the test can refuse. */
     const create = () => {
       const { context } = recordingCanvas();
       const tile = { width: 0, height: 0, getContext: () => (withContext ? context : null) };

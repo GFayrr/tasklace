@@ -145,8 +145,10 @@ describe('duplicate links', () => {
     ];
     const end = fc.record({ task: fc.nat({ max: 2 }), block: fc.option(fc.nat({ max: 2 })) });
     const linkShape = fc.record({ from: end, to: end, type: fc.constantFrom(...TYPES) });
+    /** Returns the block a link names on a task when the task has that block and at least two, or null for the whole task. */
     const blockIn = (task: WorkTask, block: number | null) =>
       block !== null && task.segments.length > 1 && block < task.segments.length ? block : null;
+    /** Builds a link from its generated shape, naming only blocks the tasks have. */
     const toLink = (
       shape: typeof linkShape extends fc.Arbitrary<infer T> ? T : never,
       id: string,
@@ -410,6 +412,7 @@ describe('scheduling properties with block links', { timeout: PROPERTY_TEST_TIME
         const result = scheduleProject(input);
         fc.pre(result.ok);
         const calendar = unwrap(compileCalendar(input.calendar));
+        /** Returns the start or end of the block a link names on a task, or of the task itself. */
         const spanOf = (id: string, block: number | null, side: 'start' | 'end') => {
           const placement = result.value.placements.get(id);
           const blocks = placement?.segments ?? [];

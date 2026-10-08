@@ -166,6 +166,7 @@ function toHour(milliseconds: number): ProjectHour {
 
 /** Creates the labels of the time scale in the regional format, project hours being wall-clock times without time zone. */
 export function createScaleLabels(locale: string): ScaleLabels {
+  /** Creates a function writing a project hour with these date options in the regional format. */
   const formatter = (options: Intl.DateTimeFormatOptions) => {
     const format = new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC' });
     return (hour: ProjectHour) => format.format(new Date(hour * MILLISECONDS_PER_HOUR));

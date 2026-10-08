@@ -147,6 +147,7 @@ describe('file tasks', () => {
     const namedPath = join(folder, 'named.json');
     await writeFile(untitledPath, exportProjectJson({ ...SAMPLE, name: NAMING.untitled }));
     await writeFile(namedPath, exportProjectJson({ ...SAMPLE, name: 'Launch' }));
+    /** Imports a JSON file and returns the name of the imported project. */
     const nameOf = async (path: string) => {
       const imported = loadedOf(
         await runFileTask({
@@ -377,6 +378,7 @@ describe('file tasks', () => {
 
   it('never writes a state of another document, a broken state or an invalid project', async () => {
     const path = join(folder, 'plan.tasklace');
+    /** Saves a state to the project file and its local copy. */
     const save = (state: Uint8Array) =>
       runFileTask({
         kind: 'saveProject',

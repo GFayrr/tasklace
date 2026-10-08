@@ -133,10 +133,12 @@ function readRow(row: CsvRow, context: RowContext): ParsedRow {
   if (row.hasExtraCells) {
     context.warnings.push({ path: rowPath(row.rowNumber), code: 'EXTRA_CELLS' });
   }
+  /** Returns the text of a cell of the row in a column, its formula guard removed, or an empty text for a column the table lacks. */
   const cell = (column: CsvColumn): string => {
     const index = context.columns.get(column);
     return index === undefined ? '' : restoreFormula(row.cells[index] ?? '');
   };
+  /** Reads a cell of the row in a column, recording the problem found when it cannot be read. */
   const read = <T>(column: CsvColumn, parse: (text: string) => Result<T, CellIssue>): T | null =>
     readCell(cell(column), rowPath(row.rowNumber, column), parse, context.issues);
   const { budget, parseDate } = context;

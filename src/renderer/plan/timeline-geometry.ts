@@ -241,7 +241,7 @@ export function deadlinesOf(project: Project): ProjectHour[] {
   return deadlines;
 }
 
-/** Returns the earliest frozen start and the latest frozen end of the tasks a project still has, for the timeline to keep them in view, the entries of deleted tasks being ignored, or nothing without such entries; it reads the entries in an order kept with the baseline, so that it usually stops at the first one. */
+/** Returns the earliest frozen start and latest frozen end of the tasks a project still has, for the timeline to keep them in view, or nothing without such entries, reading them in an order kept with the baseline so that it usually stops at the first. */
 export function baselineMarks(
   baseline: Baseline | null,
   hasTask: (id: TaskId) => boolean,

@@ -8,8 +8,10 @@ const renameFailure = vi.hoisted((): { error: Error | null } => ({ error: null }
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:fs/promises')>();
+  /** Reads the size of a file, failing while the test asks for that failure. */
   const stat = (path: string): ReturnType<typeof original.stat> =>
     sizeFailure.error === null ? original.stat(path) : Promise.reject(sizeFailure.error);
+  /** Renames a file, failing while the test asks for that failure. */
   const rename = (from: string, to: string): Promise<void> =>
     renameFailure.error === null ? original.rename(from, to) : Promise.reject(renameFailure.error);
   return { ...original, stat, rename };

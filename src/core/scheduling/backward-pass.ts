@@ -82,7 +82,7 @@ export function runBackwardPass(
   return collectFloats(context, graph, { early: earlyBlocks, late: lateBlocks }, projectEnd);
 }
 
-/** Places one block as late as the next block of its task, its successors, the project end and the advanced constraints of its task allow, or marks it unknown when that place falls before the first supported year or comes before a block whose place does. */
+/** Places one block as late as its next block, its successors, the project end and the advanced constraints of its task allow, or marks it unknown when that place falls before the first supported year or precedes an unknown block. */
 function placeLate(
   context: SchedulingContext,
   unit: ScheduleUnit,
@@ -109,7 +109,7 @@ function unknownBeforeHorizon(code: PlacementErrorCode): Result<LateSpan, Placem
   return code === 'BEYOND_PLANNING_HORIZON' ? success(UNKNOWN) : failure(code);
 }
 
-/** Combines the project end, advanced constraints, the next block and successors into latest start and end bounds, or tells that they are unknown when one of those blocks has an unknown place; a lead that would only limit the block after the last supported year is left out, since the project end already limits it. */
+/** Combines the project end, advanced constraints, the next block and successors into latest bounds, unknown when one of those blocks is unknown, a lead that could only limit the block after the last supported year being left out. */
 function computeLateBounds(
   context: SchedulingContext,
   unit: ScheduleUnit,
@@ -237,7 +237,7 @@ function collectFloats(
   return success(floats);
 }
 
-/** Computes the floats of one task: the smallest total float of its blocks and the smallest slack of the links leaving them, or the time left until the project end when none leaves, both unknown and the task critical when one of its blocks has no known late place. */
+/** Computes the floats of one task: the smallest total float of its blocks and the smallest slack of their outgoing links, or of the time left until the project end, both unknown and the task critical when a block has no known late place. */
 function computeTaskFloat(
   context: SchedulingContext,
   graph: DependencyGraph,

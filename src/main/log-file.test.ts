@@ -153,6 +153,7 @@ describe('logPageMessages', () => {
     const contents = new FakeWebContents();
     const log = memoryLog();
     logPageMessages(contents as unknown as WebContents, log);
+    /** Sends a message of a given level from the page console. */
     const message = (level: string, text: string) => {
       contents.emit('console-message', {
         level,

@@ -248,6 +248,7 @@ describe('TaskTable', () => {
 
   it('lists the tags by name in the order of the language, whatever their order in the project', async () => {
     const { app, root, grid } = await renderTable();
+    /** Builds a tag with an identifier and a name. */
     const tagOf = (id: string, name: string) => ({ ...DESIGN, id, name });
     expect(
       app.tryEdit(() => ({
@@ -326,6 +327,7 @@ describe('TaskTable', () => {
       press(grid, 'ArrowRight');
     }
     const errors: unknown[] = [];
+    /** Records an error that reached the window and keeps it from being reported. */
     const listen = (event: ErrorEvent) => {
       errors.push(event.error);
       event.preventDefault();

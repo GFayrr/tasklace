@@ -307,12 +307,12 @@ export class AppState {
     return this.#computed?.schedule ?? null;
   }
 
-  /** Describes the person or team conflicts of the schedule shown, with the tags and tasks of the project it was computed for, which may be a little older than the project shown. */
+  /** Returns the person or team conflicts of the schedule shown, described once with the tags and tasks of the project it was computed for, which may be a little older than the project shown. */
   get conflictLines(): readonly ConflictLine[] {
     return this.#peopleLines;
   }
 
-  /** Describes the dates the tasks of the schedule shown do not meet, with the tasks of the project it was computed for, which may be a little older than the project shown. */
+  /** Returns the dates the tasks of the schedule shown do not meet, described once with the tasks of the project it was computed for, which may be a little older than the project shown. */
   get dateConflictLines(): readonly DateConflictLine[] {
     return this.#dateLines;
   }
@@ -632,7 +632,7 @@ export class AppState {
     this.#conflictsOpen = !this.#conflictsOpen && this.conflictCount > 0;
   }
 
-  /** Selects the first task of a person or team conflict that the project still has, opening the summaries that hide it, and asks the workspace to show the start of the conflict, telling the user to wait when the conflict comes from a schedule older than the deletion of its tasks. */
+  /** Selects the first task of a person or team conflict that the project still has, opening its summaries, and asks the workspace to show the start of the conflict, or tells the user to wait when its tasks were deleted since the schedule. */
   showConflict(conflict: TagConflict): void {
     this.#revealConflict(conflict.taskIds, conflict.start);
   }
@@ -728,7 +728,7 @@ export class AppState {
     return name === this.project?.name ? null : this.editSettings(() => renameProject(name));
   }
 
-  /** Moves the start of the project, returning why it was refused or null, and tells in the settings how many tasks moved once the schedule of the moved project is known, counting from the schedule before a series of moves when the moves follow each other. */
+  /** Moves the start of the project, returning why it was refused or null, and tells in the settings how many tasks moved once the moved project is scheduled, counting a series of moves from the schedule before the first. */
   moveProjectStart(text: string): string | null {
     const previous = this.#startMove;
     const before = this.currentSchedule;
@@ -1030,7 +1030,7 @@ export class AppState {
     });
   };
 
-  /** Reads the project of the session once for all the changes of a moment, and asks for its schedule. */
+  /** Reads the project of the session once for all the changes of a moment, asks for its schedule, and forgets the selection and the details of a task the project no longer has. */
   #refresh(): void {
     const session = this.#session;
     if (session === null) {
@@ -1076,7 +1076,7 @@ export class AppState {
     }
   }
 
-  /** Shows a computed schedule if it still belongs to the open project. */
+  /** Shows a computed schedule if it still belongs to the open project, with its conflicts, its unknown floats and the tasks a move of the project start moved, or explains why it failed. */
   #showSchedule(result: Result<Schedule, SchedulingFailure>, project: Project): void {
     if (project !== this.project) {
       return;

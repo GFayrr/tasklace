@@ -46,6 +46,7 @@ describe('the baseline in the application state', () => {
     expect(app.setBaseline()).toBeNull();
     await settle();
     const schedule = scheduleOrThrow(PLAN);
+    /** Returns the baseline entry the schedule gives a task. */
     const entry = (id: string) => {
       const placement = schedule.placements.get(id);
       return { taskId: id, start: placement?.start, end: placement?.end, durationHours: 7 };

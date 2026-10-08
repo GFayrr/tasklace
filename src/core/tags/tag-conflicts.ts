@@ -142,6 +142,7 @@ function sweepConflicts(
   const sortedKeys = Float64Array.from(keys).sort();
   const active = new Set<number>();
   const conflicts: TagConflict[] = [];
+  /** Records a finished conflict of the tag. */
   const close = (group: ConflictGroup): void => {
     conflicts.push({ tagId, ...finishGroup(group, taskIds) });
   };

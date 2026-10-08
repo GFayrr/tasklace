@@ -175,7 +175,7 @@ function totalDurationHours(task: WorkTask): number {
   return task.segments.reduce((total, segment) => total + segment.durationHours, 0);
 }
 
-/** Finds by binary search, among the quarter hours of a range, the first start whose placement satisfies a monotonic predicate, a placement running past the last supported year counting as satisfying it when asked, since any later start runs past it too. */
+/** Finds by binary search the first quarter hour of a range whose placement satisfies a monotonic predicate, a placement past the last supported year counting as satisfying it when asked, as any later start would too. */
 function findFirstStartWhere(
   calendar: CompiledCalendar,
   task: WorkTask,

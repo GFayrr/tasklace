@@ -25,6 +25,7 @@ const BASE: Project = project([DEVELOPMENT, workTask('test'), workTask('a')]);
 /** Opens two participants on the same project. */
 function openPair(base: Project = BASE): readonly [SharedSession, SharedSession] {
   const origin = createSharedDocument(base, TEST_DOCUMENT_ID);
+  /** Opens a session on a copy of the original document, under a given client identifier. */
   const open = (clientId: number): SharedSession => {
     const document = new Y.Doc();
     document.clientID = clientId;

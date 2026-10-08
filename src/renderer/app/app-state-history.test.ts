@@ -20,6 +20,7 @@ vi.mock('../../core/shared/shared-session', async (importOriginal) => {
       if (!opened.ok) {
         return opened;
       }
+      /** Returns the refusal the test sets. */
       const refused = () => ({ ok: false, error: refusal.value }) as const;
       const history = { ...opened.value.history, undo: refused, redo: refused };
       return { ok: true, value: { ...opened.value, history } };

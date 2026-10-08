@@ -552,6 +552,7 @@ function stepArbitrary(peerCount: number): fc.Arbitrary<Step> {
 /** Turns a random operation shape into a concrete operation on the current project. */
 function toOperation(shape: OperationShape, current: Project, newId: string): SharedOperation {
   const tasks = current.tasks;
+  /** Picks a task by a generated position, or nothing when there is no task. */
   const pick = (index: number): Task | undefined => tasks[index % Math.max(tasks.length, 1)];
   const task = 'task' in shape ? pick(shape.task) : undefined;
   switch (shape.type) {

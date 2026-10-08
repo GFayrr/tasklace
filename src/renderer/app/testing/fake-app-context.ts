@@ -88,6 +88,7 @@ export function fakeBridge(): {
     imports: [],
     exports: [],
   };
+  /** Records a call of the bridge and answers it with a value. */
   const called = <T>(name: string, value: T): Promise<T> => {
     control.calls.push(name);
     return Promise.resolve(value);
@@ -165,6 +166,7 @@ export function manualScheduler(): {
     requests: [],
     automatic: true,
   };
+  /** Creates a scheduler that records each request and answers it at once while it is automatic. */
   const create = (listener: ScheduleListener): Scheduler => {
     current = listener;
     return {

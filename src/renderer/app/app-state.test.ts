@@ -645,6 +645,7 @@ describe('schedules and messages', () => {
 
   it('shows a message again with its latest details instead of keeping the older ones', async () => {
     const { app, control } = createApp();
+    /** Builds the failure of a project refused for an empty text at a path. */
     const failedWith = (path: string) =>
       ({
         ok: false,
