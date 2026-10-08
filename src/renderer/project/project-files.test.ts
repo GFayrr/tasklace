@@ -4,7 +4,6 @@ import { createSharedDocument, readDocumentId } from '../../core/shared/shared-d
 import type { SharedSession } from '../../core/shared/shared-session';
 import { project, TEST_DOCUMENT_ID, workTask } from '../../core/testing/project-builder';
 import type { BridgeResult, OpenedProject, SavedProject } from '../../preload/bridge-contract';
-import type { Timer } from './autosave';
 import {
   createProjectFiles,
   FileActionError,
@@ -14,6 +13,8 @@ import {
   type ProjectFilesListener,
   type SaveStatus,
 } from './project-files';
+import { manualTimer } from './testing/manual-timer';
+import { settle } from '../app/testing/fake-app-context';
 
 const OTHER_ID = '00000000-0000-4000-8000-000000000002';
 const SAMPLE = project([workTask('a')]);
@@ -28,25 +29,6 @@ const QUIET: ProjectFilesListener = {
 /** Returns a listener doing nothing but what a test gives it. */
 function listening(overrides: Partial<ProjectFilesListener>): ProjectFilesListener {
   return { ...QUIET, ...overrides };
-}
-
-/** A timer driven by hand. */
-function manualTimer(): Timer & { readonly fire: () => void } {
-  let callback: (() => void) | null = null;
-  return {
-    set: (next) => {
-      callback = next;
-      return next;
-    },
-    clear: () => {
-      callback = null;
-    },
-    fire: () => {
-      const current = callback;
-      callback = null;
-      current?.();
-    },
-  };
 }
 
 /** A bridge answering from fixed results and recording the saves it receives with the names they suggest. */
@@ -107,11 +89,6 @@ async function createdOn(files: ProjectFiles): Promise<SharedSession> {
     throw new Error(JSON.stringify(created.error));
   }
   return created.value;
-}
-
-/** Waits for pending promise callbacks to run. */
-async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe('createProjectFiles', () => {

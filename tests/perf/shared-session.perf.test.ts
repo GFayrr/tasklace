@@ -4,20 +4,10 @@ import { createSharedDocument } from '../../src/core/shared/shared-document';
 import { openSharedSession, type SharedSession } from '../../src/core/shared/shared-session';
 import { buildLargeProject } from '../fixtures/large-project';
 import { TEST_DOCUMENT_ID } from '../../src/core/testing/project-builder';
+import { medianDuration } from '../growth/measure-growth';
 
 const FRAME_MILLISECONDS = 16;
 const MEASURED_RUNS = 9;
-
-/** Runs a function several times after a warm-up and returns the median duration in milliseconds. */
-function medianDuration(run: (index: number) => void): number {
-  run(MEASURED_RUNS);
-  const durations = Array.from({ length: MEASURED_RUNS }, (_unused, index) => {
-    const start = performance.now();
-    run(index);
-    return performance.now() - start;
-  }).sort((left, right) => left - right);
-  return durations[Math.floor(MEASURED_RUNS / 2)] ?? Number.POSITIVE_INFINITY;
-}
 
 /** Opens a session on a copy of a document, failing the test when it cannot be opened. */
 function openCopy(document: Y.Doc): SharedSession {
@@ -41,7 +31,7 @@ describe('shared session performance (10,000 tasks, 20,000 dependencies)', () =>
       if (task !== undefined) {
         local.apply({ type: 'putTask', task: { ...task, name: `Edited ${String(index)}` } });
       }
-    });
+    }, MEASURED_RUNS);
     console.info(`Local edit: ${duration.toFixed(2)} ms`);
     expect(duration).toBeLessThan(FRAME_MILLISECONDS);
   });
@@ -63,7 +53,7 @@ describe('shared session performance (10,000 tasks, 20,000 dependencies)', () =>
       const merged = receiver.merge(updates[next] ?? new Uint8Array());
       next += 1;
       expect(merged.ok).toBe(true);
-    });
+    }, MEASURED_RUNS);
     console.info(`Received edit: ${duration.toFixed(2)} ms`);
     expect(duration).toBeLessThan(FRAME_MILLISECONDS);
   });

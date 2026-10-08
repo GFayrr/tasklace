@@ -377,12 +377,10 @@ describe('reading an untrusted tasklace file', () => {
       !unreadable.ok && 'reason' in unreadable.error && unreadable.error.reason,
     ).toBeInstanceOf(Error);
     const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
-    const before = Y.encodeStateVector(document);
     document.getMap('project').set('name', 'First');
     const between = Y.encodeStateVector(document);
     document.getMap('project').set('name', 'Second');
     const dependent = storedPayload(Y.encodeStateAsUpdate(document, between));
-    expect(before.length).toBeGreaterThan(0);
     expect(
       readCode(rewritten(file, { payload: dependent, declaredSize: dependent.length - 1 })),
     ).toBe('INVALID_CONTENT');

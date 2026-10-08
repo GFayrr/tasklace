@@ -1,7 +1,9 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import fc from 'fast-check';
-import { describe, expect, it } from 'vitest';
-import { APP_ENTRY_URL, isAppAddress, resolveAppFile } from './app-files';
+import { describe, expect, it, vi } from 'vitest';
+import { APP_ENTRY_URL, createAppFileServer, isAppAddress, resolveAppFile } from './app-files';
 
 const ROOT = resolve('/tasklace/renderer');
 const DEVELOPMENT_ORIGIN = 'http://localhost:5173';
@@ -71,5 +73,56 @@ describe('isAppAddress', () => {
     expect(isAppAddress('http://localhost:5174/index.html', DEVELOPMENT_ORIGIN)).toBe(false);
     expect(isAppAddress('app://other/index.html', DEVELOPMENT_ORIGIN)).toBe(false);
     expect(isAppAddress('', null)).toBe(false);
+  });
+});
+
+describe('createAppFileServer', () => {
+  const HEADERS = { 'Content-Security-Policy': "default-src 'self'" };
+
+  it('serves a file of the interface with its type and the security headers', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tasklace-interface-'));
+    try {
+      await writeFile(join(root, 'index.html'), '<p>Tasklace</p>');
+      const response = await createAppFileServer(root, HEADERS)(new Request(APP_ENTRY_URL));
+      expect([response.status, await response.text()]).toEqual([200, '<p>Tasklace</p>']);
+      expect([...response.headers]).toEqual([
+        ['content-security-policy', "default-src 'self'"],
+        ['content-type', 'text/html; charset=utf-8'],
+      ]);
+    } finally {
+      await rm(root, { recursive: true });
+    }
+  });
+
+  it('answers not found for an address outside the interface and for a missing file, logging nothing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tasklace-interface-'));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await writeFile(join(root, 'index.html'), '<p>Tasklace</p>');
+      const serve = createAppFileServer(root, HEADERS);
+      const outside = await serve(new Request('app://elsewhere/index.html'));
+      const missing = await serve(new Request('app://tasklace/missing.html'));
+      expect([outside.status, missing.status]).toEqual([404, 404]);
+      expect(logged).not.toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+      await rm(root, { recursive: true });
+    }
+  });
+
+  it('answers not found for a file that cannot be read, logging why', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tasklace-interface-'));
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await mkdir(join(root, 'index.html'));
+      const response = await createAppFileServer(root, HEADERS)(new Request(APP_ENTRY_URL));
+      expect(response.status).toBe(404);
+      expect(logged.mock.calls).toEqual([
+        ['A file of the interface could not be read:', expect.objectContaining({ code: 'EISDIR' })],
+      ]);
+    } finally {
+      logged.mockRestore();
+      await rm(root, { recursive: true });
+    }
   });
 });

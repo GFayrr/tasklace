@@ -54,7 +54,10 @@ function expectUnchanged(
   const read = readSharedProject(session.document);
   expect(read.ok && read.value.tasks.map((task) => task.id).sort()).toEqual(['a', 'b']);
   const linked = session.apply({ type: 'putDependency', dependency: link('a', 'c') });
-  expect(linked.ok).toBe(false);
+  expect(linked).toEqual({
+    ok: false,
+    error: [{ path: 'dependencies.a-c', code: 'UNKNOWN_DEPENDENCY_TASK' }],
+  });
 }
 
 describe('a session whose change fails partway', () => {

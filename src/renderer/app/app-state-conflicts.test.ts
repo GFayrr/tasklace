@@ -4,7 +4,7 @@ import { project, scheduleOrThrow, summary, workTask } from '../../core/testing/
 import { removeTag, setTagRepresentsPerson } from '../plan/tag-commands';
 import english from '../locales/en.json';
 import { AppState } from './app-state.svelte';
-import { fakeAppContext, openedProjectOf, settle } from './testing/fake-app-context';
+import { fakeAppContext, openedAppOf, openedProjectOf, settle } from './testing/fake-app-context';
 
 const ALICE: Tag = { id: 'alice', name: 'Alice', color: '#4a3aa7', representsPersonOrTeam: true };
 const PLAN = project(
@@ -17,14 +17,9 @@ const PLAN = project(
   { tags: [ALICE] },
 );
 
-/** Opens the plan, whose two tasks of Alice overlap, in an application state. */
-async function openedApp() {
-  const fake = fakeAppContext();
-  const app = new AppState(fake.context);
-  fake.control.openResult = openedProjectOf(PLAN);
-  await app.open();
-  await settle();
-  return { app, ...fake };
+/** Opens the plan in an application state. */
+function openedApp() {
+  return openedAppOf(PLAN);
 }
 
 describe('the list of conflicts', () => {

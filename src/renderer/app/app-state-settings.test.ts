@@ -8,7 +8,7 @@ import type { BridgeResult, OpenedProject } from '../../preload/bridge-contract'
 import english from '../locales/en.json';
 import { removeTimeRange, setTimeRange, setWorkingWeekday } from '../plan/project-commands';
 import { AppState } from './app-state.svelte';
-import { fakeAppContext, openedProjectOf, settle } from './testing/fake-app-context';
+import { fakeAppContext, openedAppOf, openedProjectOf, settle } from './testing/fake-app-context';
 
 const PLAN = project(
   [
@@ -27,12 +27,8 @@ const PLAN = project(
 const MOVED = english.settings.tasksMoved;
 
 /** Opens the plan in an application state. */
-async function openedApp() {
-  const fake = fakeAppContext();
-  const app = new AppState(fake.context);
-  fake.control.openResult = openedProjectOf(PLAN);
-  await app.open();
-  return { app, ...fake };
+function openedApp() {
+  return openedAppOf(PLAN);
 }
 
 /** Returns the open project, failing the test when there is none. */

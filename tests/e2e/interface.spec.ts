@@ -174,11 +174,28 @@ test('lets messages fade away on their own, but keeps them while the pointer res
   await page.getByRole('button', { name: /Open…/ }).click();
   const alert = page.getByRole('alert');
   await expect(alert).toBeVisible();
+  const fade = () =>
+    alert.evaluate((element) => {
+      const [animation] = element.getAnimations();
+      return animation === undefined
+        ? null
+        : {
+            fades:
+              animation instanceof CSSAnimation && animation.animationName.endsWith('notice-fade'),
+            duration: animation.effect?.getTiming().duration,
+            state: animation.playState,
+          };
+    });
   await alert.hover();
-  await page.waitForTimeout(11_000);
-  await expect(alert).toBeVisible();
+  await expect.poll(fade).toEqual({ fades: true, duration: 10_000, state: 'paused' });
   await page.mouse.move(0, 0);
-  await expect(alert).toBeHidden({ timeout: 12_000 });
+  await expect.poll(fade).toEqual({ fades: true, duration: 10_000, state: 'running' });
+  await alert.evaluate((element) => {
+    for (const animation of element.getAnimations()) {
+      animation.finish();
+    }
+  });
+  await expect(alert).toBeHidden();
 });
 
 test('changes the calendar in the project settings, each change applied at once and undone after', async () => {

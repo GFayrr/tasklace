@@ -13,7 +13,7 @@ import english from '../locales/en.json';
 import { toggleProjectOption } from '../plan/project-commands';
 import { draftFromTask } from '../plan/task-details';
 import { AppState } from './app-state.svelte';
-import { fakeAppContext, openedProjectOf, settle } from './testing/fake-app-context';
+import { fakeAppContext, openedAppOf, settle } from './testing/fake-app-context';
 
 const ALICE: Tag = { id: 'alice', name: 'Alice', color: '#4a3aa7', representsPersonOrTeam: true };
 const OPTIONS = {
@@ -40,14 +40,9 @@ const PLAN = project(
 );
 const WRITING_END = at(2026, 9, 28, 17);
 
-/** Opens the plan, where Writing misses its deadline, Defense cannot finish on its date and Alice works twice at once. */
-async function openedApp() {
-  const fake = fakeAppContext();
-  const app = new AppState(fake.context);
-  fake.control.openResult = openedProjectOf(PLAN);
-  await app.open();
-  await settle();
-  return { app, ...fake };
+/** Opens the plan in an application state. */
+function openedApp() {
+  return openedAppOf(PLAN);
 }
 
 describe('date conflicts in the application state', () => {

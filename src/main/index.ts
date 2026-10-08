@@ -1,8 +1,7 @@
-import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { app, BrowserWindow, dialog, protocol, session } from 'electron';
-import { APP_ENTRY_URL, APP_SCHEME, isAppAddress, resolveAppFile } from './app-files';
+import { APP_ENTRY_URL, APP_SCHEME, createAppFileServer, isAppAddress } from './app-files';
 import { MAX_FILE_WORKER_HEAP_MEBIBYTES } from '../core/limits';
 import { contentSecurityPolicy } from './content-security-policy';
 import { flushBeforeClosing, registerFlushHandler } from './close-flush';
@@ -24,10 +23,8 @@ import {
   logWorkerErrors,
   writeLogBeforeQuitting,
 } from './log-file';
-import { isMissingFile } from './stored-files';
 import { createMainWindow } from './window';
 
-const NOT_FOUND = 404;
 const developmentUrl = app.isPackaged ? null : (process.env['ELECTRON_RENDERER_URL'] ?? null);
 const developmentOrigin = developmentUrl === null ? null : new URL(developmentUrl).origin;
 const policy = contentSecurityPolicy(developmentUrl !== null);
@@ -66,7 +63,10 @@ if (app.requestSingleInstanceLock()) {
 /** Protects the session, serves the interface, answers the bridge and opens the window, which saves its project before closing. */
 function start(): void {
   hardenSession(session.defaultSession, policy);
-  protocol.handle(APP_SCHEME, serveAppFile);
+  protocol.handle(
+    APP_SCHEME,
+    createAppFileServer(rendererRoot, { [CONTENT_SECURITY_POLICY_HEADER]: policy }),
+  );
   const assertTrusted = createTrustCheck((address) => isAppAddress(address, developmentOrigin));
   registerFlushHandler(assertTrusted);
   registerProjectFileHandlers({
@@ -99,24 +99,6 @@ function createFileWorker(): Worker {
   });
   logWorkerErrors(worker.stderr, log, process.stderr);
   return worker;
-}
-
-/** Answers a request of the application scheme with a file of the interface and the content security policy, or not found. */
-async function serveAppFile(request: Request): Promise<Response> {
-  const file = resolveAppFile(rendererRoot, request.url);
-  if (file === null) {
-    return new Response(null, { status: NOT_FOUND });
-  }
-  const headers = { 'Content-Type': file.contentType, [CONTENT_SECURITY_POLICY_HEADER]: policy };
-  return readFile(file.path).then(
-    (content) => new Response(content, { headers }),
-    (error: unknown) => {
-      if (!isMissingFile(error)) {
-        console.error('A file of the interface could not be read:', error);
-      }
-      return new Response(null, { status: NOT_FOUND });
-    },
-  );
 }
 
 /** Brings the first window forward when the application is launched a second time. */

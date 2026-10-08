@@ -778,17 +778,22 @@ describe('readProject: holes, totals and scheduling', () => {
           })),
         ],
       }),
+      'INVALID_INSTANT',
     ],
     [
       'a calendar without any working day',
       calendarWith({ nonWorkingPeriods: [{ firstDay: MIN_DAY_INDEX, lastDay: MAX_DAY_INDEX }] }),
+      'BEYOND_PLANNING_HORIZON',
     ],
-  ])('accepts %s and lets scheduling fail with a typed error', (_label, data) => {
+  ] as const)('accepts %s and lets scheduling fail with a typed error', (_label, data, code) => {
     const read = readProject(data, STORED_VALUE_CODEC);
     if (!read.ok) {
       throw new Error(JSON.stringify(read.error));
     }
-    expect(scheduleProject(read.value).ok).toBe(false);
+    expect(scheduleProject(read.value)).toEqual({
+      ok: false,
+      error: { kind: 'task', error: { code, taskId: 'a' } },
+    });
   });
 });
 

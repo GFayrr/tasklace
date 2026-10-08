@@ -33,7 +33,10 @@ describe('quarter hours in dates', () => {
     expect(unwrap(toProjectHour({ year: 2026, month: 10, day: 5, hour: 9, minute: 45 }))).toBe(
       at(2026, 10, 5, 9) + 0.75,
     );
-    expect(toProjectHour({ year: 2026, month: 10, day: 5, hour: 9, minute: 10 }).ok).toBe(false);
+    expect(toProjectHour({ year: 2026, month: 10, day: 5, hour: 9, minute: 10 })).toEqual({
+      ok: false,
+      error: 'INVALID_DATE_TIME',
+    });
     expect(fromProjectHour(at(2026, 10, 5, 13) + 0.25)).toEqual({
       year: 2026,
       month: 10,
@@ -49,7 +52,7 @@ describe('quarter hours in dates', () => {
     const hour = at(2026, 10, 5, 14) + 0.5;
     expect(formatDateTime(hour)).toBe('2026-10-05T14:30');
     expect(parseDateTime('2026-10-05T14:30')).toEqual({ ok: true, value: hour });
-    expect(parseDateTime('2026-10-05T14:20').ok).toBe(false);
+    expect(parseDateTime('2026-10-05T14:20')).toEqual({ ok: false, error: 'INVALID_DATE_TIME' });
     expect(parseCsvDate('05/10/2026 14:30', FRENCH)).toEqual({
       ok: true,
       value: { kind: 'dateTime', hour },
@@ -143,11 +146,11 @@ describe('quarter hours in schedules and exchanges', () => {
       { durationHours: 1.25, gapDaysBefore: 0, startNoEarlierThan: null },
       { durationHours: 0.5, gapDaysBefore: 2, startNoEarlierThan: null },
     ]);
-    expect(parseBlocks('1.3h', 10, 10).ok).toBe(false);
+    expect(parseBlocks('1.3h', 10, 10)).toEqual({ ok: false, error: 'INVALID_NOTATION' });
     expect(unwrap(parsePredecessors('1SS-0.75h', 10))).toEqual([
       { wbs: '1', block: null, type: 'startToStart', lagHours: -0.75 },
     ]);
-    expect(parsePredecessors('1+0.1h', 10).ok).toBe(false);
+    expect(parsePredecessors('1+0.1h', 10)).toEqual({ ok: false, error: 'INVALID_NOTATION' });
   });
 });
 

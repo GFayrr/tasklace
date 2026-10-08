@@ -16,7 +16,8 @@ import {
 import type { SharedOperation } from './shared-operations';
 import { createSharedDocument, PROJECT_ROOT, readSharedData, TASKS_ROOT } from './shared-document';
 import { mergeSharedUpdate, readSharedProject } from './shared-project';
-import { openSharedSession, type SharedSession } from './shared-session';
+import type { SharedSession } from './shared-session';
+import { sessionOn } from '../testing/session-copy';
 
 const repairing = vi.hoisted(() => ({ refused: false }));
 
@@ -44,18 +45,6 @@ const DESIGN: Tag = {
 afterEach(() => {
   repairing.refused = false;
 });
-
-/** Opens a session on a copy of a document, failing the test when it is refused. */
-function sessionOn(document: Y.Doc, clientId: number): SharedSession {
-  const copy = new Y.Doc();
-  copy.clientID = clientId;
-  Y.applyUpdate(copy, Y.encodeStateAsUpdate(document));
-  const session = openSharedSession(copy);
-  if (!session.ok) {
-    throw new Error(JSON.stringify(session.error));
-  }
-  return session.value;
-}
 
 /** Returns the shared entry of a task, failing the test when it is missing. */
 function taskEntry(document: Y.Doc, id: string): Y.Map<unknown> {

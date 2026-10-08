@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { closeDiscarding, launchApplication } from './application';
+import { addTask as addTaskIn, taskRow, typeInCell as typeInCellOf } from './table';
 
 import { paleColor } from '../../src/renderer/plan/tag-styles';
 import { pixelsPerHour } from '../../src/renderer/plan/time-scale';
@@ -37,6 +38,21 @@ test.afterEach(async () => {
   await rm(userData, { recursive: true, force: true });
 });
 
+/** Adds a task with the toolbar and types its name. */
+async function addTask(name: string): Promise<void> {
+  await addTaskIn(page, name);
+}
+
+/** Returns a row of the table by the task name it shows. */
+function row(name: string): Locator {
+  return taskRow(page, name);
+}
+
+/** Types a text in a cell of the row of a task, by the index of its column, and validates it. */
+async function typeInCell(name: string, column: number, text: string): Promise<void> {
+  await typeInCellOf(page, name, column, text);
+}
+
 /** Returns the hours a new one-day task works once its end is stretched by some calendar days, under the default calendar of 9 hours from Monday to Friday, counted from the day the application created the project so that the test does not depend on the day it runs. */
 function stretchedHours(days: number): number {
   const day = new Date(today);
@@ -56,29 +72,6 @@ async function picture(name: string): Promise<void> {
   if (SCREENSHOT_FOLDER !== undefined) {
     await page.screenshot({ path: join(SCREENSHOT_FOLDER, `${name}.png`) });
   }
-}
-
-/** Adds a task with the toolbar and types its name. */
-async function addTask(name: string): Promise<void> {
-  await page.getByRole('button', { name: 'Add task' }).click();
-  const editor = grid.getByRole('textbox');
-  await expect(editor).toBeFocused();
-  await expect(editor).toHaveValue('New task');
-  await editor.fill(name);
-  await editor.press('Enter');
-}
-
-/** Returns a row of the table by the task name it shows. */
-function row(name: string): Locator {
-  return grid.getByRole('row').filter({ hasText: name });
-}
-
-/** Returns the edited text of a cell, typed after pressing a column's key sequence. */
-async function typeInCell(name: string, column: number, text: string): Promise<void> {
-  await row(name).getByRole('gridcell').nth(column).dblclick();
-  const editor = grid.getByRole('textbox');
-  await editor.fill(text);
-  await editor.press('Enter');
 }
 
 test('plans tasks from the keyboard and the table, and undoes each change', async () => {

@@ -1,4 +1,6 @@
+import { readFile } from 'node:fs/promises';
 import { extname, isAbsolute, relative, resolve } from 'node:path';
+import { isMissingFile } from './stored-files';
 
 export const APP_SCHEME = 'app';
 export const APP_HOST = 'tasklace';
@@ -63,4 +65,29 @@ function decodePath(pathname: string): string | null {
     }
     throw error;
   }
+}
+
+const NOT_FOUND = 404;
+
+/** Creates the handler of the application scheme, which answers with a file of the interface, its type and the given security headers, or not found for an address outside the interface or a file that cannot be read, logging a file that exists but cannot be read. */
+export function createAppFileServer(
+  rendererRoot: string,
+  securityHeaders: Readonly<Record<string, string>>,
+): (request: Request) => Promise<Response> {
+  return async (request) => {
+    const file = resolveAppFile(rendererRoot, request.url);
+    if (file === null) {
+      return new Response(null, { status: NOT_FOUND });
+    }
+    const headers = { 'Content-Type': file.contentType, ...securityHeaders };
+    return readFile(file.path).then(
+      (content) => new Response(content, { headers }),
+      (error: unknown) => {
+        if (!isMissingFile(error)) {
+          console.error('A file of the interface could not be read:', error);
+        }
+        return new Response(null, { status: NOT_FOUND });
+      },
+    );
+  };
 }

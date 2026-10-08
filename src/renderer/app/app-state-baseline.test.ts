@@ -5,7 +5,7 @@ import english from '../locales/en.json';
 import { toggleProjectOption } from '../plan/project-commands';
 import { setDuration } from '../plan/task-commands';
 import { AppState } from './app-state.svelte';
-import { fakeAppContext, openedProjectOf, settle } from './testing/fake-app-context';
+import { fakeAppContext, openedAppOf, openedProjectOf, settle } from './testing/fake-app-context';
 
 const NOW = new Date(2026, 9, 6, 10, 40);
 const PLAN = project(
@@ -34,14 +34,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** Opens the plan, whose baseline is turned on but not set, in an application state. */
-async function openedApp() {
-  const fake = fakeAppContext();
-  const app = new AppState({ ...fake.context, now: () => new Date() });
-  fake.control.openResult = openedProjectOf(PLAN);
-  await app.open();
-  await settle();
-  return { app, ...fake };
+/** Opens the plan in an application state. */
+function openedApp() {
+  return openedAppOf(PLAN, { now: () => new Date() });
 }
 
 describe('the baseline in the application state', () => {

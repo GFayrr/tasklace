@@ -3,8 +3,6 @@ import { closeDiscarding, launchApplication } from './application';
 
 const ENTRY_URL = 'app://tasklace/index.html';
 const FOREIGN_URL = 'https://example.com/';
-const SETTLE_MS = 500;
-const STRING_CODE_WAIT_MS = 100;
 
 let application: ElectronApplication;
 let page: Page;
@@ -33,11 +31,20 @@ test('gives the page no access to Node.js', async () => {
 
 test('refuses code in strings, inline scripts and requests to other sites', async () => {
   const outcome = await page.evaluate(
-    async ({ foreign, wait }) => {
+    async ({ foreign }) => {
+      const violation = new Promise<string>((resolve) => {
+        document.addEventListener(
+          'securitypolicyviolation',
+          (event) => {
+            resolve(event.blockedURI);
+          },
+          { once: true },
+        );
+      });
       const timerCode = 'window.ranStringCode = true;';
       Reflect.apply(setTimeout, window, [timerCode, 0]);
-      await new Promise((resolve) => setTimeout(resolve, wait));
-      const evaluated = window.ranStringCode === true ? 'ran' : 'refused';
+      const blocked = await violation;
+      const evaluated = window.ranStringCode === true ? 'ran' : `refused (${blocked})`;
       const script = document.createElement('script');
       script.textContent = 'window.ranInlineScript = true;';
       document.body.append(script);
@@ -47,17 +54,25 @@ test('refuses code in strings, inline scripts and requests to other sites', asyn
       );
       return { evaluated, inline: window.ranInlineScript === true, request };
     },
-    { foreign: FOREIGN_URL, wait: STRING_CODE_WAIT_MS },
+    { foreign: FOREIGN_URL },
   );
-  expect(outcome).toEqual({ evaluated: 'refused', inline: false, request: 'refused' });
+  expect(outcome).toEqual({ evaluated: 'refused (eval)', inline: false, request: 'refused' });
 });
 
 test('stays on the application when the page tries to navigate or open windows', async () => {
+  await application.evaluate(({ BrowserWindow }) => {
+    const [window] = BrowserWindow.getAllWindows();
+    window?.webContents.once('will-navigate', (event, url) => {
+      Object.assign(globalThis, { navigation: { url, prevented: event.defaultPrevented } });
+    });
+  });
   const opened = await page.evaluate((foreign) => window.open(foreign) === null, FOREIGN_URL);
   await page.evaluate((foreign) => {
     window.location.href = foreign;
   }, FOREIGN_URL);
-  await page.waitForTimeout(SETTLE_MS);
+  await expect
+    .poll(() => application.evaluate(() => Reflect.get(globalThis, 'navigation') as unknown))
+    .toEqual({ url: FOREIGN_URL, prevented: true });
   expect(opened).toBe(true);
   expect(page.url()).toBe(ENTRY_URL);
   expect(application.windows()).toHaveLength(1);

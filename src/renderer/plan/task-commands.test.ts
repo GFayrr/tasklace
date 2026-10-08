@@ -354,7 +354,10 @@ describe('editing cells', () => {
   it('lets the session refuse a link that would close a loop', () => {
     const { session, context } = openPlan();
     const edit = setPredecessors(context(), 'a', '1.2');
-    expect(edit.ok && session.applyAll(edit.value).ok).toBe(false);
+    expect(edit.ok && session.applyAll(edit.value)).toEqual({
+      ok: false,
+      error: [{ path: 'dependencies.new1', code: 'DEPENDENCY_CYCLE' }],
+    });
     expect(normalized(session.project())).toEqual(normalized(PLAN));
   });
 

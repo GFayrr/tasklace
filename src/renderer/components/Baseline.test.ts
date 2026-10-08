@@ -330,7 +330,7 @@ describe('the baseline in the table and on the timeline', () => {
     const widened = frameWith([at(2027, 2, 1, 9), far]);
     expect(widened.end).toBe(at(2027, 3, 31));
     expect(spacerOf(shown.root)).toBe(pixels(xOf(widened, widened.end)));
-    expect(frameWith([]).end).toBeLessThan(widened.end);
+    expect(frameWith([]).end).toBe(at(2026, 12, 20));
     const hidden = await renderAdvanced({
       ...PLAN,
       options: { ...PLAN.options, baselineEnabled: false },

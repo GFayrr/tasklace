@@ -494,8 +494,13 @@ describe('scheduleProject: failures', () => {
     for (const id of ['a', 'b', 'c', 'm', 'part']) {
       expect(floats?.get(id)).toEqual(UNKNOWN_FLOAT);
     }
-    expect(floats?.get('free')?.totalFloatHours).toBeGreaterThan(0);
-    expect(floats?.get('free')?.isCritical).toBe(false);
+    expect(floats?.get('free')).toEqual({
+      lateStart: 439334,
+      lateFinish: 439358,
+      totalFloatHours: 200,
+      freeFloatHours: 200,
+      isCritical: false,
+    });
   });
 
   it('gives an unknown float to a split task when only its first block would start before the first supported year', () => {

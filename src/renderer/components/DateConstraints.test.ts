@@ -296,7 +296,7 @@ describe('the dates tasks do not meet', () => {
     await toggleDateConstraints(app);
     const without = frameOf(app);
     expect(app.shownDeadlines).toEqual([]);
-    expect(without.end).toBeLessThan(withDeadlines.end);
+    expect(without.end).toBe(at(2026, 12, 20));
     expect(spacer()).toBe(pixels(xOf(without, without.end)));
   });
 });
