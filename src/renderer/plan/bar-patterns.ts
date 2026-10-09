@@ -1,41 +1,32 @@
+import {
+  PATTERN_INK_OPACITY,
+  PATTERN_LINE_WIDTH,
+  PATTERN_TILE_SIZE,
+  patternTileOf,
+} from '../../core/print/pattern-tiles';
 import type { TagPattern } from '../../core/tags/tag-appearance';
 
-export const PATTERN_TILE_SIZE = 8;
+export { PATTERN_TILE_SIZE };
 
-const PATTERN_INK = 'rgba(0, 0, 0, 0.35)';
-const PATTERN_LINE_WIDTH = 1.5;
-const DOT_RADIUS = 1.2;
-const HALF = 2;
+const FULL_TURN = Math.PI * 2;
+const PATTERN_INK = `rgba(0, 0, 0, ${String(PATTERN_INK_OPACITY)})`;
 
 /** Draws one tile of a pattern that repeats over the bars of a tag, so that tags of similar colors stay apart. */
 export function drawPatternTile(context: CanvasRenderingContext2D, pattern: TagPattern): void {
-  const size = PATTERN_TILE_SIZE;
-  const middle = size / HALF;
-  context.clearRect(0, 0, size, size);
+  const tile = patternTileOf(pattern);
+  context.clearRect(0, 0, PATTERN_TILE_SIZE, PATTERN_TILE_SIZE);
   context.strokeStyle = PATTERN_INK;
   context.fillStyle = PATTERN_INK;
   context.lineWidth = PATTERN_LINE_WIDTH;
   context.beginPath();
-  if (pattern === 'dots') {
-    context.arc(middle, middle, DOT_RADIUS, 0, Math.PI * HALF);
+  if (tile.kind === 'dot') {
+    context.arc(tile.x, tile.y, tile.radius, 0, FULL_TURN);
     context.fill();
     return;
   }
-  if (pattern === 'diagonal' || pattern === 'crossHatch') {
-    context.moveTo(0, size);
-    context.lineTo(size, 0);
-  }
-  if (pattern === 'reverseDiagonal' || pattern === 'crossHatch') {
-    context.moveTo(0, 0);
-    context.lineTo(size, size);
-  }
-  if (pattern === 'horizontal') {
-    context.moveTo(0, middle);
-    context.lineTo(size, middle);
-  }
-  if (pattern === 'vertical') {
-    context.moveTo(middle, 0);
-    context.lineTo(middle, size);
+  for (const [startX, startY, endX, endY] of tile.lines) {
+    context.moveTo(startX, startY);
+    context.lineTo(endX, endY);
   }
   context.stroke();
 }
