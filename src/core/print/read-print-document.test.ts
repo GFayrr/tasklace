@@ -10,6 +10,7 @@ import {
 } from '../limits';
 import { printDocumentArbitrary } from '../testing/print-arbitrary';
 import {
+  MAX_CLIP_DEPTH,
   MAX_DASH_STEP,
   MAX_STROKE_WIDTH,
   MAX_TEXT_POINTS,
@@ -43,7 +44,12 @@ const TEXT = {
   align: 'start',
 };
 const PATTERN = { kind: 'pattern', shape: RECT, pattern: 'diagonal' };
-const CLIP = { kind: 'clip', x: 0, y: 0, width: 100, height: 100, orders: [FILL, TEXT] };
+const CLIP = { kind: 'clip', shape: RECT, orders: [FILL, TEXT] };
+
+/** Builds clips held one inside the other, a given number of levels deep. */
+function nestedClip(depth: number): Record<string, unknown> {
+  return depth === 1 ? CLIP : { ...CLIP, orders: [nestedClip(depth - 1)] };
+}
 
 /** Builds a document whose single page holds the given orders. */
 function documentWith(...orders: unknown[]): Record<string, unknown> {
@@ -256,13 +262,35 @@ describe('readPrintDocument', () => {
       'y',
       'OUT_OF_RANGE',
     ],
-    ['a clip inside a clip', { ...CLIP, orders: [CLIP] }, 'orders[0].kind', 'OUT_OF_RANGE'],
+    [
+      'a clip deeper than the limit',
+      nestedClip(MAX_CLIP_DEPTH + 1),
+      `${'orders[0].'.repeat(MAX_CLIP_DEPTH)}kind`,
+      'OUT_OF_RANGE',
+    ],
     ['a clip whose orders are no list', { ...CLIP, orders: {} }, 'orders', 'WRONG_TYPE'],
-    ['a clip beyond the limit', { ...CLIP, x: Number.POSITIVE_INFINITY }, 'x', 'OUT_OF_RANGE'],
+    [
+      'a clip beyond the limit',
+      { ...CLIP, shape: { ...RECT, x: Number.POSITIVE_INFINITY } },
+      'shape.x',
+      'OUT_OF_RANGE',
+    ],
+    [
+      'a clip of an unknown shape',
+      { ...CLIP, shape: { kind: 'circle' } },
+      'shape.kind',
+      'OUT_OF_RANGE',
+    ],
   ])('refuses %s', (_name, order, field, code) => {
     expect(issuesOf(documentWith(FILL, order))).toEqual([
       { path: `pages[0][1]${field === '' ? '' : `.${field}`}`, code },
     ]);
+  });
+
+  it('accepts clips nested down to the limit, of a rectangle or a path', () => {
+    const path = { kind: 'path', segments: [PATH_MOVE, 0, 0, PATH_LINE, 5, 5, PATH_CLOSE] };
+    const document = documentWith(nestedClip(MAX_CLIP_DEPTH), { ...CLIP, shape: path });
+    expect(readPrintDocument(document)).toEqual({ ok: true, value: document });
   });
 
   it('accepts a text of the longest length and of the extreme printed sizes', () => {

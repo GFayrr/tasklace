@@ -63,7 +63,8 @@
     "history": "History",
     "undo": "Undo",
     "redo": "Redo",
-    "projectName": "Project name"
+    "projectName": "Project name",
+    "exportPdf": "PDF…"
   },
   "saveStatus": {
     "saved": "All changes saved",
@@ -536,5 +537,45 @@
     "unresponsiveBody": "It stopped responding while saving your project before closing. Wait a little longer, or close it now: changes not saved yet would be lost.",
     "wait": "Wait",
     "closeAnyway": "Close anyway"
+  },
+  "print": {
+    "exported": "Exported {date}",
+    "page": "Page {page} of {count}",
+    "title": "Export to PDF",
+    "close": "Close the export to PDF",
+    "paper": "Paper",
+    "a4": "A4",
+    "a3": "A3",
+    "letter": "US Letter",
+    "orientation": "Orientation",
+    "landscape": "Landscape",
+    "portrait": "Portrait",
+    "period": "Period",
+    "wholeProject": "Whole project ({span})",
+    "days": "From – to",
+    "firstDay": "First day printed",
+    "lastDay": "Last day printed",
+    "zoom": "Zoom",
+    "automatic": "Automatic",
+    "automaticHint": "Automatic fits the period on the fewest pages: {zoom} here.",
+    "columns": "Columns beside the names",
+    "nameAlways": "Name (always)",
+    "progress": "Progress",
+    "floats": "Floats",
+    "floatsHint": "“Floats” appears only with the critical path on.",
+    "preview": "Preview · page 1 of {count}",
+    "previewLabel": "Preview of the first page",
+    "waiting": "The dates of the plan are being worked out.",
+    "scheduleFailed": "The dates of the plan cannot be worked out, so it cannot be printed yet.",
+    "previewUnavailable": "The preview cannot be drawn on this computer.",
+    "refusals": {
+      "NO_ROOM_FOR_TIMELINE": "These columns leave no room for the timeline. Untick some columns, or choose a wider paper or the landscape orientation.",
+      "NO_ROOM_FOR_ROWS": "The legend of the tags leaves no room for the tasks on this paper. Choose a larger paper.",
+      "TOO_MANY_PAGES": "This would print more than {limit} pages. Choose a coarser zoom or a shorter period.",
+      "EMPTY_PERIOD": "The last day printed comes before the first day."
+    },
+    "cancel": "Cancel",
+    "export": "Export PDF…",
+    "wholeProjectWithoutDates": "Whole project"
   }
 }

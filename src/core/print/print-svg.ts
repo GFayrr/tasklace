@@ -72,11 +72,8 @@ function printOrderSvg(order: PrintOrder, writer: PageWriter): string {
     return drawOrderSvg(order, writer);
   }
   const id = `${writer.prefix}-c${String(writer.clips.length)}`;
-  writer.clips.push(
-    `<clipPath id="${id}"><rect x="${svgNumber(order.x)}" y="${svgNumber(order.y)}"` +
-      ` width="${svgNumber(order.width)}" height="${svgNumber(order.height)}"/></clipPath>`,
-  );
-  const inner = order.orders.map((drawn) => drawOrderSvg(drawn, writer)).join('');
+  writer.clips.push(`<clipPath id="${id}">${shapeSvg(order.shape, '')}</clipPath>`);
+  const inner = order.orders.map((held) => printOrderSvg(held, writer)).join('');
   return `<g clip-path="url(#${id})">${inner}</g>`;
 }
 
@@ -105,14 +102,15 @@ function drawOrderSvg(order: DrawOrder, writer: PageWriter): string {
   );
 }
 
-/** Writes a rectangle or a path with the paint attributes given. */
+/** Writes a rectangle or a path with the paint attributes given, if any. */
 function shapeSvg(shape: PrintShape, paint: string): string {
+  const attributes = paint === '' ? '' : ` ${paint}`;
   if (shape.kind === 'path') {
-    return `<path d="${pathData(shape.segments)}" ${paint}/>`;
+    return `<path d="${pathData(shape.segments)}"${attributes}/>`;
   }
   return (
     `<rect x="${svgNumber(shape.x)}" y="${svgNumber(shape.y)}" width="${svgNumber(shape.width)}"` +
-    ` height="${svgNumber(shape.height)}" ${paint}/>`
+    ` height="${svgNumber(shape.height)}"${attributes}/>`
   );
 }
 

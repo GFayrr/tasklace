@@ -26,6 +26,7 @@ import {
 } from '../validation/value-readers';
 import { PAPER_NAMES, PAPER_ORIENTATIONS } from './paper';
 import {
+  MAX_CLIP_DEPTH,
   MAX_DASH_STEP,
   MAX_STROKE_WIDTH,
   MAX_TEXT_POINTS,
@@ -73,7 +74,7 @@ const ORDER_KEYS: Readonly<Record<PrintOrder['kind'], readonly string[]>> = {
   stroke: ['kind', 'shape', 'color', 'opacity', 'width', 'dash'],
   pattern: ['kind', 'shape', 'pattern'],
   text: ['kind', 'x', 'y', 'text', 'size', 'weight', 'color', 'align'],
-  clip: ['kind', 'x', 'y', 'width', 'height', 'orders'],
+  clip: ['kind', 'shape', 'orders'],
 };
 const MAX_BOX_SIDE = MAX_PRINT_COORDINATE + MAX_PRINT_COORDINATE;
 
@@ -113,7 +114,7 @@ function readPages(value: unknown, issues: IssueList): PrintOrder[][] | undefine
   const budget: Budget = { left: MAX_PRINT_ORDERS };
   try {
     return pages.map((page, index) =>
-      within(`[${String(index)}]`, () => readOrderList(page, budget, false)),
+      within(`[${String(index)}]`, () => readOrderList(page, budget, 0)),
     );
   } catch (error) {
     if (!(error instanceof RefusedValue)) {
@@ -124,8 +125,8 @@ function readPages(value: unknown, issues: IssueList): PrintOrder[][] | undefine
   }
 }
 
-/** Reads a list of orders within what is left of the budget of orders, checking its length before any of its orders and refusing a clip inside a clip. */
-function readOrderList(value: unknown, budget: Budget, insideClip: boolean): PrintOrder[] {
+/** Reads a list of orders within what is left of the budget of orders, checking its length before any of its orders, inside a given number of clips. */
+function readOrderList(value: unknown, budget: Budget, clipDepth: number): PrintOrder[] {
   if (!Array.isArray(value)) {
     return refuse('', 'WRONG_TYPE');
   }
@@ -134,27 +135,27 @@ function readOrderList(value: unknown, budget: Budget, insideClip: boolean): Pri
   }
   budget.left -= value.length;
   return value.map((order: unknown, index) =>
-    within(`[${String(index)}]`, () => readOrder(order, budget, insideClip)),
+    within(`[${String(index)}]`, () => readOrder(order, budget, clipDepth)),
   );
 }
 
-/** Reads one order, which must have exactly the keys of its kind. */
-function readOrder(value: unknown, budget: Budget, insideClip: boolean): PrintOrder {
+/** Reads one order, which must have exactly the keys of its kind, a clip never lying deeper than the limit. */
+function readOrder(value: unknown, budget: Budget, clipDepth: number): PrintOrder {
   const record = readObject(value, '');
   const kind = record['kind'];
   if (
     typeof kind !== 'string' ||
     !Object.hasOwn(ORDER_KEYS, kind) ||
-    (insideClip && kind === 'clip')
+    (kind === 'clip' && clipDepth >= MAX_CLIP_DEPTH)
   ) {
     return refuse('kind', 'OUT_OF_RANGE');
   }
   const orderKind = kind as PrintOrder['kind'];
   checkKeys(record, ORDER_KEYS[orderKind]);
   if (orderKind === 'clip') {
-    const box = readBox(record);
-    const orders = within('.orders', () => readOrderList(record['orders'], budget, true));
-    return { kind: orderKind, ...box, orders: orders as DrawOrder[] };
+    const shape = within('.shape', () => readShape(record['shape']));
+    const orders = within('.orders', () => readOrderList(record['orders'], budget, clipDepth + 1));
+    return { kind: orderKind, shape, orders };
   }
   return readDrawOrder(record, orderKind);
 }

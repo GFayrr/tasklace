@@ -2,6 +2,7 @@ import fc from 'fast-check';
 import { MAX_PRINT_COORDINATE } from '../limits';
 import { PAPER_NAMES, PAPER_ORIENTATIONS } from '../print/paper';
 import {
+  MAX_CLIP_DEPTH,
   MAX_TEXT_POINTS,
   MIN_TEXT_POINTS,
   PATH_CLOSE,
@@ -101,14 +102,20 @@ export const drawOrderArbitrary: fc.Arbitrary<DrawOrder> = fc.oneof(
   }),
 );
 
-const clipArbitrary: fc.Arbitrary<ClipOrder> = fc
-  .tuple(rectArbitrary, fc.array(drawOrderArbitrary, { maxLength: 4 }))
-  .map(([{ x, y, width, height }, orders]) => ({ kind: 'clip', x, y, width, height, orders }));
+/** Generates an order that is a clip of any shape at most a given number of levels deep, or an order that draws. */
+function orderAtDepth(depth: number): fc.Arbitrary<PrintOrder> {
+  if (depth === 0) {
+    return drawOrderArbitrary;
+  }
+  const clip: fc.Arbitrary<ClipOrder> = fc.record({
+    kind: fc.constant('clip' as const),
+    shape: shapeArbitrary,
+    orders: fc.array(orderAtDepth(depth - 1), { maxLength: 3 }),
+  });
+  return fc.oneof({ weight: 3, arbitrary: drawOrderArbitrary }, { weight: 1, arbitrary: clip });
+}
 
-const orderArbitrary: fc.Arbitrary<PrintOrder> = fc.oneof(
-  { weight: 4, arbitrary: drawOrderArbitrary },
-  { weight: 1, arbitrary: clipArbitrary },
-);
+const orderArbitrary = orderAtDepth(MAX_CLIP_DEPTH);
 
 /** Generates a valid document to print, with up to three pages of any orders. */
 export const printDocumentArbitrary: fc.Arbitrary<PrintDocument> = fc.record({

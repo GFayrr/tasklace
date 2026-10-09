@@ -107,6 +107,7 @@
     baseline,
     selectedTaskId: app.selectedTaskId,
     today,
+    showFloatLines: true,
   });
 
   $effect(() => {

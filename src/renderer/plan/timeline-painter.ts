@@ -62,7 +62,8 @@ export interface TimelineScene {
   readonly deadlines: DeadlineMarks | null;
   readonly baseline: ReadonlyMap<TaskId, BaselineEntry> | null;
   readonly selectedTaskId: TaskId | null;
-  readonly today: ProjectHour;
+  readonly today: ProjectHour | null;
+  readonly showFloatLines: boolean;
   readonly preview: DragPreview | null;
   readonly patternFor: (pattern: TagPattern) => CanvasPattern | null;
 }
@@ -398,7 +399,7 @@ function paintShape(
   paintFloat(context, scene, taskFloat, blocks, top);
 }
 
-/** Marks a critical task with a line in the action color under each block, or draws the total float of a task that can slip as a dashed line from its end to its latest finish when that is later, drawing nothing without critical path. */
+/** Marks a critical task with a line in the action color under each block, or, when float lines are shown, draws the total float of a task that can slip as a dashed line to its latest finish when that is later, drawing nothing without critical path. */
 function paintFloat(
   context: CanvasRenderingContext2D,
   scene: TimelineScene,
@@ -417,6 +418,9 @@ function paintFloat(
       const left = block.start + (block.end - block.start - width) / HALF;
       context.fillRect(left, barBottom + CRITICAL_MARK_GAP, width, CRITICAL_MARK_HEIGHT);
     }
+    return;
+  }
+  if (!scene.showFloatLines) {
     return;
   }
   const end = blocks.reduce((last, block) => Math.max(last, block.end), Number.NEGATIVE_INFINITY);
@@ -838,12 +842,15 @@ export function previewSpan(
   return { start: shape.start + preview.offset, width: shape.end - shape.start };
 }
 
-/** Draws the vertical line of the current time. */
+/** Draws the vertical line of the current time, unless the scene has none, as on a printed page. */
 function paintToday(
   context: CanvasRenderingContext2D,
   scene: TimelineScene,
   viewport: Viewport,
 ): void {
+  if (scene.today === null) {
+    return;
+  }
   context.fillStyle = scene.theme.error;
   context.fillRect(
     xOf(scene.frame, scene.today) - TODAY_WIDTH / HALF,

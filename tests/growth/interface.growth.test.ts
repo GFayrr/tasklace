@@ -130,6 +130,7 @@ describe('growth of drawing the timeline', () => {
       baseline: null,
       selectedTaskId: null,
       today: project.startDate,
+      showFloatLines: true,
       preview: null,
       patternFor: () => null,
     };
