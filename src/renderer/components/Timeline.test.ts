@@ -77,6 +77,7 @@ function renderTimeline(selectedTaskId: string | null = null, scrollTop = 0, pla
     baseline: null,
     selectedTaskId,
     today: at(2026, 9, 28, 12),
+    showFloatLines: true,
   };
   const root = render(Timeline, {
     scene,

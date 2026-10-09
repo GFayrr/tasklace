@@ -150,6 +150,11 @@ export interface Notice {
   readonly lasting: boolean;
 }
 
+export interface PdfExportOpening {
+  readonly documentId: string;
+  readonly exportedAt: Date;
+}
+
 export interface AppContext {
   readonly bridge: TasklaceBridge;
   readonly messages: Messages;
@@ -185,6 +190,7 @@ export class AppState {
     this.#startMove = null;
   });
   #closePrompt = $state.raw<ClosePrompt | null>(null);
+  #pdfExport = $state.raw<PdfExportOpening | null>(null);
   #fileActionRunning = $state(false);
   #report = $state.raw<Report | null>(null);
   #lastQuestion: Promise<unknown> = Promise.resolve();
@@ -658,6 +664,24 @@ export class AppState {
     this.#revealRequest = { taskId, hour };
   }
 
+  /** Returns the project and moment of the export to PDF being prepared, or null when its window is closed. */
+  get pdfExport(): PdfExportOpening | null {
+    return this.#pdfExport;
+  }
+
+  /** Opens the window that prepares an export of the open project to PDF, dated now. */
+  openPdfExport(): void {
+    const session = this.#session;
+    if (this.project !== null && session !== null) {
+      this.#pdfExport = { documentId: session.documentId, exportedAt: this.#context.now() };
+    }
+  }
+
+  /** Closes the window that prepares an export to PDF. */
+  closePdfExport(): void {
+    this.#pdfExport = null;
+  }
+
   /** Opens the settings of the open project, starting afresh. */
   openSettings(): void {
     if (this.project !== null) {
@@ -1010,6 +1034,7 @@ export class AppState {
     this.#conflictsOpen = false;
     this.#forgetUnknownFloats();
     this.#detailsTaskId = null;
+    this.#pdfExport = null;
     this.settings.close();
     this.#changedSinceOpened = false;
     this.collapsed = NOTHING_COLLAPSED;

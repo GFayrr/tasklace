@@ -10,6 +10,7 @@ export const MIN_TEXT_POINTS = 10;
 export const MAX_TEXT_POINTS = 32;
 export const MAX_STROKE_WIDTH = 64;
 export const MAX_DASH_STEP = 256;
+export const MAX_CLIP_DEPTH = 4;
 
 export type TextAlign = 'start' | 'middle' | 'end';
 
@@ -75,11 +76,8 @@ export type DrawOrder = FillOrder | StrokeOrder | PatternOrder | TextOrder;
 
 export interface ClipOrder {
   readonly kind: 'clip';
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-  readonly orders: readonly DrawOrder[];
+  readonly shape: PrintShape;
+  readonly orders: readonly PrintOrder[];
 }
 
 export type PrintOrder = DrawOrder | ClipOrder;
