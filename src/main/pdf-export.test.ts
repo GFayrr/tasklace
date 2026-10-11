@@ -385,10 +385,11 @@ describe('exporting to PDF', () => {
   });
 
   it('gives the files of the printed weights of Jost in a fonts folder', () => {
-    expect(printFontsIn('/app/fonts')).toEqual({
-      400: '/app/fonts/jost-print-400.ttf',
-      500: '/app/fonts/jost-print-500.ttf',
-      600: '/app/fonts/jost-print-600.ttf',
+    const folder = join('app', 'fonts');
+    expect(printFontsIn(folder)).toEqual({
+      400: join(folder, 'jost-print-400.ttf'),
+      500: join(folder, 'jost-print-500.ttf'),
+      600: join(folder, 'jost-print-600.ttf'),
     });
   });
 
