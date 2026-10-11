@@ -61,20 +61,23 @@ interface WindowProject {
   readonly documentId: DocumentId;
 }
 
-type FileKind = 'tasklace' | ExchangeKind;
+type ReadKind = 'tasklace' | ExchangeKind;
+
+export type SavedKind = ReadKind | 'pdf';
 
 type SaveDestination =
   { readonly kind: 'current' } | { readonly kind: 'chosen'; readonly suggestedName: string };
 
-const MAX_BYTES: Readonly<Record<FileKind, number>> = {
+const MAX_BYTES: Readonly<Record<ReadKind, number>> = {
   tasklace: MAX_FILE_BYTES,
   json: MAX_JSON_FILE_BYTES,
   csv: MAX_CSV_FILE_BYTES,
 };
-const FILTERS: Readonly<Record<FileKind, FileFilter>> = {
+const FILTERS: Readonly<Record<SavedKind, FileFilter>> = {
   tasklace: { name: MESSAGES.dialogs.projectFiles, extensions: ['tasklace'] },
   json: { name: MESSAGES.dialogs.jsonFiles, extensions: ['json'] },
   csv: { name: MESSAGES.dialogs.csvFiles, extensions: ['csv'] },
+  pdf: { name: MESSAGES.dialogs.pdfFiles, extensions: ['pdf'] },
 };
 const RECENT_STORE = 'recent-projects.json';
 const REPLACE_BUTTON = 0;
@@ -143,7 +146,7 @@ export function registerProjectFileHandlers(services: ProjectFileServices): void
 }
 
 /** Answers a file request of the bridge, turning an Error other than a refusal into a logged task failure the page can report, and throwing again a value that is not an Error. */
-async function answerOrFail(
+export async function answerOrFail(
   channel: string,
   answer: () => Promise<BridgeResult<unknown>>,
 ): Promise<BridgeResult<unknown>> {
@@ -365,7 +368,7 @@ async function exportProject(
 }
 
 /** Refuses a file larger than the limit of its kind, checked in bytes before anything reads it, or gives null when it may be read. */
-async function checkSize(path: string, kind: FileKind): Promise<BridgeResult<never> | null> {
+async function checkSize(path: string, kind: ReadKind): Promise<BridgeResult<never> | null> {
   try {
     const { size } = await stat(path);
     return size > MAX_BYTES[kind] ? failure({ code: 'TOO_LARGE' }) : null;
@@ -389,7 +392,7 @@ function openedProject(loaded: LoadedProject, path: string): OpenedProject {
 }
 
 /** Shows the open dialog for a kind of file, giving the chosen path or null. */
-async function chooseFileToOpen(sender: WebContents, kind: FileKind): Promise<string | null> {
+async function chooseFileToOpen(sender: WebContents, kind: ReadKind): Promise<string | null> {
   const options = { properties: ['openFile' as const], filters: [FILTERS[kind]] };
   const window = BrowserWindow.fromWebContents(sender);
   const chosen =
@@ -400,9 +403,9 @@ async function chooseFileToOpen(sender: WebContents, kind: FileKind): Promise<st
 }
 
 /** Shows the save dialog for a kind of file with the name of the project suggested, giving the chosen path with its extension, or null when the user cancels or declines to replace a file the added extension leads to. */
-async function chooseFileToSave(
+export async function chooseFileToSave(
   sender: WebContents,
-  kind: FileKind,
+  kind: SavedKind,
   suggestedName: string,
 ): Promise<string | null> {
   const current = projects.get(sender)?.path ?? null;

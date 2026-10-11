@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, isAbsolute, relative, resolve } from 'node:path';
 import { isMissingFile } from './stored-files';
@@ -13,6 +14,7 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
 };
@@ -68,13 +70,49 @@ function decodePath(pathname: string): string | null {
 }
 
 const NOT_FOUND = 404;
+const HTML_TYPE = 'text/html; charset=utf-8';
+const PRINT_PAGE_PREFIX = `${APP_SCHEME}://${APP_HOST}/print/`;
+const PRINT_PAGE_SUFFIX = '.html';
+
+export interface HeldPrintPage {
+  readonly url: string;
+  readonly release: () => void;
+}
+
+export interface PrintPageStore {
+  readonly hold: (html: string) => HeldPrintPage;
+  readonly pageAt: (address: string) => string | null;
+}
+
+/** Creates the store of the pages being printed to PDF, each served from memory at an address of its own until it is released. */
+export function createPrintPageStore(): PrintPageStore {
+  const pages = new Map<string, string>();
+  return {
+    hold: (html) => {
+      const url = `${PRINT_PAGE_PREFIX}${randomUUID()}${PRINT_PAGE_SUFFIX}`;
+      pages.set(url, html);
+      return {
+        url,
+        release: () => {
+          pages.delete(url);
+        },
+      };
+    },
+    pageAt: (address) => pages.get(address) ?? null,
+  };
+}
 
 /** Creates the handler of the application scheme, answering with a file of the interface, its type and the security headers, or not found for an address outside the interface or an unreadable file, logged when it exists. */
 export function createAppFileServer(
   rendererRoot: string,
   securityHeaders: Readonly<Record<string, string>>,
+  printPages: PrintPageStore | null = null,
 ): (request: Request) => Promise<Response> {
   return async (request) => {
+    const page = printPages?.pageAt(request.url) ?? null;
+    if (page !== null) {
+      return new Response(page, { headers: { 'Content-Type': HTML_TYPE, ...securityHeaders } });
+    }
     const file = resolveAppFile(rendererRoot, request.url);
     if (file === null) {
       return new Response(null, { status: NOT_FOUND });

@@ -5,7 +5,8 @@
     "csvFiles": "CSV files",
     "replaceExisting": "{file} already exists. Do you want to replace it?",
     "replace": "Replace",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "pdfFiles": "PDF documents"
   },
   "projects": {
     "untitled": "Untitled project"
@@ -576,6 +577,14 @@
     },
     "cancel": "Cancel",
     "export": "Export PDF…",
-    "wholeProjectWithoutDates": "Whole project"
+    "wholeProjectWithoutDates": "Whole project",
+    "making": "Making the PDF…",
+    "tooLarge": "This PDF is too large to be written. Choose a coarser zoom, a shorter period or fewer columns.",
+    "heavy": "This PDF weighs about {size} for {pages}, more than expected.",
+    "exportAsItIs": "Export as it is…",
+    "pages": {
+      "one": "{count} page",
+      "other": "{count} pages"
+    }
   }
 }

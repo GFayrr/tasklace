@@ -1,0 +1,21 @@
+/* Layout of the page Tasklace prints to PDF: one SVG image per sheet, without margins. */
+@page {
+  margin: 0;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+}
+
+svg {
+  display: block;
+  break-after: page;
+  overflow: hidden;
+}
+
+svg:last-child {
+  break-after: auto;
+}

@@ -16,7 +16,7 @@ import {
   type PrintShape,
 } from './print-document';
 
-export const PRINT_FONT_FAMILY = 'Jost';
+export const PRINT_FONT_FAMILY = 'Jost Print';
 
 const HUNDREDTHS = 100;
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';

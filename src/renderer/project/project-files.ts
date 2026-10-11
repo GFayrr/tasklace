@@ -1,5 +1,6 @@
 import * as Y from 'yjs';
 import type { Project } from '../../core/model/project';
+import type { PrintDocument } from '../../core/print/print-document';
 import { createSharedDocument, isDocumentId } from '../../core/shared/shared-document';
 import {
   openSharedSession,
@@ -17,6 +18,7 @@ import {
   type OpenedProject,
   type SavedProject,
   type TasklaceBridge,
+  type PdfExport,
 } from '../../preload/bridge-contract';
 import type { ValidationIssue } from '../../core/validation/validation-issues';
 import type { Result } from '../../core/result';
@@ -32,6 +34,8 @@ export type ProjectBridge = Pick<
   | 'saveProject'
   | 'saveProjectAs'
   | 'exportProject'
+  | 'exportPdf'
+  | 'saveHeldPdf'
 >;
 
 export type ActionFailure =
@@ -83,6 +87,11 @@ export interface ProjectFiles {
     text: string,
     suggestedName: string,
   ) => Promise<ActionResult<ExportedFile>>;
+  readonly exportPdf: (
+    document: PrintDocument,
+    suggestedName: string,
+  ) => Promise<ActionResult<PdfExport>>;
+  readonly saveHeldPdf: () => Promise<ActionResult<ExportedFile>>;
   readonly flush: () => Promise<void>;
 }
 
@@ -257,6 +266,9 @@ export function createProjectFiles(
     saveAs: () => exclusive(saveAs),
     exportFile: (kind, text, suggestedName) =>
       exclusive(() => bridge.exportProject(kind, text, suggestedName)),
+    exportPdf: (document, suggestedName) =>
+      exclusive(() => bridge.exportPdf(document, suggestedName)),
+    saveHeldPdf: () => exclusive(() => bridge.saveHeldPdf()),
     flush: autosave.flush,
   };
 }

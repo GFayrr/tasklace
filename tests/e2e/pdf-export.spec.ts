@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
@@ -150,4 +150,52 @@ test('previews the first printed page of the plan and remembers the settings for
   await expect(reopened.getByRole('checkbox', { name: 'Floats' })).toBeChecked();
   await page.keyboard.press('Escape');
   await expect(reopened).toBeHidden();
+});
+
+/** Counts the pages of a PDF from the page objects it declares. */
+function pageCount(pdf: Buffer): number {
+  return (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length;
+}
+
+test('writes the plan as a PDF of vector pages with the Jost typeface embedded', async () => {
+  const path = join(folder, 'Thesis.pdf');
+  const dialog = await openExport();
+  await answerDialogs(application, { save: path });
+  await dialog.getByRole('button', { name: 'Export PDF…' }).click();
+  await expect(page.getByText('Exported to Thesis.pdf.')).toBeVisible();
+  await expect(dialog).toBeHidden();
+  const pdf = await readFile(path);
+  expect(pdf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  expect(pageCount(pdf)).toBe(1);
+  expect(pdf.toString('latin1')).toMatch(/\/BaseFont\s*\/[A-Z]{6}\+Jost/);
+});
+
+test('prints a long plan on as many PDF pages as the preview announces, with no blank page', async () => {
+  const path = join(folder, 'Long.pdf');
+  const long = {
+    ...project(
+      Array.from({ length: 60 }, (_unused, index) =>
+        workTask(`t${String(index)}`, {
+          name: `Task ${String(index + 1)}`,
+          sortKey: `k${String(index).padStart(3, '0')}`,
+        }),
+      ),
+    ),
+    name: 'Long plan',
+  };
+  const source = join(folder, 'Long plan.tasklace');
+  await writeFile(
+    source,
+    encodeTasklaceFile(createSharedDocument(long, crypto.randomUUID()), zlibCompressor),
+  );
+  await answerDialogs(application, { open: source });
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Open a file…' }).click();
+  await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('Long plan');
+  const dialog = await openExport();
+  await expect(dialog.getByText('Preview · page 1 of 3')).toBeVisible();
+  await answerDialogs(application, { save: path });
+  await dialog.getByRole('button', { name: 'Export PDF…' }).click();
+  await expect(page.getByText('Exported to Long.pdf.')).toBeVisible();
+  expect(pageCount(await readFile(path))).toBe(3);
 });

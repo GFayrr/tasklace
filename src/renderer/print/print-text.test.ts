@@ -46,7 +46,7 @@ describe('createCanvasMeasure', () => {
       },
     });
     const width = createCanvasMeasure(watched)('Writing', 10, 600);
-    expect(fonts).toEqual(['600 13.333333333333332px Jost']);
+    expect(fonts).toEqual(['600 13.333333333333332px Jost Print']);
     expect(calls.filter((call) => call.name === 'measureText').map((call) => call.args)).toEqual([
       ['Writing'],
     ]);
@@ -69,9 +69,9 @@ describe('pageMeasure', () => {
     } as unknown as Document;
     const measured = await pageMeasure(page);
     expect(load.mock.calls).toEqual([
-      ['400 13.333333333333332px Jost'],
-      ['500 13.333333333333332px Jost'],
-      ['600 13.333333333333332px Jost'],
+      ['400 13.333333333333332px Jost Print'],
+      ['500 13.333333333333332px Jost Print'],
+      ['600 13.333333333333332px Jost Print'],
     ]);
     expect(measured?.('ab', 10, 400)).toBeCloseTo(9, 9);
   });

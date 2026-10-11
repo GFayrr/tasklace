@@ -123,7 +123,7 @@ describe('paintPrintPage', () => {
     );
     const write = calls.find((call) => call.name === 'fillText');
     expect([write?.args, write?.fillStyle]).toEqual([['Survey', 10, 20], '#1c1b19']);
-    expect(fonts).toEqual(['600 10px Jost']);
+    expect(fonts).toEqual(['600 10px Jost Print']);
   });
 
   it('draws the orders of a clip inside its shape, between a save and a restore', () => {

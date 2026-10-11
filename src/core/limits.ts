@@ -46,3 +46,5 @@ export const MAX_PRINT_PATH_NUMBERS = 1_024;
 export const MAX_PRINT_TEXT_LENGTH = 512;
 export const MAX_PRINT_COORDINATE = 32_768;
 export const MAX_PRINT_DASH_LENGTH = 8;
+export const MAX_PDF_MEBIBYTES = 256;
+export const MAX_PDF_BYTES = MAX_PDF_MEBIBYTES * UNITS_PER_MEBI;

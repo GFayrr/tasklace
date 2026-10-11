@@ -70,6 +70,9 @@ function fakeBridge(
     saveProjectAs: record(true),
     exportProject: (_kind, _text, name) =>
       Promise.resolve({ ok: true, value: { fileName: `${name}.csv` } }),
+    exportPdf: (_document, name) =>
+      Promise.resolve({ ok: true, value: { kind: 'exported', fileName: `${name}.pdf` } }),
+    saveHeldPdf: () => Promise.resolve({ ok: true, value: { fileName: 'held.pdf' } }),
   };
   return { bridge, saves, suggestedNames, events, adopted, adoption };
 }
