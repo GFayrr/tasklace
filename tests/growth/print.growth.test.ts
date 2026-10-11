@@ -6,6 +6,7 @@ import {
   type PrintDocument,
   type PrintOrder,
 } from '../../src/core/print/print-document';
+import { printHtml } from '../../src/core/print/print-html';
 import { printLayout } from '../../src/core/print/print-layout';
 import { printPageSvg } from '../../src/core/print/print-svg';
 import { readPrintDocument } from '../../src/core/print/read-print-document';
@@ -102,6 +103,17 @@ describe('growth of printing with the size of the plan', () => {
       () => readPrintDocument(large),
     );
     console.info(`Print document check: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
+  });
+
+  it('writes the page printed to PDF in linear time', () => {
+    const small = documentOf(SMALL_TASK_COUNT);
+    const large = documentOf(LARGE_TASK_COUNT);
+    const ratio = growthRatio(
+      () => printHtml(small),
+      () => printHtml(large),
+    );
+    console.info(`Print HTML: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
   });
 

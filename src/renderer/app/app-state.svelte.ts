@@ -32,6 +32,7 @@ import {
 } from '../../core/scheduling/schedule-project';
 import type { SharedSession } from '../../core/shared/shared-session';
 import type { TagConflict } from '../../core/tags/tag-conflicts';
+import type { PrintDocument } from '../../core/print/print-document';
 import type { ProjectHour } from '../../core/time';
 import { deadlinesOf } from '../plan/timeline-geometry';
 import type { ExchangeKind, RecentProject, TasklaceBridge } from '../../preload/bridge-contract';
@@ -148,6 +149,11 @@ export interface Notice {
   readonly text: string;
   readonly report: Report | null;
   readonly lasting: boolean;
+}
+
+export interface HeavyPdf {
+  readonly bytes: number;
+  readonly pages: number;
 }
 
 export interface PdfExportOpening {
@@ -575,6 +581,51 @@ export class AppState {
       );
     }
     this.#showResult(exported);
+  }
+
+  /** Prints a document of the open project to PDF, telling the user once it is written, and returning the size of a PDF heavier than expected that was kept back, or null when nothing more is to be decided. */
+  async exportPdf(document: PrintDocument): Promise<HeavyPdf | null> {
+    const project = this.project;
+    if (project === null) {
+      return null;
+    }
+    const exported = await this.#files.exportPdf(document, project.name);
+    if (!exported.ok) {
+      this.#showPdfFailure(exported);
+      return null;
+    }
+    const outcome = exported.value;
+    if (outcome.kind === 'heavy') {
+      return { bytes: outcome.bytes, pages: outcome.pages };
+    }
+    this.#pdfWritten(outcome.fileName);
+    return null;
+  }
+
+  /** Writes the PDF kept back for being heavier than expected, as the user chose to export it as it is, telling whether it was written. */
+  async saveHeldPdf(): Promise<boolean> {
+    const saved = await this.#files.saveHeldPdf();
+    if (saved.ok) {
+      this.#pdfWritten(saved.value.fileName);
+      return true;
+    }
+    this.#showPdfFailure(saved);
+    return false;
+  }
+
+  /** Tells the user a PDF was written and closes the window of the export. */
+  #pdfWritten(fileName: string): void {
+    this.#notify('info', fillMessage(this.messages.notices.exported, { file: fileName }));
+    this.#pdfExport = null;
+  }
+
+  /** Tells the user why a PDF was not written, a PDF too large having its own message. */
+  #showPdfFailure(result: ActionResult<unknown>): void {
+    if (!result.ok && result.error.code === 'TOO_LARGE') {
+      this.#notify('error', this.messages.print.tooLarge);
+      return;
+    }
+    this.#showResult(result);
   }
 
   /** Renames the project, telling whether the name was accepted and telling the user why when the project or a running file action refuses it. */

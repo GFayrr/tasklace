@@ -11,6 +11,7 @@ import {
 } from '../app/testing/fake-app-context';
 import english from '../locales/en.json';
 import type { PrintSettings } from '../print/print-pages';
+import type { BridgeResult, PdfExport } from '../../preload/bridge-contract';
 import App from './App.svelte';
 import { button, click, press, render, single } from './testing/render';
 import { drawFrames, refuseDrawingContexts } from './testing/timeline-environment';
@@ -56,6 +57,17 @@ async function renderExport(plan: Project = PLAN) {
   return { ...opened, page: root, root: dialog, dialog };
 }
 
+/** Builds a plan of a given number of tasks in a row, named Thesis. */
+function longPlan(count: number): Project {
+  const tasks = Array.from({ length: count }, (_unused, index) =>
+    workTask(`t${String(index)}`, {
+      name: `Task ${String(index + 1)}`,
+      sortKey: `k${String(index).padStart(3, '0')}`,
+    }),
+  );
+  return project(tasks, [], { name: 'Thesis', startDate: at(2026, 9, 28, 9) });
+}
+
 /** Finds a radio button or check box of the export window by the text of its label. */
 function choice(root: ParentNode, label: string): HTMLInputElement {
   const found = [...root.querySelectorAll('label')].find(
@@ -91,7 +103,7 @@ describe('the export to PDF', () => {
     expect(drawn.filter((call) => call.name === 'fillText').map((call) => call.args[0])).toContain(
       'Survey',
     );
-    expect(button(root, TEXT.export).disabled).toBe(true);
+    expect(button(root, TEXT.export).disabled).toBe(false);
   });
 
   it('names the period of the whole plan and the zoom the automatic choice picked', async () => {
@@ -148,6 +160,69 @@ describe('the export to PDF', () => {
     flushSync();
     expect(single(root, '[role="status"]').textContent).toBe(TEXT.refusals.EMPTY_PERIOD);
     pick(choice(root, 'Whole project (Sep 28, 2026 – Sep 29, 2026)'));
+    expect(root.querySelector('[role="status"]')).toBeNull();
+  });
+
+  it('exports every page of the plan, then tells the file written and closes', async () => {
+    const { app, root, control } = await renderExport(longPlan(40));
+    click(button(root, TEXT.export));
+    await settle();
+    flushSync();
+    const [sent] = control.pdfExports;
+    expect(sent?.name).toBe('Thesis');
+    expect(sent?.document.pages).toHaveLength(2);
+    expect(sent?.document.title).toBe('Thesis');
+    expect(app.pdfExport).toBeNull();
+    expect(app.notices.map((notice) => notice.text)).toEqual(['Exported to Thesis.pdf.']);
+  });
+
+  it('says a PDF is heavier than expected and writes it as it is when asked', async () => {
+    const { app, root, control } = await renderExport();
+    control.pdfResult = { ok: true, value: { kind: 'heavy', bytes: 1_400_000, pages: 12 } };
+    click(button(root, TEXT.export));
+    await settle();
+    flushSync();
+    expect(single(root, '[role="alert"]').textContent.trim()).toBe(
+      'This PDF weighs about 1.4 MB for 12 pages, more than expected.',
+    );
+    expect(() => button(root, TEXT.export)).toThrow();
+    click(button(root, TEXT.exportAsItIs));
+    await settle();
+    flushSync();
+    expect(control.calls.filter((call) => call === 'saveHeldPdf')).toEqual(['saveHeldPdf']);
+    expect(app.pdfExport).toBeNull();
+  });
+
+  it('writes a smaller heavy PDF in kilobytes, and forgets it once a setting changes', async () => {
+    const { root, control } = await renderExport();
+    control.pdfResult = { ok: true, value: { kind: 'heavy', bytes: 600_000, pages: 1 } };
+    click(button(root, TEXT.export));
+    await settle();
+    flushSync();
+    expect(single(root, '[role="alert"]').textContent.trim()).toBe(
+      'This PDF weighs about 600 kB for 1 page, more than expected.',
+    );
+    pick(choice(root, TEXT.a3));
+    expect(root.querySelector('[role="alert"]')).toBeNull();
+    expect(button(root, TEXT.export).disabled).toBe(false);
+  });
+
+  it('says the PDF is being made, its buttons waiting, until the main process answers', async () => {
+    const { root, context } = await renderExport();
+    let answer: (value: BridgeResult<PdfExport>) => void = () => undefined;
+    Object.assign(context.bridge, {
+      exportPdf: () =>
+        new Promise<BridgeResult<PdfExport>>((resolve) => {
+          answer = resolve;
+        }),
+    });
+    click(button(root, TEXT.export));
+    flushSync();
+    expect(single(root, '[role="status"]').textContent).toBe(TEXT.making);
+    expect(button(root, TEXT.export).disabled).toBe(true);
+    answer({ ok: false, error: { code: 'CANCELLED' } });
+    await settle();
+    flushSync();
     expect(root.querySelector('[role="status"]')).toBeNull();
   });
 

@@ -4,8 +4,8 @@
   import { pageSizeOf, PAPER_NAMES, PAPER_ORIENTATIONS } from '../../core/print/paper';
   import { valueAt } from '../../core/table-value';
   import { MAX_DAY_INDEX, MIN_DAY_INDEX, type DayIndex } from '../../core/time';
-  import type { AppState } from '../app/app-state.svelte';
-  import { fillMessage } from '../i18n/messages';
+  import type { AppState, HeavyPdf } from '../app/app-state.svelte';
+  import { countMessage, fillMessage } from '../i18n/messages';
   import { createPatternCache } from '../plan/bar-patterns';
   import { ZOOM_LEVELS } from '../plan/time-scale';
   import {
@@ -14,6 +14,7 @@
     wholePlanDays,
     type PrintColumn,
     type PrintSettings,
+    type PrintSource,
     type PrintZoomChoice,
   } from '../print/print-pages';
   import { paintPrintPage } from '../print/print-preview';
@@ -26,6 +27,8 @@
   const PREVIEW_WIDTH = 560;
   const MILLISECONDS_PER_DAY = 86_400_000;
   const ISO_DATE_LENGTH = 10;
+  const BYTES_PER_KILOBYTE = 1_000;
+  const BYTES_PER_MEGABYTE = 1_000_000;
   const ZOOM_CHOICES: readonly PrintZoomChoice[] = ['automatic', ...ZOOM_LEVELS];
   const storage = (() => {
     try {
@@ -52,25 +55,38 @@
   const current = $derived(app.currentSchedule);
   const schedule = $derived(current.ok ? current.value : null);
   const wholeDays = $derived(schedule === null ? null : wholePlanDays(project, schedule));
-  const printed = $derived.by(() => {
-    if (opening === null || measure === null || schedule === null || app.calendar === null) {
+  const source = $derived.by((): PrintSource | null => {
+    if (opening === null || schedule === null || app.calendar === null) {
       return null;
     }
-    return buildPrintDocument(
-      {
-        project,
-        schedule,
-        calendar: app.calendar,
-        theme: app.theme,
-        messages: app.messages,
-        locale: app.locale,
-        exportedAt: opening.exportedAt,
-      },
-      settings,
-      measure,
-      1,
-    );
+    return {
+      project,
+      schedule,
+      calendar: app.calendar,
+      theme: app.theme,
+      messages: app.messages,
+      locale: app.locale,
+      exportedAt: opening.exportedAt,
+    };
   });
+  const printed = $derived(
+    source === null || measure === null ? null : buildPrintDocument(source, settings, measure, 1),
+  );
+  let heavy = $state.raw<HeavyPdf | null>(null);
+  const megabyte = $derived(
+    new Intl.NumberFormat(app.locale, {
+      style: 'unit',
+      unit: 'megabyte',
+      maximumFractionDigits: 1,
+    }),
+  );
+  const kilobyte = $derived(
+    new Intl.NumberFormat(app.locale, {
+      style: 'unit',
+      unit: 'kilobyte',
+      maximumFractionDigits: 0,
+    }),
+  );
   const status = $derived.by(() => {
     if (!current.ok) {
       return text.waiting;
@@ -95,6 +111,7 @@
     if (opening !== null && !dialog.open) {
       settings = readPrintSettings(storage, opening.documentId);
       previewFailed = false;
+      heavy = null;
       void prepareMeasure();
       dialog.showModal();
     } else if (opening === null && dialog.open) {
@@ -116,6 +133,7 @@
   /** Changes the settings and remembers them for the project on this computer. */
   function change(changes: Partial<PrintSettings>): void {
     settings = { ...settings, ...changes };
+    heavy = null;
     if (opening !== null) {
       rememberPrintSettings(storage, opening.documentId, settings);
     }
@@ -188,6 +206,24 @@
       floats: text.floats,
     };
     return labels[column];
+  }
+
+  /** Prints every page to PDF with the settings chosen, keeping the size of a PDF heavier than expected so that the user can choose what to do. */
+  async function exportPdf(): Promise<void> {
+    if (source === null || measure === null) {
+      return;
+    }
+    const built = buildPrintDocument(source, settings, measure);
+    if (built.ok) {
+      heavy = await app.exportPdf(built.value.document);
+    }
+  }
+
+  /** Writes a size in bytes in kilobytes, or in megabytes from one megabyte on, in the regional format. */
+  function sizeText(bytes: number): string {
+    return bytes < BYTES_PER_MEGABYTE
+      ? kilobyte.format(bytes / BYTES_PER_KILOBYTE)
+      : megabyte.format(bytes / BYTES_PER_MEGABYTE);
   }
 
   /** Writes a day in the regional format. */
@@ -351,7 +387,16 @@
         </fieldset>
       </div>
       <div class="preview">
-        {#if status !== null}
+        {#if app.fileActionRunning}
+          <p class="status" role="status">{text.making}</p>
+        {:else if heavy !== null}
+          <p class="message warning" role="alert">
+            {fillMessage(text.heavy, {
+              size: sizeText(heavy.bytes),
+              pages: countMessage(text.pages, heavy.pages, app.locale),
+            })}
+          </p>
+        {:else if status !== null}
           <p class="status" role="status">{status}</p>
         {:else if printed?.ok === true}
           <p class="caption">
@@ -369,7 +414,21 @@
           app.closePdfExport();
         }}>{text.cancel}</button
       >
-      <button type="button" class="button primary" disabled>{text.export}</button>
+      {#if heavy === null}
+        <button
+          type="button"
+          class="button primary"
+          disabled={printed?.ok !== true || app.fileActionRunning}
+          onclick={() => void exportPdf()}>{text.export}</button
+        >
+      {:else}
+        <button
+          type="button"
+          class="button primary"
+          disabled={app.fileActionRunning}
+          onclick={() => void app.saveHeldPdf()}>{text.exportAsItIs}</button
+        >
+      {/if}
     </div>
   {/if}
 </dialog>
@@ -504,6 +563,18 @@
     padding: var(--space-4);
     background: var(--color-panel);
     border-radius: var(--radius);
+  }
+
+  .message {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--font-size-small);
+    border-radius: var(--radius);
+  }
+
+  .message.warning {
+    color: var(--color-warning);
+    background: color-mix(in srgb, var(--color-warning) 10%, var(--color-surface));
   }
 
   .caption,

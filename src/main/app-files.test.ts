@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import fc from 'fast-check';
 import { describe, expect, it, vi } from 'vitest';
-import { APP_ENTRY_URL, createAppFileServer, isAppAddress, resolveAppFile } from './app-files';
+import {
+  APP_ENTRY_URL,
+  createAppFileServer,
+  createPrintPageStore,
+  isAppAddress,
+  resolveAppFile,
+} from './app-files';
 
 const ROOT = resolve('/tasklace/renderer');
 const DEVELOPMENT_ORIGIN = 'http://localhost:5173';
@@ -124,5 +130,33 @@ describe('createAppFileServer', () => {
       logged.mockRestore();
       await rm(root, { recursive: true });
     }
+  });
+});
+
+describe('createPrintPageStore', () => {
+  const POLICY = { 'Content-Security-Policy': "default-src 'self'" };
+  it('serves a page held for printing at its own address, with the security headers, until it is released', async () => {
+    const store = createPrintPageStore();
+    const serve = createAppFileServer(tmpdir(), POLICY, store);
+    const first = store.hold('<p>first</p>');
+    const second = store.hold('<p>second</p>');
+    expect(first.url).toMatch(/^app:\/\/tasklace\/print\/[0-9a-f-]{36}\.html$/);
+    expect(second.url).not.toBe(first.url);
+    const response = await serve(new Request(first.url));
+    expect([response.status, await response.text()]).toEqual([200, '<p>first</p>']);
+    expect([...response.headers]).toEqual([
+      ['content-security-policy', "default-src 'self'"],
+      ['content-type', 'text/html; charset=utf-8'],
+    ]);
+    first.release();
+    expect(store.pageAt(first.url)).toBeNull();
+    expect((await serve(new Request(first.url))).status).toBe(404);
+    expect(store.pageAt(second.url)).toBe('<p>second</p>');
+  });
+
+  it('serves no held page at an address it did not give', () => {
+    const store = createPrintPageStore();
+    store.hold('<p>held</p>');
+    expect(store.pageAt('app://tasklace/print/unknown.html')).toBeNull();
   });
 });

@@ -28,3 +28,24 @@ export function createMainWindow(preloadPath: string): BrowserWindow {
   });
   return window;
 }
+
+/** Creates the hidden window that prints a page to PDF, with no bridge and no script allowed, since it only lays out the drawing it is given. */
+export function createPrintWindow(): BrowserWindow {
+  return new BrowserWindow({
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      javascript: false,
+      nodeIntegration: false,
+      nodeIntegrationInWorker: false,
+      nodeIntegrationInSubFrames: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      webviewTag: false,
+      navigateOnDragDrop: false,
+      experimentalFeatures: false,
+      spellcheck: false,
+    },
+  });
+}

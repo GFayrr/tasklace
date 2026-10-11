@@ -110,7 +110,7 @@ describe('printPageSvg', () => {
       0,
     );
     expect(svg).toBe(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="841.89pt" height="595.28pt" viewBox="0 0 841.89 595.28" font-family="Jost" xml:space="preserve">' +
+      '<svg xmlns="http://www.w3.org/2000/svg" width="841.89pt" height="595.28pt" viewBox="0 0 841.89 595.28" font-family="Jost Print" xml:space="preserve">' +
         '<rect x="10" y="20" width="30" height="40" fill="#2a78d6"/>' +
         '<rect x="0" y="0" width="1" height="1" fill="#000000" fill-opacity="0.5"/>' +
         '<path d="M0 0L10 5C1 2 3 4 5 6Z" fill="none" stroke="#1c1b19" stroke-width="1.5"/>' +
@@ -145,7 +145,7 @@ describe('printPageSvg', () => {
       1,
     );
     expect(svg).toBe(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="841.89pt" height="595.28pt" viewBox="0 0 841.89 595.28" font-family="Jost" xml:space="preserve">' +
+      '<svg xmlns="http://www.w3.org/2000/svg" width="841.89pt" height="595.28pt" viewBox="0 0 841.89 595.28" font-family="Jost Print" xml:space="preserve">' +
         '<defs>' +
         '<clipPath id="p1-c0"><rect x="1" y="2" width="3" height="4"/></clipPath>' +
         '<clipPath id="p1-c1"><path d="M0 0L4 4Z"/></clipPath>' +

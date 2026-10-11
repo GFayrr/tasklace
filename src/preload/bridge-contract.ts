@@ -1,6 +1,7 @@
 import type { CsvWarning } from '../core/exchange/csv/csv-rows';
 import type { RegionalFormat } from '../core/exchange/csv/regional-format';
 import type { FileError, StateCheckError } from '../core/file/tasklace-file';
+import type { PrintDocument } from '../core/print/print-document';
 import type { Result } from '../core/result';
 import type { DocumentId } from '../core/shared/shared-document';
 import type { ValidationIssue } from '../core/validation/validation-issues';
@@ -15,6 +16,8 @@ export const IPC_CHANNELS = {
   saveProject: 'project:save',
   saveProjectAs: 'project:save-as',
   exportProject: 'project:export',
+  exportPdf: 'project:export-pdf',
+  saveHeldPdf: 'project:save-held-pdf',
   adoptProject: 'project:adopt',
   pageStartFailed: 'page:start-failed',
   flushRequested: 'project:flush-requested',
@@ -63,6 +66,10 @@ export interface ExportedFile {
   readonly fileName: string;
 }
 
+export type PdfExport =
+  | { readonly kind: 'exported'; readonly fileName: string }
+  | { readonly kind: 'heavy'; readonly bytes: number; readonly pages: number };
+
 export interface RecentProject {
   readonly name: string;
   readonly folder: string;
@@ -86,6 +93,11 @@ export interface TasklaceBridge {
     text: string,
     suggestedName: string,
   ) => Promise<BridgeResult<ExportedFile>>;
+  readonly exportPdf: (
+    document: PrintDocument,
+    suggestedName: string,
+  ) => Promise<BridgeResult<PdfExport>>;
+  readonly saveHeldPdf: () => Promise<BridgeResult<ExportedFile>>;
   readonly onFlushRequested: (flush: () => Promise<boolean>) => void;
   readonly reportStartFailure: () => void;
 }
@@ -101,6 +113,8 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.saveProject]: BridgeResult<SavedProject>;
   readonly [IPC_CHANNELS.saveProjectAs]: BridgeResult<SavedProject>;
   readonly [IPC_CHANNELS.exportProject]: BridgeResult<ExportedFile>;
+  readonly [IPC_CHANNELS.exportPdf]: BridgeResult<PdfExport>;
+  readonly [IPC_CHANNELS.saveHeldPdf]: BridgeResult<ExportedFile>;
 }
 
 export interface ChannelArguments {
@@ -118,6 +132,8 @@ export interface ChannelArguments {
     text: string,
     suggestedName: string,
   ];
+  readonly [IPC_CHANNELS.exportPdf]: readonly [document: PrintDocument, suggestedName: string];
+  readonly [IPC_CHANNELS.saveHeldPdf]: readonly [];
 }
 
 export type InvokeChannel = keyof ChannelAnswers & keyof ChannelArguments;
