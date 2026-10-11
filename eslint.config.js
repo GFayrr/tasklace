@@ -5,6 +5,11 @@ import tseslint from 'typescript-eslint';
 import svelteConfig from './svelte.config.js';
 
 const MAX_NESTING_DEPTH = 2;
+const ONLY_DIRECT_PDF_IMPORTS_PDFKIT = {
+  regex: String.raw`^pdfkit(/.*)?$`,
+  message:
+    'Only src/main/pdf/direct-pdf.ts may use PDFKit, so that it can be replaced in one place.',
+};
 
 export default defineConfig(
   { ignores: ['coverage/', 'dist/', 'out/', 'node_modules/'] },
@@ -57,6 +62,7 @@ export default defineConfig(
               regex: String.raw`^(node:.*|electron|${builtinModules.join('|')})(/.*)?$`,
               message: 'src/core must stay pure: no Node.js or Electron module.',
             },
+            ONLY_DIRECT_PDF_IMPORTS_PDFKIT,
           ],
         },
       ],
@@ -79,6 +85,7 @@ export default defineConfig(
               regex: String.raw`^(node:.*|electron|${builtinModules.join('|')})(/.*)?$`,
               message: 'The page talks to the main process only through the preload bridge.',
             },
+            ONLY_DIRECT_PDF_IMPORTS_PDFKIT,
           ],
         },
       ],
@@ -95,9 +102,17 @@ export default defineConfig(
               regex: String.raw`^(node:.*|${builtinModules.join('|')})(/.*)?$`,
               message: 'The sandboxed preload script may only use the electron module.',
             },
+            ONLY_DIRECT_PDF_IMPORTS_PDFKIT,
           ],
         },
       ],
+    },
+  },
+  {
+    files: ['src/main/**/*.ts', 'tests/**/*.ts'],
+    ignores: ['src/main/pdf/direct-pdf.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [ONLY_DIRECT_PDF_IMPORTS_PDFKIT] }],
     },
   },
   { files: ['**/*.js'], extends: [tseslint.configs.disableTypeChecked] },

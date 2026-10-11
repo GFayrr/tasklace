@@ -8,8 +8,14 @@ import { printHtml } from '../core/print/print-html';
 import { failure, success } from '../core/result';
 import { IPC_CHANNELS } from '../preload/bridge-contract';
 import { createPrintPageStore } from './app-files';
+import type { FileTask, FileTaskResult, ResultOfTask } from './file-tasks';
 import { RefusedRequest } from './ipc-trust';
-import { PDF_GUARD_BYTES_PER_PAGE, PDF_GUARD_MIN_PAGES, registerPdfHandlers } from './pdf-export';
+import {
+  PDF_GUARD_BYTES_PER_PAGE,
+  PDF_GUARD_MIN_PAGES,
+  printFontsIn,
+  registerPdfHandlers,
+} from './pdf-export';
 import type { FakeIpcMain } from './testing/fake-electron';
 
 const MOCKED_MAX_PDF_BYTES = 2_000_000;
@@ -68,6 +74,13 @@ const printing = {
   answer: (): Promise<Buffer> => Promise.resolve(Buffer.from('%PDF-1.4 light')),
 };
 const services = { timeoutMs: 1_000 };
+const FONTS = { 400: '/fonts/400.ttf', 500: '/fonts/500.ttf', 600: '/fonts/600.ttf' } as const;
+const LIGHTER_PDF = Uint8Array.from([0x25, 0x50, 0x44, 0x46]);
+const tasks: FileTask[] = [];
+const lighter = {
+  answer: (): Promise<FileTaskResult> =>
+    Promise.resolve(success({ kind: 'directPdf', pdf: LIGHTER_PDF })),
+};
 const DOCUMENT: PrintDocument = {
   paper: 'a4',
   orientation: 'landscape',
@@ -96,6 +109,11 @@ registerPdfHandlers({
   get timeoutMs() {
     return services.timeoutMs;
   },
+  runTask: async <T extends FileTask>(task: T) => {
+    tasks.push(task);
+    return (await lighter.answer()) as ResultOfTask<T>;
+  },
+  fonts: FONTS,
 });
 
 beforeEach(async () => {
@@ -106,6 +124,8 @@ beforeEach(async () => {
   services.timeoutMs = 1_000;
   printing.load = () => Promise.resolve();
   printing.answer = () => Promise.resolve(Buffer.from('%PDF-1.4 light'));
+  tasks.length = 0;
+  lighter.answer = () => Promise.resolve(success({ kind: 'directPdf', pdf: LIGHTER_PDF }));
 });
 
 afterEach(async () => {
@@ -316,6 +336,62 @@ describe('exporting to PDF', () => {
     expect(windows[0]?.destroyed).toBe(true);
   });
 
+  it('writes the document kept back as a lighter PDF made in the file worker, once, whatever its size', async () => {
+    const sender = {};
+    printsBytes(PDF_GUARD_BYTES_PER_PAGE * PDF_GUARD_MIN_PAGES + 1);
+    await request(IPC_CHANNELS.exportPdf, sender, DOCUMENT, 'Thesis');
+    chooseToSave(null);
+    expect(await request(IPC_CHANNELS.exportLighterPdf, sender)).toEqual(
+      failure({ code: 'CANCELLED' }),
+    );
+    chooseToSave(join(folder, 'lighter'));
+    expect(await request(IPC_CHANNELS.exportLighterPdf, sender)).toEqual(
+      success({ fileName: 'lighter.pdf' }),
+    );
+    expect(await readFile(join(folder, 'lighter.pdf'))).toEqual(Buffer.from(LIGHTER_PDF));
+    expect(tasks).toEqual([
+      { kind: 'writeDirectPdf', document: DOCUMENT, fonts: FONTS },
+      { kind: 'writeDirectPdf', document: DOCUMENT, fonts: FONTS },
+    ]);
+    expect((await quietly(() => request(IPC_CHANNELS.exportLighterPdf, sender))).answer).toEqual(
+      failure({ code: 'TASK_FAILED' }),
+    );
+    expect((await quietly(() => request(IPC_CHANNELS.saveHeldPdf, sender))).answer).toEqual(
+      failure({ code: 'TASK_FAILED' }),
+    );
+  });
+
+  it('passes on a failure of the file worker, keeping the PDF back for another choice', async () => {
+    const sender = {};
+    printsBytes(PDF_GUARD_BYTES_PER_PAGE * PDF_GUARD_MIN_PAGES + 1);
+    await request(IPC_CHANNELS.exportPdf, sender, DOCUMENT, 'Thesis');
+    lighter.answer = () => Promise.resolve(failure({ code: 'TOO_LARGE' }));
+    expect(await request(IPC_CHANNELS.exportLighterPdf, sender)).toEqual(
+      failure({ code: 'TOO_LARGE' }),
+    );
+    expect(dialogs.save).not.toHaveBeenCalled();
+    chooseToSave(join(folder, 'heavy.pdf'));
+    expect(await request(IPC_CHANNELS.saveHeldPdf, sender)).toEqual(
+      success({ fileName: 'heavy.pdf' }),
+    );
+  });
+
+  it('makes no lighter PDF when nothing was kept back, logging why', async () => {
+    expect(await quietly(() => request(IPC_CHANNELS.exportLighterPdf, {}))).toEqual({
+      answer: failure({ code: 'TASK_FAILED' }),
+      logged: [['No PDF was kept back for this window.']],
+    });
+    expect(tasks).toEqual([]);
+  });
+
+  it('gives the files of the printed weights of Jost in a fonts folder', () => {
+    expect(printFontsIn('/app/fonts')).toEqual({
+      400: '/app/fonts/jost-print-400.ttf',
+      500: '/app/fonts/jost-print-500.ttf',
+      600: '/app/fonts/jost-print-600.ttf',
+    });
+  });
+
   it('answers nothing to a page that is not the application', async () => {
     trusted.mockImplementation(() => {
       throw new RefusedRequest('not the application');
@@ -324,6 +400,7 @@ describe('exporting to PDF', () => {
       RefusedRequest,
     );
     await expect(request(IPC_CHANNELS.saveHeldPdf, {})).rejects.toThrow(RefusedRequest);
+    await expect(request(IPC_CHANNELS.exportLighterPdf, {})).rejects.toThrow(RefusedRequest);
     expect(windows).toEqual([]);
   });
 });

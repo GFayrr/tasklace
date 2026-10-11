@@ -1,4 +1,4 @@
-import { basename } from 'node:path';
+import { basename, join } from 'node:path';
 import type { BrowserWindow, IpcMainInvokeEvent, WebContents } from 'electron';
 import { MAX_PDF_BYTES } from '../core/limits';
 import { pageSizeOf } from '../core/print/paper';
@@ -15,6 +15,8 @@ import {
   type ResultChannel,
 } from '../preload/bridge-contract';
 import type { PrintPageStore } from './app-files';
+import type { FileTask, ResultOfTask } from './file-tasks';
+import type { PrintFonts } from './pdf/direct-pdf';
 import { registerChannel } from './ipc-channels';
 import { refuseMessage, type TrustCheck } from './ipc-trust';
 import { readSuggestedName } from './ipc-validators';
@@ -27,11 +29,14 @@ export interface PdfServices {
   readonly pages: PrintPageStore;
   readonly createPrintWindow: () => BrowserWindow;
   readonly timeoutMs: number;
+  readonly runTask: <T extends FileTask>(task: T) => Promise<ResultOfTask<T>>;
+  readonly fonts: PrintFonts;
 }
 
 interface HeldPdf {
   readonly pdf: Uint8Array;
   readonly name: string;
+  readonly document: PrintDocument;
 }
 
 export const PDF_RENDER_TIMEOUT_MS = 300_000;
@@ -41,7 +46,7 @@ export const PDF_GUARD_MIN_PAGES = 10;
 const POINTS_PER_INCH = 72;
 const held = new WeakMap<WebContents, HeldPdf>();
 
-/** Answers the bridge requests that print a plan to PDF and that write a PDF kept back for being heavier than expected. */
+/** Answers the bridge requests that print a plan to PDF and that write a PDF kept back for being heavier than expected, as it is or made lighter without the browser. */
 export function registerPdfHandlers(services: PdfServices): void {
   /** Registers the answer of a channel, an unexpected failure becoming a task failure. */
   const handle = <C extends ResultChannel>(
@@ -56,6 +61,7 @@ export function registerPdfHandlers(services: PdfServices): void {
     exportPdf(services, event.sender, document, name),
   );
   handle(IPC_CHANNELS.saveHeldPdf, (event) => saveHeldPdf(event.sender));
+  handle(IPC_CHANNELS.exportLighterPdf, (event) => exportLighterPdf(services, event.sender));
 }
 
 /** Prints a document sent by a page to PDF once it is checked, keeping the PDF back when it weighs more than 500 KB for 10 pages, never less than 500 KB, so that the page can offer a choice, and otherwise asking where to write it. */
@@ -78,7 +84,7 @@ async function exportPdf(
   }
   const pages = read.value.pages.length;
   if (pdf.length > PDF_GUARD_BYTES_PER_PAGE * Math.max(pages, PDF_GUARD_MIN_PAGES)) {
-    held.set(sender, { pdf, name });
+    held.set(sender, { pdf, name, document: read.value });
     return success({ kind: 'heavy', bytes: pdf.length, pages });
   }
   const written = await writePdf(sender, pdf, name);
@@ -97,6 +103,40 @@ async function saveHeldPdf(sender: WebContents): Promise<BridgeResult<ExportedFi
     held.delete(sender);
   }
   return written;
+}
+
+/** Writes the document kept back for a page as a PDF made without the browser, in the file worker, as the user chose the lighter PDF, writing it whatever its size. */
+async function exportLighterPdf(
+  services: PdfServices,
+  sender: WebContents,
+): Promise<BridgeResult<ExportedFile>> {
+  const kept = held.get(sender);
+  if (kept === undefined) {
+    console.error('No PDF was kept back for this window.');
+    return failure({ code: 'TASK_FAILED' });
+  }
+  const made = await services.runTask({
+    kind: 'writeDirectPdf',
+    document: kept.document,
+    fonts: services.fonts,
+  });
+  if (!made.ok) {
+    return made;
+  }
+  const written = await writePdf(sender, made.value.pdf, kept.name);
+  if (written.ok) {
+    held.delete(sender);
+  }
+  return written;
+}
+
+/** Returns the files of the printed weights of Jost in the fonts folder of the interface. */
+export function printFontsIn(folder: string): PrintFonts {
+  return {
+    400: join(folder, 'jost-print-400.ttf'),
+    500: join(folder, 'jost-print-500.ttf'),
+    600: join(folder, 'jost-print-600.ttf'),
+  };
 }
 
 /** Asks where to write a PDF and writes it safely, a failure of the system being reported as a failed write. */

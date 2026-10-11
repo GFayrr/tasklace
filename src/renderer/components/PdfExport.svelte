@@ -424,9 +424,15 @@
       {:else}
         <button
           type="button"
-          class="button primary"
+          class="button"
           disabled={app.fileActionRunning}
           onclick={() => void app.saveHeldPdf()}>{text.exportAsItIs}</button
+        >
+        <button
+          type="button"
+          class="button primary"
+          disabled={app.fileActionRunning}
+          onclick={() => void app.saveHeldPdf(true)}>{text.exportLighter}</button
         >
       {/if}
     </div>

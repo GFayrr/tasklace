@@ -149,6 +149,7 @@ export function fakeBridge(): {
       return called('exportPdf', control.pdfResult);
     },
     saveHeldPdf: () => called('saveHeldPdf', control.heldPdfResult),
+    exportLighterPdf: () => called('exportLighterPdf', control.heldPdfResult),
     onFlushRequested: () => undefined,
     reportStartFailure: () => undefined,
   };

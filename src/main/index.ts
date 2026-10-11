@@ -30,7 +30,7 @@ import {
   writeLogBeforeQuitting,
 } from './log-file';
 import { createMainWindow, createPrintWindow } from './window';
-import { PDF_RENDER_TIMEOUT_MS, registerPdfHandlers } from './pdf-export';
+import { PDF_RENDER_TIMEOUT_MS, printFontsIn, registerPdfHandlers } from './pdf-export';
 
 const developmentUrl = app.isPackaged ? null : (process.env['ELECTRON_RENDERER_URL'] ?? null);
 const developmentOrigin = developmentUrl === null ? null : new URL(developmentUrl).origin;
@@ -87,6 +87,8 @@ function start(): void {
     pages: printPages,
     createPrintWindow,
     timeoutMs: PDF_RENDER_TIMEOUT_MS,
+    runTask: (task) => runInFileWorker(createFileWorker, task),
+    fonts: printFontsIn(join(rendererRoot, 'fonts')),
   });
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath);

@@ -47,6 +47,15 @@ describe('exporting to PDF from the application state', () => {
     expect(app.pdfExport).toBeNull();
   });
 
+  it('writes the PDF kept back made lighter without the browser when asked', async () => {
+    const { app, control } = await openedAppOf(PLAN);
+    app.openPdfExport();
+    control.heldPdfResult = { ok: true, value: { fileName: 'Lighter.pdf' } };
+    expect(await app.saveHeldPdf(true)).toBe(true);
+    expect(control.calls.filter((call) => call.endsWith('Pdf'))).toEqual(['exportLighterPdf']);
+    expect(noticesOf(app)).toEqual([['info', 'Exported to Lighter.pdf.']]);
+  });
+
   it('tells nothing when the user cancels the choice of the file, the export staying open', async () => {
     const { app, control } = await openedAppOf(PLAN);
     app.openPdfExport();

@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PrintDocument } from '../core/print/print-document';
 import { BRIDGE_NAME, IPC_CHANNELS, type TasklaceBridge } from './bridge-contract';
+
+const PRINTED: PrintDocument = {
+  paper: 'a4',
+  orientation: 'landscape',
+  title: 'Thesis',
+  pages: [[]],
+};
 
 const electron = vi.hoisted(() => ({
   exposed: new Map<string, unknown>(),
@@ -67,6 +75,9 @@ describe('the bridge exposed to the page', () => {
     await bridge.saveProject(state);
     await bridge.saveProjectAs(state, 'Plan');
     await bridge.exportProject('json', '{}', 'Plan');
+    await bridge.exportPdf(PRINTED, 'Plan');
+    await bridge.saveHeldPdf();
+    await bridge.exportLighterPdf();
     expect(electron.invoke.mock.calls).toEqual([
       [IPC_CHANNELS.openProject],
       [IPC_CHANNELS.openRecentProject, 2],
@@ -75,6 +86,9 @@ describe('the bridge exposed to the page', () => {
       [IPC_CHANNELS.saveProject, state],
       [IPC_CHANNELS.saveProjectAs, state, 'Plan'],
       [IPC_CHANNELS.exportProject, 'json', '{}', 'Plan'],
+      [IPC_CHANNELS.exportPdf, PRINTED, 'Plan'],
+      [IPC_CHANNELS.saveHeldPdf],
+      [IPC_CHANNELS.exportLighterPdf],
     ]);
   });
 
