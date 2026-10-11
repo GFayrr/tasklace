@@ -16,10 +16,12 @@ import {
   type FileError,
 } from '../core/file/tasklace-file';
 import type { Project } from '../core/model/project';
+import type { PrintDocument } from '../core/print/print-document';
 import { failure, success, type Result } from '../core/result';
 import { createSharedDocument, type DocumentId } from '../core/shared/shared-document';
 import type { FileFailure } from '../preload/bridge-contract';
 import { saveLocalCopy } from './local-copies';
+import { TooManyPatternTiles, writeDirectPdf, type PrintFonts } from './pdf/direct-pdf';
 import { isSystemError } from './stored-files';
 import { writeFileSafely } from './safe-write';
 import { zlibCompressor } from './zlib-compressor';
@@ -45,6 +47,11 @@ export type FileTask =
       readonly documentId: DocumentId;
       readonly localCopyFolder: string;
       readonly savedAt: number;
+    }
+  | {
+      readonly kind: 'writeDirectPdf';
+      readonly document: PrintDocument;
+      readonly fonts: PrintFonts;
     };
 
 export interface ImportNaming {
@@ -64,12 +71,18 @@ export interface SavedFiles {
   readonly localCopySaved: boolean;
 }
 
-export type FileTaskResult = Result<LoadedProject | SavedFiles, FileFailure>;
+export interface DirectPdf {
+  readonly kind: 'directPdf';
+  readonly pdf: Uint8Array;
+}
+
+export type FileTaskResult = Result<LoadedProject | SavedFiles | DirectPdf, FileFailure>;
 interface TaskOutcomes {
   readonly openProject: LoadedProject;
   readonly importJson: LoadedProject;
   readonly importCsv: LoadedProject;
   readonly saveProject: SavedFiles;
+  readonly writeDirectPdf: DirectPdf;
 }
 
 export type ResultOfTask<T extends FileTask> = Result<TaskOutcomes[T['kind']], FileFailure>;
@@ -79,6 +92,7 @@ const OUTCOME_KINDS = {
   importJson: 'loaded',
   importCsv: 'loaded',
   saveProject: 'saved',
+  writeDirectPdf: 'directPdf',
 } as const satisfies { readonly [Kind in FileTask['kind']]: TaskOutcomes[Kind]['kind'] };
 
 /** Tells whether a value has the shape of a result of a task: a failure, or a success of the kind the task gives. */
@@ -94,7 +108,7 @@ export function isResultOf<T extends FileTask>(task: T, value: unknown): value i
 const READ_CHUNK_BYTES = 16 * UNITS_PER_MEBI;
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
-/** Runs one file task: reading and checking a project file or an import, or writing a project and its local copy. */
+/** Runs one file task: reading and checking a project file or an import, writing a project and its local copy, or writing a checked document as a PDF without the browser. */
 export async function runFileTask(task: FileTask): Promise<FileTaskResult> {
   switch (task.kind) {
     case 'openProject':
@@ -109,6 +123,21 @@ export async function runFileTask(task: FileTask): Promise<FileTaskResult> {
       );
     case 'saveProject':
       return saveProject(task);
+    case 'writeDirectPdf':
+      return directPdf(task.document, task.fonts);
+  }
+}
+
+/** Writes a checked document as a PDF without the browser, refusing as too large a document whose patterns would need too many tiles. */
+async function directPdf(document: PrintDocument, fonts: PrintFonts): Promise<FileTaskResult> {
+  try {
+    return success({ kind: 'directPdf', pdf: await writeDirectPdf(document, fonts) });
+  } catch (error) {
+    if (!(error instanceof TooManyPatternTiles)) {
+      throw error;
+    }
+    console.error('The lighter PDF was refused:', error);
+    return failure({ code: 'TOO_LARGE' });
   }
 }
 

@@ -602,9 +602,9 @@ export class AppState {
     return null;
   }
 
-  /** Writes the PDF kept back for being heavier than expected, as the user chose to export it as it is, telling whether it was written. */
-  async saveHeldPdf(): Promise<boolean> {
-    const saved = await this.#files.saveHeldPdf();
+  /** Writes the PDF kept back for being heavier than expected, as it is or made lighter without the browser as the user chose, telling whether it was written. */
+  async saveHeldPdf(lighter = false): Promise<boolean> {
+    const saved = await (lighter ? this.#files.exportLighterPdf() : this.#files.saveHeldPdf());
     if (saved.ok) {
       this.#pdfWritten(saved.value.fileName);
       return true;

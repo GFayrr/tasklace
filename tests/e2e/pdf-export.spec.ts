@@ -19,6 +19,7 @@ import { closeDiscarding, launchApplication } from './application';
 import { answerDialogs } from './dialogs';
 
 const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
+const HEAVY_PDF_TIMEOUT_MS = 120_000;
 const DESIGN = { id: 'design', name: 'Design', color: '#2a78d6', representsPersonOrTeam: false };
 const DOCUMENTATION = {
   id: 'documentation',
@@ -198,4 +199,60 @@ test('prints a long plan on as many PDF pages as the preview announces, with no 
   await dialog.getByRole('button', { name: 'Export PDF…' }).click();
   await expect(page.getByText('Exported to Long.pdf.')).toBeVisible();
   expect(pageCount(await readFile(path))).toBe(3);
+});
+
+test('writes a heavy PDF again without the browser in the file worker, with the same pages and Jost embedded', async () => {
+  test.setTimeout(HEAVY_PDF_TIMEOUT_MS);
+  const path = join(folder, 'Lighter.pdf');
+  await answerDialogs(application, { save: path });
+  const answers = await page.evaluate(async () => {
+    const bridge = window.tasklace;
+    if (bridge === undefined) {
+      return null;
+    }
+    const orders = Array.from({ length: 200_000 }, (_unused, index) => ({
+      kind: 'fill' as const,
+      shape: {
+        kind: 'rect' as const,
+        x: (index % 400) * 2,
+        y: (Math.floor(index / 400) % 250) * 2,
+        width: 1.5,
+        height: 1.5,
+      },
+      color: `#${((index * 2_654_435) % 16_777_216).toString(16).padStart(6, '0')}`,
+      opacity: 1,
+    }));
+    const text = {
+      kind: 'text' as const,
+      x: 28,
+      y: 580,
+      text: 'Heavy plan',
+      size: 10,
+      weight: 400 as const,
+      color: '#1c1b19',
+      align: 'start' as const,
+    };
+    const heavy = await bridge.exportPdf(
+      {
+        paper: 'a4',
+        orientation: 'landscape',
+        title: 'Heavy plan',
+        pages: [[...orders, text], [text]],
+      },
+      'Heavy plan',
+    );
+    const lighter = await bridge.exportLighterPdf();
+    return { heavy, lighter };
+  });
+  expect(answers?.heavy).toMatchObject({ ok: true, value: { kind: 'heavy', pages: 2 } });
+  expect(answers?.lighter).toEqual({ ok: true, value: { fileName: 'Lighter.pdf' } });
+  const pdf = await readFile(path);
+  expect(pdf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  expect(pageCount(pdf)).toBe(2);
+  expect(pdf.toString('latin1')).toMatch(/\/BaseFont\s*\/[A-Z]{6}\+Jost-Book/);
+  const heavyBytes =
+    answers?.heavy.ok === true && answers.heavy.value.kind === 'heavy'
+      ? answers.heavy.value.bytes
+      : 0;
+  expect(pdf.length).toBeLessThan(heavyBytes);
 });

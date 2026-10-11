@@ -183,13 +183,30 @@ describe('the export to PDF', () => {
     await settle();
     flushSync();
     expect(single(root, '[role="alert"]').textContent.trim()).toBe(
-      'This PDF weighs about 1.4 MB for 12 pages, more than expected.',
+      'This PDF weighs about 1.4 MB for 12 pages, more than expected. Tasklace can write a lighter one directly, with the same pages.',
     );
     expect(() => button(root, TEXT.export)).toThrow();
     click(button(root, TEXT.exportAsItIs));
     await settle();
     flushSync();
     expect(control.calls.filter((call) => call === 'saveHeldPdf')).toEqual(['saveHeldPdf']);
+    expect(app.pdfExport).toBeNull();
+  });
+
+  it('writes the lighter PDF made without the browser when asked', async () => {
+    const { app, root, control } = await renderExport();
+    control.pdfResult = { ok: true, value: { kind: 'heavy', bytes: 1_400_000, pages: 12 } };
+    click(button(root, TEXT.export));
+    await settle();
+    flushSync();
+    click(button(root, TEXT.exportLighter));
+    await settle();
+    flushSync();
+    expect(control.calls.filter((call) => call.endsWith('Pdf'))).toEqual([
+      'exportPdf',
+      'exportLighterPdf',
+    ]);
+    expect(app.notices.map((notice) => notice.text)).toEqual(['Exported to Thesis.pdf.']);
     expect(app.pdfExport).toBeNull();
   });
 
@@ -200,7 +217,7 @@ describe('the export to PDF', () => {
     await settle();
     flushSync();
     expect(single(root, '[role="alert"]').textContent.trim()).toBe(
-      'This PDF weighs about 600 kB for 1 page, more than expected.',
+      'This PDF weighs about 600 kB for 1 page, more than expected. Tasklace can write a lighter one directly, with the same pages.',
     );
     pick(choice(root, TEXT.a3));
     expect(root.querySelector('[role="alert"]')).toBeNull();

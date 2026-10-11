@@ -73,6 +73,7 @@ function fakeBridge(
     exportPdf: (_document, name) =>
       Promise.resolve({ ok: true, value: { kind: 'exported', fileName: `${name}.pdf` } }),
     saveHeldPdf: () => Promise.resolve({ ok: true, value: { fileName: 'held.pdf' } }),
+    exportLighterPdf: () => Promise.resolve({ ok: true, value: { fileName: 'lighter.pdf' } }),
   };
   return { bridge, saves, suggestedNames, events, adopted, adoption };
 }

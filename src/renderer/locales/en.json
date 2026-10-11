@@ -580,11 +580,12 @@
     "wholeProjectWithoutDates": "Whole project",
     "making": "Making the PDF…",
     "tooLarge": "This PDF is too large to be written. Choose a coarser zoom, a shorter period or fewer columns.",
-    "heavy": "This PDF weighs about {size} for {pages}, more than expected.",
+    "heavy": "This PDF weighs about {size} for {pages}, more than expected. Tasklace can write a lighter one directly, with the same pages.",
     "exportAsItIs": "Export as it is…",
     "pages": {
       "one": "{count} page",
       "other": "{count} pages"
-    }
+    },
+    "exportLighter": "Export the lighter PDF…"
   }
 }

@@ -18,6 +18,7 @@ export const IPC_CHANNELS = {
   exportProject: 'project:export',
   exportPdf: 'project:export-pdf',
   saveHeldPdf: 'project:save-held-pdf',
+  exportLighterPdf: 'project:export-lighter-pdf',
   adoptProject: 'project:adopt',
   pageStartFailed: 'page:start-failed',
   flushRequested: 'project:flush-requested',
@@ -98,6 +99,7 @@ export interface TasklaceBridge {
     suggestedName: string,
   ) => Promise<BridgeResult<PdfExport>>;
   readonly saveHeldPdf: () => Promise<BridgeResult<ExportedFile>>;
+  readonly exportLighterPdf: () => Promise<BridgeResult<ExportedFile>>;
   readonly onFlushRequested: (flush: () => Promise<boolean>) => void;
   readonly reportStartFailure: () => void;
 }
@@ -115,6 +117,7 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.exportProject]: BridgeResult<ExportedFile>;
   readonly [IPC_CHANNELS.exportPdf]: BridgeResult<PdfExport>;
   readonly [IPC_CHANNELS.saveHeldPdf]: BridgeResult<ExportedFile>;
+  readonly [IPC_CHANNELS.exportLighterPdf]: BridgeResult<ExportedFile>;
 }
 
 export interface ChannelArguments {
@@ -134,6 +137,7 @@ export interface ChannelArguments {
   ];
   readonly [IPC_CHANNELS.exportPdf]: readonly [document: PrintDocument, suggestedName: string];
   readonly [IPC_CHANNELS.saveHeldPdf]: readonly [];
+  readonly [IPC_CHANNELS.exportLighterPdf]: readonly [];
 }
 
 export type InvokeChannel = keyof ChannelAnswers & keyof ChannelArguments;
