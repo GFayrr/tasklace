@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, plans tasks in a table and on a timeline, and has its project settings: name and start, working calendar, tags, and the critical path, date constraints and baseline among the advanced options. PDF export and collaboration are still to come, and there is no downloadable release yet.
+> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, plans tasks in a table and on a timeline, and has its project settings: name and start, working calendar, tags, and the critical path, date constraints and baseline among the advanced options. It exports plans to PDF. Collaboration is still to come, and there is no downloadable release yet.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -65,6 +65,7 @@ What Tasklace already supports:
 - Project settings in a dialog with tabs: project name and start, working days, working hours to the quarter hour and days off, each change applied at once and undone with Ctrl+Z.
 - Tag management: rename, choose one of twelve tested colors or a custom one, mark a person or a team, add and delete (with a question when tasks use the tag); the legend shows the patterns of close colors.
 - A list of the conflicts of people and teams next to the legend: a line selects the first task concerned and scrolls the table and the timeline to it.
+- PDF export: A4, A3 or US Letter, the whole project or chosen days, an automatic or chosen zoom and optional columns, with a live preview of the first page. Text is never smaller than 10 points: a plan fits on one page when it can, otherwise it is printed on a grid of pages repeating the names and the time scale. The title, the export date, the legend of the tags and the page numbers are on every page; a PDF heavier than expected can be written again without the browser, much lighter.
 - Advanced options, off by default, turned on in the project settings: with the critical path on, the table shows total and free floats, the timeline underlines critical tasks and draws how far the others can slip; with date constraints on, a task can have a date it must finish on and a deadline, each date missed is listed with the conflicts, marked in the table and on the timeline, and each deadline is drawn on its row; with the baseline on, the plan can be frozen, each task then shows where it was planned and how many working days later or earlier it now ends.
 
 ## Roadmap
@@ -74,7 +75,7 @@ What Tasklace already supports:
 - [x] Tags and person or team conflict detection
 - [x] Project file format, validation, JSON and CSV import and export
 - [x] Desktop application and user interface
-- [ ] PDF export
+- [x] PDF export
 - [ ] Real-time collaboration on the local network
 - [ ] End-to-end encrypted relay and deployment guide
 - [ ] Portable Windows executable
@@ -97,18 +98,19 @@ npm install
 
 The following commands are for development only.
 
-| Command                | Purpose                                                 |
-| ---------------------- | ------------------------------------------------------- |
-| `npm run dev`          | Start the desktop application in development mode       |
-| `npm run build`        | Build the main process, the preload bridge and the page |
-| `npm run test:e2e`     | Build, then test the running application end to end     |
-| `npm test`             | Run unit and property-based tests with coverage         |
-| `npm run test:watch`   | Run tests in watch mode                                 |
-| `npm run bench`        | Check performance on 10,000 tasks and 20,000 links      |
-| `npm run bench:growth` | Check that key operations grow as their complexity says |
-| `npm run lint`         | Type-check TypeScript and Svelte, lint with ESLint      |
-| `npm run format`       | Format the code with Prettier                           |
-| `npm run format:check` | Check formatting without changing files                 |
+| Command                | Purpose                                                         |
+| ---------------------- | --------------------------------------------------------------- |
+| `npm run dev`          | Start the desktop application in development mode               |
+| `npm run build`        | Build the main process, the preload bridge and the page         |
+| `npm run test:e2e`     | Build, then test the running application end to end             |
+| `npm test`             | Run unit and property-based tests with coverage                 |
+| `npm run test:watch`   | Run tests in watch mode                                         |
+| `npm run bench`        | Check performance on 10,000 tasks and 20,000 links              |
+| `npm run bench:growth` | Check that key operations grow as their complexity says         |
+| `npm run pdf:compare`  | Print three sample plans with both PDF engines and compare them |
+| `npm run lint`         | Type-check TypeScript and Svelte, lint with ESLint              |
+| `npm run format`       | Format the code with Prettier                                   |
+| `npm run format:check` | Check formatting without changing files                         |
 
 The test suite covers edge cases extensively and uses property-based testing to check scheduling invariants and data exchange on thousands of random projects, and to make sure that no malformed input is ever accepted. Continuous integration runs formatting, linting, unit tests and end-to-end tests on Windows and Linux, and the growth checks of key operations, for every push and pull request.
 
@@ -121,20 +123,22 @@ src/core/            pure logic, independent of any user interface
   exchange/          JSON and CSV import and export
   file/              .tasklace project file: header, checksum and defensive reading
   model/             project data types
+  print/             printed page layout, drawing orders and their checks, SVG
   scheduling/        dependency graph, forward and backward passes, summaries, WBS
   shared/            shared Yjs document, merge repairs and fractional ordering
   tags/              tag colors, patterns and person or team conflicts
   testing/           test helpers and random data generators
   validation/        validation of untrusted project data
-src/main/            Electron main process: window, security, files, file worker
+src/main/            Electron main process: window, security, files, file worker, PDF printing
 src/preload/         minimal typed bridge between the page and the main process
-src/renderer/        Svelte user interface: theme, messages, schedule worker, components
+src/renderer/        Svelte user interface: theme, messages, schedule worker, components, printed pages
 docs/                roadmap and user documentation
 tests/e2e/           end-to-end journeys in the running application (Playwright)
 tests/file/          .tasklace files with real compression, decompression bombs
-tests/fixtures/      large test projects generated from fixed seeds
+tests/fixtures/      large test projects and PDF sample plans generated from fixed seeds
 tests/growth/        growth checks of key operations, run in CI
 tests/perf/          performance benchmark
+tests/pdf-compare/   comparison of the two PDF engines on the sample plans
 tests/repository/    repository checks: small text fixtures, no text written in a component, comments, wording
 ```
 

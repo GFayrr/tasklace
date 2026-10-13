@@ -15,11 +15,15 @@ import {
   workTask,
 } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
+import { buildPdfSample } from '../fixtures/pdf-samples';
 import { closeDiscarding, launchApplication } from './application';
 import { answerDialogs } from './dialogs';
 
 const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
 const HEAVY_PDF_TIMEOUT_MS = 120_000;
+const A3_PORTRAIT = [841.89, 1190.55] as const;
+/** Chromium rounds the height of a page by up to 0.55 point, a fifth of a millimetre, whatever the way its size is given. */
+const PAGE_SIZE_TOLERANCE = 1;
 const DESIGN = { id: 'design', name: 'Design', color: '#2a78d6', representsPersonOrTeam: false };
 const DOCUMENTATION = {
   id: 'documentation',
@@ -255,4 +259,50 @@ test('writes a heavy PDF again without the browser in the file worker, with the 
       ? answers.heavy.value.bytes
       : 0;
   expect(pdf.length).toBeLessThan(heavyBytes);
+});
+
+/** Lists the page sizes of a PDF in points, rounded to a tenth, from the media boxes it declares. */
+function pageSizes(pdf: Buffer): number[][] {
+  return [
+    ...pdf.toString('latin1').matchAll(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/g),
+  ].map(([, width = '0', height = '0']) => [
+    Math.round(Number(width) * 10) / 10,
+    Math.round(Number(height) * 10) / 10,
+  ]);
+}
+
+test('prints a chosen period at a chosen zoom on portrait A3 pages, as many as the preview announces', async () => {
+  const plan = buildPdfSample('medium');
+  const source = join(folder, `${plan.name}.tasklace`);
+  await writeFile(
+    source,
+    encodeTasklaceFile(createSharedDocument(plan, crypto.randomUUID()), zlibCompressor),
+  );
+  await answerDialogs(application, { open: source });
+  await page.getByRole('button', { name: 'Open', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Open a file…' }).click();
+  await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue(plan.name);
+  const dialog = await openExport();
+  await dialog.getByText('A3', { exact: true }).click();
+  await dialog.getByText('Portrait', { exact: true }).click();
+  await dialog.getByText('Week', { exact: true }).click();
+  await dialog.getByText('From – to', { exact: true }).click();
+  const last = dialog.getByLabel('Last day printed');
+  await last.fill('2026-11-27');
+  await last.dispatchEvent('change');
+  const caption = dialog.getByText(/^Preview · page 1 of \d+$/);
+  await expect(caption).toBeVisible();
+  const announced = Number(/of (\d+)$/.exec((await caption.textContent()) ?? '')?.[1]);
+  const path = join(folder, 'Medium.pdf');
+  await answerDialogs(application, { save: path });
+  await dialog.getByRole('button', { name: 'Export PDF…' }).click();
+  await expect(page.getByText('Exported to Medium.pdf.')).toBeVisible({ timeout: 60_000 });
+  const pdf = await readFile(path);
+  expect(pageCount(pdf)).toBe(announced);
+  const sizes = pageSizes(pdf);
+  expect(sizes).toHaveLength(announced);
+  for (const [width = 0, height = 0] of sizes) {
+    expect(Math.abs(width - A3_PORTRAIT[0])).toBeLessThanOrEqual(PAGE_SIZE_TOLERANCE);
+    expect(Math.abs(height - A3_PORTRAIT[1])).toBeLessThanOrEqual(PAGE_SIZE_TOLERANCE);
+  }
 });

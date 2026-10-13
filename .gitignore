@@ -14,6 +14,7 @@ CLAUDE.md
 *.key
 
 test-results/
+/pdf-compare/
 playwright-report/
 blob-report/
 .eslintcache

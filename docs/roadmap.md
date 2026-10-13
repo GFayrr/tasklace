@@ -2,17 +2,49 @@
 
 Tasklace is built in nine steps. Each step, or sub-step, is developed on its own branch, tested, reviewed and merged into `main` through a pull request.
 
-| Step | Content                                                    | Status  |
-| ---- | ---------------------------------------------------------- | ------- |
-| 1    | Foundations and working-time calendar                      | Done    |
-| 2    | Scheduling engine                                          | Done    |
-| 3    | Tags and person or team conflicts                          | Done    |
-| 4    | Shared model, project file, validation, JSON and CSV       | Done    |
-| 5    | Secure Electron shell and Svelte user interface            | Done    |
-| 6    | PDF export and comparison of the page splitting strategies | Planned |
-| 7    | Real-time collaboration on the local network               | Planned |
-| 8    | End-to-end encrypted relay                                 | Planned |
-| 9    | Distribution                                               | Planned |
+| Step | Content                                              | Status  |
+| ---- | ---------------------------------------------------- | ------- |
+| 1    | Foundations and working-time calendar                | Done    |
+| 2    | Scheduling engine                                    | Done    |
+| 3    | Tags and person or team conflicts                    | Done    |
+| 4    | Shared model, project file, validation, JSON and CSV | Done    |
+| 5    | Secure Electron shell and Svelte user interface      | Done    |
+| 6    | PDF export                                           | Done    |
+| 7    | Real-time collaboration on the local network         | Planned |
+| 8    | End-to-end encrypted relay                           | Planned |
+| 9    | Distribution                                         | Planned |
+
+## Step 6: PDF export (done)
+
+Step 6 prints a plan to PDF. Like step 5, it was developed on its own branch, one sub-step after the other, each merged into that branch through its own reviewed pull request, and the whole step was reviewed before being merged into `main`. The window and the printed page were approved as mockups first.
+
+### 6a. Page layout and drawing orders (done)
+
+- A4, A3 and US Letter, landscape or portrait. Text is never printed below 10 points: a plan fits on one page when it can at that size, otherwise it is split into a grid of pages, each repeating the task names and the time scale.
+- A neutral list of drawing orders (fills, strokes, tag patterns, text, nested clips) that the main process checks completely before printing, since everything the page sends is untrusted; bounded sizes and counts, no text below 10 points.
+- Each page written as an SVG image with every text escaped.
+
+### 6b. Printed pages and the export window (done)
+
+- The rows of the timeline are drawn by the same code as on screen, recorded at the printed scale: bars, progress, links, days off and the critical path underline, without the today line, the selection, deadlines, the baseline or conflict outlines.
+- The task names, the chosen columns, the title, the export date, the legend of the tags used and the page numbers are written by the print code, names shortened with an ellipsis when too long.
+- "PDF…" in the Export menu opens the "Export to PDF" window: paper and orientation, whole project or chosen days, automatic or chosen zoom, columns to print, and a live preview of the first page. The settings are remembered per project on this computer, outside the project file.
+
+### 6c. Printing with Chromium and the size guard (done)
+
+- The page is printed by Chromium in a hidden window with no script and no bridge, served from memory, with a time limit; the PDF holds vector shapes, selectable text and the static weights of Jost embedded as subsets.
+- A PDF heavier than 500 KB for 10 pages (never less than 500 KB) is kept back: the window says how heavy it is and lets the user export it as it is.
+
+### 6d. The lighter PDF (done)
+
+- "Export the lighter PDF…" writes the same pages without the browser, with PDFKit in the file worker; on the sample plans the files are 40 to 80 % smaller. Chromium stays the main engine because it also prints the characters that Jost does not have, such as Greek, Chinese, Arabic or emoji.
+- Tag patterns are drawn as real lines, bounded to the page and to a budget per document so that a forged document cannot exhaust the memory of the worker.
+
+### 6e. Sample plans and comparison (done)
+
+- Three sample plans generated from a fixed seed: about 10 tasks over a month, 100 over six months and 500 over two years.
+- `npm run pdf:compare` prints them with both engines and several settings and writes the PDF files with a summary table into `pdf-compare/`.
+- End-to-end journeys check real PDF files: their header, pages and page sizes, the embedded typeface, the pages announced by the preview, and the lighter PDF made in the file worker.
 
 ## Step 5: secure Electron shell and Svelte user interface (done)
 
