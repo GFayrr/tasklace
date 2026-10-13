@@ -25,6 +25,7 @@ export default defineConfig(
             'eslint.config.js',
             'electron.vite.config.ts',
             'playwright.config.ts',
+            'playwright.pdf-compare.config.ts',
             'svelte.config.js',
           ],
         },

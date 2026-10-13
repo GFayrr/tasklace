@@ -11,14 +11,15 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "lint": "tsc --noEmit && tsc --noEmit -p src/main && tsc --noEmit -p src/preload && svelte-check --tsconfig src/renderer/tsconfig.json --fail-on-warnings --output human && tsc --noEmit -p tests && tsc --noEmit -p tests/e2e && eslint .",
+    "lint": "tsc --noEmit && tsc --noEmit -p src/main && tsc --noEmit -p src/preload && svelte-check --tsconfig src/renderer/tsconfig.json --fail-on-warnings --output human && tsc --noEmit -p tests && tsc --noEmit -p tests/e2e && tsc --noEmit -p tests/pdf-compare && eslint .",
     "format": "prettier --write .",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "format:check": "prettier --check .",
     "bench": "vitest run --config vitest.perf.config.ts",
     "bench:growth": "vitest run --config vitest.growth.config.ts",
-    "test:e2e": "electron-vite build && playwright test"
+    "test:e2e": "electron-vite build && playwright test",
+    "pdf:compare": "electron-vite build && playwright test --config playwright.pdf-compare.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
