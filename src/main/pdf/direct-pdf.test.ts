@@ -17,6 +17,7 @@ import { MissingCharacter, writeDirectPdf } from './direct-pdf';
 
 const FONTS = printFontsIn(join(import.meta.dirname, '../../renderer/public/fonts'));
 const RECT = { kind: 'rect', x: 10, y: 20, width: 30, height: 8 } as const;
+const SURVEY_WIDTH = 28.11;
 
 /** Builds a landscape A4 document whose single page holds some orders. */
 function documentOf(...orders: PrintOrder[]): PrintDocument {
@@ -227,7 +228,7 @@ describe('writeDirectPdf', () => {
     const [start, middle, end] = positions;
     expect(start).toEqual([100, 595.28 - 50]);
     const width = (start?.[0] ?? 0) - (end?.[0] ?? 0);
-    expect(width).toBeGreaterThan(20);
+    expect(width).toBeCloseTo(SURVEY_WIDTH, 6);
     expect((start?.[0] ?? 0) - (middle?.[0] ?? 0)).toBeCloseTo(width / 2, 6);
     expect(new Set(positions.map(([, y]) => y))).toEqual(new Set([595.28 - 50]));
   });
@@ -290,6 +291,29 @@ describe('writeDirectPdf', () => {
     );
     expect(operatorCount(pdf, 'S')).toBe(1);
   });
+
+  it.each([
+    ['diagonal', '0 8 m\n8 0 l\n'],
+    ['reverseDiagonal', '0 0 m\n8 8 l\n'],
+    ['crossHatch', '0 8 m\n8 0 l\n0 0 m\n8 8 l\n'],
+    ['horizontal', '0 4 m\n8 4 l\n'],
+    ['vertical', '4 0 m\n4 8 l\n'],
+  ] as const)(
+    'draws the %s pattern over one tile as the lines of its tile',
+    async (pattern, lines) => {
+      const pdf = await pdfText(
+        documentOf({
+          kind: 'pattern',
+          shape: { kind: 'rect', x: 0, y: 0, width: 8, height: 8 },
+          pattern,
+        }),
+      );
+      expect(pdf).toContain(
+        `q\n0 0 8 8 re\nW n\n1.5 w\n/DeviceRGB CS\n0 0 0 SCN\n/Gs1 gs\n${lines}S\nQ`,
+      );
+      expect(operatorCount(pdf, 'S')).toBe(1);
+    },
+  );
 
   it('draws a dotted pattern as filled dots over every tile a path with curves reaches', async () => {
     const shape = {

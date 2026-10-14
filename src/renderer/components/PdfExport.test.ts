@@ -116,9 +116,17 @@ describe('the export to PDF', () => {
     expect(single(root, '.caption').textContent).toBe('Preview · page 1 of 1');
     expect(single(root, 'canvas').getAttribute('aria-label')).toBe(TEXT.previewLabel);
     const drawn = drawFrames();
-    expect(drawn.filter((call) => call.name === 'fillText').map((call) => call.args[0])).toContain(
+    expect(drawn.filter((call) => call.name === 'fillText').map((call) => call.args[0])).toEqual([
+      'Thesis',
+      'Exported Sep 28, 2026',
+      'September 2026',
+      '28',
+      '29',
+      'Name',
       'Survey',
-    );
+      'Writing',
+      'Page 1 of 1',
+    ]);
     expect(button(root, TEXT.export).disabled).toBe(false);
   });
 
@@ -292,6 +300,88 @@ describe('the export to PDF', () => {
     click(button(root, TEXT.export));
     await settle();
     expect(control.pdfExports).toHaveLength(1);
+  });
+
+  it('ignores a date outside the years handled, keeping the days chosen', async () => {
+    const { root } = await renderExport();
+    pick(choice(root, TEXT.days));
+    const first = single(root, `input[aria-label="${TEXT.firstDay}"]`) as HTMLInputElement;
+    const last = single(root, `input[aria-label="${TEXT.lastDay}"]`) as HTMLInputElement;
+    first.value = '2019-12-31';
+    first.dispatchEvent(new Event('change', { bubbles: true }));
+    last.value = '2201-01-01';
+    last.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(
+      (JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? 'null') as PrintSettings).period,
+    ).toEqual({ kind: 'days', firstDay: 20_724, lastDay: 20_725 });
+  });
+
+  it('prints with the settings chosen when the local storage is refused, warning that they will not be remembered', async () => {
+    const refusal = new DOMException('Storage is disabled.', 'SecurityError');
+    const storage = vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+      throw refusal;
+    });
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const { root, control } = await renderExport();
+      pick(choice(root, TEXT.a3));
+      click(button(root, TEXT.export));
+      await settle();
+      expect(control.pdfExports.map((exported) => exported.document.paper)).toEqual(['a3']);
+      expect(warned.mock.calls).toEqual([
+        ['The width of the table will not be remembered:', refusal],
+        ['The print settings will not be remembered:', refusal],
+      ]);
+    } finally {
+      storage.mockRestore();
+      warned.mockRestore();
+    }
+  });
+
+  it('draws the patterns of close tags in the preview, reporting once that this computer cannot draw them', async () => {
+    const tags = [
+      { id: 'design', name: 'Design', color: '#2A78D6', representsPersonOrTeam: false },
+      { id: 'near', name: 'Near', color: '#2A78D7', representsPersonOrTeam: false },
+    ];
+    const tagged = project(
+      [
+        workTask('a', { name: 'Survey', sortKey: 'a', tagId: 'design' }),
+        workTask('b', { name: 'Writing', sortKey: 'b', tagId: 'near' }),
+      ],
+      [],
+      { name: 'Thesis', startDate: at(2026, 9, 28, 9), tags },
+    );
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { app, root } = await renderExport(tagged);
+      pick(choice(root, TEXT.a3));
+      expect(logged.mock.calls).toEqual([
+        ['The patterns could not be drawn: the canvas gave no drawing context or pattern.'],
+      ]);
+      expect(app.notices.map((notice) => notice.text)).toEqual([
+        english.notices.drawingUnavailable.patterns,
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('says the plan cannot be printed while its dates cannot be worked out', async () => {
+    const late = project(
+      [
+        workTask('a', {
+          name: 'Survey',
+          startNoEarlierThan: at(2200, 12, 31, 9),
+          segments: [{ durationHours: 70, gapDaysBefore: 0, startNoEarlierThan: null }],
+        }),
+      ],
+      [],
+      { name: 'Thesis', startDate: at(2026, 9, 28, 9) },
+    );
+    const { root } = await renderExport(late);
+    expect(single(root, '[role="status"]').textContent).toBe(TEXT.scheduleFailed);
+    expect(button(root, TEXT.export).disabled).toBe(true);
   });
 
   it('offers the float columns only with the critical path on, and says so', async () => {

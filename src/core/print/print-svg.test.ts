@@ -181,7 +181,9 @@ describe('printPageSvg', () => {
     ],
   ] as const)('sizes a %s page', (_name, paper, orientation, size) => {
     const svg = printPageSvg(checkedOrThrow({ ...documentOf([]), paper, orientation }), 0);
-    expect(svg.slice(0, 120)).toContain(size);
+    expect(svg.slice(0, svg.indexOf(' font-family'))).toBe(
+      `<svg xmlns="http://www.w3.org/2000/svg" ${size}`,
+    );
   });
 
   it('throws for a page the document does not have', () => {

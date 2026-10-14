@@ -54,13 +54,18 @@ function sourceOf(plan: Project): PrintSource {
     theme: SAND_GRAPHITE,
     messages,
     locale: 'en-US',
-    exportedAt: new Date(Date.UTC(2026, 9, 9, 12)),
+    exportedAt: new Date(2026, 9, 9, 12),
   };
 }
 
 /** Prints the long plan, all its pages or the first ones up to a limit. */
 function print(pageLimit?: number) {
   return buildPrintDocument(sourceOf(longPlan()), SETTINGS, measure, pageLimit);
+}
+
+/** Counts the pages of a printed plan, or gives back the refusal. */
+function pagesOf(result: ReturnType<typeof print>): number | string {
+  return result.ok ? result.value.document.pages.length : result.error;
 }
 
 /** Adds up the cost of the pages of the long plan printed without limits. */
@@ -82,18 +87,18 @@ describe('the limits of a printed document', () => {
   it('prints pages that hold exactly as many orders as a document allows, and refuses one more', () => {
     const cost = costOfPages();
     limits.orders = cost.orders;
-    expect(print().ok).toBe(true);
+    expect(pagesOf(print())).toBe(3);
     limits.orders = cost.orders - 1;
     expect(print()).toEqual({ ok: false, error: 'TOO_DETAILED' });
-    expect(print(1).ok).toBe(true);
+    expect(pagesOf(print(1))).toBe(1);
   });
 
   it('prints pages that hold exactly as many numbers of paths as a document allows, and refuses one more', () => {
     const cost = costOfPages();
     limits.pathNumbers = cost.pathNumbers;
-    expect(print().ok).toBe(true);
+    expect(pagesOf(print())).toBe(3);
     limits.pathNumbers = cost.pathNumbers - 1;
     expect(print()).toEqual({ ok: false, error: 'TOO_DETAILED' });
-    expect(print(1).ok).toBe(true);
+    expect(pagesOf(print(1))).toBe(1);
   });
 });

@@ -392,7 +392,7 @@ function columnTable(
         measure(messages.table.name, TEXT_SIZE, SEMIBOLD),
         ...rows.map(
           (row, index) =>
-            (indents[index] ?? 0) +
+            valueAt(indents, index) +
             measure(row.task.name, TEXT_SIZE, summaryRows.has(index) ? SEMIBOLD : REGULAR),
         ),
       ),
@@ -506,17 +506,23 @@ function linksByBand(
 ): Dependency[][] {
   const bands = Array.from({ length: bandCount }, (): Dependency[] => []);
   for (const dependency of dependencies) {
-    const from = outline.rowIndexById.get(dependency.predecessorId);
-    const to = outline.rowIndexById.get(dependency.successorId);
-    if (from === undefined || to === undefined) {
-      continue;
-    }
+    const from = rowOf(outline, dependency.predecessorId);
+    const to = rowOf(outline, dependency.successorId);
     const last = Math.floor(Math.max(from, to) / rowsPerPage);
     for (let band = Math.floor(Math.min(from, to) / rowsPerPage); band <= last; band += 1) {
-      bands[band]?.push(dependency);
+      valueAt(bands, band).push(dependency);
     }
   }
   return bands;
+}
+
+/** Returns the printed row of a task, every task having one since every row is unfolded, and throws for a task that has none. */
+function rowOf(outline: PlanOutline, taskId: TaskId): number {
+  const row = outline.rowIndexById.get(taskId);
+  if (row === undefined) {
+    throw new RangeError(`The linked task ${taskId} has no printed row.`);
+  }
+  return row;
 }
 
 /** Builds the scene of the timeline as printed: white paper, every row unfolded, nothing but bars, links, days off and the critical underline. */
@@ -663,9 +669,9 @@ function columnOrders(context: PageContext, page: PrintPage): DrawOrder[] {
     for (let offset = 0; offset < page.rowCount; offset += 1) {
       const row = page.firstRow + offset;
       const isName = column === table.name;
-      const indent = isName ? (table.indents[row] ?? 0) : 0;
+      const indent = isName ? valueAt(table.indents, row) : 0;
       const weight = isName && table.summaryRows.has(row) ? SEMIBOLD : REGULAR;
-      const value = fitText(column.cells[row] ?? '', inner - indent, TEXT_SIZE, weight, measure);
+      const value = fitText(valueAt(column.cells, row), inner - indent, TEXT_SIZE, weight, measure);
       const baseline = frame.rowsTop + offset * PRINT_ROW_HEIGHT + TEXT_BASELINE;
       orders.push(...text(context, value, x + indent, baseline, { weight, align: column.align }));
     }
@@ -690,7 +696,7 @@ function bodyOrders(context: PageContext, page: PrintPage): PrintOrder[] {
   drawing.translate(area.x, area.y);
   drawing.scale(PRINT_SCALE, PRINT_SCALE);
   const band = Math.floor(page.firstRow / context.layout.rowsPerPage);
-  const scene = { ...context.scene, dependencies: context.bandLinks[band] ?? [] };
+  const scene = { ...context.scene, dependencies: valueAt(context.bandLinks, band) };
   paintTimelineBody(drawing, scene, {
     left: page.timelineStart / PRINT_SCALE,
     top: page.firstRow * ROW_HEIGHT,

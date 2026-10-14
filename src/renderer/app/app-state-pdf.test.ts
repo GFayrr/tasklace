@@ -70,7 +70,7 @@ describe('exporting to PDF from the application state', () => {
     control.pdfResult = { ok: false, error: { code: 'CANCELLED' } };
     expect(await app.exportPdf(DOCUMENT)).toBeNull();
     expect(noticesOf(app)).toEqual([]);
-    expect(app.pdfExport).not.toBeNull();
+    expect(app.pdfExport).toEqual({ documentId: OPENED_DOCUMENT_ID, exportedAt: FIXED_NOW });
   });
 
   it('explains a PDF too large to be written, and any other failure as for the other exports', async () => {

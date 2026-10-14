@@ -68,9 +68,22 @@ describe('readPrintDocument', () => {
     expect(readPrintDocument(document)).toEqual({ ok: true, value: document });
   });
 
-  it('gives back copies that hold no property the document did not need', () => {
-    const result = readPrintDocument(documentWith(FILL));
-    expect(result.ok && result.value.pages[0]?.[0]).not.toBe(FILL);
+  it('gives back a copy that a later change of the document it read leaves untouched, down to its lists', () => {
+    const dash = [...STROKE.dash];
+    const segments = [...STROKE.shape.segments];
+    const clipOrders = [...CLIP.orders];
+    const page: unknown[] = [
+      { ...STROKE, shape: { kind: 'path', segments }, dash },
+      { ...CLIP, orders: clipOrders },
+    ];
+    const pages = [page];
+    const result = readPrintDocument({ ...documentWith(), pages });
+    dash.fill(MAX_DASH_STEP);
+    segments.fill(PATH_MOVE);
+    clipOrders.length = 0;
+    page.length = 0;
+    pages.push([]);
+    expect(result).toEqual({ ok: true, value: documentWith(STROKE, CLIP) });
   });
 
   it('accepts any valid document unchanged', () => {

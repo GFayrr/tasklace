@@ -182,7 +182,8 @@ describe('printLayout', () => {
 
   it('refuses more pages than the limit, before laying any of them out', () => {
     const rowsForLimit = 27 * MAX_PRINT_PAGES;
-    expect(printLayout(request({ rowCount: rowsForLimit })).ok).toBe(true);
+    const atLimit = printLayout(request({ rowCount: rowsForLimit }));
+    expect(atLimit.ok && atLimit.value.pages.length).toBe(MAX_PRINT_PAGES);
     expect(printLayout(request({ rowCount: rowsForLimit + 1 }))).toEqual({
       ok: false,
       error: 'TOO_MANY_PAGES',

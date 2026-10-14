@@ -21,6 +21,8 @@ vi.mock('../../core/limits', async (importOriginal) => {
   };
 });
 
+const CURVE_OPERATOR = / c\n/g;
+const CURVES_PER_CIRCLE = 4;
 const FONTS = printFontsIn(join(import.meta.dirname, '../../renderer/public/fonts'));
 
 /** Builds a document whose page covers a rectangle with a pattern. */
@@ -38,10 +40,15 @@ function patterned(x: number, width: number): CheckedPrintDocument {
   });
 }
 
+/** Counts the dots of patterns an uncompressed PDF draws, each dot being a circle of four curves. */
+async function dotsDrawn(document: CheckedPrintDocument): Promise<number> {
+  const pdf = Buffer.from(await writeDirectPdf(document, FONTS, false)).toString('latin1');
+  return (pdf.match(CURVE_OPERATOR) ?? []).length / CURVES_PER_CIRCLE;
+}
+
 describe('the tiles of the patterns of a lighter PDF', () => {
   it('draws the tiles the document needs within the limit, over all its pages', async () => {
-    const pdf = await writeDirectPdf(patterned(0, 16), FONTS);
-    expect(Buffer.from(pdf).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+    expect(await dotsDrawn(patterned(0, 16))).toBe(4);
   });
 
   it('refuses a document whose patterns need more tiles than the limit', async () => {
@@ -51,8 +58,7 @@ describe('the tiles of the patterns of a lighter PDF', () => {
   });
 
   it('counts no tile for a pattern outside the page, which would not show', async () => {
-    const pdf = await writeDirectPdf(patterned(20_000, 12_000), FONTS);
-    expect(Buffer.from(pdf).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+    expect(await dotsDrawn(patterned(20_000, 12_000))).toBe(0);
   });
 
   it('turns a document refused for its patterns into a PDF too large, logged, in the file worker task', async () => {

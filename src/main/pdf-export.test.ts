@@ -281,6 +281,26 @@ describe('exporting to PDF', () => {
     },
   );
 
+  it.each([
+    ['portrait US Letter', 'letter', 'portrait', { width: 8.5, height: 11 }],
+    ['landscape US Letter', 'letter', 'landscape', { width: 11, height: 8.5 }],
+    ['portrait A3', 'a3', 'portrait', { width: 841.89 / 72, height: 1190.55 / 72 }],
+  ] as const)('prints a %s page at its size in inches', async (_name, paper, orientation, size) => {
+    chooseToSave(join(folder, 'thesis'));
+    await request(IPC_CHANNELS.exportPdf, page(), { ...DOCUMENT, paper, orientation }, 'Thesis');
+    const [window] = windows;
+    expect(window?.webContents.printToPDF.mock.calls).toEqual([
+      [
+        {
+          pageSize: size,
+          landscape: false,
+          margins: { top: 0, bottom: 0, left: 0, right: 0 },
+          printBackground: true,
+          preferCSSPageSize: false,
+        },
+      ],
+    ]);
+  });
   it('writes the PDF kept back when the user exports it as it is, once', async () => {
     const sender = page();
     const pdf = printsBytes(PDF_GUARD_BYTES_PER_PAGE * PDF_GUARD_MIN_PAGES + 1);
