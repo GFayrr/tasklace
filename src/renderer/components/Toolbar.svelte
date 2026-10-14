@@ -34,6 +34,13 @@
   const exportItems: readonly MenuItem[] = $derived([
     { key: 'csv', label: text.toolbar.exportCsv, select: () => void app.exportFile('csv') },
     { key: 'json', label: text.toolbar.exportJson, select: () => void app.exportFile('json') },
+    {
+      key: 'pdf',
+      label: text.toolbar.exportPdf,
+      select: () => {
+        app.openPdfExport();
+      },
+    },
   ]);
 
   const taskActions: readonly TaskAction[] = $derived([

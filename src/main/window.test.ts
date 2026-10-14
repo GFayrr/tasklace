@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
-import { createMainWindow } from './window';
+import { createMainWindow, createPrintWindow } from './window';
 
 const created = vi.hoisted(() => [] as { options: unknown; shown: boolean }[]);
 
@@ -49,5 +49,34 @@ describe('createMainWindow', () => {
     expect(record?.shown).toBe(false);
     window.emit('ready-to-show');
     expect(record?.shown).toBe(true);
+  });
+});
+
+describe('createPrintWindow', () => {
+  it('creates a window that is never shown, with no bridge and no script, for printing only', () => {
+    created.length = 0;
+    createPrintWindow();
+    expect(created).toEqual([
+      {
+        options: {
+          show: false,
+          webPreferences: {
+            contextIsolation: true,
+            sandbox: true,
+            javascript: false,
+            nodeIntegration: false,
+            nodeIntegrationInWorker: false,
+            nodeIntegrationInSubFrames: false,
+            webSecurity: true,
+            allowRunningInsecureContent: false,
+            webviewTag: false,
+            navigateOnDragDrop: false,
+            experimentalFeatures: false,
+            spellcheck: false,
+          },
+        },
+        shown: false,
+      },
+    ]);
   });
 });

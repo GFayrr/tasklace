@@ -1,4 +1,5 @@
 import * as Y from 'yjs';
+import type { PrintDocument } from '../../core/print/print-document';
 import { describe, expect, it, vi } from 'vitest';
 import { createSharedDocument, readDocumentId } from '../../core/shared/shared-document';
 import type { SharedSession } from '../../core/shared/shared-session';
@@ -18,6 +19,12 @@ import { settle } from '../app/testing/fake-app-context';
 
 const OTHER_ID = '00000000-0000-4000-8000-000000000002';
 const SAMPLE = project([workTask('a')]);
+const PRINTED: PrintDocument = {
+  paper: 'a4',
+  orientation: 'landscape',
+  title: 'Plan',
+  pages: [[]],
+};
 const SAVED: BridgeResult<SavedProject> = { ok: true, value: { localCopySaved: true } };
 const QUIET: ProjectFilesListener = {
   failed: () => undefined,
@@ -70,6 +77,14 @@ function fakeBridge(
     saveProjectAs: record(true),
     exportProject: (_kind, _text, name) =>
       Promise.resolve({ ok: true, value: { fileName: `${name}.csv` } }),
+    exportPdf: (_document, name) =>
+      Promise.resolve({ ok: true, value: { kind: 'exported', fileName: `${name}.pdf` } }),
+    saveHeldPdf: () => Promise.resolve({ ok: true, value: { fileName: 'held.pdf' } }),
+    discardHeldPdf: () => {
+      events.push('discard');
+      return Promise.resolve({ ok: true, value: null });
+    },
+    exportLighterPdf: () => Promise.resolve({ ok: true, value: { fileName: 'lighter.pdf' } }),
   };
   return { bridge, saves, suggestedNames, events, adopted, adoption };
 }
@@ -203,7 +218,12 @@ describe('createProjectFiles', () => {
     expect(await files.importFile('csv')).toEqual(busy);
     expect(await files.create(SAMPLE)).toEqual(busy);
     expect(await files.exportFile('csv', 'a', 'Plan')).toEqual(busy);
+    expect(await files.exportPdf(PRINTED, 'Plan')).toEqual(busy);
+    expect(await files.saveHeldPdf()).toEqual(busy);
+    expect(await files.exportLighterPdf()).toEqual(busy);
     expect(events).toEqual(before);
+    expect(await files.discardHeldPdf()).toEqual({ ok: true, value: null });
+    expect(events).toEqual([...before, 'discard']);
     finish(openedOf(OTHER_ID));
     expect((await first).ok).toBe(true);
     expect(await files.exportFile('csv', 'a', 'Plan')).toEqual({

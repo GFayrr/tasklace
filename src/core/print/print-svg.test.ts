@@ -1,0 +1,262 @@
+import fc from 'fast-check';
+import { describe, expect, it } from 'vitest';
+import { checkedOrThrow, checkedPrintDocumentArbitrary } from '../testing/print-arbitrary';
+import {
+  PATH_CLOSE,
+  PATH_CURVE,
+  PATH_LINE,
+  PATH_MOVE,
+  type PrintDocument,
+  type PrintOrder,
+} from './print-document';
+import type { CheckedPrintDocument } from './read-print-document';
+import { escapeMarkup, printPageSvg, svgNumber } from './print-svg';
+
+const TAG = /<(\/?)([a-zA-Z]+)((?:\s+[a-zA-Z:-]+="[^"<]*")*)\s*(\/?)>/g;
+const TEXT_CONTENT = /<text[^>]*>([^<]*)<\/text>/g;
+const ENTITIES: Readonly<Record<string, string>> = {
+  '&amp;': '&',
+  '&lt;': '<',
+  '&gt;': '>',
+  '&quot;': '"',
+  '&#39;': "'",
+};
+
+/** Builds a document whose pages hold the given orders. */
+function documentOf(...pages: PrintDocument['pages']): CheckedPrintDocument {
+  return checkedOrThrow({ paper: 'a4', orientation: 'landscape', title: 'Thesis', pages });
+}
+
+/** Tells whether markup is made only of tags with quoted attributes, closed in order, and of text without a raw markup character. */
+function isBalancedMarkup(markup: string): boolean {
+  const open: string[] = [];
+  let end = 0;
+  for (const match of markup.matchAll(TAG)) {
+    if (/[<>]/.test(markup.slice(end, match.index))) {
+      return false;
+    }
+    end = match.index + match[0].length;
+    const [, closing, name = '', , selfClosing] = match;
+    if (closing === '/' && open.pop() !== name) {
+      return false;
+    }
+    if (closing !== '/' && selfClosing !== '/') {
+      open.push(name);
+    }
+  }
+  return open.length === 0 && end === markup.length;
+}
+
+/** Returns the texts an SVG image writes, with their characters decoded. */
+function textsOf(svg: string): string[] {
+  return [...svg.matchAll(TEXT_CONTENT)].map(([, text = '']) =>
+    text.replace(/&[a-z#0-9]+;/g, (entity) => ENTITIES[entity] ?? entity),
+  );
+}
+
+/** Lists the texts of orders in the order they are written, those inside clips included. */
+function textsIn(order: PrintOrder): string[] {
+  if (order.kind === 'clip') {
+    return order.orders.flatMap(textsIn);
+  }
+  return order.kind === 'text' ? [order.text] : [];
+}
+
+describe('printPageSvg', () => {
+  it('writes a page sized in points with each kind of order', () => {
+    const svg = printPageSvg(
+      documentOf([
+        {
+          kind: 'fill',
+          shape: { kind: 'rect', x: 10, y: 20.004, width: 30, height: 40 },
+          color: '#2a78d6',
+          opacity: 1,
+        },
+        {
+          kind: 'fill',
+          shape: { kind: 'rect', x: 0, y: 0, width: 1, height: 1 },
+          color: '#000000',
+          opacity: 0.5,
+        },
+        {
+          kind: 'stroke',
+          shape: {
+            kind: 'path',
+            segments: [PATH_MOVE, 0, 0, PATH_LINE, 10, 5, PATH_CURVE, 1, 2, 3, 4, 5, 6, PATH_CLOSE],
+          },
+          color: '#1c1b19',
+          opacity: 1,
+          width: 1.5,
+          dash: [],
+        },
+        {
+          kind: 'stroke',
+          shape: { kind: 'rect', x: 0, y: 0, width: 2, height: 2 },
+          color: '#1c1b19',
+          opacity: 0.25,
+          width: 1,
+          dash: [3, 2],
+        },
+        {
+          kind: 'text',
+          x: 28,
+          y: 50,
+          text: 'R&D <phase> "one" \'two\'',
+          size: 10,
+          weight: 600,
+          color: '#1c1b19',
+          align: 'middle',
+        },
+      ]),
+      0,
+    );
+    expect(svg).toBe(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="841.89pt" height="595.28pt" viewBox="0 0 841.89 595.28" font-family="Jost Print" xml:space="preserve">' +
+        '<rect x="10" y="20" width="30" height="40" fill="#2a78d6"/>' +
+        '<rect x="0" y="0" width="1" height="1" fill="#000000" fill-opacity="0.5"/>' +
+        '<path d="M0 0L10 5C1 2 3 4 5 6Z" fill="none" stroke="#1c1b19" stroke-width="1.5"/>' +
+        '<rect x="0" y="0" width="2" height="2" fill="none" stroke="#1c1b19" stroke-width="1" stroke-opacity="0.25" stroke-dasharray="3 2"/>' +
+        '<text x="28" y="50" font-size="10" font-weight="600" fill="#1c1b19" text-anchor="middle">R&amp;D &lt;phase&gt; &quot;one&quot; &#39;two&#39;</text>' +
+        '</svg>',
+    );
+  });
+
+  it('draws each pattern as the dots or lines of its tiles, in the ink of the timeline, kept inside its shape, and a clip path of any shape for each clip, nested clips included', () => {
+    const rect = { kind: 'rect', x: 0, y: 0, width: 8, height: 8 } as const;
+    const svg = printPageSvg(
+      documentOf(
+        [],
+        [
+          { kind: 'pattern', shape: rect, pattern: 'dots' },
+          {
+            kind: 'clip',
+            shape: { kind: 'rect', x: 1, y: 2, width: 3, height: 4 },
+            orders: [
+              { kind: 'pattern', shape: rect, pattern: 'dots' },
+              {
+                kind: 'clip',
+                shape: { kind: 'path', segments: [PATH_MOVE, 0, 0, PATH_LINE, 4, 4, PATH_CLOSE] },
+                orders: [{ kind: 'pattern', shape: rect, pattern: 'crossHatch' }],
+              },
+            ],
+          },
+          { kind: 'clip', shape: { kind: 'rect', x: 0, y: 0, width: 1, height: 1 }, orders: [] },
+        ],
+      ),
+      1,
+    );
+    const dots = 'fill="#000000" fill-opacity="0.35"';
+    const lines = 'fill="none" stroke="#000000" stroke-opacity="0.35" stroke-width="1.5"';
+    expect(svg).toBe(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="841.89pt" height="595.28pt" viewBox="0 0 841.89 595.28" font-family="Jost Print" xml:space="preserve">' +
+        '<defs>' +
+        '<clipPath id="p1-c0"><rect x="0" y="0" width="8" height="8"/></clipPath>' +
+        '<clipPath id="p1-c1"><rect x="1" y="2" width="3" height="4"/></clipPath>' +
+        '<clipPath id="p1-c2"><rect x="0" y="0" width="8" height="8"/></clipPath>' +
+        '<clipPath id="p1-c3"><path d="M0 0L4 4Z"/></clipPath>' +
+        '<clipPath id="p1-c4"><rect x="0" y="0" width="8" height="8"/></clipPath>' +
+        '<clipPath id="p1-c5"><rect x="0" y="0" width="1" height="1"/></clipPath>' +
+        '</defs>' +
+        `<g clip-path="url(#p1-c0)"><path d="M2.8 4a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0 -2.4 0Z" ${dots}/></g>` +
+        '<g clip-path="url(#p1-c1)">' +
+        `<g clip-path="url(#p1-c2)"><path d="M2.8 4a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0 -2.4 0Z" ${dots}/></g>` +
+        '<g clip-path="url(#p1-c3)">' +
+        `<g clip-path="url(#p1-c4)"><path d="M0 8L8 0M0 0L8 8" ${lines}/></g>` +
+        '</g>' +
+        '</g>' +
+        '<g clip-path="url(#p1-c5)"></g>' +
+        '</svg>',
+    );
+  });
+
+  it.each([
+    [
+      'dots',
+      'M2.8 4a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0 -2.4 0ZM10.8 4a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0 -2.4 0Z',
+    ],
+    ['diagonal', 'M0 8L8 0M8 8L16 0'],
+    ['reverseDiagonal', 'M0 0L8 8M8 0L16 8'],
+    ['crossHatch', 'M0 8L8 0M0 0L8 8M8 8L16 0M8 0L16 8'],
+    ['horizontal', 'M0 4L8 4M8 4L16 4'],
+    ['vertical', 'M4 0L4 8M12 0L12 8'],
+  ] as const)('draws the %s pattern tile by tile over its shape', (pattern, data) => {
+    const shape = { kind: 'rect', x: 0, y: 0, width: 16, height: 8 } as const;
+    const svg = printPageSvg(documentOf([{ kind: 'pattern', shape, pattern }]), 0);
+    expect(svg.slice(svg.indexOf('</defs>') + '</defs>'.length, -'</svg>'.length)).toMatch(
+      new RegExp(
+        `^<g clip-path="url\\(#p0-c0\\)"><path d="${data.replaceAll('.', '\\.')}" [^>]*/></g>$`,
+      ),
+    );
+  });
+
+  it('writes nothing for a pattern outside the page', () => {
+    const shape = { kind: 'rect', x: 900, y: 0, width: 16, height: 8 } as const;
+    expect(printPageSvg(documentOf([{ kind: 'pattern', shape, pattern: 'dots' }]), 0)).toBe(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="841.89pt" height="595.28pt" viewBox="0 0 841.89 595.28" font-family="Jost Print" xml:space="preserve"></svg>',
+    );
+  });
+
+  it.each([
+    [
+      'portrait A3',
+      'a3',
+      'portrait',
+      'width="841.89pt" height="1190.55pt" viewBox="0 0 841.89 1190.55"',
+    ],
+    [
+      'landscape US Letter',
+      'letter',
+      'landscape',
+      'width="792pt" height="612pt" viewBox="0 0 792 612"',
+    ],
+  ] as const)('sizes a %s page', (_name, paper, orientation, size) => {
+    const svg = printPageSvg(checkedOrThrow({ ...documentOf([]), paper, orientation }), 0);
+    expect(svg.slice(0, svg.indexOf(' font-family'))).toBe(
+      `<svg xmlns="http://www.w3.org/2000/svg" ${size}`,
+    );
+  });
+
+  it('throws for a page the document does not have', () => {
+    expect(() => printPageSvg(documentOf([]), 1)).toThrow('No page 1 to write.');
+  });
+
+  it('writes balanced markup for any valid document, every text decoding back to itself', () => {
+    fc.assert(
+      fc.property(checkedPrintDocumentArbitrary, (document) => {
+        document.pages.forEach((orders, index) => {
+          const svg = printPageSvg(document, index);
+          expect(isBalancedMarkup(svg)).toBe(true);
+          expect(textsOf(svg)).toEqual(orders.flatMap(textsIn));
+        });
+      }),
+    );
+  });
+
+  it('catches unbalanced markup in its own check', () => {
+    expect(isBalancedMarkup('<svg><g></svg>')).toBe(false);
+    expect(isBalancedMarkup('<svg>a<b</svg>')).toBe(false);
+    expect(isBalancedMarkup('<svg><g/></svg>')).toBe(true);
+  });
+});
+
+describe('svgNumber', () => {
+  it.each([
+    [10, '10'],
+    [20.004, '20'],
+    [20.005, '20.01'],
+    [0.1 + 0.2, '0.3'],
+    [-0.001, '0'],
+    [-0, '0'],
+    [1e-7, '0'],
+    [-32_768, '-32768'],
+    [65_536, '65536'],
+  ])('writes %d as %s', (value, written) => {
+    expect(svgNumber(value)).toBe(written);
+  });
+});
+
+describe('escapeMarkup', () => {
+  it('escapes the five markup characters and leaves the rest', () => {
+    expect(escapeMarkup(`a&b<c>d"e'f é 漢 😀`)).toBe('a&amp;b&lt;c&gt;d&quot;e&#39;f é 漢 😀');
+  });
+});

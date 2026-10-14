@@ -86,6 +86,7 @@ function sceneOf(overrides: Partial<TimelineScene> = {}): TimelineScene {
     baseline: null,
     selectedTaskId: null,
     today: at(2026, 9, 30, 12),
+    showFloatLines: true,
     preview: null,
     patternFor: () => STRIPES,
     ...overrides,
@@ -420,6 +421,20 @@ describe('paintTimelineBody', () => {
     expect(callsOf(plain, 'stroke').some((call) => call.lineDash.join() === '4,3')).toBe(false);
   });
 
+  it('keeps the critical underline but draws no float line when float lines are not shown', () => {
+    const schedule = scheduleOrThrow({
+      ...PLAN,
+      options: { ...PLAN.options, criticalPathEnabled: true },
+    });
+    const calls = paintBody({ schedule, showFloatLines: false });
+    expect(
+      callsOf(calls, 'fillRect').filter(
+        (call) => call.fillStyle === THEME.action && call.args[3] === 3,
+      ),
+    ).toHaveLength(1);
+    expect(callsOf(calls, 'stroke').filter((call) => call.lineDash.join() === '4,3')).toEqual([]);
+  });
+
   it('underlines a critical milestone across its diamond', () => {
     const m = placedShapeOf('m');
     const floats = new Map([
@@ -527,6 +542,11 @@ describe('paintTimelineBody', () => {
         (call) => call.args[0] === first?.x && call.args[1] === first?.y,
       ),
     ).toBe(false);
+  });
+
+  it('draws no today line for a scene without one, as on a printed page', () => {
+    const calls = paintBody({ today: null });
+    expect(callsOf(calls, 'fillRect').filter((call) => call.fillStyle === THEME.error)).toEqual([]);
   });
 
   it('draws only the background, shading and today line before the schedule is known', () => {

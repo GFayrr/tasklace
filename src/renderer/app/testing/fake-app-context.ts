@@ -1,5 +1,6 @@
 import * as Y from 'yjs';
 import type { Project } from '../../../core/model/project';
+import type { PrintDocument } from '../../../core/print/print-document';
 import { scheduleProject } from '../../../core/scheduling/schedule-project';
 import { createSharedDocument } from '../../../core/shared/shared-document';
 import { TEST_DOCUMENT_ID } from '../../../core/testing/project-builder';
@@ -11,6 +12,7 @@ import type {
   RecentProject,
   SavedProject,
   TasklaceBridge,
+  PdfExport,
 } from '../../../preload/bridge-contract';
 import english from '../../locales/en.json';
 import type { Scheduler, ScheduleListener } from '../../schedule/scheduler';
@@ -33,6 +35,9 @@ export interface FakeBridgeControl {
   saveResult: BridgeResult<SavedProject> | Error;
   saveAsResult: BridgeResult<SavedProject>;
   exportResult: BridgeResult<ExportedFile>;
+  pdfResult: BridgeResult<PdfExport>;
+  heldPdfResult: BridgeResult<ExportedFile>;
+  discardResult: BridgeResult<null>;
   adoptResult: BridgeResult<null>;
   recent: readonly RecentProject[] | Error | 'unreadable';
   newDocumentId: string;
@@ -42,6 +47,7 @@ export interface FakeBridgeControl {
   readonly openedRecent: number[];
   readonly imports: ExchangeKind[];
   readonly exports: { readonly kind: ExchangeKind; readonly text: string; readonly name: string }[];
+  readonly pdfExports: { readonly document: PrintDocument; readonly name: string }[];
 }
 
 export interface ManualScheduler {
@@ -78,6 +84,9 @@ export function fakeBridge(): {
     saveResult: SAVED,
     saveAsResult: SAVED,
     exportResult: { ok: true, value: { fileName: 'plan.json' } },
+    pdfResult: { ok: true, value: { kind: 'exported', fileName: 'Thesis.pdf' } },
+    heldPdfResult: { ok: true, value: { fileName: 'Thesis.pdf' } },
+    discardResult: { ok: true, value: null },
     adoptResult: { ok: true, value: null },
     recent: [],
     newDocumentId: TEST_DOCUMENT_ID,
@@ -87,6 +96,7 @@ export function fakeBridge(): {
     openedRecent: [],
     imports: [],
     exports: [],
+    pdfExports: [],
   };
   /** Records a call of the bridge and answers it with a value. */
   const called = <T>(name: string, value: T): Promise<T> => {
@@ -136,6 +146,13 @@ export function fakeBridge(): {
       control.exports.push({ kind, text, name });
       return called('exportProject', control.exportResult);
     },
+    exportPdf: (document, name) => {
+      control.pdfExports.push({ document, name });
+      return called('exportPdf', control.pdfResult);
+    },
+    saveHeldPdf: () => called('saveHeldPdf', control.heldPdfResult),
+    exportLighterPdf: () => called('exportLighterPdf', control.heldPdfResult),
+    discardHeldPdf: () => called('discardHeldPdf', control.discardResult),
     onFlushRequested: () => undefined,
     reportStartFailure: () => undefined,
   };

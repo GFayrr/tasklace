@@ -3,6 +3,12 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": [".", "../electron.vite.config.ts", "../playwright.config.ts"],
-  "exclude": ["e2e"]
+  "include": [
+    ".",
+    "../electron.vite.config.ts",
+    "../playwright.config.ts",
+    "../playwright.pdf-compare.config.ts",
+    "../src/main/pdf/pdfkit-dash.d.ts"
+  ],
+  "exclude": ["e2e", "pdf-compare"]
 }

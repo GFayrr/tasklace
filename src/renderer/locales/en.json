@@ -5,7 +5,8 @@
     "csvFiles": "CSV files",
     "replaceExisting": "{file} already exists. Do you want to replace it?",
     "replace": "Replace",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "pdfFiles": "PDF documents"
   },
   "projects": {
     "untitled": "Untitled project"
@@ -29,6 +30,9 @@
     "INVALID_IMPORT": "This file contains errors and cannot be imported.",
     "NO_PROJECT": "There is no open project to save.",
     "TASK_FAILED": "Something went wrong with this file. Try again.",
+    "MISSING_CHARACTERS": "This plan holds characters the lighter PDF cannot write, such as letters of other alphabets or emoji. Use “Export as it is” instead.",
+    "PRINT_FAILED": "The PDF could not be made: printing stopped or took too long. Choose a coarser zoom or a shorter period, then try again.",
+    "PRINT_INCOMPLETE": "The PDF came out incomplete, so it was not written. Restart Tasklace; if this keeps happening, install it again.",
     "WRONG_DOCUMENT": "The project was not saved because this window no longer matches its file. Export the project as JSON to keep your changes, then open it again.",
     "INVALID_STATE": "The project was not saved because it contains an error Tasklace could not repair. Export the project as JSON to keep your changes.",
     "BUSY": "Wait until the current file action is finished, then try again.",
@@ -63,7 +67,8 @@
     "history": "History",
     "undo": "Undo",
     "redo": "Redo",
-    "projectName": "Project name"
+    "projectName": "Project name",
+    "exportPdf": "PDF…"
   },
   "saveStatus": {
     "saved": "All changes saved",
@@ -536,5 +541,58 @@
     "unresponsiveBody": "It stopped responding while saving your project before closing. Wait a little longer, or close it now: changes not saved yet would be lost.",
     "wait": "Wait",
     "closeAnyway": "Close anyway"
+  },
+  "print": {
+    "exported": "Exported {date}",
+    "page": "Page {page} of {count}",
+    "title": "Export to PDF",
+    "close": "Close the export to PDF",
+    "paper": "Paper",
+    "a4": "A4",
+    "a3": "A3",
+    "letter": "US Letter",
+    "orientation": "Orientation",
+    "landscape": "Landscape",
+    "portrait": "Portrait",
+    "period": "Period",
+    "wholeProject": "Whole project ({span})",
+    "days": "From – to",
+    "firstDay": "First day printed",
+    "lastDay": "Last day printed",
+    "zoom": "Zoom",
+    "automatic": "Automatic",
+    "automaticHint": "Automatic fits the period on the fewest pages: {zoom} here.",
+    "columns": "Columns beside the names",
+    "nameAlways": "Name (always)",
+    "progress": "Progress",
+    "floats": "Floats",
+    "floatsHint": "“Floats” appears only with the critical path on.",
+    "preview": "Preview · page 1 of {count}",
+    "previewLabel": "Preview of the first page",
+    "waiting": "The dates of the plan are being worked out.",
+    "scheduleFailed": "The dates of the plan cannot be worked out, so it cannot be printed yet.",
+    "previewUnavailable": "The preview cannot be drawn on this computer. The PDF can still be exported.",
+    "scheduleStopped": "The dates of the plan could not be updated, so it cannot be printed. Close this window and change a value to work them out again.",
+    "measureUnavailable": "The printed font could not be prepared, so the plan cannot be printed. Restart Tasklace; if this keeps happening, install it again.",
+    "notDrawn": "The pages could not be drawn. Close this window and try again; if this keeps happening, save your project and restart Tasklace.",
+    "refusals": {
+      "NO_ROOM_FOR_TIMELINE": "These columns leave no room for the timeline. Untick some columns, or choose a wider paper or the landscape orientation.",
+      "NO_ROOM_FOR_ROWS": "The legend of the tags leaves no room for the tasks on this paper. Choose a larger paper.",
+      "TOO_MANY_PAGES": "This would print more than {limit} pages. Choose a coarser zoom or a shorter period.",
+      "EMPTY_PERIOD": "The last day printed comes before the first day.",
+      "TOO_DETAILED": "These pages hold too much detail to be printed. Choose a coarser zoom or a shorter period."
+    },
+    "cancel": "Cancel",
+    "export": "Export PDF…",
+    "wholeProjectWithoutDates": "Whole project",
+    "making": "Making the PDF…",
+    "tooLarge": "This PDF is too large to be written. Choose a coarser zoom, a shorter period or fewer columns.",
+    "heavy": "This PDF weighs about {size} for {pages}, more than expected. Tasklace can write a lighter one directly, with the same pages.",
+    "exportAsItIs": "Export as it is…",
+    "pages": {
+      "one": "{count} page",
+      "other": "{count} pages"
+    },
+    "exportLighter": "Export the lighter PDF…"
   }
 }

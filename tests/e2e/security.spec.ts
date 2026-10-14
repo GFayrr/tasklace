@@ -95,11 +95,23 @@ test('exposes only the listed bridge functions, which check what they receive', 
         () => 'answered',
         () => 'refused',
       ),
+      wrongName: await api
+        .exportPdf(
+          { paper: 'a4', orientation: 'landscape', title: 'Plan', pages: [[]] },
+          wrongPosition as unknown as string,
+        )
+        .then(
+          () => 'answered',
+          () => 'refused',
+        ),
     };
   }, -1);
   expect(bridge).toEqual({
     keys: [
       'adoptProject',
+      'discardHeldPdf',
+      'exportLighterPdf',
+      'exportPdf',
       'exportProject',
       'importProject',
       'newProject',
@@ -109,10 +121,12 @@ test('exposes only the listed bridge functions, which check what they receive', 
       'recentProjects',
       'regionalFormat',
       'reportStartFailure',
+      'saveHeldPdf',
       'saveProject',
       'saveProjectAs',
     ],
     wrongType: 'refused',
+    wrongName: 'refused',
   });
 });
 

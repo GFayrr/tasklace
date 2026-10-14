@@ -1,8 +1,14 @@
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { app, BrowserWindow, dialog, protocol, session } from 'electron';
-import { APP_ENTRY_URL, APP_SCHEME, createAppFileServer, isAppAddress } from './app-files';
-import { MAX_FILE_WORKER_HEAP_MEBIBYTES } from '../core/limits';
+import {
+  APP_ENTRY_URL,
+  APP_SCHEME,
+  createAppFileServer,
+  createPrintPageStore,
+  isAppAddress,
+} from './app-files';
+import { MAX_FILE_WORKER_HEAP_MEBIBYTES, MAX_PDF_RENDER_MILLISECONDS } from '../core/limits';
 import { contentSecurityPolicy } from './content-security-policy';
 import { flushBeforeClosing, registerFlushHandler } from './close-flush';
 import { runInFileWorker } from './file-worker-client';
@@ -23,7 +29,8 @@ import {
   logWorkerErrors,
   writeLogBeforeQuitting,
 } from './log-file';
-import { createMainWindow } from './window';
+import { createMainWindow, createPrintWindow } from './window';
+import { printFontsIn, registerPdfHandlers } from './pdf-export';
 
 const developmentUrl = app.isPackaged ? null : (process.env['ELECTRON_RENDERER_URL'] ?? null);
 const developmentOrigin = developmentUrl === null ? null : new URL(developmentUrl).origin;
@@ -60,12 +67,13 @@ if (app.requestSingleInstanceLock()) {
   app.quit();
 }
 
-/** Protects the session, serves the interface, answers the bridge and opens the window, which saves its project before closing. */
+/** Protects the session, serves the interface and the pages printed to PDF, answers the bridge and opens the window, which saves its project before closing. */
 function start(): void {
   hardenSession(session.defaultSession, policy);
+  const printPages = createPrintPageStore();
   protocol.handle(
     APP_SCHEME,
-    createAppFileServer(rendererRoot, { [CONTENT_SECURITY_POLICY_HEADER]: policy }),
+    createAppFileServer(rendererRoot, { [CONTENT_SECURITY_POLICY_HEADER]: policy }, printPages),
   );
   const assertTrusted = createTrustCheck((address) => isAppAddress(address, developmentOrigin));
   registerFlushHandler(assertTrusted);
@@ -74,10 +82,21 @@ function start(): void {
     runTask: (task) => runInFileWorker(createFileWorker, task),
     userDataFolder: app.getPath('userData'),
   });
+  const pdf = registerPdfHandlers({
+    assertTrusted,
+    pages: printPages,
+    createPrintWindow,
+    timeoutMs: MAX_PDF_RENDER_MILLISECONDS,
+    runTask: (task) => runInFileWorker(createFileWorker, task),
+    fonts: printFontsIn(join(rendererRoot, 'fonts')),
+  });
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath);
   logPageMessages(window.webContents, log);
-  flushBeforeClosing(window, windowProjectKind, forgetWindowProject);
+  flushBeforeClosing(window, windowProjectKind, (sender) => {
+    forgetWindowProject(sender);
+    pdf.forgetHeldPdf(sender);
+  });
   let closing = false;
   window.once('close', () => {
     closing = true;

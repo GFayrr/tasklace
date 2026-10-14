@@ -11,19 +11,21 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "lint": "tsc --noEmit && tsc --noEmit -p src/main && tsc --noEmit -p src/preload && svelte-check --tsconfig src/renderer/tsconfig.json --fail-on-warnings --output human && tsc --noEmit -p tests && tsc --noEmit -p tests/e2e && eslint .",
+    "lint": "tsc --noEmit && tsc --noEmit -p src/main && tsc --noEmit -p src/preload && svelte-check --tsconfig src/renderer/tsconfig.json --fail-on-warnings --output human && tsc --noEmit -p tests && tsc --noEmit -p tests/e2e && tsc --noEmit -p tests/pdf-compare && eslint .",
     "format": "prettier --write .",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "format:check": "prettier --check .",
     "bench": "vitest run --config vitest.perf.config.ts",
     "bench:growth": "vitest run --config vitest.growth.config.ts",
-    "test:e2e": "electron-vite build && playwright test"
+    "test:e2e": "electron-vite build && playwright test",
+    "pdf:compare": "electron-vite build && playwright test --config playwright.pdf-compare.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@types/node": "^24.19.0",
+    "@types/pdfkit": "0.17.6",
     "@vitest/coverage-v8": "^5.0.2",
     "electron": "^44.4.5",
     "electron-vite": "^5.0.0",
@@ -40,6 +42,7 @@
     "vitest": "^5.0.2"
   },
   "dependencies": {
+    "pdfkit": "0.20.2",
     "svelte": "5.57.1",
     "yjs": "13.6.33"
   },
