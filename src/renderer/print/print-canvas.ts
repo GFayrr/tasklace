@@ -357,7 +357,7 @@ export class PrintCanvas implements TimelineBodyContext {
     return { kind: 'rect', x: left, y: top, width: right - left, height: bottom - top };
   }
 
-  /** Returns the width and dash of a stroke, scaled like the drawing. */
+  /** Returns the width and dash of a stroke, scaled by the horizontal scale of the drawing, which printing keeps equal to the vertical one. */
   #strokeLook(): { readonly width: number; readonly dash: number[] } {
     const scale = Math.abs(this.#state.scaleX);
     return {
@@ -458,7 +458,7 @@ function overlaps(first: Box, second: Box): boolean {
   );
 }
 
-/** Keeps every point of a path within a box, walking the path once, operations unchanged. */
+/** Keeps every point of a path within a box, walking the path once, a point outside being moved onto the edge, which bends a line that crosses it. */
 function clampPath(path: readonly number[], box: Box): number[] {
   const clamped: number[] = [];
   let index = 0;

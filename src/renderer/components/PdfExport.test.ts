@@ -73,7 +73,7 @@ async function renderExport(plan: Project = PLAN, overrides: Partial<AppContext>
   return { ...opened, page: root, root: dialog, dialog };
 }
 
-/** Builds a plan of a given number of tasks in a row, named Thesis. */
+/** Builds a plan of a given number of unlinked tasks, one per row, named Thesis. */
 function longPlan(count: number): Project {
   const tasks = Array.from({ length: count }, (_unused, index) =>
     workTask(`t${String(index)}`, {

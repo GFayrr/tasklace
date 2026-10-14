@@ -126,7 +126,7 @@ function documentOf(plan: Project, settings: PrintSettings): PrintDocument {
   return built.value.document;
 }
 
-/** Prints a document with Chromium through the bridge of the application and writes it, as it is when it is heavy, telling its size and whether the guard kept it back. */
+/** Prints a document with Chromium through the bridge of the application and writes it, as it is when it is heavy, telling whether the guard kept it back. */
 async function printWithChromium(
   document: PrintDocument,
   path: string,

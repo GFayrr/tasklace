@@ -123,7 +123,7 @@ function addChain(building: Building, phase: number, chain: number, first: strin
   return previous ?? '';
 }
 
-/** Adds one task of a chain, split in two blocks now and then, with a random length around the mean, a tag and progress, returning its identifier. */
+/** Adds one task of a chain, split in two blocks one task in nine, with a random length around the mean, a tag and progress, returning its identifier. */
 function addTask(building: Building, phase: number, chain: number, step: number): string {
   const { shape, random, tasks } = building;
   const id = `p${String(phase)}c${String(chain)}t${String(step)}`;

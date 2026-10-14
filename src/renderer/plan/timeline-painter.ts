@@ -215,7 +215,7 @@ export function splitAtDaysOff(
   return { parts, daysOff: mergeIntervals(daysOff) };
 }
 
-/** Draws the rows of the timeline that a viewport shows: non-working periods, selection, links, baseline ghosts, bars, deadlines and the today line. */
+/** Draws the rows of the timeline that a viewport shows: non-working periods, selection, links, baseline ghosts, bars, deadlines and the today line when the scene has one. */
 export function paintTimelineBody(
   context: TimelineBodyContext,
   scene: TimelineScene,
@@ -419,7 +419,7 @@ function paintShape(context: TimelineBodyContext, scene: TimelineScene, shape: R
   paintFloat(context, scene, taskFloat, blocks, top);
 }
 
-/** Marks a critical task with a line in the action color under each block, or, when float lines are shown, draws the total float of a task that can slip as a dashed line to its latest finish when that is later, drawing nothing without critical path. */
+/** Underlines each block of a critical task in the action color, or, with float lines shown, draws the total float of a task that can slip as a dash from the end of its last block to a later latest finish, nothing without critical path. */
 function paintFloat(
   context: TimelineBodyContext,
   scene: TimelineScene,

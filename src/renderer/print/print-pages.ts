@@ -293,7 +293,7 @@ function printPeriod(source: PrintSource, period: PrintPeriod): HourSpan | null 
     : { start: startOfDay(days.firstDay), end: startOfDay(days.lastDay + 1) };
 }
 
-/** Returns the days of a plan, from the day of its first start, or of the project start, to the day of its last end. */
+/** Returns the days of a plan, from the earlier of the project start and the first start of a task to the day of its last end, an end at midnight counting for the day before. */
 export function wholePlanDays(
   project: Project,
   schedule: Schedule,
@@ -578,7 +578,7 @@ function printScene(
   };
 }
 
-/** Draws one page: header, time scale, columns, timeline rows and footer. */
+/** Draws one page: header, time scale, columns, timeline rows, grid lines and footer. */
 function pageOrders(context: PageContext, page: PrintPage): PrintOrder[] {
   return [
     ...headerOrders(context),
@@ -809,7 +809,7 @@ function swatchOrders(theme: Theme, item: LegendItem, x: number, top: number): D
   return swatch;
 }
 
-/** Writes a line of text at the printed size, or nothing for an empty text. */
+/** Returns the order that writes a line of text, 10 points and regular by default, or nothing for a text made only of spaces. */
 function text(
   context: PageContext,
   value: string,

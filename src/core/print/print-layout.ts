@@ -63,7 +63,7 @@ export interface PrintLayout {
 
 export type PrintLayoutRefusal = 'NO_ROOM_FOR_TIMELINE' | 'NO_ROOM_FOR_ROWS' | 'TOO_MANY_PAGES';
 
-/** Lays a plan out on pages with text at its printed size: one page when all fits, else a grid read row of pages by row of pages, each repeating the columns and the scale, the last column taking the rest of the period, in time linear in the pages. */
+/** Lays a plan out on pages with text at its printed size: one page when all fits, else a grid read row of pages by row of pages, each repeating the columns and the scale, the last column taking what is left, in time linear in pages and legend items. */
 export function printLayout(request: PrintLayoutRequest): Result<PrintLayout, PrintLayoutRefusal> {
   checkRequest(request);
   const frame = printFrame(request);

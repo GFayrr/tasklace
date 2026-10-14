@@ -12,7 +12,7 @@ function fingerprint(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-/** Sorts items by their identifier, the order a shared document gives them back in being its own. */
+/** Sorts items by their identifier, since a shared document gives them back in an order of its own. */
 function byId<T extends { readonly id: string }>(items: readonly T[]): T[] {
   return [...items].sort((left, right) => left.id.localeCompare(right.id));
 }
