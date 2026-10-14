@@ -6,11 +6,11 @@ import {
   TEXT_WEIGHTS,
   type DrawOrder,
   type PathSegment,
-  type PrintDocument,
   type PrintOrder,
   type PrintShape,
   type TextWeight,
 } from '../../core/print/print-document';
+import type { CheckedPrintDocument } from '../../core/print/read-print-document';
 import {
   PATTERN_INK_COLOR,
   PATTERN_INK_OPACITY,
@@ -76,7 +76,7 @@ const HALF = 2;
 
 /** Writes a checked document as a PDF without the browser, drawn as its SVG is, texts in Jost Print embedded as subsets, in time linear in the orders and pattern tiles, refusing a character the font lacks or a PDF too large. */
 export async function writeDirectPdf(
-  document: PrintDocument,
+  document: CheckedPrintDocument,
   fonts: PrintFonts,
   compress = true,
 ): Promise<Uint8Array> {

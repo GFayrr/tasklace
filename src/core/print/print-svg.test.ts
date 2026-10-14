@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { printDocumentArbitrary } from '../testing/print-arbitrary';
+import { checkedOrThrow, checkedPrintDocumentArbitrary } from '../testing/print-arbitrary';
 import {
   PATH_CLOSE,
   PATH_CURVE,
@@ -9,6 +9,7 @@ import {
   type PrintDocument,
   type PrintOrder,
 } from './print-document';
+import type { CheckedPrintDocument } from './read-print-document';
 import { escapeMarkup, printPageSvg, svgNumber } from './print-svg';
 
 const TAG = /<(\/?)([a-zA-Z]+)((?:\s+[a-zA-Z:-]+="[^"<]*")*)\s*(\/?)>/g;
@@ -22,8 +23,8 @@ const ENTITIES: Readonly<Record<string, string>> = {
 };
 
 /** Builds a document whose pages hold the given orders. */
-function documentOf(...pages: PrintDocument['pages']): PrintDocument {
-  return { paper: 'a4', orientation: 'landscape', title: 'Thesis', pages };
+function documentOf(...pages: PrintDocument['pages']): CheckedPrintDocument {
+  return checkedOrThrow({ paper: 'a4', orientation: 'landscape', title: 'Thesis', pages });
 }
 
 /** Tells whether markup is made only of tags with quoted attributes, closed in order, and of text without a raw markup character. */
@@ -179,7 +180,7 @@ describe('printPageSvg', () => {
       'width="792pt" height="612pt" viewBox="0 0 792 612"',
     ],
   ] as const)('sizes a %s page', (_name, paper, orientation, size) => {
-    const svg = printPageSvg({ ...documentOf([]), paper, orientation }, 0);
+    const svg = printPageSvg(checkedOrThrow({ ...documentOf([]), paper, orientation }), 0);
     expect(svg.slice(0, 120)).toContain(size);
   });
 
@@ -189,7 +190,7 @@ describe('printPageSvg', () => {
 
   it('writes balanced markup for any valid document, every text decoding back to itself', () => {
     fc.assert(
-      fc.property(printDocumentArbitrary, (document) => {
+      fc.property(checkedPrintDocumentArbitrary, (document) => {
         document.pages.forEach((orders, index) => {
           const svg = printPageSvg(document, index);
           expect(isBalancedMarkup(svg)).toBe(true);

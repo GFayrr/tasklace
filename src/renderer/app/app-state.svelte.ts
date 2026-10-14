@@ -30,6 +30,7 @@ import {
   type Schedule,
   type SchedulingFailure,
 } from '../../core/scheduling/schedule-project';
+import type { DocumentId } from '../../core/shared/shared-document';
 import type { SharedSession } from '../../core/shared/shared-session';
 import type { TagConflict } from '../../core/tags/tag-conflicts';
 import type { PrintDocument } from '../../core/print/print-document';
@@ -157,7 +158,7 @@ export interface HeavyPdf {
 }
 
 export interface PdfExportOpening {
-  readonly documentId: string;
+  readonly documentId: DocumentId;
   readonly exportedAt: Date;
 }
 

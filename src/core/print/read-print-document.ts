@@ -45,6 +45,11 @@ import {
   type TextWeight,
 } from './print-document';
 
+declare const CHECKED: unique symbol;
+
+/** A document to print that `readPrintDocument` accepted, the only kind printing and writing a PDF take. */
+export type CheckedPrintDocument = PrintDocument & { readonly [CHECKED]: true };
+
 interface Box {
   readonly x: number;
   readonly y: number;
@@ -81,7 +86,7 @@ const ORDER_KEYS: Readonly<Record<PrintOrder['kind'], readonly string[]>> = {
 const MAX_BOX_SIDE = MAX_PRINT_COORDINATE + MAX_PRINT_COORDINATE;
 
 /** Reads a document to print sent by the interface, which is not trusted, checking every order against the format and its limits and refusing the whole document on the first order that breaks them. */
-export function readPrintDocument(value: unknown): Result<PrintDocument, ValidationIssues> {
+export function readPrintDocument(value: unknown): Result<CheckedPrintDocument, ValidationIssues> {
   const issues = createIssueList();
   const record = readRecord({ value, path: '' }, issues, DOCUMENT_KEYS);
   if (record === undefined) {
@@ -100,7 +105,8 @@ export function readPrintDocument(value: unknown): Result<PrintDocument, Validat
   ) {
     return failure(requireIssues(issues.issues));
   }
-  return success({ paper, orientation, title, pages });
+  const document: PrintDocument = { paper, orientation, title, pages };
+  return success(document as CheckedPrintDocument);
 }
 
 /** Reads the pages of a document within the limits of pages, orders and numbers of paths, a hole in a list being read as a missing value, reporting the first refused value with its full path. */

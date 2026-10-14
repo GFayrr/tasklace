@@ -1,7 +1,9 @@
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { PrintDocument, PrintOrder } from '../../core/print/print-document';
+import type { PrintOrder } from '../../core/print/print-document';
+import type { CheckedPrintDocument } from '../../core/print/read-print-document';
 import { failure } from '../../core/result';
+import { checkedOrThrow } from '../../core/testing/print-arbitrary';
 import { runFileTask } from '../file-tasks';
 import { printFontsIn } from '../pdf-export';
 import { MissingCharacter, TooLargePdf, TooManyPatternTiles, writeDirectPdf } from './direct-pdf';
@@ -22,13 +24,18 @@ vi.mock('../../core/limits', async (importOriginal) => {
 const FONTS = printFontsIn(join(import.meta.dirname, '../../renderer/public/fonts'));
 
 /** Builds a document whose page covers a rectangle with a pattern. */
-function patterned(x: number, width: number): PrintDocument {
+function patterned(x: number, width: number): CheckedPrintDocument {
   const order: PrintOrder = {
     kind: 'pattern',
     shape: { kind: 'rect', x, y: 0, width, height: 8 },
     pattern: 'dots',
   };
-  return { paper: 'a4', orientation: 'landscape', title: 'Plan', pages: [[order], [order]] };
+  return checkedOrThrow({
+    paper: 'a4',
+    orientation: 'landscape',
+    title: 'Plan',
+    pages: [[order], [order]],
+  });
 }
 
 describe('the tiles of the patterns of a lighter PDF', () => {
@@ -92,7 +99,7 @@ describe('the tiles of the patterns of a lighter PDF', () => {
 
   it('refuses a character the printed font lacks, in the file worker task, rather than writing a blank', async () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const document: PrintDocument = {
+    const document = checkedOrThrow({
       ...patterned(0, 8),
       pages: [
         [
@@ -108,7 +115,7 @@ describe('the tiles of the patterns of a lighter PDF', () => {
           },
         ],
       ],
-    };
+    });
     try {
       expect(await runFileTask({ kind: 'writeDirectPdf', document, fonts: FONTS })).toEqual(
         failure({ code: 'MISSING_CHARACTERS' }),

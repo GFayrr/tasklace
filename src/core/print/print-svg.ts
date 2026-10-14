@@ -11,10 +11,10 @@ import {
   pathSegments,
   type DrawOrder,
   type PathSegment,
-  type PrintDocument,
   type PrintOrder,
   type PrintShape,
 } from './print-document';
+import type { CheckedPrintDocument } from './read-print-document';
 
 export const PRINT_FONT_FAMILY = 'Jost Print';
 
@@ -38,7 +38,7 @@ interface PageWriter {
 }
 
 /** Writes one page of a validated document as an SVG image sized in points, its identifiers starting with the page number so that several pages can share one HTML page. */
-export function printPageSvg(document: PrintDocument, pageIndex: number): string {
+export function printPageSvg(document: CheckedPrintDocument, pageIndex: number): string {
   const orders = document.pages[pageIndex];
   if (orders === undefined) {
     throw new RangeError(`No page ${String(pageIndex)} to write.`);

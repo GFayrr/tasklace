@@ -8,6 +8,7 @@ import { readPrintDocument } from '../../core/print/read-print-document';
 import { scheduleProject } from '../../core/scheduling/schedule-project';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../../core/testing/arbitraries';
 import { compileOrThrow } from '../../core/testing/civil-time';
+import { checkedOrThrow } from '../../core/testing/print-arbitrary';
 import { richProjectArbitrary } from '../../core/testing/project-arbitrary';
 import {
   link,
@@ -127,7 +128,7 @@ describe('buildPrintDocument', () => {
     expect(plan.layout.pages).toHaveLength(1);
     expect(plan.document.title).toBe('Thesis');
     expect(readPrintDocument(plan.document)).toEqual({ ok: true, value: plan.document });
-    expect(printPageSvg(plan.document, 0).startsWith('<svg')).toBe(true);
+    expect(printPageSvg(checkedOrThrow(plan.document), 0).startsWith('<svg')).toBe(true);
   });
 
   it('writes the title, the date of the export, the scale, the names in plan order, the legend of the tags used and the page number', () => {

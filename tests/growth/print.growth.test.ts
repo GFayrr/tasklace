@@ -9,7 +9,11 @@ import {
 import { printHtml } from '../../src/core/print/print-html';
 import { printLayout } from '../../src/core/print/print-layout';
 import { printPageSvg } from '../../src/core/print/print-svg';
-import { readPrintDocument } from '../../src/core/print/read-print-document';
+import {
+  readPrintDocument,
+  type CheckedPrintDocument,
+} from '../../src/core/print/read-print-document';
+import { checkedOrThrow } from '../../src/core/testing/print-arbitrary';
 import {
   growthRatio,
   LARGE_TASK_COUNT,
@@ -107,8 +111,8 @@ describe('growth of printing with the size of the plan', () => {
   });
 
   it('writes the page printed to PDF in linear time', () => {
-    const small = documentOf(SMALL_TASK_COUNT);
-    const large = documentOf(LARGE_TASK_COUNT);
+    const small = checkedOrThrow(documentOf(SMALL_TASK_COUNT));
+    const large = checkedOrThrow(documentOf(LARGE_TASK_COUNT));
     const ratio = growthRatio(
       () => printHtml(small),
       () => printHtml(large),
@@ -118,10 +122,10 @@ describe('growth of printing with the size of the plan', () => {
   });
 
   it('writes every page as SVG in linear time', () => {
-    const small = documentOf(SMALL_TASK_COUNT);
-    const large = documentOf(LARGE_TASK_COUNT);
+    const small = checkedOrThrow(documentOf(SMALL_TASK_COUNT));
+    const large = checkedOrThrow(documentOf(LARGE_TASK_COUNT));
     /** Writes every page of a document as SVG. */
-    const writeAll = (document: PrintDocument) => () => {
+    const writeAll = (document: CheckedPrintDocument) => () => {
       document.pages.forEach((_page, index) => printPageSvg(document, index));
     };
     const ratio = growthRatio(writeAll(small), writeAll(large));

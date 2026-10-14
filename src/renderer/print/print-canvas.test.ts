@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_PRINT_PATH_NUMBERS } from '../../core/limits';
 import {
+  MAX_CLIP_DEPTH,
   PATH_CLOSE,
   PATH_CURVE,
   PATH_LINE,
@@ -7,10 +9,12 @@ import {
   pathSegments,
   type PrintOrder,
 } from '../../core/print/print-document';
+import { readPrintDocument } from '../../core/print/read-print-document';
 import { PrintCanvas, printPattern } from './print-canvas';
 
 const AREA = { x: 100, y: 50, width: 400, height: 300 };
 const BLEED = 8;
+const LINES_TO_FILL_A_PATH = 340;
 
 /** Creates a print canvas over the sample printed area. */
 function canvas(): PrintCanvas {
@@ -81,7 +85,7 @@ describe('PrintCanvas', () => {
   });
 
   it('refuses a drawing call or a setting it does not know rather than leaving it out', () => {
-    const { context } = canvas();
+    const context = canvas().context as CanvasRenderingContext2D;
     expect(() => {
       context.fillText('Late', 0, 0);
     }).toThrow(TypeError);
@@ -373,6 +377,51 @@ describe('PrintCanvas', () => {
     const outer = orders[0];
     const inner = outer?.kind === 'clip' ? outer.orders[0] : undefined;
     expect(inner?.kind === 'clip' && inner.orders.map((order) => order.kind)).toEqual(['fill']);
+  });
+
+  it('nests as many clips as a printed document allows, which main accepts, and refuses one more', () => {
+    const print = canvas();
+    const { context } = print;
+    /** Keeps the next drawings inside the printed area. */
+    const clipToArea = () => {
+      context.beginPath();
+      context.roundRect(AREA.x, AREA.y, AREA.width, AREA.height, 0);
+      context.clip();
+    };
+    for (let depth = 0; depth < MAX_CLIP_DEPTH; depth += 1) {
+      clipToArea();
+    }
+    expect(clipToArea).toThrow(new RangeError('A printed page cannot nest more than 4 clips.'));
+    context.fillStyle = '#000000';
+    context.fillRect(110, 60, 5, 5);
+    const document = {
+      paper: 'a4',
+      orientation: 'landscape',
+      title: 'Thesis',
+      pages: [print.orders()],
+    };
+    expect(readPrintDocument(document)).toEqual({ ok: true, value: document });
+  });
+
+  it('draws a path of as many numbers as a printed document allows, and refuses one more', () => {
+    const print = canvas();
+    const { context } = print;
+    context.strokeStyle = '#000000';
+    context.beginPath();
+    context.moveTo(AREA.x, AREA.y);
+    for (let point = 1; point <= LINES_TO_FILL_A_PATH; point += 1) {
+      context.lineTo(AREA.x + (point % AREA.width), AREA.y + BLEED);
+    }
+    context.closePath();
+    context.stroke();
+    const [order] = print.orders();
+    expect(
+      order?.kind === 'stroke' && order.shape.kind === 'path' && order.shape.segments.length,
+    ).toBe(MAX_PRINT_PATH_NUMBERS);
+    context.closePath();
+    expect(() => {
+      context.stroke();
+    }).toThrow(new RangeError('A printed path cannot hold more than 1024 numbers.'));
   });
 
   it('hides every drawing inside a clip outside the printed area until the state is restored', () => {

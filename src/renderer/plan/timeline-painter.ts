@@ -40,6 +40,30 @@ import {
   type TimelineFrame,
 } from './timeline-geometry';
 
+/** The drawing calls the body of the timeline makes, which the screen canvas and the print canvas both provide. */
+export type TimelineBodyContext = Pick<
+  CanvasRenderingContext2D,
+  | 'fillStyle'
+  | 'strokeStyle'
+  | 'lineWidth'
+  | 'save'
+  | 'restore'
+  | 'translate'
+  | 'scale'
+  | 'setLineDash'
+  | 'beginPath'
+  | 'moveTo'
+  | 'lineTo'
+  | 'closePath'
+  | 'arc'
+  | 'roundRect'
+  | 'fill'
+  | 'stroke'
+  | 'fillRect'
+  | 'strokeRect'
+  | 'clip'
+>;
+
 export interface Viewport {
   readonly left: number;
   readonly top: number;
@@ -193,7 +217,7 @@ export function splitAtDaysOff(
 
 /** Draws the rows of the timeline that a viewport shows: non-working periods, selection, links, baseline ghosts, bars, deadlines and the today line. */
 export function paintTimelineBody(
-  context: CanvasRenderingContext2D,
+  context: TimelineBodyContext,
   scene: TimelineScene,
   viewport: Viewport,
 ): void {
@@ -266,7 +290,7 @@ export function paintTimelineHeader(
 
 /** Shades the days off and, at the hour zoom, the hours outside the working hours. */
 function paintNonWorking(
-  context: CanvasRenderingContext2D,
+  context: TimelineBodyContext,
   scene: TimelineScene,
   viewport: Viewport,
 ): void {
@@ -291,7 +315,7 @@ function paintNonWorking(
 
 /** Draws a thin line under each visible row. */
 function paintRowLines(
-  context: CanvasRenderingContext2D,
+  context: TimelineBodyContext,
   scene: TimelineScene,
   viewport: Viewport,
   range: RowRange,
@@ -309,7 +333,7 @@ function paintRowLines(
 
 /** Highlights the row of the selected task. */
 function paintSelection(
-  context: CanvasRenderingContext2D,
+  context: TimelineBodyContext,
   scene: TimelineScene,
   viewport: Viewport,
 ): void {
@@ -343,11 +367,7 @@ function shapeAt(scene: TimelineScene, index: number): RowShape | null {
 }
 
 /** Draws one bar, milestone or summary, outlining a bar or milestone whose task is in a person or team conflict or misses one of its dates. */
-function paintShape(
-  context: CanvasRenderingContext2D,
-  scene: TimelineScene,
-  shape: RowShape,
-): void {
+function paintShape(context: TimelineBodyContext, scene: TimelineScene, shape: RowShape): void {
   const top = shape.row * ROW_HEIGHT;
   if (shape.kind === 'summary') {
     paintSummary(context, scene.theme.text, shape.start, shape.end, top);
@@ -401,7 +421,7 @@ function paintShape(
 
 /** Marks a critical task with a line in the action color under each block, or, when float lines are shown, draws the total float of a task that can slip as a dashed line to its latest finish when that is later, drawing nothing without critical path. */
 function paintFloat(
-  context: CanvasRenderingContext2D,
+  context: TimelineBodyContext,
   scene: TimelineScene,
   taskFloat: TaskFloat | undefined,
   blocks: readonly PixelInterval[],
@@ -463,7 +483,7 @@ function piecesOf(
 
 /** Draws one worked part of a block: pale ground, progress up to its end, pattern, outline and conflict outline. */
 function paintBarPart(
-  context: CanvasRenderingContext2D,
+  context: TimelineBodyContext,
   scene: TimelineScene,
   bar: BarLook,
   part: PixelInterval,
@@ -513,7 +533,7 @@ function paintBarPart(
 
 /** Draws the pause between two blocks of a split task as a dotted line. */
 function paintSplitGap(
-  context: CanvasRenderingContext2D,
+  context: TimelineBodyContext,
   color: string,
   start: number,
   end: number,
@@ -532,7 +552,7 @@ function paintSplitGap(
 
 /** Draws a summary as a thin bar with a tip at each end. */
 function paintSummary(
-  context: CanvasRenderingContext2D,
+  context: TimelineBodyContext,
   color: string,
   start: number,
   end: number,
@@ -552,12 +572,7 @@ function paintSummary(
 }
 
 /** Draws a milestone as a diamond centred on its date. */
-function paintMilestone(
-  context: CanvasRenderingContext2D,
-  color: string,
-  x: number,
-  top: number,
-): void {
+function paintMilestone(context: TimelineBodyContext, color: string, x: number, top: number): void {
   const middle = top + ROW_HEIGHT / HALF;
   const half = MILESTONE_SIZE / HALF;
   context.fillStyle = color;
@@ -571,11 +586,7 @@ function paintMilestone(
 }
 
 /** Draws where each visible task was planned in the baseline, as a thin pale bar at the top of its row or a small hollow diamond for a milestone, drawing nothing without a baseline shown. */
-function paintBaseline(
-  context: CanvasRenderingContext2D,
-  scene: TimelineScene,
-  range: RowRange,
-): void {
+function paintBaseline(context: TimelineBodyContext, scene: TimelineScene, range: RowRange): void {
   const entries = scene.baseline;
   if (entries === null) {
     return;
@@ -592,7 +603,7 @@ function paintBaseline(
 
 /** Draws the ghost of one baseline entry on its row, a bar for a frozen period and a diamond for a frozen instant. */
 function paintGhost(
-  context: CanvasRenderingContext2D,
+  context: TimelineBodyContext,
   scene: TimelineScene,
   color: string,
   entry: BaselineEntry,
@@ -623,7 +634,7 @@ function paintGhost(
 
 /** Draws the red outline of a milestone that misses one of its dates. */
 function paintMilestoneOutline(
-  context: CanvasRenderingContext2D,
+  context: TimelineBodyContext,
   color: string,
   x: number,
   top: number,
@@ -642,11 +653,7 @@ function paintMilestoneOutline(
 }
 
 /** Draws the deadline of each visible task or milestone that has one, as an upright line through its row topped by a small triangle, in red when the task ends later, drawing nothing while deadlines are hidden. */
-function paintDeadlines(
-  context: CanvasRenderingContext2D,
-  scene: TimelineScene,
-  range: RowRange,
-): void {
+function paintDeadlines(context: TimelineBodyContext, scene: TimelineScene, range: RowRange): void {
   const marks = scene.deadlines;
   if (marks === null) {
     return;
@@ -662,12 +669,7 @@ function paintDeadlines(
 }
 
 /** Draws one deadline marker on a row. */
-function paintDeadline(
-  context: CanvasRenderingContext2D,
-  color: string,
-  x: number,
-  top: number,
-): void {
+function paintDeadline(context: TimelineBodyContext, color: string, x: number, top: number): void {
   const lineTop = top + DEADLINE_INSET;
   context.fillStyle = color;
   context.fillRect(
@@ -685,11 +687,7 @@ function paintDeadline(
 }
 
 /** Draws the arrows of the dependencies that cross the visible rows. */
-function paintArrows(
-  context: CanvasRenderingContext2D,
-  scene: TimelineScene,
-  range: RowRange,
-): void {
+function paintArrows(context: TimelineBodyContext, scene: TimelineScene, range: RowRange): void {
   context.strokeStyle = scene.theme.textSecondary;
   context.fillStyle = scene.theme.textSecondary;
   context.lineWidth = ARROW_WIDTH;
@@ -713,7 +711,7 @@ function paintArrows(
 }
 
 /** Draws a polyline ending with an arrow head. */
-function paintArrow(context: CanvasRenderingContext2D, points: readonly Point[]): void {
+function paintArrow(context: TimelineBodyContext, points: readonly Point[]): void {
   const [first, ...rest] = points;
   const last = points.at(-1);
   const beforeLast = points.at(-2);
@@ -737,7 +735,7 @@ function paintArrow(context: CanvasRenderingContext2D, points: readonly Point[])
 
 /** Draws the handles of the selected task from which a link is dragged: one at the end of each block but the last, and one after the bar. */
 function paintLinkHandles(
-  context: CanvasRenderingContext2D,
+  context: TimelineBodyContext,
   scene: TimelineScene,
   shapes: readonly RowShape[],
 ): void {
@@ -758,7 +756,7 @@ function paintLinkHandles(
 
 /** Draws the line of a dragged link and the row, and the block, it would be dropped on. */
 function paintLinkPreview(
-  context: CanvasRenderingContext2D,
+  context: TimelineBodyContext,
   scene: TimelineScene,
   preview: Extract<DragPreview, { kind: 'link' }>,
 ): void {
@@ -789,7 +787,7 @@ function paintLinkPreview(
 }
 
 /** Draws where a dragged bar or link would go, as a dashed outline. */
-function paintPreview(context: CanvasRenderingContext2D, scene: TimelineScene): void {
+function paintPreview(context: TimelineBodyContext, scene: TimelineScene): void {
   const preview = scene.preview;
   if (preview === null) {
     return;
@@ -843,11 +841,7 @@ export function previewSpan(
 }
 
 /** Draws the vertical line of the current time, unless the scene has none, as on a printed page. */
-function paintToday(
-  context: CanvasRenderingContext2D,
-  scene: TimelineScene,
-  viewport: Viewport,
-): void {
+function paintToday(context: TimelineBodyContext, scene: TimelineScene, viewport: Viewport): void {
   if (scene.today === null) {
     return;
   }
@@ -862,7 +856,7 @@ function paintToday(
 
 /** Traces a rectangle with rounded corners. */
 function roundedRectangle(
-  context: CanvasRenderingContext2D,
+  context: TimelineBodyContext,
   x: number,
   y: number,
   width: number,
@@ -873,12 +867,7 @@ function roundedRectangle(
 }
 
 /** Draws a crisp vertical line of one pixel. */
-function verticalLine(
-  context: CanvasRenderingContext2D,
-  x: number,
-  top: number,
-  bottom: number,
-): void {
+function verticalLine(context: TimelineBodyContext, x: number, top: number, bottom: number): void {
   context.beginPath();
   context.moveTo(Math.round(x) + 0.5, top);
   context.lineTo(Math.round(x) + 0.5, bottom);

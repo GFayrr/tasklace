@@ -1,4 +1,5 @@
 import { PAPER_NAMES, PAPER_ORIENTATIONS } from '../../core/print/paper';
+import type { DocumentId } from '../../core/shared/shared-document';
 import { MAX_DAY_INDEX, MIN_DAY_INDEX } from '../../core/time';
 import type { WidthStore } from '../plan/table-width';
 import { ZOOM_LEVELS } from '../plan/time-scale';
@@ -24,7 +25,7 @@ const SETTINGS_KEYS = ['paper', 'orientation', 'period', 'zoom', 'columns'];
 const PERIOD_DAYS_KEYS = ['kind', 'firstDay', 'lastDay'];
 
 /** Reads the print settings remembered on this computer for a project, which are not trusted, or the default settings when there are none or they cannot be read. */
-export function readPrintSettings(store: WidthStore | null, documentId: string): PrintSettings {
+export function readPrintSettings(store: WidthStore | null, documentId: DocumentId): PrintSettings {
   try {
     const text = store?.getItem(`${STORAGE_PREFIX}${documentId}`) ?? null;
     if (text === null) {
@@ -45,7 +46,7 @@ export function readPrintSettings(store: WidthStore | null, documentId: string):
 /** Remembers the print settings of a project on this computer, outside the project file, only logging a warning when the browser storage refuses them. */
 export function rememberPrintSettings(
   store: WidthStore | null,
-  documentId: string,
+  documentId: DocumentId,
   settings: PrintSettings,
 ): void {
   try {

@@ -2,9 +2,8 @@ import { basename, join } from 'node:path';
 import type { BrowserWindow, IpcMainInvokeEvent, WebContents } from 'electron';
 import { MAX_PDF_BYTES } from '../core/limits';
 import { pageSizeOf } from '../core/print/paper';
-import type { PrintDocument } from '../core/print/print-document';
 import { printHtml } from '../core/print/print-html';
-import { readPrintDocument } from '../core/print/read-print-document';
+import { readPrintDocument, type CheckedPrintDocument } from '../core/print/read-print-document';
 import { failure, success, type Result } from '../core/result';
 import {
   IPC_CHANNELS,
@@ -41,7 +40,7 @@ export interface PdfHandlers {
 interface HeldPdf {
   readonly pdf: Uint8Array;
   readonly name: string;
-  readonly document: PrintDocument;
+  readonly document: CheckedPrintDocument;
 }
 
 interface HeldPdfStore {
@@ -153,7 +152,7 @@ async function exportPdf(
 /** Prints a checked document and checks the PDF, refusing one larger than allowed, one that stopped or took too long and one that came out without its pages or font, each logged. */
 async function printChecked(
   services: PdfServices,
-  document: PrintDocument,
+  document: CheckedPrintDocument,
 ): Promise<Result<Uint8Array, FileFailure>> {
   let pdf: Uint8Array;
   try {
@@ -263,7 +262,7 @@ function closedWhilePrinting(): BridgeResult<never> {
 /** Prints a checked document in a hidden window and returns the PDF, the window and its page being given up in every case, and failing when the window ends or printing takes longer than the time allowed. */
 export async function renderPdf(
   services: PdfServices,
-  document: PrintDocument,
+  document: CheckedPrintDocument,
 ): Promise<Uint8Array> {
   const page = services.pages.hold(printHtml(document));
   let window: BrowserWindow | null = null;
@@ -278,7 +277,11 @@ export async function renderPdf(
 }
 
 /** Loads a page in the hidden window and prints it at the size of the paper of the document, failing when the process of the window ends. */
-function printIn(window: BrowserWindow, url: string, document: PrintDocument): Promise<Buffer> {
+function printIn(
+  window: BrowserWindow,
+  url: string,
+  document: CheckedPrintDocument,
+): Promise<Buffer> {
   const size = pageSizeOf(document.paper, document.orientation);
   const gone = new Promise<never>((_resolve, reject) => {
     window.webContents.once('render-process-gone', (_event, details) => {

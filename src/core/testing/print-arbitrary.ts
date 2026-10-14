@@ -17,6 +17,7 @@ import {
   type PrintOrder,
   type PrintShape,
 } from '../print/print-document';
+import { readPrintDocument, type CheckedPrintDocument } from '../print/read-print-document';
 import { TAG_PATTERNS } from '../tags/tag-appearance';
 
 const PAGE_SPAN = 1_200;
@@ -124,3 +125,16 @@ export const printDocumentArbitrary: fc.Arbitrary<PrintDocument> = fc.record({
   title: printTextArbitrary,
   pages: fc.array(fc.array(orderArbitrary, { maxLength: 6 }), { minLength: 1, maxLength: 3 }),
 });
+
+/** Checks a document to print as the main process does, failing the test when it is refused. */
+export function checkedOrThrow(document: PrintDocument): CheckedPrintDocument {
+  const result = readPrintDocument(document);
+  if (!result.ok) {
+    throw new Error(`The document to print was refused: ${JSON.stringify(result.error)}`);
+  }
+  return result.value;
+}
+
+/** Generates a document to print as the main process accepts it. */
+export const checkedPrintDocumentArbitrary: fc.Arbitrary<CheckedPrintDocument> =
+  printDocumentArbitrary.map(checkedOrThrow);

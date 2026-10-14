@@ -16,7 +16,7 @@ import {
   type FileError,
 } from '../core/file/tasklace-file';
 import type { Project } from '../core/model/project';
-import type { PrintDocument } from '../core/print/print-document';
+import type { CheckedPrintDocument } from '../core/print/read-print-document';
 import { failure, success, type Result } from '../core/result';
 import { createSharedDocument, type DocumentId } from '../core/shared/shared-document';
 import type { FileFailure } from '../preload/bridge-contract';
@@ -56,7 +56,7 @@ export type FileTask =
     }
   | {
       readonly kind: 'writeDirectPdf';
-      readonly document: PrintDocument;
+      readonly document: CheckedPrintDocument;
       readonly fonts: PrintFonts;
     };
 
@@ -135,7 +135,10 @@ export async function runFileTask(task: FileTask): Promise<FileTaskResult> {
 }
 
 /** Writes a checked document as a PDF without the browser, refusing as too large a document whose patterns would need too many tiles or whose PDF would be larger than allowed, and a document holding a character the printed font lacks. */
-async function directPdf(document: PrintDocument, fonts: PrintFonts): Promise<FileTaskResult> {
+async function directPdf(
+  document: CheckedPrintDocument,
+  fonts: PrintFonts,
+): Promise<FileTaskResult> {
   try {
     return success({ kind: 'directPdf', pdf: await writeDirectPdf(document, fonts) });
   } catch (error) {

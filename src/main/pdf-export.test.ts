@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrintDocument } from '../core/print/print-document';
 import { printHtml } from '../core/print/print-html';
 import { failure, success } from '../core/result';
+import { checkedOrThrow } from '../core/testing/print-arbitrary';
 import { IPC_CHANNELS } from '../preload/bridge-contract';
 import { createPrintPageStore } from './app-files';
 import type { FileTask, FileTaskResult, ResultOfTask } from './file-tasks';
@@ -228,7 +229,7 @@ describe('exporting to PDF', () => {
     );
     expect(await readFile(join(folder, 'thesis.pdf'))).toEqual(fakePdf(1));
     const [window] = windows;
-    expect(window?.served).toEqual([printHtml(DOCUMENT)]);
+    expect(window?.served).toEqual([printHtml(checkedOrThrow(DOCUMENT))]);
     expect(window?.loaded[0]).toMatch(/^app:\/\/tasklace\/print\/[0-9a-f-]{36}\.html$/);
     expect(pages.pageAt(window?.loaded[0] ?? '')).toBeNull();
     expect(window?.destroyed).toBe(true);

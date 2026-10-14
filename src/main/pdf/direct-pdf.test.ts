@@ -11,7 +11,7 @@ import {
   type PrintOrder,
 } from '../../core/print/print-document';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../../core/testing/arbitraries';
-import { printDocumentArbitrary } from '../../core/testing/print-arbitrary';
+import { checkedOrThrow, printDocumentArbitrary } from '../../core/testing/print-arbitrary';
 import { printFontsIn } from '../pdf-export';
 import { MissingCharacter, writeDirectPdf } from './direct-pdf';
 
@@ -25,7 +25,9 @@ function documentOf(...orders: PrintOrder[]): PrintDocument {
 
 /** Writes a document as an uncompressed PDF and returns it as text, so that its operators can be read. */
 async function pdfText(document: PrintDocument): Promise<string> {
-  return Buffer.from(await writeDirectPdf(document, FONTS, false)).toString('latin1');
+  return Buffer.from(await writeDirectPdf(checkedOrThrow(document), FONTS, false)).toString(
+    'latin1',
+  );
 }
 
 /** Returns the objects of an uncompressed PDF by number. */

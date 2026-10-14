@@ -7,6 +7,7 @@ import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
 import type { Project } from '../../src/core/model/project';
 import type { PrintDocument } from '../../src/core/print/print-document';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
+import { checkedOrThrow } from '../../src/core/testing/print-arbitrary';
 import { scheduleOrThrow } from '../../src/core/testing/project-builder';
 import { writeDirectPdf } from '../../src/main/pdf/direct-pdf';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
@@ -217,7 +218,7 @@ test('prints the three sample plans with both engines and writes the comparison'
     const plan = buildPdfSample(size);
     window.push([plan.name, await exportThroughWindow(plan, size)]);
     for (const [index, compared] of COMPARED_SETTINGS.entries()) {
-      const document = documentOf(plan, compared.settings);
+      const document = checkedOrThrow(documentOf(plan, compared.settings));
       const chromiumPath = join(OUTPUT_FOLDER, `${size} - ${String(index + 1)} - chromium.pdf`);
       const directPath = join(OUTPUT_FOLDER, `${size} - ${String(index + 1)} - pdfkit.pdf`);
       const { heavy } = await printWithChromium(document, chromiumPath);
