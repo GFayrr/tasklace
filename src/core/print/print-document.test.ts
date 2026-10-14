@@ -6,6 +6,7 @@ import {
   PATH_MOVE,
   coordinatesAfter,
   pathSegments,
+  printCostOf,
 } from './print-document';
 
 describe('coordinatesAfter', () => {
@@ -45,5 +46,39 @@ describe('pathSegments', () => {
     ['a cut first operation', [PATH_MOVE], 0],
   ])('throws on %s, which a validated path never holds', (_name, segments, index) => {
     expect(() => pathSegments(segments)).toThrow(`Invalid path operation at ${String(index)}.`);
+  });
+});
+
+describe('printCostOf', () => {
+  it('counts the orders inside clips and the numbers of every path, rectangles and texts adding none', () => {
+    const rect = { kind: 'rect', x: 0, y: 0, width: 1, height: 1 } as const;
+    const path = {
+      kind: 'path',
+      segments: [PATH_MOVE, 0, 0, PATH_LINE, 1, 1, PATH_CLOSE],
+    } as const;
+    const text = {
+      kind: 'text',
+      x: 0,
+      y: 0,
+      text: 'Plan',
+      size: 10,
+      weight: 400,
+      color: '#000000',
+      align: 'start',
+    } as const;
+    const fill = { kind: 'fill', shape: path, color: '#000000', opacity: 1 } as const;
+    expect(
+      printCostOf([
+        fill,
+        text,
+        { kind: 'pattern', shape: rect, pattern: 'dots' },
+        {
+          kind: 'clip',
+          shape: path,
+          orders: [fill, { kind: 'clip', shape: rect, orders: [fill] }],
+        },
+      ]),
+    ).toEqual({ orders: 7, pathNumbers: 7 * 4 });
+    expect(printCostOf([])).toEqual({ orders: 0, pathNumbers: 0 });
   });
 });

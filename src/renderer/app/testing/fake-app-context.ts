@@ -37,6 +37,7 @@ export interface FakeBridgeControl {
   exportResult: BridgeResult<ExportedFile>;
   pdfResult: BridgeResult<PdfExport>;
   heldPdfResult: BridgeResult<ExportedFile>;
+  discardResult: BridgeResult<null>;
   adoptResult: BridgeResult<null>;
   recent: readonly RecentProject[] | Error | 'unreadable';
   newDocumentId: string;
@@ -85,6 +86,7 @@ export function fakeBridge(): {
     exportResult: { ok: true, value: { fileName: 'plan.json' } },
     pdfResult: { ok: true, value: { kind: 'exported', fileName: 'Thesis.pdf' } },
     heldPdfResult: { ok: true, value: { fileName: 'Thesis.pdf' } },
+    discardResult: { ok: true, value: null },
     adoptResult: { ok: true, value: null },
     recent: [],
     newDocumentId: TEST_DOCUMENT_ID,
@@ -150,6 +152,7 @@ export function fakeBridge(): {
     },
     saveHeldPdf: () => called('saveHeldPdf', control.heldPdfResult),
     exportLighterPdf: () => called('exportLighterPdf', control.heldPdfResult),
+    discardHeldPdf: () => called('discardHeldPdf', control.discardResult),
     onFlushRequested: () => undefined,
     reportStartFailure: () => undefined,
   };

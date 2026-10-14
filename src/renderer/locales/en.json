@@ -30,6 +30,9 @@
     "INVALID_IMPORT": "This file contains errors and cannot be imported.",
     "NO_PROJECT": "There is no open project to save.",
     "TASK_FAILED": "Something went wrong with this file. Try again.",
+    "MISSING_CHARACTERS": "This plan holds characters the lighter PDF cannot write, such as letters of other alphabets or emoji. Use “Export as it is” instead.",
+    "PRINT_FAILED": "The PDF could not be made: printing stopped or took too long. Choose a coarser zoom or a shorter period, then try again.",
+    "PRINT_INCOMPLETE": "The PDF came out incomplete, so it was not written. Restart Tasklace; if this keeps happening, install it again.",
     "WRONG_DOCUMENT": "The project was not saved because this window no longer matches its file. Export the project as JSON to keep your changes, then open it again.",
     "INVALID_STATE": "The project was not saved because it contains an error Tasklace could not repair. Export the project as JSON to keep your changes.",
     "BUSY": "Wait until the current file action is finished, then try again.",
@@ -568,12 +571,16 @@
     "previewLabel": "Preview of the first page",
     "waiting": "The dates of the plan are being worked out.",
     "scheduleFailed": "The dates of the plan cannot be worked out, so it cannot be printed yet.",
-    "previewUnavailable": "The preview cannot be drawn on this computer.",
+    "previewUnavailable": "The preview cannot be drawn on this computer. The PDF can still be exported.",
+    "scheduleStopped": "The dates of the plan could not be updated, so it cannot be printed. Close this window and change a value to work them out again.",
+    "measureUnavailable": "The printed font could not be prepared, so the plan cannot be printed. Restart Tasklace; if this keeps happening, install it again.",
+    "notDrawn": "The pages could not be drawn. Close this window and try again; if this keeps happening, save your project and restart Tasklace.",
     "refusals": {
       "NO_ROOM_FOR_TIMELINE": "These columns leave no room for the timeline. Untick some columns, or choose a wider paper or the landscape orientation.",
       "NO_ROOM_FOR_ROWS": "The legend of the tags leaves no room for the tasks on this paper. Choose a larger paper.",
       "TOO_MANY_PAGES": "This would print more than {limit} pages. Choose a coarser zoom or a shorter period.",
-      "EMPTY_PERIOD": "The last day printed comes before the first day."
+      "EMPTY_PERIOD": "The last day printed comes before the first day.",
+      "TOO_DETAILED": "These pages hold too much detail to be printed. Choose a coarser zoom or a shorter period."
     },
     "cancel": "Cancel",
     "export": "Export PDF…",

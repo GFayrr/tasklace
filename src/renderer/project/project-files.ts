@@ -37,6 +37,7 @@ export type ProjectBridge = Pick<
   | 'exportPdf'
   | 'saveHeldPdf'
   | 'exportLighterPdf'
+  | 'discardHeldPdf'
 >;
 
 export type ActionFailure =
@@ -94,6 +95,7 @@ export interface ProjectFiles {
   ) => Promise<ActionResult<PdfExport>>;
   readonly saveHeldPdf: () => Promise<ActionResult<ExportedFile>>;
   readonly exportLighterPdf: () => Promise<ActionResult<ExportedFile>>;
+  readonly discardHeldPdf: () => Promise<ActionResult<null>>;
   readonly flush: () => Promise<void>;
 }
 
@@ -272,6 +274,7 @@ export function createProjectFiles(
       exclusive(() => bridge.exportPdf(document, suggestedName)),
     saveHeldPdf: () => exclusive(() => bridge.saveHeldPdf()),
     exportLighterPdf: () => exclusive(() => bridge.exportLighterPdf()),
+    discardHeldPdf: () => bridge.discardHeldPdf(),
     flush: autosave.flush,
   };
 }

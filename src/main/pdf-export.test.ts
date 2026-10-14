@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ipcMain as electronIpcMain, type BrowserWindow } from 'electron';
+import { ipcMain as electronIpcMain, type BrowserWindow, type WebContents } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrintDocument } from '../core/print/print-document';
 import { printHtml } from '../core/print/print-html';
@@ -29,6 +29,18 @@ vi.mock('../core/limits', async (importOriginal) => ({
   MAX_PDF_BYTES: 2_000_000,
 }));
 
+const writing = vi.hoisted(() => ({ failure: null as Error | null }));
+
+vi.mock('./safe-write', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./safe-write')>();
+  return {
+    writeFileSafely: (path: string, content: Uint8Array) =>
+      writing.failure === null
+        ? original.writeFileSafely(path, content)
+        : Promise.reject(writing.failure),
+  };
+});
+
 vi.mock('electron', async () => {
   const fakes = await import('./testing/fake-electron');
   return {
@@ -43,14 +55,24 @@ vi.mock('electron', async () => {
   };
 });
 
-/** A hidden print window that records what it loads and answers printing with a PDF the test chooses. */
+/** A hidden print window that records what it loads and answers printing with a PDF the test chooses, its process ending when the test says. */
 class FakePrintWindow {
   readonly loaded: string[] = [];
   readonly served: (string | null)[] = [];
   destroyed = false;
   readonly webContents = {
     printToPDF: vi.fn<(options: unknown) => Promise<Buffer>>(() => printing.answer()),
+    once: (event: string, listener: (event: unknown, details: { reason: string }) => void) => {
+      if (event === 'render-process-gone') {
+        this.end = (reason) => {
+          listener({}, { reason });
+        };
+      }
+    },
   };
+
+  /** Ends the process of the window, as a crash does. */
+  end: (reason: string) => void = () => undefined;
 
   /** Records the address loaded and the page the store serves there at that moment. */
   loadURL(url: string): Promise<void> {
@@ -67,11 +89,13 @@ class FakePrintWindow {
 
 const ipcMain = electronIpcMain as unknown as FakeIpcMain;
 const pages = createPrintPageStore();
+const heldUrls: string[] = [];
+const windowCreation = { failure: null as Error | null };
 const windows: FakePrintWindow[] = [];
 const trusted = vi.fn();
 const printing = {
   load: (): Promise<void> => Promise.resolve(),
-  answer: (): Promise<Buffer> => Promise.resolve(Buffer.from('%PDF-1.4 light')),
+  answer: (): Promise<Buffer> => Promise.resolve(fakePdf(1)),
 };
 const services = { timeoutMs: 1_000 };
 const FONTS = { 400: '/fonts/400.ttf', 500: '/fonts/500.ttf', 600: '/fonts/600.ttf' } as const;
@@ -98,10 +122,20 @@ const DOCUMENT: PrintDocument = {
 };
 let folder: string;
 
-registerPdfHandlers({
+const handlers = registerPdfHandlers({
   assertTrusted: trusted,
-  pages,
+  pages: {
+    hold: (html) => {
+      const held = pages.hold(html);
+      heldUrls.push(held.url);
+      return held;
+    },
+    pageAt: pages.pageAt,
+  },
   createPrintWindow: () => {
+    if (windowCreation.failure !== null) {
+      throw windowCreation.failure;
+    }
     const window = new FakePrintWindow();
     windows.push(window);
     return window as unknown as BrowserWindow;
@@ -119,11 +153,14 @@ registerPdfHandlers({
 beforeEach(async () => {
   folder = await mkdtemp(join(tmpdir(), 'tasklace-pdf-'));
   windows.length = 0;
+  heldUrls.length = 0;
+  windowCreation.failure = null;
+  writing.failure = null;
   trusted.mockReset();
   dialogs.save.mockReset();
   services.timeoutMs = 1_000;
   printing.load = () => Promise.resolve();
-  printing.answer = () => Promise.resolve(Buffer.from('%PDF-1.4 light'));
+  printing.answer = () => Promise.resolve(fakePdf(1));
   tasks.length = 0;
   lighter.answer = () => Promise.resolve(success({ kind: 'directPdf', pdf: LIGHTER_PDF }));
 });
@@ -146,11 +183,26 @@ function chooseToSave(path: string | null): void {
   );
 }
 
-/** Makes printing answer a PDF of a given number of bytes. */
-function printsBytes(count: number): Buffer {
-  const pdf = Buffer.alloc(count, 0x25);
+/** Builds what Chromium prints: a PDF declaring its pages and the printed font, padded to a number of bytes when one is given. */
+function fakePdf(pageCount: number, bytes = 0): Buffer {
+  const content = `%PDF-1.4 /BaseFont /ABCDEF+Jost-Book /Type /Pages ${'/Type /Page '.repeat(pageCount)}`;
+  return Buffer.from(content.padEnd(bytes, ' '), 'latin1');
+}
+
+/** Makes printing answer a complete PDF of a given number of bytes and pages. */
+function printsBytes(count: number, pageCount = 1): Buffer {
+  const pdf = fakePdf(pageCount, count);
   printing.answer = () => Promise.resolve(pdf);
   return pdf;
+}
+
+/** Returns a window of the application as the sender of its requests, open until the test closes it. */
+function page(): { isDestroyed: () => boolean; closed: boolean } {
+  const sender = {
+    closed: false,
+    isDestroyed: () => sender.closed,
+  };
+  return sender;
 }
 
 /** Builds a document of a given number of empty pages. */
@@ -171,10 +223,10 @@ async function quietly(run: () => Promise<unknown>) {
 describe('exporting to PDF', () => {
   it('prints the page of the document in a hidden window and writes a light PDF where the user chooses, adding the extension', async () => {
     chooseToSave(join(folder, 'thesis'));
-    expect(await request(IPC_CHANNELS.exportPdf, {}, DOCUMENT, 'Thesis')).toEqual(
+    expect(await request(IPC_CHANNELS.exportPdf, page(), DOCUMENT, 'Thesis')).toEqual(
       success({ kind: 'exported', fileName: 'thesis.pdf' }),
     );
-    expect(await readFile(join(folder, 'thesis.pdf'), 'latin1')).toBe('%PDF-1.4 light');
+    expect(await readFile(join(folder, 'thesis.pdf'))).toEqual(fakePdf(1));
     const [window] = windows;
     expect(window?.served).toEqual([printHtml(DOCUMENT)]);
     expect(window?.loaded[0]).toMatch(/^app:\/\/tasklace\/print\/[0-9a-f-]{36}\.html$/);
@@ -206,9 +258,9 @@ describe('exporting to PDF', () => {
   ])(
     'writes a PDF of %i pages that weighs at most its allowance of %i bytes',
     async (pageCount, bytes) => {
-      printsBytes(bytes);
+      printsBytes(bytes, pageCount);
       chooseToSave(join(folder, 'plan.pdf'));
-      expect(await request(IPC_CHANNELS.exportPdf, {}, documentOf(pageCount), 'Plan')).toEqual(
+      expect(await request(IPC_CHANNELS.exportPdf, page(), documentOf(pageCount), 'Plan')).toEqual(
         success({ kind: 'exported', fileName: 'plan.pdf' }),
       );
     },
@@ -220,8 +272,8 @@ describe('exporting to PDF', () => {
   ])(
     'keeps back a PDF of %i pages heavier than its allowance, %i bytes, without asking where to write it',
     async (pageCount, bytes) => {
-      printsBytes(bytes);
-      expect(await request(IPC_CHANNELS.exportPdf, {}, documentOf(pageCount), 'Plan')).toEqual(
+      printsBytes(bytes, pageCount);
+      expect(await request(IPC_CHANNELS.exportPdf, page(), documentOf(pageCount), 'Plan')).toEqual(
         success({ kind: 'heavy', bytes, pages: pageCount }),
       );
       expect(dialogs.save).not.toHaveBeenCalled();
@@ -229,7 +281,7 @@ describe('exporting to PDF', () => {
   );
 
   it('writes the PDF kept back when the user exports it as it is, once', async () => {
-    const sender = {};
+    const sender = page();
     const pdf = printsBytes(PDF_GUARD_BYTES_PER_PAGE * PDF_GUARD_MIN_PAGES + 1);
     await request(IPC_CHANNELS.exportPdf, sender, DOCUMENT, 'Thesis');
     chooseToSave(null);
@@ -246,10 +298,10 @@ describe('exporting to PDF', () => {
   });
 
   it('keeps a PDF back for its own window only, and forgets it when the window starts another export', async () => {
-    const sender = {};
+    const sender = page();
     printsBytes(PDF_GUARD_BYTES_PER_PAGE * PDF_GUARD_MIN_PAGES + 1);
     await request(IPC_CHANNELS.exportPdf, sender, DOCUMENT, 'Thesis');
-    expect((await quietly(() => request(IPC_CHANNELS.saveHeldPdf, {}))).answer).toEqual(
+    expect((await quietly(() => request(IPC_CHANNELS.saveHeldPdf, page()))).answer).toEqual(
       failure({ code: 'TASK_FAILED' }),
     );
     printsBytes(10);
@@ -265,7 +317,7 @@ describe('exporting to PDF', () => {
   it('refuses a PDF larger than the limit before keeping or writing it', async () => {
     printsBytes(MOCKED_MAX_PDF_BYTES + 1);
     expect(
-      await request(IPC_CHANNELS.exportPdf, {}, documentOf(PDF_GUARD_MIN_PAGES * 4), 'Plan'),
+      await request(IPC_CHANNELS.exportPdf, page(), documentOf(PDF_GUARD_MIN_PAGES * 4), 'Plan'),
     ).toEqual(failure({ code: 'TOO_LARGE' }));
     expect(dialogs.save).not.toHaveBeenCalled();
   });
@@ -288,7 +340,7 @@ describe('exporting to PDF', () => {
         ],
       ],
     };
-    expect(await quietly(() => request(IPC_CHANNELS.exportPdf, {}, broken, 'Plan'))).toEqual({
+    expect(await quietly(() => request(IPC_CHANNELS.exportPdf, page(), broken, 'Plan'))).toEqual({
       answer: failure({ code: 'TASK_FAILED' }),
       logged: [
         [
@@ -301,26 +353,34 @@ describe('exporting to PDF', () => {
   });
 
   it('refuses a suggested name that is not a short text', async () => {
-    await expect(request(IPC_CHANNELS.exportPdf, {}, DOCUMENT, 7)).rejects.toThrow(RefusedRequest);
+    await expect(request(IPC_CHANNELS.exportPdf, page(), DOCUMENT, 7)).rejects.toThrow(
+      RefusedRequest,
+    );
     expect(windows).toEqual([]);
   });
 
   it('reports an export that could not be written as a failed write, logged', async () => {
     chooseToSave(join(folder, 'missing', 'plan.pdf'));
-    const written = await quietly(() => request(IPC_CHANNELS.exportPdf, {}, DOCUMENT, 'Plan'));
+    const written = await quietly(() => request(IPC_CHANNELS.exportPdf, page(), DOCUMENT, 'Plan'));
     expect(written.answer).toEqual(failure({ code: 'WRITE_FAILED' }));
-    expect(written.logged.map((call): unknown => call[0])).toEqual([
-      'The PDF could not be written:',
+    expect(written.logged).toEqual([
+      ['The PDF could not be written:', expect.objectContaining({ code: 'ENOENT' })],
     ]);
   });
 
-  it('gives up printing that takes longer than the time allowed, the window destroyed and the page released', async () => {
+  it('gives up printing that takes longer than the time allowed as a failed print, logged, the window destroyed and the page released', async () => {
     services.timeoutMs = 5;
     printing.answer = () => new Promise(() => undefined);
-    const late = await quietly(() => request(IPC_CHANNELS.exportPdf, {}, DOCUMENT, 'Plan'));
-    expect(late.answer).toEqual(failure({ code: 'TASK_FAILED' }));
+    const late = await quietly(() => request(IPC_CHANNELS.exportPdf, page(), DOCUMENT, 'Plan'));
+    expect(late.answer).toEqual(failure({ code: 'PRINT_FAILED' }));
     expect(late.logged).toEqual([
-      ['The request project:export-pdf failed:', new Error('Printing to PDF took more than 5 ms.')],
+      [
+        'The PDF could not be printed:',
+        expect.objectContaining({
+          name: 'PrintingStopped',
+          message: 'Printing to PDF took more than 5 ms.',
+        }),
+      ],
     ]);
     expect(windows[0]?.destroyed).toBe(true);
     expect(pages.pageAt(windows[0]?.loaded[0] ?? '')).toBeNull();
@@ -329,7 +389,7 @@ describe('exporting to PDF', () => {
   it('reports a page that could not be loaded for printing as a failed task, the window destroyed', async () => {
     const refused = new Error('ERR_FAILED');
     printing.load = () => Promise.reject(refused);
-    expect(await quietly(() => request(IPC_CHANNELS.exportPdf, {}, DOCUMENT, 'Plan'))).toEqual({
+    expect(await quietly(() => request(IPC_CHANNELS.exportPdf, page(), DOCUMENT, 'Plan'))).toEqual({
       answer: failure({ code: 'TASK_FAILED' }),
       logged: [['The request project:export-pdf failed:', refused]],
     });
@@ -337,7 +397,7 @@ describe('exporting to PDF', () => {
   });
 
   it('writes the document kept back as a lighter PDF made in the file worker, once, whatever its size', async () => {
-    const sender = {};
+    const sender = page();
     printsBytes(PDF_GUARD_BYTES_PER_PAGE * PDF_GUARD_MIN_PAGES + 1);
     await request(IPC_CHANNELS.exportPdf, sender, DOCUMENT, 'Thesis');
     chooseToSave(null);
@@ -362,7 +422,7 @@ describe('exporting to PDF', () => {
   });
 
   it('passes on a failure of the file worker, keeping the PDF back for another choice', async () => {
-    const sender = {};
+    const sender = page();
     printsBytes(PDF_GUARD_BYTES_PER_PAGE * PDF_GUARD_MIN_PAGES + 1);
     await request(IPC_CHANNELS.exportPdf, sender, DOCUMENT, 'Thesis');
     lighter.answer = () => Promise.resolve(failure({ code: 'TOO_LARGE' }));
@@ -377,11 +437,180 @@ describe('exporting to PDF', () => {
   });
 
   it('makes no lighter PDF when nothing was kept back, logging why', async () => {
-    expect(await quietly(() => request(IPC_CHANNELS.exportLighterPdf, {}))).toEqual({
+    expect(await quietly(() => request(IPC_CHANNELS.exportLighterPdf, page()))).toEqual({
       answer: failure({ code: 'TASK_FAILED' }),
       logged: [['No PDF was kept back for this window.']],
     });
     expect(tasks).toEqual([]);
+  });
+
+  it('reports a window of printing whose process ended as a failed print, logged, the window destroyed and the page released', async () => {
+    printing.answer = () => {
+      windows[0]?.end('oom');
+      return new Promise(() => undefined);
+    };
+    expect(await quietly(() => request(IPC_CHANNELS.exportPdf, page(), DOCUMENT, 'Plan'))).toEqual({
+      answer: failure({ code: 'PRINT_FAILED' }),
+      logged: [
+        [
+          'The PDF could not be printed:',
+          expect.objectContaining({
+            name: 'PrintingStopped',
+            message: 'The printing window ended: oom.',
+          }),
+        ],
+      ],
+    });
+    expect(windows[0]?.destroyed).toBe(true);
+    expect(heldUrls.map((url) => pages.pageAt(url))).toEqual([null]);
+  });
+
+  it.each([
+    ['without the printed font', Buffer.from('%PDF-1.4 /Type /Page ', 'latin1')],
+    ['with fewer pages than the document', fakePdf(0)],
+    ['with more pages than the document', fakePdf(2)],
+  ])(
+    'refuses a printed PDF %s, as a page printed without its style sheet or fonts, logged and never written',
+    async (_case, pdf) => {
+      printing.answer = () => Promise.resolve(pdf);
+      expect(
+        await quietly(() => request(IPC_CHANNELS.exportPdf, page(), DOCUMENT, 'Plan')),
+      ).toEqual({
+        answer: failure({ code: 'PRINT_INCOMPLETE' }),
+        logged: [
+          [
+            'The printed PDF lacks pages or the printed font: a file of the interface was not served.',
+          ],
+        ],
+      });
+      expect(dialogs.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it('counts page objects written with any blanks or none, never the tree of pages', async () => {
+    printing.answer = () =>
+      Promise.resolve(
+        Buffer.from(
+          '%PDF-1.4 +Jost /Type/Page /Type\n\t /Page /Type /Pages /Type /Pages',
+          'latin1',
+        ),
+      );
+    chooseToSave(join(folder, 'plan.pdf'));
+    expect(await request(IPC_CHANNELS.exportPdf, page(), documentOf(2), 'Plan')).toEqual(
+      success({ kind: 'exported', fileName: 'plan.pdf' }),
+    );
+  });
+
+  it('releases the page to print when the hidden window cannot be created, the failure passed on', async () => {
+    const refused = new Error('No window');
+    windowCreation.failure = refused;
+    expect(await quietly(() => request(IPC_CHANNELS.exportPdf, page(), DOCUMENT, 'Plan'))).toEqual({
+      answer: failure({ code: 'TASK_FAILED' }),
+      logged: [['The request project:export-pdf failed:', refused]],
+    });
+    expect(heldUrls).toHaveLength(1);
+    expect(heldUrls.map((url) => pages.pageAt(url))).toEqual([null]);
+  });
+
+  it('cancels an export whose window closed while its PDF was being made, asking nothing and keeping nothing', async () => {
+    const light = page();
+    printing.answer = () => {
+      light.closed = true;
+      return Promise.resolve(fakePdf(1));
+    };
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await request(IPC_CHANNELS.exportPdf, light, DOCUMENT, 'Plan')).toEqual(
+      failure({ code: 'CANCELLED' }),
+    );
+    const heavy = page();
+    const pdf = fakePdf(1, PDF_GUARD_BYTES_PER_PAGE * PDF_GUARD_MIN_PAGES + 1);
+    printing.answer = () => {
+      heavy.closed = true;
+      return Promise.resolve(pdf);
+    };
+    expect(await request(IPC_CHANNELS.exportPdf, heavy, DOCUMENT, 'Plan')).toEqual(
+      failure({ code: 'CANCELLED' }),
+    );
+    heavy.closed = false;
+    expect((await quietly(() => request(IPC_CHANNELS.saveHeldPdf, heavy))).answer).toEqual(
+      failure({ code: 'TASK_FAILED' }),
+    );
+    expect(warned.mock.calls).toEqual([
+      ['The export closed while its PDF was being made.'],
+      ['The export closed while its PDF was being made.'],
+    ]);
+    expect(dialogs.save).not.toHaveBeenCalled();
+    warned.mockRestore();
+  });
+
+  it('forgets the PDF kept back when the page closes its export, or when the main process reloads the window', async () => {
+    const sender = page();
+    printsBytes(PDF_GUARD_BYTES_PER_PAGE * PDF_GUARD_MIN_PAGES + 1);
+    await request(IPC_CHANNELS.exportPdf, sender, DOCUMENT, 'Thesis');
+    expect(await request(IPC_CHANNELS.discardHeldPdf, sender)).toEqual(success(null));
+    expect((await quietly(() => request(IPC_CHANNELS.saveHeldPdf, sender))).answer).toEqual(
+      failure({ code: 'TASK_FAILED' }),
+    );
+    await request(IPC_CHANNELS.exportPdf, sender, DOCUMENT, 'Thesis');
+    handlers.forgetHeldPdf(sender as unknown as WebContents);
+    expect((await quietly(() => request(IPC_CHANNELS.exportLighterPdf, sender))).answer).toEqual(
+      failure({ code: 'TASK_FAILED' }),
+    );
+  });
+
+  it('keeps nothing back for an export the page closed while Chromium was still printing it', async () => {
+    const sender = page();
+    let answer: (pdf: Buffer) => void = () => undefined;
+    printing.answer = () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      });
+    const exporting = request(IPC_CHANNELS.exportPdf, sender, DOCUMENT, 'Thesis');
+    await vi.waitFor(() => {
+      expect(windows).toHaveLength(1);
+    });
+    await request(IPC_CHANNELS.discardHeldPdf, sender);
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    answer(fakePdf(1, PDF_GUARD_BYTES_PER_PAGE * PDF_GUARD_MIN_PAGES + 1));
+    expect(await exporting).toEqual(failure({ code: 'CANCELLED' }));
+    expect(warned.mock.calls).toEqual([['The export closed while its PDF was being made.']]);
+    warned.mockRestore();
+    expect((await quietly(() => request(IPC_CHANNELS.saveHeldPdf, sender))).answer).toEqual(
+      failure({ code: 'TASK_FAILED' }),
+    );
+  });
+
+  it('passes on an error of the write that is no failure of the system as a failed task, logged', async () => {
+    const broken = new Error('Not a system error');
+    writing.failure = broken;
+    chooseToSave(join(folder, 'plan.pdf'));
+    expect(await quietly(() => request(IPC_CHANNELS.exportPdf, page(), DOCUMENT, 'Plan'))).toEqual({
+      answer: failure({ code: 'TASK_FAILED' }),
+      logged: [['The request project:export-pdf failed:', broken]],
+    });
+  });
+
+  it('keeps the PDF back when the file worker fails or the lighter PDF cannot be written', async () => {
+    const sender = page();
+    printsBytes(PDF_GUARD_BYTES_PER_PAGE * PDF_GUARD_MIN_PAGES + 1);
+    await request(IPC_CHANNELS.exportPdf, sender, DOCUMENT, 'Thesis');
+    const lost = new Error('Worker lost');
+    lighter.answer = () => Promise.reject(lost);
+    expect(await quietly(() => request(IPC_CHANNELS.exportLighterPdf, sender))).toEqual({
+      answer: failure({ code: 'TASK_FAILED' }),
+      logged: [['The request project:export-lighter-pdf failed:', lost]],
+    });
+    lighter.answer = () => Promise.resolve(success({ kind: 'directPdf', pdf: LIGHTER_PDF }));
+    chooseToSave(join(folder, 'missing', 'lighter.pdf'));
+    const unwritten = await quietly(() => request(IPC_CHANNELS.exportLighterPdf, sender));
+    expect(unwritten.answer).toEqual(failure({ code: 'WRITE_FAILED' }));
+    expect(unwritten.logged).toEqual([
+      ['The PDF could not be written:', expect.objectContaining({ code: 'ENOENT' })],
+    ]);
+    chooseToSave(join(folder, 'heavy.pdf'));
+    expect(await request(IPC_CHANNELS.saveHeldPdf, sender)).toEqual(
+      success({ fileName: 'heavy.pdf' }),
+    );
   });
 
   it('gives the files of the printed weights of Jost in a fonts folder', () => {
@@ -397,11 +626,12 @@ describe('exporting to PDF', () => {
     trusted.mockImplementation(() => {
       throw new RefusedRequest('not the application');
     });
-    await expect(request(IPC_CHANNELS.exportPdf, {}, DOCUMENT, 'Plan')).rejects.toThrow(
+    await expect(request(IPC_CHANNELS.exportPdf, page(), DOCUMENT, 'Plan')).rejects.toThrow(
       RefusedRequest,
     );
-    await expect(request(IPC_CHANNELS.saveHeldPdf, {})).rejects.toThrow(RefusedRequest);
-    await expect(request(IPC_CHANNELS.exportLighterPdf, {})).rejects.toThrow(RefusedRequest);
+    await expect(request(IPC_CHANNELS.saveHeldPdf, page())).rejects.toThrow(RefusedRequest);
+    await expect(request(IPC_CHANNELS.exportLighterPdf, page())).rejects.toThrow(RefusedRequest);
+    await expect(request(IPC_CHANNELS.discardHeldPdf, page())).rejects.toThrow(RefusedRequest);
     expect(windows).toEqual([]);
   });
 });

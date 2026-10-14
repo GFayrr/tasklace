@@ -42,7 +42,7 @@ export function readPrintSettings(store: WidthStore | null, documentId: string):
   }
 }
 
-/** Remembers the print settings of a project on this computer, outside the project file, doing nothing when the browser storage refuses them. */
+/** Remembers the print settings of a project on this computer, outside the project file, only logging a warning when the browser storage refuses them. */
 export function rememberPrintSettings(
   store: WidthStore | null,
   documentId: string,
@@ -81,7 +81,7 @@ function settingsOf(value: unknown): PrintSettings | null {
   };
 }
 
-/** Reads a printed period: the whole plan, or whole days within the years handled, the last not before the first. */
+/** Reads a printed period: the whole plan, or whole days within the years handled, kept even when the last comes before the first so that the window explains it rather than forgetting every setting. */
 function periodOf(value: unknown): PrintPeriod | null {
   if (hasExactKeys(value, ['kind']) && value['kind'] === 'whole') {
     return { kind: 'whole' };
@@ -90,7 +90,7 @@ function periodOf(value: unknown): PrintPeriod | null {
     return null;
   }
   const { firstDay, lastDay } = value;
-  if (!isDay(firstDay) || !isDay(lastDay) || lastDay < firstDay) {
+  if (!isDay(firstDay) || !isDay(lastDay)) {
     return null;
   }
   return { kind: 'days', firstDay, lastDay };

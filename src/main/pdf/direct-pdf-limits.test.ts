@@ -4,12 +4,20 @@ import type { PrintDocument, PrintOrder } from '../../core/print/print-document'
 import { failure } from '../../core/result';
 import { runFileTask } from '../file-tasks';
 import { printFontsIn } from '../pdf-export';
-import { TooManyPatternTiles, writeDirectPdf } from './direct-pdf';
+import { MissingCharacter, TooLargePdf, TooManyPatternTiles, writeDirectPdf } from './direct-pdf';
 
-vi.mock('../../core/limits', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../core/limits')>()),
-  MAX_PRINT_PATTERN_TILES: 4,
-}));
+const pdfLimit = vi.hoisted(() => ({ bytes: null as number | null }));
+
+vi.mock('../../core/limits', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../core/limits')>();
+  return {
+    ...original,
+    MAX_PRINT_PATTERN_TILES: 4,
+    get MAX_PDF_BYTES() {
+      return pdfLimit.bytes ?? original.MAX_PDF_BYTES;
+    },
+  };
+});
 
 const FONTS = printFontsIn(join(import.meta.dirname, '../../renderer/public/fonts'));
 
@@ -49,6 +57,66 @@ describe('the tiles of the patterns of a lighter PDF', () => {
       expect(logged.mock.calls).toEqual([
         ['The lighter PDF was refused:', new TooManyPatternTiles(4)],
       ]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('writes a PDF of exactly the largest size allowed, and refuses one byte more without keeping its bytes', async () => {
+    const size = (await writeDirectPdf(patterned(0, 8), FONTS)).length;
+    pdfLimit.bytes = size;
+    try {
+      expect((await writeDirectPdf(patterned(0, 8), FONTS)).length).toBe(size);
+      pdfLimit.bytes = size - 1;
+      await expect(writeDirectPdf(patterned(0, 8), FONTS)).rejects.toThrow(
+        new TooLargePdf(size - 1),
+      );
+    } finally {
+      pdfLimit.bytes = null;
+    }
+  });
+
+  it('turns a lighter PDF larger than allowed into a PDF too large, logged, in the file worker task', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    pdfLimit.bytes = 1;
+    try {
+      expect(
+        await runFileTask({ kind: 'writeDirectPdf', document: patterned(0, 8), fonts: FONTS }),
+      ).toEqual(failure({ code: 'TOO_LARGE' }));
+      expect(logged.mock.calls).toEqual([['The lighter PDF was refused:', new TooLargePdf(1)]]);
+    } finally {
+      pdfLimit.bytes = null;
+      logged.mockRestore();
+    }
+  });
+
+  it('refuses a character the printed font lacks, in the file worker task, rather than writing a blank', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const document: PrintDocument = {
+      ...patterned(0, 8),
+      pages: [
+        [
+          {
+            kind: 'text',
+            x: 10,
+            y: 20,
+            text: 'Plan 漢',
+            size: 10,
+            weight: 400,
+            color: '#000000',
+            align: 'start',
+          },
+        ],
+      ],
+    };
+    try {
+      expect(await runFileTask({ kind: 'writeDirectPdf', document, fonts: FONTS })).toEqual(
+        failure({ code: 'MISSING_CHARACTERS' }),
+      );
+      expect(logged.mock.calls).toEqual([
+        ['The lighter PDF was refused:', new MissingCharacter('漢')],
+      ]);
+      expect(new MissingCharacter('漢').message).toBe('The printed font has no glyph for U+6F22.');
     } finally {
       logged.mockRestore();
     }

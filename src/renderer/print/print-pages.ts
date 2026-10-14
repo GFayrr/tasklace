@@ -1,10 +1,12 @@
 import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
 import type { Dependency, Project, TaskId } from '../../core/model/project';
+import { MAX_PRINT_DOCUMENT_PATH_NUMBERS, MAX_PRINT_ORDERS } from '../../core/limits';
 import type { PaperName, PaperOrientation } from '../../core/print/paper';
 import {
   MIN_TEXT_POINTS,
   PATH_LINE,
   PATH_MOVE,
+  printCostOf,
   type DrawOrder,
   type PrintDocument,
   type PrintOrder,
@@ -92,7 +94,7 @@ export interface PrintedPlan {
   readonly period: HourSpan;
 }
 
-export type PrintRefusal = PrintLayoutRefusal | 'EMPTY_PERIOD';
+export type PrintRefusal = PrintLayoutRefusal | 'EMPTY_PERIOD' | 'TOO_DETAILED';
 
 interface HourSpan {
   readonly start: ProjectHour;
@@ -144,7 +146,9 @@ const TITLE_BASELINE = 14;
 const DATE_BASELINE = 31;
 const CELL_PADDING = 4;
 const INDENT = 10;
-const MAX_NAME_WIDTH = 220;
+const MAX_COLUMN_WIDTH = 220;
+const MIN_NAME_ROOM = 80;
+const MAX_INDENT = MAX_COLUMN_WIDTH - MIN_NAME_ROOM;
 const SWATCH_WIDTH = 12;
 const SWATCH_HEIGHT = 8;
 const SWATCH_TOP = 4;
@@ -171,7 +175,7 @@ const SHORTEST_UNIT_HOURS: Readonly<Record<ZoomLevel, number>> = {
 };
 const HALF = 2;
 
-/** Lays a plan out on printed pages and draws all of them, or the first ones up to a limit for a preview: header, scale, columns, timeline rows without today line, selection, deadlines, baseline or conflicts, legend and page numbers. */
+/** Lays a plan out on printed pages and draws all of them, or the first ones for a preview: header, scale, columns, bars and links only, legend and page numbers, refusing pages that hold more than a document allows. */
 export function buildPrintDocument(
   source: PrintSource,
   settings: PrintSettings,
@@ -223,7 +227,10 @@ export function buildPrintDocument(
     ticks: (from, to) => buildScaleTicks(zoom, from, to, labels),
     measure,
   };
-  const pages = layout.pages.slice(0, pageLimit).map((page) => pageOrders(context, page));
+  const pages = drawPages(context, layout.pages.slice(0, pageLimit));
+  if (pages === null) {
+    return failure('TOO_DETAILED');
+  }
   return success({
     document: {
       paper: settings.paper,
@@ -235,6 +242,24 @@ export function buildPrintDocument(
     zoom,
     period,
   });
+}
+
+/** Draws pages one after the other, or nothing as soon as they hold more orders or numbers of paths than a document allows, so that a page never sends what the main process would refuse. */
+function drawPages(context: PageContext, pages: readonly PrintPage[]): PrintOrder[][] | null {
+  const drawn: PrintOrder[][] = [];
+  let orders = 0;
+  let pathNumbers = 0;
+  for (const page of pages) {
+    const pageDrawn = pageOrders(context, page);
+    const cost = printCostOf(pageDrawn);
+    orders += cost.orders;
+    pathNumbers += cost.pathNumbers;
+    if (orders > MAX_PRINT_ORDERS || pathNumbers > MAX_PRINT_DOCUMENT_PATH_NUMBERS) {
+      return null;
+    }
+    drawn.push(pageDrawn);
+  }
+  return drawn;
 }
 
 /** Returns the hours printed: the whole plan, or the chosen days, or null for days that end before they start. */
@@ -261,7 +286,7 @@ export function wholePlanDays(
   return { firstDay, lastDay: Math.max(lastDay, firstDay) };
 }
 
-/** Builds the columns printed beside the timeline: the WBS when chosen, the names, always, then the other chosen columns in their usual order, each as wide as its widest text. */
+/** Builds the columns printed beside the timeline: the WBS when chosen, the names, always, then the other chosen columns in their usual order, each as wide as its widest text but at most 220 points, longer texts being cut. */
 function columnTable(
   source: PrintSource,
   chosen: readonly PrintColumn[],
@@ -283,7 +308,7 @@ function columnTable(
     align: TextAlign;
     kind: PrintColumn | 'total' | 'free';
   }[] = [];
-  /** Adds a column when it was chosen. */
+  /** Adds a column to those to print, with its header, cells and alignment. */
   const add = (
     kind: PrintColumn | 'total' | 'free',
     header: string,
@@ -356,13 +381,13 @@ function columnTable(
       'end',
     );
   }
-  const indents = rows.map((row) => row.depth * INDENT);
+  const indents = rows.map((row) => Math.min(row.depth * INDENT, MAX_INDENT));
   const summaryRows = new Set(
     rows.flatMap((row, index) => (row.task.kind === 'summary' ? [index] : [])),
   );
   const nameWidth =
     Math.min(
-      MAX_NAME_WIDTH,
+      MAX_COLUMN_WIDTH,
       Math.max(
         measure(messages.table.name, TEXT_SIZE, SEMIBOLD),
         ...rows.map(
@@ -385,11 +410,14 @@ function columnTable(
     left += width;
     return column;
   };
-  /** Measures the widest text of a column, its header included. */
+  /** Measures the widest text of a column, its header included, up to the widest a column may be. */
   const widthOf = (header: string, values: readonly string[]) =>
-    Math.max(
-      measure(header, TEXT_SIZE, SEMIBOLD),
-      ...values.map((value) => measure(value, TEXT_SIZE, REGULAR)),
+    Math.min(
+      MAX_COLUMN_WIDTH,
+      Math.max(
+        measure(header, TEXT_SIZE, SEMIBOLD),
+        ...values.map((value) => measure(value, TEXT_SIZE, REGULAR)),
+      ),
     ) +
     CELL_PADDING * HALF;
   const before = contents.filter((content) => content.kind === 'wbs');

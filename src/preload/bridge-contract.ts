@@ -19,6 +19,7 @@ export const IPC_CHANNELS = {
   exportPdf: 'project:export-pdf',
   saveHeldPdf: 'project:save-held-pdf',
   exportLighterPdf: 'project:export-lighter-pdf',
+  discardHeldPdf: 'project:discard-held-pdf',
   adoptProject: 'project:adopt',
   pageStartFailed: 'page:start-failed',
   flushRequested: 'project:flush-requested',
@@ -38,6 +39,9 @@ export type FileFailureCode =
   | 'INVALID_ENCODING'
   | 'INVALID_IMPORT'
   | 'NO_PROJECT'
+  | 'MISSING_CHARACTERS'
+  | 'PRINT_FAILED'
+  | 'PRINT_INCOMPLETE'
   | 'TASK_FAILED';
 
 export const ISSUE_FAILURE_CODES = ['INVALID_PROJECT', 'INVALID_IMPORT', 'INVALID_STATE'] as const;
@@ -100,6 +104,7 @@ export interface TasklaceBridge {
   ) => Promise<BridgeResult<PdfExport>>;
   readonly saveHeldPdf: () => Promise<BridgeResult<ExportedFile>>;
   readonly exportLighterPdf: () => Promise<BridgeResult<ExportedFile>>;
+  readonly discardHeldPdf: () => Promise<BridgeResult<null>>;
   readonly onFlushRequested: (flush: () => Promise<boolean>) => void;
   readonly reportStartFailure: () => void;
 }
@@ -118,6 +123,7 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.exportPdf]: BridgeResult<PdfExport>;
   readonly [IPC_CHANNELS.saveHeldPdf]: BridgeResult<ExportedFile>;
   readonly [IPC_CHANNELS.exportLighterPdf]: BridgeResult<ExportedFile>;
+  readonly [IPC_CHANNELS.discardHeldPdf]: BridgeResult<null>;
 }
 
 export interface ChannelArguments {
@@ -138,6 +144,7 @@ export interface ChannelArguments {
   readonly [IPC_CHANNELS.exportPdf]: readonly [document: PrintDocument, suggestedName: string];
   readonly [IPC_CHANNELS.saveHeldPdf]: readonly [];
   readonly [IPC_CHANNELS.exportLighterPdf]: readonly [];
+  readonly [IPC_CHANNELS.discardHeldPdf]: readonly [];
 }
 
 export type InvokeChannel = keyof ChannelAnswers & keyof ChannelArguments;

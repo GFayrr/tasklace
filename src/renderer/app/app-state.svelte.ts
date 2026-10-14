@@ -728,9 +728,27 @@ export class AppState {
     }
   }
 
-  /** Closes the window that prepares an export to PDF. */
+  /** Closes the window that prepares an export to PDF, the main process forgetting any PDF it kept back for it. */
   closePdfExport(): void {
+    if (this.#pdfExport === null) {
+      return;
+    }
     this.#pdfExport = null;
+    this.#discardHeldPdf();
+  }
+
+  /** Asks the main process to forget the PDF it kept back for this window, logging a failure since nothing else waits for it. */
+  #discardHeldPdf(): void {
+    this.#files.discardHeldPdf().then(
+      (result) => {
+        if (!result.ok) {
+          console.error('The PDF kept back could not be forgotten:', result.error);
+        }
+      },
+      (error: unknown) => {
+        console.error('The PDF kept back could not be forgotten:', error);
+      },
+    );
   }
 
   /** Opens the settings of the open project, starting afresh. */
@@ -1085,7 +1103,7 @@ export class AppState {
     this.#conflictsOpen = false;
     this.#forgetUnknownFloats();
     this.#detailsTaskId = null;
-    this.#pdfExport = null;
+    this.closePdfExport();
     this.settings.close();
     this.#changedSinceOpened = false;
     this.collapsed = NOTHING_COLLAPSED;

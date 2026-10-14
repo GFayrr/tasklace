@@ -1,0 +1,99 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Project } from '../../core/model/project';
+import { printCostOf, type PrintCost } from '../../core/print/print-document';
+import { compileOrThrow } from '../../core/testing/civil-time';
+import { project, scheduleOrThrow, workTask } from '../../core/testing/project-builder';
+import { loadMessages } from '../i18n/messages';
+import { SAND_GRAPHITE } from '../theme/sand-graphite';
+import { buildPrintDocument, type PrintSettings, type PrintSource } from './print-pages';
+import type { MeasureText } from './print-text';
+
+const limits = vi.hoisted(() => ({
+  orders: Number.POSITIVE_INFINITY,
+  pathNumbers: Number.POSITIVE_INFINITY,
+}));
+
+vi.mock('../../core/limits', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../core/limits')>()),
+  get MAX_PRINT_ORDERS() {
+    return limits.orders;
+  },
+  get MAX_PRINT_DOCUMENT_PATH_NUMBERS() {
+    return limits.pathNumbers;
+  },
+}));
+
+const messages = await loadMessages('en');
+const CHARACTER_WIDTH = 5;
+const TASK_COUNT = 60;
+const SETTINGS: PrintSettings = {
+  paper: 'a4',
+  orientation: 'landscape',
+  period: { kind: 'whole' },
+  zoom: 'automatic',
+  columns: [],
+};
+
+/** Measures a text at a fixed width per character, whatever its size and weight. */
+const measure: MeasureText = (text) => Array.from(text).length * CHARACTER_WIDTH;
+
+/** Builds a plan of unlinked tasks long enough to fill three printed pages. */
+function longPlan(): Project {
+  const tasks = Array.from({ length: TASK_COUNT }, (_unused, index) =>
+    workTask(`t${String(index)}`, { sortKey: `k${String(index).padStart(3, '0')}` }),
+  );
+  return { ...project(tasks, []), name: 'Long plan' };
+}
+
+/** Returns what printing needs from a project, its schedule worked out. */
+function sourceOf(plan: Project): PrintSource {
+  return {
+    project: plan,
+    schedule: scheduleOrThrow(plan),
+    calendar: compileOrThrow(plan.calendar),
+    theme: SAND_GRAPHITE,
+    messages,
+    locale: 'en-US',
+    exportedAt: new Date(Date.UTC(2026, 9, 9, 12)),
+  };
+}
+
+/** Prints the long plan, all its pages or the first ones up to a limit. */
+function print(pageLimit?: number) {
+  return buildPrintDocument(sourceOf(longPlan()), SETTINGS, measure, pageLimit);
+}
+
+/** Adds up the cost of the pages of the long plan printed without limits. */
+function costOfPages(): PrintCost {
+  const whole = print();
+  if (!whole.ok) {
+    throw new Error(whole.error);
+  }
+  expect(whole.value.document.pages).toHaveLength(3);
+  return printCostOf(whole.value.document.pages.flat());
+}
+
+describe('the limits of a printed document', () => {
+  beforeEach(() => {
+    limits.orders = Number.POSITIVE_INFINITY;
+    limits.pathNumbers = Number.POSITIVE_INFINITY;
+  });
+
+  it('prints pages that hold exactly as many orders as a document allows, and refuses one more', () => {
+    const cost = costOfPages();
+    limits.orders = cost.orders;
+    expect(print().ok).toBe(true);
+    limits.orders = cost.orders - 1;
+    expect(print()).toEqual({ ok: false, error: 'TOO_DETAILED' });
+    expect(print(1).ok).toBe(true);
+  });
+
+  it('prints pages that hold exactly as many numbers of paths as a document allows, and refuses one more', () => {
+    const cost = costOfPages();
+    limits.pathNumbers = cost.pathNumbers;
+    expect(print().ok).toBe(true);
+    limits.pathNumbers = cost.pathNumbers - 1;
+    expect(print()).toEqual({ ok: false, error: 'TOO_DETAILED' });
+    expect(print(1).ok).toBe(true);
+  });
+});

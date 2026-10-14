@@ -1,6 +1,7 @@
 import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Project } from '../../core/model/project';
+import type { AppContext } from '../app/app-state.svelte';
 import { at } from '../../core/testing/civil-time';
 import { link, project, workTask } from '../../core/testing/project-builder';
 import {
@@ -12,6 +13,8 @@ import {
 import english from '../locales/en.json';
 import type { PrintSettings } from '../print/print-pages';
 import type { BridgeResult, PdfExport } from '../../preload/bridge-contract';
+import { SAND_GRAPHITE } from '../theme/sand-graphite';
+import type { Theme } from '../theme/theme';
 import App from './App.svelte';
 import { button, click, press, render, single } from './testing/render';
 import { drawFrames, refuseDrawingContexts } from './testing/timeline-environment';
@@ -31,17 +34,30 @@ beforeEach(() => {
   window.localStorage.clear();
   Object.defineProperty(document, 'fonts', {
     configurable: true,
-    value: { load: () => Promise.resolve([]) },
+    value: { load: () => Promise.resolve([{ status: 'loaded' }]) },
   });
 });
 
 afterEach(() => {
   window.localStorage.clear();
+  limits.orders = null;
+});
+
+const limits = vi.hoisted(() => ({ orders: null as number | null }));
+
+vi.mock('../../core/limits', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../core/limits')>();
+  return {
+    ...original,
+    get MAX_PRINT_ORDERS() {
+      return limits.orders ?? original.MAX_PRINT_ORDERS;
+    },
+  };
 });
 
 /** Opens the sample plan, renders the application and opens the export to PDF from the Export menu, waiting for the printed font. */
-async function renderExport(plan: Project = PLAN) {
-  const opened = await openedAppOf(plan);
+async function renderExport(plan: Project = PLAN, overrides: Partial<AppContext> = {}) {
+  const opened = await openedAppOf(plan, overrides);
   const root = render(App, { app: opened.app });
   click(button(root, english.toolbar.export));
   const item = [...root.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
@@ -159,6 +175,9 @@ describe('the export to PDF', () => {
     first.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
     expect(single(root, '[role="status"]').textContent).toBe(TEXT.refusals.EMPTY_PERIOD);
+    expect(
+      (JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? 'null') as PrintSettings).period,
+    ).toEqual({ kind: 'days', firstDay: 20_731, lastDay: 20_725 });
     pick(choice(root, 'Whole project (Sep 28, 2026 – Sep 29, 2026)'));
     expect(root.querySelector('[role="status"]')).toBeNull();
   });
@@ -233,14 +252,20 @@ describe('the export to PDF', () => {
           answer = resolve;
         }),
     });
+    /** Tells whether each group of settings can be changed. */
+    const groupsDisabled = () =>
+      [...root.querySelectorAll('fieldset')].map((group) => group.disabled);
+    expect(groupsDisabled()).toEqual([false, false, false, false]);
     click(button(root, TEXT.export));
     flushSync();
     expect(single(root, '[role="status"]').textContent).toBe(TEXT.making);
     expect(button(root, TEXT.export).disabled).toBe(true);
+    expect(groupsDisabled()).toEqual([true, true, true, true]);
     answer({ ok: false, error: { code: 'CANCELLED' } });
     await settle();
     flushSync();
     expect(root.querySelector('[role="status"]')).toBeNull();
+    expect(groupsDisabled()).toEqual([false, false, false, false]);
   });
 
   it('moves the last day printed', async () => {
@@ -255,11 +280,18 @@ describe('the export to PDF', () => {
     ).toEqual({ kind: 'days', firstDay: 20_724, lastDay: 20_728 });
   });
 
-  it('says the preview cannot be drawn when only its canvas refuses to draw', async () => {
-    const { root } = await renderExport();
+  it('says the preview cannot be drawn when only its canvas refuses to draw, the export staying possible', async () => {
+    const { root, control } = await renderExport();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     refuseDrawingContexts();
     pick(choice(root, TEXT.a3));
     expect(single(root, '[role="status"]').textContent).toBe(TEXT.previewUnavailable);
+    expect(logged.mock.calls).toEqual([
+      ['The preview could not be drawn: the canvas gave no drawing context.'],
+    ]);
+    click(button(root, TEXT.export));
+    await settle();
+    expect(control.pdfExports).toHaveLength(1);
   });
 
   it('offers the float columns only with the critical path on, and says so', async () => {
@@ -298,22 +330,76 @@ describe('the export to PDF', () => {
     expect(single(root, '[role="status"]').textContent).toBe(TEXT.waiting);
   });
 
-  it('says the preview cannot be drawn when the page cannot draw on a canvas', async () => {
+  it('says the plan cannot be printed when the page cannot measure texts on a canvas, and writes why in the log', async () => {
     refuseDrawingContexts();
-    const { root } = await renderExport();
-    expect(single(root, '[role="status"]').textContent).toBe(TEXT.previewUnavailable);
-  });
-
-  it('says the preview cannot be drawn when the printed font cannot be loaded, and writes why in the log', async () => {
-    const failure = new Error('Font refused');
-    Object.defineProperty(document, 'fonts', {
-      configurable: true,
-      value: { load: () => Promise.reject(failure) },
-    });
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { root } = await renderExport();
-    expect(single(root, '[role="status"]').textContent).toBe(TEXT.previewUnavailable);
-    expect(logged.mock.calls).toEqual([['The printed font could not be loaded:', failure]]);
+    expect(single(root, '[role="status"]').textContent).toBe(TEXT.measureUnavailable);
+    expect(button(root, TEXT.export).disabled).toBe(true);
+    expect(logged.mock.calls.slice(-1)).toEqual([
+      ['Printed texts cannot be measured: the canvas gave no drawing context.'],
+    ]);
+  });
+
+  it.each([
+    ['cannot be loaded', () => Promise.reject(new Error('Font refused')), 'Font refused'],
+    [
+      'is declared in no weight',
+      () => Promise.resolve([]),
+      'The page declares no Jost Print font of weight 400, 500, 600.',
+    ],
+  ])(
+    'says the plan cannot be printed when the printed font %s, and writes why in the log',
+    async (_case, load, reason) => {
+      Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const { root } = await renderExport();
+      expect(single(root, '[role="status"]').textContent).toBe(TEXT.measureUnavailable);
+      expect(button(root, TEXT.export).disabled).toBe(true);
+      expect(logged.mock.calls).toEqual([
+        ['The printed font could not be loaded:', new Error(reason)],
+      ]);
+    },
+  );
+
+  it('says the plan cannot be printed while its dates cannot be updated, rather than waiting for ever', async () => {
+    const { app, root, scheduler } = await renderExport();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const failure = new Error('Worker lost');
+    scheduler.automatic = false;
+    app.addTask();
+    scheduler.listener().failed(failure);
+    flushSync();
+    expect(single(root, '[role="status"]').textContent).toBe(TEXT.scheduleStopped);
+    expect(button(root, TEXT.export).disabled).toBe(true);
+    expect(logged.mock.calls).toEqual([['The schedule could not be computed:', failure]]);
+  });
+
+  it('says the pages could not be drawn, writing why in the log, rather than leaving the window stuck', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const theme = Object.fromEntries(
+      Object.keys(SAND_GRAPHITE).map((key) => [key, 'hsl(0 0% 50%)']),
+    ) as unknown as Theme;
+    const { root } = await renderExport(PLAN, { theme });
+    expect(single(root, '[role="status"]').textContent).toBe(TEXT.notDrawn);
+    expect(button(root, TEXT.export).disabled).toBe(true);
+    expect(logged.mock.calls.at(-1)?.[0]).toBe('The printed pages could not be drawn:');
+    expect(logged.mock.calls.at(-1)?.[1]).toEqual(
+      new TypeError('Unknown color to print: hsl(0 0% 50%)'),
+    );
+  });
+
+  it('explains pages refused only once all of them are drawn, sending nothing, until a setting changes', async () => {
+    const { root, control } = await renderExport(longPlan(40));
+    limits.orders = 1;
+    click(button(root, TEXT.export));
+    await settle();
+    flushSync();
+    expect(control.pdfExports).toEqual([]);
+    expect(single(root, '[role="status"]').textContent).toBe(TEXT.refusals.TOO_DETAILED);
+    limits.orders = null;
+    pick(choice(root, TEXT.a3));
+    expect(root.querySelector('[role="status"]')).toBeNull();
   });
 
   it('closes with the close button and with Escape, keeping no content once closed, and ignores the shortcuts of the plan while open', async () => {

@@ -159,6 +159,40 @@ describe('readPrintDocument', () => {
   });
 
   it.each([
+    ['a page', { ...documentWith(), pages: [[FILL], , [FILL]] }, 'pages[1]', 'WRONG_TYPE'],
+    ['an order', { ...documentWith(), pages: [[FILL, , FILL]] }, 'pages[0][1]', 'WRONG_TYPE'],
+    [
+      'an order of a clip',
+      documentWith({ ...CLIP, orders: [FILL, , FILL] }),
+      'pages[0][0].orders[1]',
+      'WRONG_TYPE',
+    ],
+    [
+      'a coordinate of a path',
+      documentWith({ ...STROKE, shape: { kind: 'path', segments: [PATH_MOVE, , 0] } }),
+      'pages[0][0].shape.segments',
+      'OUT_OF_RANGE',
+    ],
+    [
+      'an operation of a path',
+      documentWith({ ...STROKE, shape: { kind: 'path', segments: [PATH_MOVE, 0, 0, , 1, 1] } }),
+      'pages[0][0].shape.segments',
+      'OUT_OF_RANGE',
+    ],
+    [
+      'a step of a dash',
+      documentWith({ ...STROKE, dash: [3, , 2] }),
+      'pages[0][0].dash',
+      'OUT_OF_RANGE',
+    ],
+  ])(
+    'refuses a hole in a list as a missing value, kept by the copy between processes: %s',
+    (_name, document, path, code) => {
+      expect(issuesOf(structuredClone(document))).toEqual([{ path, code }]);
+    },
+  );
+
+  it.each([
     ['an order that is no object', 1, '', 'WRONG_TYPE'],
     ['an order made by a class', new Date(0), '', 'WRONG_TYPE'],
     ['an unknown kind', { ...FILL, kind: 'blur' }, 'kind', 'OUT_OF_RANGE'],

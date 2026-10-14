@@ -1,5 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
+import { MAX_HIERARCHY_DEPTH } from '../../core/limits';
 import type { Project } from '../../core/model/project';
 import { MIN_TEXT_POINTS, type PrintOrder } from '../../core/print/print-document';
 import { printPageSvg } from '../../core/print/print-svg';
@@ -160,6 +161,49 @@ describe('buildPrintDocument', () => {
     expect(research?.kind === 'text' && [research.weight, research.x]).toEqual([600, 32]);
     expect(survey?.kind === 'text' && [survey.weight, survey.x]).toEqual([400, 42]);
     expect(writing?.kind === 'text' && [writing.weight, writing.x]).toEqual([400, 32]);
+  });
+
+  it('keeps room for every name of the deepest hierarchy, the indent stopping at 140 points', () => {
+    const levels = MAX_HIERARCHY_DEPTH - 1;
+    const tasks = [
+      ...Array.from({ length: levels }, (_unused, index) =>
+        summary(`s${String(index)}`, {
+          parentId: index === 0 ? null : `s${String(index - 1)}`,
+          name: `Level ${String(index)}`,
+        }),
+      ),
+      workTask('a', { parentId: `s${String(levels - 1)}`, name: 'Deepest task' }),
+    ];
+    const orders = printed({ ...project(tasks, []), name: 'Deep' }).document.pages.flatMap((page) =>
+      flatten(page),
+    );
+    const names = orders.flatMap((order) =>
+      order.kind === 'text' && /^(Level \d+|Deepest task)$/.test(order.text)
+        ? [[order.text, order.x]]
+        : [],
+    );
+    expect(names).toEqual([
+      ...Array.from({ length: levels }, (_unused, index) => [
+        `Level ${String(index)}`,
+        32 + Math.min(index * 10, 140),
+      ]),
+      ['Deepest task', 32 + 140],
+    ]);
+  });
+
+  it('cuts a column longer than 220 points, so that one long cell never takes the room of the timeline', () => {
+    const tasks = Array.from({ length: 41 }, (_unused, index) =>
+      workTask(`t${String(index)}`, { sortKey: `k${String(index).padStart(2, '0')}` }),
+    );
+    const links = tasks.slice(0, -1).map((task) => link(task.id, 't40'));
+    const plan = printed(
+      { ...project(tasks, links), name: 'Linked' },
+      { orientation: 'portrait', columns: ['predecessors'] },
+    );
+    const texts = plan.document.pages.flatMap((page) => textsOf(page));
+    const full = Array.from({ length: 40 }, (_unused, index) => String(index + 1)).join(', ');
+    expect(texts).toContain(`${full.slice(0, 220 / CHARACTER_WIDTH - 1).trimEnd()}…`);
+    expect(texts).not.toContain(full);
   });
 
   it('draws the bars and links of the screen without today line, and the tags with their colors and patterns', () => {
