@@ -21,13 +21,7 @@ import { failure, success, type Result } from '../core/result';
 import { createSharedDocument, type DocumentId } from '../core/shared/shared-document';
 import type { FileFailure } from '../preload/bridge-contract';
 import { saveLocalCopy } from './local-copies';
-import {
-  MissingCharacter,
-  TooLargePdf,
-  TooManyPatternTiles,
-  writeDirectPdf,
-  type PrintFonts,
-} from './pdf/direct-pdf';
+import { MissingCharacter, TooLargePdf, writeDirectPdf, type PrintFonts } from './pdf/direct-pdf';
 import { isSystemError } from './stored-files';
 import { writeFileSafely } from './safe-write';
 import { zlibCompressor } from './zlib-compressor';
@@ -134,7 +128,7 @@ export async function runFileTask(task: FileTask): Promise<FileTaskResult> {
   }
 }
 
-/** Writes a checked document as a PDF without the browser, refusing as too large a document whose patterns would need too many tiles or whose PDF would be larger than allowed, and a document holding a character the printed font lacks. */
+/** Writes a checked document as a PDF without the browser, refusing as too large a document whose PDF would be larger than allowed, and a document holding a character the printed font lacks. */
 async function directPdf(
   document: CheckedPrintDocument,
   fonts: PrintFonts,
@@ -153,7 +147,7 @@ async function directPdf(
 
 /** Returns the failure a refusal of the lighter PDF is reported as, or null for an error that is no refusal. */
 function lighterPdfRefusal(error: unknown): 'TOO_LARGE' | 'MISSING_CHARACTERS' | null {
-  if (error instanceof TooManyPatternTiles || error instanceof TooLargePdf) {
+  if (error instanceof TooLargePdf) {
     return 'TOO_LARGE';
   }
   return error instanceof MissingCharacter ? 'MISSING_CHARACTERS' : null;

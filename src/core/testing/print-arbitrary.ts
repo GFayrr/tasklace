@@ -68,7 +68,7 @@ const rectArbitrary = fc
   })
   .map((box) => ({ kind: 'rect' as const, ...box }));
 
-const shapeArbitrary: fc.Arbitrary<PrintShape> = fc.oneof(rectArbitrary, pathArbitrary);
+export const shapeArbitrary: fc.Arbitrary<PrintShape> = fc.oneof(rectArbitrary, pathArbitrary);
 
 /** Generates any order that draws, with every kind of shape, paint and text. */
 export const drawOrderArbitrary: fc.Arbitrary<DrawOrder> = fc.oneof(

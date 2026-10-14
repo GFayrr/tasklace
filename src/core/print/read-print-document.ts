@@ -5,6 +5,7 @@ import {
   MAX_PRINT_ORDERS,
   MAX_PRINT_PAGES,
   MAX_PRINT_PATH_NUMBERS,
+  MAX_PRINT_PATTERN_TILES,
   MAX_PRINT_TEXT_LENGTH,
 } from '../limits';
 import { failure, success, type Result } from '../result';
@@ -25,7 +26,8 @@ import {
   readText,
   type UnknownRecord,
 } from '../validation/value-readers';
-import { PAPER_NAMES, PAPER_ORIENTATIONS } from './paper';
+import { PAPER_NAMES, PAPER_ORIENTATIONS, pageSizeOf, type PageSize } from './paper';
+import { patternTileCount } from './pattern-tiles';
 import {
   MAX_CLIP_DEPTH,
   MAX_DASH_STEP,
@@ -58,8 +60,10 @@ interface Box {
 }
 
 interface Budget {
+  readonly page: PageSize;
   orders: number;
   pathNumbers: number;
+  tiles: number;
 }
 
 /** A refusal of a value, its place written relative to the value being read, so that the path is built only when a value is refused. */
@@ -84,6 +88,7 @@ const ORDER_KEYS: Readonly<Record<PrintOrder['kind'], readonly string[]>> = {
   clip: ['kind', 'shape', 'orders'],
 };
 const MAX_BOX_SIDE = MAX_PRINT_COORDINATE + MAX_PRINT_COORDINATE;
+const NO_PAGE: PageSize = { width: 0, height: 0 };
 
 /** Reads a document to print sent by the interface, which is not trusted, checking every order against the format and its limits and refusing the whole document on the first order that breaks them. */
 export function readPrintDocument(value: unknown): Result<CheckedPrintDocument, ValidationIssues> {
@@ -95,7 +100,9 @@ export function readPrintDocument(value: unknown): Result<CheckedPrintDocument, 
   const paper = readEnum(childField(record, 'paper', ''), issues, PAPER_NAMES);
   const orientation = readEnum(childField(record, 'orientation', ''), issues, PAPER_ORIENTATIONS);
   const title = readText(childField(record, 'title', ''), issues, MAX_PRINT_TEXT_LENGTH);
-  const pages = readPages(childField(record, 'pages', '').value, issues);
+  const page =
+    paper === undefined || orientation === undefined ? NO_PAGE : pageSizeOf(paper, orientation);
+  const pages = readPages(childField(record, 'pages', '').value, issues, page);
   if (
     paper === undefined ||
     orientation === undefined ||
@@ -109,8 +116,8 @@ export function readPrintDocument(value: unknown): Result<CheckedPrintDocument, 
   return success(document as CheckedPrintDocument);
 }
 
-/** Reads the pages of a document within the limits of pages, orders and numbers of paths, a hole in a list being read as a missing value, reporting the first refused value with its full path. */
-function readPages(value: unknown, issues: IssueList): PrintOrder[][] | undefined {
+/** Reads the pages of a document within the limits of pages, orders, numbers of paths and pattern tiles on its paper, none on an unknown paper, a hole in a list being read as a missing value, reporting the first refused value. */
+function readPages(value: unknown, issues: IssueList, page: PageSize): PrintOrder[][] | undefined {
   const pages = readArray({ value, path: 'pages' }, issues, MAX_PRINT_PAGES);
   if (pages === undefined) {
     return undefined;
@@ -120,8 +127,10 @@ function readPages(value: unknown, issues: IssueList): PrintOrder[][] | undefine
     return undefined;
   }
   const budget: Budget = {
+    page,
     orders: MAX_PRINT_ORDERS,
     pathNumbers: MAX_PRINT_DOCUMENT_PATH_NUMBERS,
+    tiles: MAX_PRINT_PATTERN_TILES,
   };
   try {
     return Array.from(pages, (page, index) =>
@@ -171,13 +180,17 @@ function readOrder(value: unknown, budget: Budget, clipDepth: number): PrintOrde
   return readDrawOrder(record, orderKind, budget);
 }
 
-/** Reads an order that draws, every one of its keys being known to be there, its path counted against what is left of the budget of path numbers. */
+/** Reads an order that draws, every one of its keys being known to be there, its path and the tiles of its pattern counted against what is left of their budgets. */
 function readDrawOrder(record: UnknownRecord, kind: DrawOrder['kind'], budget: Budget): DrawOrder {
   if (kind === 'text') {
     return readTextOrder(record);
   }
   const shape = within('.shape', () => readShape(record['shape'], budget));
   if (kind === 'pattern') {
+    budget.tiles -= patternTileCount(shape, budget.page);
+    if (budget.tiles < 0) {
+      return refuse('shape', 'TOO_MANY_ITEMS');
+    }
     return { kind, shape, pattern: readChoice(record, 'pattern', TAG_PATTERNS) };
   }
   const color = readColor(record['color']);

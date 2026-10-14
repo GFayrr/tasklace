@@ -102,7 +102,6 @@ export type PathSegment =
     }
   | { readonly kind: 'close' };
 
-const NO_COST: PrintCost = { orders: 0, pathNumbers: 0 };
 const POINT_COORDINATES = 2;
 const CURVE_COORDINATES = 6;
 const COORDINATES_OF_OPERATION: readonly number[] = [
@@ -111,29 +110,6 @@ const COORDINATES_OF_OPERATION: readonly number[] = [
   CURVE_COORDINATES,
   0,
 ];
-
-export interface PrintCost {
-  readonly orders: number;
-  readonly pathNumbers: number;
-}
-
-/** Counts the orders of a list, those inside its clips included, and the numbers of all their paths, as the limits of a document count them. */
-export function printCostOf(orders: readonly PrintOrder[]): PrintCost {
-  let count = orders.length;
-  let pathNumbers = 0;
-  for (const order of orders) {
-    pathNumbers += order.kind === 'text' ? 0 : shapeNumbers(order.shape);
-    const inner = order.kind === 'clip' ? printCostOf(order.orders) : NO_COST;
-    count += inner.orders;
-    pathNumbers += inner.pathNumbers;
-  }
-  return { orders: count, pathNumbers };
-}
-
-/** Returns how many numbers a shape counts against the numbers of paths a document may hold, none for a rectangle. */
-function shapeNumbers(shape: PrintShape): number {
-  return shape.kind === 'path' ? shape.segments.length : 0;
-}
 
 /** Returns how many coordinates follow a path operation, or null for a number that is no operation. */
 export function coordinatesAfter(operation: number): number | null {

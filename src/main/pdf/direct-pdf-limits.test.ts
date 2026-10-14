@@ -6,7 +6,7 @@ import { failure } from '../../core/result';
 import { checkedOrThrow } from '../../core/testing/print-arbitrary';
 import { runFileTask } from '../file-tasks';
 import { printFontsIn } from '../pdf-export';
-import { MissingCharacter, TooLargePdf, TooManyPatternTiles, writeDirectPdf } from './direct-pdf';
+import { MissingCharacter, TooLargePdf, writeDirectPdf } from './direct-pdf';
 
 const pdfLimit = vi.hoisted(() => ({ bytes: null as number | null }));
 
@@ -14,7 +14,6 @@ vi.mock('../../core/limits', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../core/limits')>();
   return {
     ...original,
-    MAX_PRINT_PATTERN_TILES: 4,
     get MAX_PDF_BYTES() {
       return pdfLimit.bytes ?? original.MAX_PDF_BYTES;
     },
@@ -46,33 +45,13 @@ async function dotsDrawn(document: CheckedPrintDocument): Promise<number> {
   return (pdf.match(CURVE_OPERATOR) ?? []).length / CURVES_PER_CIRCLE;
 }
 
-describe('the tiles of the patterns of a lighter PDF', () => {
-  it('draws the tiles the document needs within the limit, over all its pages', async () => {
+describe('the tiles and the size of a lighter PDF', () => {
+  it('draws the tiles the document needs, over all its pages', async () => {
     expect(await dotsDrawn(patterned(0, 16))).toBe(4);
   });
 
-  it('refuses a document whose patterns need more tiles than the limit', async () => {
-    await expect(writeDirectPdf(patterned(0, 24), FONTS)).rejects.toThrow(
-      new TooManyPatternTiles(4),
-    );
-  });
-
-  it('counts no tile for a pattern outside the page, which would not show', async () => {
+  it('draws no tile for a pattern outside the page, which would not show', async () => {
     expect(await dotsDrawn(patterned(20_000, 12_000))).toBe(0);
-  });
-
-  it('turns a document refused for its patterns into a PDF too large, logged, in the file worker task', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    try {
-      expect(
-        await runFileTask({ kind: 'writeDirectPdf', document: patterned(0, 24), fonts: FONTS }),
-      ).toEqual(failure({ code: 'TOO_LARGE' }));
-      expect(logged.mock.calls).toEqual([
-        ['The lighter PDF was refused:', new TooManyPatternTiles(4)],
-      ]);
-    } finally {
-      logged.mockRestore();
-    }
   });
 
   it('writes a PDF of exactly the largest size allowed, and refuses one byte more without keeping its bytes', async () => {

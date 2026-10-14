@@ -163,7 +163,7 @@ function pageCount(pdf: Buffer): number {
   return (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length;
 }
 
-test('writes the plan as a PDF of vector pages with the Jost typeface embedded, its title and texts reading back', async () => {
+test('writes the plan as a PDF of vector pages without any image, patterns included, with the Jost typeface embedded and its title and texts reading back', async () => {
   const path = join(folder, 'Thesis.pdf');
   const dialog = await openExport();
   await answerDialogs(application, { save: path });
@@ -174,6 +174,7 @@ test('writes the plan as a PDF of vector pages with the Jost typeface embedded, 
   expect(pdf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
   expect(pageCount(pdf)).toBe(1);
   expect(pdf.toString('latin1')).toMatch(/\/BaseFont\s*\/[A-Z]{6}\+Jost/);
+  expect(pdf.toString('latin1').match(/\/Subtype\s*\/Image/g)).toBeNull();
   const { title, texts } = readPdfTexts(pdf);
   const [heading, exported, ...rest] = texts;
   expect([title, heading]).toEqual(['Thesis', 'Thesis']);

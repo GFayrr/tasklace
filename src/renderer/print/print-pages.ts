@@ -1,12 +1,21 @@
 import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
 import type { Dependency, Project, TaskId } from '../../core/model/project';
-import { MAX_PRINT_DOCUMENT_PATH_NUMBERS, MAX_PRINT_ORDERS } from '../../core/limits';
-import type { PaperName, PaperOrientation } from '../../core/print/paper';
+import {
+  MAX_PRINT_DOCUMENT_PATH_NUMBERS,
+  MAX_PRINT_ORDERS,
+  MAX_PRINT_PATTERN_TILES,
+} from '../../core/limits';
+import {
+  pageSizeOf,
+  type PageSize,
+  type PaperName,
+  type PaperOrientation,
+} from '../../core/print/paper';
+import { printCostOf } from '../../core/print/print-cost';
 import {
   MIN_TEXT_POINTS,
   PATH_LINE,
   PATH_MOVE,
-  printCostOf,
   type DrawOrder,
   type PrintDocument,
   type PrintOrder,
@@ -227,7 +236,11 @@ export function buildPrintDocument(
     ticks: (from, to) => buildScaleTicks(zoom, from, to, labels),
     measure,
   };
-  const pages = drawPages(context, layout.pages.slice(0, pageLimit));
+  const pages = drawPages(
+    context,
+    layout.pages.slice(0, pageLimit),
+    pageSizeOf(settings.paper, settings.orientation),
+  );
   if (pages === null) {
     return failure('TOO_DETAILED');
   }
@@ -244,17 +257,27 @@ export function buildPrintDocument(
   });
 }
 
-/** Draws pages one after the other, or nothing as soon as they hold more orders or numbers of paths than a document allows, so that a page never sends what the main process would refuse. */
-function drawPages(context: PageContext, pages: readonly PrintPage[]): PrintOrder[][] | null {
+/** Draws pages one after the other, or nothing as soon as they hold more orders, numbers of paths or pattern tiles than a document allows, so that a page never sends what the main process would refuse. */
+function drawPages(
+  context: PageContext,
+  pages: readonly PrintPage[],
+  size: PageSize,
+): PrintOrder[][] | null {
   const drawn: PrintOrder[][] = [];
   let orders = 0;
   let pathNumbers = 0;
+  let tiles = 0;
   for (const page of pages) {
     const pageDrawn = pageOrders(context, page);
-    const cost = printCostOf(pageDrawn);
+    const cost = printCostOf(pageDrawn, size);
     orders += cost.orders;
     pathNumbers += cost.pathNumbers;
-    if (orders > MAX_PRINT_ORDERS || pathNumbers > MAX_PRINT_DOCUMENT_PATH_NUMBERS) {
+    tiles += cost.tiles;
+    if (
+      orders > MAX_PRINT_ORDERS ||
+      pathNumbers > MAX_PRINT_DOCUMENT_PATH_NUMBERS ||
+      tiles > MAX_PRINT_PATTERN_TILES
+    ) {
       return null;
     }
     drawn.push(pageDrawn);
