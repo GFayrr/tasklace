@@ -22,6 +22,13 @@ describe('fitText', () => {
     expect(fitText('😀😀😀😀', 18, 10, 400, measure)).toBe('😀😀…');
   });
 
+  it('never separates an accent or a composed emoji from the character it belongs to', () => {
+    const accented = 'e\u0301e\u0301e\u0301e\u0301';
+    const family = '👨‍👩‍👧👨‍👩‍👧';
+    expect(fitText(accented, 24, 10, 400, measure)).toBe('e\u0301…');
+    expect(fitText(family, 36, 10, 400, measure)).toBe('👨‍👩‍👧…');
+  });
+
   it('returns an empty text when not even the ellipsis fits', () => {
     expect(fitText('Survey', 5, 10, 400, measure)).toBe('');
   });
@@ -62,7 +69,7 @@ describe('pageMeasure', () => {
 
   it('loads the printed font in each weight before measuring', async () => {
     const { context } = recordingCanvas();
-    const load = vi.fn(() => Promise.resolve([]));
+    const load = vi.fn(() => Promise.resolve([{}]));
     const page = {
       createElement: () => ({ getContext: () => context }),
       fonts: { load },
@@ -74,6 +81,19 @@ describe('pageMeasure', () => {
       ['600 13.333333333333332px Jost Print'],
     ]);
     expect(measured?.('ab', 10, 400)).toBeCloseTo(9, 9);
+  });
+
+  it('fails when the page declares the printed font in no weight it needs, rather than measuring with another font', async () => {
+    const { context } = recordingCanvas();
+    const page = {
+      createElement: () => ({ getContext: () => context }),
+      fonts: {
+        load: (font: string) => Promise.resolve(font.startsWith('500') ? [] : [{}]),
+      },
+    } as unknown as Document;
+    await expect(pageMeasure(page)).rejects.toThrow(
+      new Error('The page declares no Jost Print font of weight 500.'),
+    );
   });
 
   it('fails when the font cannot be loaded', async () => {

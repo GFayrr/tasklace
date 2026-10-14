@@ -16,12 +16,12 @@ import {
   type FileError,
 } from '../core/file/tasklace-file';
 import type { Project } from '../core/model/project';
-import type { PrintDocument } from '../core/print/print-document';
+import type { CheckedPrintDocument } from '../core/print/read-print-document';
 import { failure, success, type Result } from '../core/result';
 import { createSharedDocument, type DocumentId } from '../core/shared/shared-document';
 import type { FileFailure } from '../preload/bridge-contract';
 import { saveLocalCopy } from './local-copies';
-import { TooManyPatternTiles, writeDirectPdf, type PrintFonts } from './pdf/direct-pdf';
+import { MissingCharacter, TooLargePdf, writeDirectPdf, type PrintFonts } from './pdf/direct-pdf';
 import { isSystemError } from './stored-files';
 import { writeFileSafely } from './safe-write';
 import { zlibCompressor } from './zlib-compressor';
@@ -50,7 +50,7 @@ export type FileTask =
     }
   | {
       readonly kind: 'writeDirectPdf';
-      readonly document: PrintDocument;
+      readonly document: CheckedPrintDocument;
       readonly fonts: PrintFonts;
     };
 
@@ -128,17 +128,29 @@ export async function runFileTask(task: FileTask): Promise<FileTaskResult> {
   }
 }
 
-/** Writes a checked document as a PDF without the browser, refusing as too large a document whose patterns would need too many tiles. */
-async function directPdf(document: PrintDocument, fonts: PrintFonts): Promise<FileTaskResult> {
+/** Writes a checked document as a PDF without the browser, refusing as too large a document whose PDF would be larger than allowed, and a document holding a character the printed font lacks. */
+async function directPdf(
+  document: CheckedPrintDocument,
+  fonts: PrintFonts,
+): Promise<FileTaskResult> {
   try {
     return success({ kind: 'directPdf', pdf: await writeDirectPdf(document, fonts) });
   } catch (error) {
-    if (!(error instanceof TooManyPatternTiles)) {
+    const code = lighterPdfRefusal(error);
+    if (code === null) {
       throw error;
     }
     console.error('The lighter PDF was refused:', error);
-    return failure({ code: 'TOO_LARGE' });
+    return failure({ code });
   }
+}
+
+/** Returns the failure a refusal of the lighter PDF is reported as, or null for an error that is no refusal. */
+function lighterPdfRefusal(error: unknown): 'TOO_LARGE' | 'MISSING_CHARACTERS' | null {
+  if (error instanceof TooLargePdf) {
+    return 'TOO_LARGE';
+  }
+  return error instanceof MissingCharacter ? 'MISSING_CHARACTERS' : null;
 }
 
 /** Reads a .tasklace file and checks it completely, giving back its Yjs state and document identifier. */

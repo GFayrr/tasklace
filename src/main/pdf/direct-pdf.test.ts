@@ -11,12 +11,13 @@ import {
   type PrintOrder,
 } from '../../core/print/print-document';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../../core/testing/arbitraries';
-import { printDocumentArbitrary } from '../../core/testing/print-arbitrary';
+import { checkedOrThrow, printDocumentArbitrary } from '../../core/testing/print-arbitrary';
 import { printFontsIn } from '../pdf-export';
-import { writeDirectPdf } from './direct-pdf';
+import { MissingCharacter, writeDirectPdf } from './direct-pdf';
 
 const FONTS = printFontsIn(join(import.meta.dirname, '../../renderer/public/fonts'));
 const RECT = { kind: 'rect', x: 10, y: 20, width: 30, height: 8 } as const;
+const SURVEY_WIDTH = 28.11;
 
 /** Builds a landscape A4 document whose single page holds some orders. */
 function documentOf(...orders: PrintOrder[]): PrintDocument {
@@ -25,7 +26,9 @@ function documentOf(...orders: PrintOrder[]): PrintDocument {
 
 /** Writes a document as an uncompressed PDF and returns it as text, so that its operators can be read. */
 async function pdfText(document: PrintDocument): Promise<string> {
-  return Buffer.from(await writeDirectPdf(document, FONTS, false)).toString('latin1');
+  return Buffer.from(await writeDirectPdf(checkedOrThrow(document), FONTS, false)).toString(
+    'latin1',
+  );
 }
 
 /** Returns the objects of an uncompressed PDF by number. */
@@ -82,6 +85,16 @@ function textsOf(pdf: string): { readonly font: string; readonly text: string }[
     texts.push({ font: current?.name ?? '', text });
   }
   return texts;
+}
+
+/** Lists the texts a document writes, those inside clips included. */
+function textsOfDocument(document: PrintDocument): string[] {
+  /** Lists the texts of a list of orders. */
+  const of = (orders: readonly PrintOrder[]): string[] =>
+    orders.flatMap((order) =>
+      order.kind === 'text' ? [order.text] : order.kind === 'clip' ? of(order.orders) : [],
+    );
+  return document.pages.flatMap((orders) => of(orders));
 }
 
 /** Counts the times an operator appears at the end of a line of the content. */
@@ -161,6 +174,40 @@ describe('writeDirectPdf', () => {
     expect(pdf).not.toMatch(/Helvetica/);
   });
 
+  it.each([
+    ['Arabic', 'شكرا', 'ش'],
+    ['Chinese', 'Plan 漢字', '漢'],
+    ['a composed emoji', 'Team 👨‍👩‍👧', '👨'],
+    ['a symbol', 'Done ✓', '✓'],
+  ])(
+    'refuses a text in %s, which Jost Print lacks, naming its first missing character',
+    async (_case, text, missing) => {
+      await expect(
+        pdfText(
+          documentOf({
+            kind: 'text',
+            x: 28,
+            y: 40,
+            text,
+            size: 10,
+            weight: 400,
+            color: '#000000',
+            align: 'start',
+          }),
+        ),
+      ).rejects.toThrow(new MissingCharacter(missing));
+    },
+  );
+
+  it('writes a title with accents, a dash and parentheses, as the PDF reads it back', async () => {
+    const pdf = await pdfText({ ...documentOf(), title: 'R&D (v2) — Thèse' });
+    const written = objectsOf(pdf).get(/\/Title (\d+) 0 R/.exec(pdf)?.[1] ?? '') ?? '';
+    const literal = /^\s*\((.*)\)\s*$/s.exec(written)?.[1] ?? '';
+    const bytes = Buffer.from(literal.replace(/\\([()\\])/g, '$1'), 'latin1');
+    expect(bytes.subarray(0, 2)).toEqual(Buffer.from([0xfe, 0xff]));
+    expect(new TextDecoder('utf-16be').decode(bytes.subarray(2))).toBe('R&D (v2) — Thèse');
+  });
+
   it('places a text on its baseline, shifted left by its width when centered or aligned to the end', async () => {
     /** Builds a text order aligned in a given way. */
     const text = (align: 'start' | 'middle' | 'end') =>
@@ -181,7 +228,7 @@ describe('writeDirectPdf', () => {
     const [start, middle, end] = positions;
     expect(start).toEqual([100, 595.28 - 50]);
     const width = (start?.[0] ?? 0) - (end?.[0] ?? 0);
-    expect(width).toBeGreaterThan(20);
+    expect(width).toBeCloseTo(SURVEY_WIDTH, 6);
     expect((start?.[0] ?? 0) - (middle?.[0] ?? 0)).toBeCloseTo(width / 2, 6);
     expect(new Set(positions.map(([, y]) => y))).toEqual(new Set([595.28 - 50]));
   });
@@ -245,6 +292,29 @@ describe('writeDirectPdf', () => {
     expect(operatorCount(pdf, 'S')).toBe(1);
   });
 
+  it.each([
+    ['diagonal', '0 8 m\n8 0 l\n'],
+    ['reverseDiagonal', '0 0 m\n8 8 l\n'],
+    ['crossHatch', '0 8 m\n8 0 l\n0 0 m\n8 8 l\n'],
+    ['horizontal', '0 4 m\n8 4 l\n'],
+    ['vertical', '4 0 m\n4 8 l\n'],
+  ] as const)(
+    'draws the %s pattern over one tile as the lines of its tile',
+    async (pattern, lines) => {
+      const pdf = await pdfText(
+        documentOf({
+          kind: 'pattern',
+          shape: { kind: 'rect', x: 0, y: 0, width: 8, height: 8 },
+          pattern,
+        }),
+      );
+      expect(pdf).toContain(
+        `q\n0 0 8 8 re\nW n\n1.5 w\n/DeviceRGB CS\n0 0 0 SCN\n/Gs1 gs\n${lines}S\nQ`,
+      );
+      expect(operatorCount(pdf, 'S')).toBe(1);
+    },
+  );
+
   it('draws a dotted pattern as filled dots over every tile a path with curves reaches', async () => {
     const shape = {
       kind: 'path',
@@ -256,13 +326,20 @@ describe('writeDirectPdf', () => {
   });
 
   it(
-    'writes any valid document without failing, with one page for each of its pages',
+    'writes any valid document with one page for each of its pages, or refuses it for a character of its texts the font lacks',
     { timeout: PROPERTY_TEST_TIMEOUT_MS },
     async () => {
       await fc.assert(
         fc.asyncProperty(printDocumentArbitrary, async (document) => {
-          const pdf = await pdfText(document);
-          expect(pdf.match(/\/Type \/Page\n/g)).toHaveLength(document.pages.length);
+          try {
+            const pdf = await pdfText(document);
+            expect(pdf.match(/\/Type \/Page\n/g)).toHaveLength(document.pages.length);
+          } catch (error) {
+            if (!(error instanceof MissingCharacter)) {
+              throw error;
+            }
+            expect(textsOfDocument(document).join('')).toContain(error.character);
+          }
         }),
         { numRuns: 30 },
       );

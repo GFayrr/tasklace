@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
 import { readSharedProject } from '../../src/core/shared/shared-project';
@@ -6,7 +7,12 @@ import { buildPdfSample, PDF_SAMPLE_SIZES } from './pdf-samples';
 
 const HOURS_PER_DAY = 24;
 
-/** Sorts items by their identifier, the order a shared document gives them back in being its own. */
+/** Returns the SHA-256 fingerprint of a value serialized as JSON. */
+function fingerprint(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+/** Sorts items by their identifier, since a shared document gives them back in an order of its own. */
 function byId<T extends { readonly id: string }>(items: readonly T[]): T[] {
   return [...items].sort((left, right) => left.id.localeCompare(right.id));
 }
@@ -47,6 +53,14 @@ describe('the sample plans of the PDF export', () => {
     }
     expect(byId(read.value.tasks)).toEqual(byId(plan.tasks));
     expect(byId(read.value.dependencies)).toEqual(byId(plan.dependencies));
+  });
+
+  it('builds each plan exactly as it was pinned, so that a change of the generator is seen', () => {
+    expect(PDF_SAMPLE_SIZES.map((size) => [size, fingerprint(buildPdfSample(size))])).toEqual([
+      ['small', '9e98173e106ddf0f6fab3740aa0dacb3cdc06b1a9e2bf96dc6223843436d3afe'],
+      ['medium', '27025c53c07e7f9c85183a454671d04c4641c00a74030c4387b6f9cbae9298ce'],
+      ['large', '2a78b88bf156204a1da4c84966eb23d9a394a62327bb355eabd3544b68dd3df2'],
+    ]);
   });
 
   it('builds the same plan from the same seed and another one from another seed', () => {

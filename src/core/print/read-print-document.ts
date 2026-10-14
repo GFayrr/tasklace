@@ -1,9 +1,11 @@
 import {
   MAX_PRINT_COORDINATE,
   MAX_PRINT_DASH_LENGTH,
+  MAX_PRINT_DOCUMENT_PATH_NUMBERS,
   MAX_PRINT_ORDERS,
   MAX_PRINT_PAGES,
   MAX_PRINT_PATH_NUMBERS,
+  MAX_PRINT_PATTERN_TILES,
   MAX_PRINT_TEXT_LENGTH,
 } from '../limits';
 import { failure, success, type Result } from '../result';
@@ -24,7 +26,8 @@ import {
   readText,
   type UnknownRecord,
 } from '../validation/value-readers';
-import { PAPER_NAMES, PAPER_ORIENTATIONS } from './paper';
+import { PAPER_NAMES, PAPER_ORIENTATIONS, pageSizeOf, type PageSize } from './paper';
+import { patternTileCount } from './pattern-tiles';
 import {
   MAX_CLIP_DEPTH,
   MAX_DASH_STEP,
@@ -44,6 +47,11 @@ import {
   type TextWeight,
 } from './print-document';
 
+declare const CHECKED: unique symbol;
+
+/** A document to print that `readPrintDocument` accepted, the only kind printing and writing a PDF take. */
+export type CheckedPrintDocument = PrintDocument & { readonly [CHECKED]: true };
+
 interface Box {
   readonly x: number;
   readonly y: number;
@@ -52,7 +60,10 @@ interface Box {
 }
 
 interface Budget {
-  left: number;
+  readonly page: PageSize;
+  orders: number;
+  pathNumbers: number;
+  tiles: number;
 }
 
 /** A refusal of a value, its place written relative to the value being read, so that the path is built only when a value is refused. */
@@ -77,9 +88,10 @@ const ORDER_KEYS: Readonly<Record<PrintOrder['kind'], readonly string[]>> = {
   clip: ['kind', 'shape', 'orders'],
 };
 const MAX_BOX_SIDE = MAX_PRINT_COORDINATE + MAX_PRINT_COORDINATE;
+const NO_PAGE: PageSize = { width: 0, height: 0 };
 
 /** Reads a document to print sent by the interface, which is not trusted, checking every order against the format and its limits and refusing the whole document on the first order that breaks them. */
-export function readPrintDocument(value: unknown): Result<PrintDocument, ValidationIssues> {
+export function readPrintDocument(value: unknown): Result<CheckedPrintDocument, ValidationIssues> {
   const issues = createIssueList();
   const record = readRecord({ value, path: '' }, issues, DOCUMENT_KEYS);
   if (record === undefined) {
@@ -88,7 +100,9 @@ export function readPrintDocument(value: unknown): Result<PrintDocument, Validat
   const paper = readEnum(childField(record, 'paper', ''), issues, PAPER_NAMES);
   const orientation = readEnum(childField(record, 'orientation', ''), issues, PAPER_ORIENTATIONS);
   const title = readText(childField(record, 'title', ''), issues, MAX_PRINT_TEXT_LENGTH);
-  const pages = readPages(childField(record, 'pages', '').value, issues);
+  const page =
+    paper === undefined || orientation === undefined ? NO_PAGE : pageSizeOf(paper, orientation);
+  const pages = readPages(childField(record, 'pages', '').value, issues, page);
   if (
     paper === undefined ||
     orientation === undefined ||
@@ -98,11 +112,12 @@ export function readPrintDocument(value: unknown): Result<PrintDocument, Validat
   ) {
     return failure(requireIssues(issues.issues));
   }
-  return success({ paper, orientation, title, pages });
+  const document: PrintDocument = { paper, orientation, title, pages };
+  return success(document as CheckedPrintDocument);
 }
 
-/** Reads the pages of a document within the limits of pages and orders, reporting the first refused value with its full path. */
-function readPages(value: unknown, issues: IssueList): PrintOrder[][] | undefined {
+/** Reads the pages of a document within the limits of pages, orders, numbers of paths and pattern tiles on its paper, none on an unknown paper, a hole in a list being read as a missing value, reporting the first refused value. */
+function readPages(value: unknown, issues: IssueList, page: PageSize): PrintOrder[][] | undefined {
   const pages = readArray({ value, path: 'pages' }, issues, MAX_PRINT_PAGES);
   if (pages === undefined) {
     return undefined;
@@ -111,9 +126,14 @@ function readPages(value: unknown, issues: IssueList): PrintOrder[][] | undefine
     issues.add('pages', 'EMPTY_LIST');
     return undefined;
   }
-  const budget: Budget = { left: MAX_PRINT_ORDERS };
+  const budget: Budget = {
+    page,
+    orders: MAX_PRINT_ORDERS,
+    pathNumbers: MAX_PRINT_DOCUMENT_PATH_NUMBERS,
+    tiles: MAX_PRINT_PATTERN_TILES,
+  };
   try {
-    return pages.map((page, index) =>
+    return Array.from(pages, (page, index) =>
       within(`[${String(index)}]`, () => readOrderList(page, budget, 0)),
     );
   } catch (error) {
@@ -130,11 +150,11 @@ function readOrderList(value: unknown, budget: Budget, clipDepth: number): Print
   if (!Array.isArray(value)) {
     return refuse('', 'WRONG_TYPE');
   }
-  if (value.length > budget.left) {
+  if (value.length > budget.orders) {
     return refuse('', 'TOO_MANY_ITEMS');
   }
-  budget.left -= value.length;
-  return value.map((order: unknown, index) =>
+  budget.orders -= value.length;
+  return Array.from(value, (order: unknown, index) =>
     within(`[${String(index)}]`, () => readOrder(order, budget, clipDepth)),
   );
 }
@@ -153,20 +173,24 @@ function readOrder(value: unknown, budget: Budget, clipDepth: number): PrintOrde
   const orderKind = kind as PrintOrder['kind'];
   checkKeys(record, ORDER_KEYS[orderKind]);
   if (orderKind === 'clip') {
-    const shape = within('.shape', () => readShape(record['shape']));
+    const shape = within('.shape', () => readShape(record['shape'], budget));
     const orders = within('.orders', () => readOrderList(record['orders'], budget, clipDepth + 1));
     return { kind: orderKind, shape, orders };
   }
-  return readDrawOrder(record, orderKind);
+  return readDrawOrder(record, orderKind, budget);
 }
 
-/** Reads an order that draws, every one of its keys being known to be there. */
-function readDrawOrder(record: UnknownRecord, kind: DrawOrder['kind']): DrawOrder {
+/** Reads an order that draws, every one of its keys being known to be there, its path and the tiles of its pattern counted against what is left of their budgets. */
+function readDrawOrder(record: UnknownRecord, kind: DrawOrder['kind'], budget: Budget): DrawOrder {
   if (kind === 'text') {
     return readTextOrder(record);
   }
-  const shape = within('.shape', () => readShape(record['shape']));
+  const shape = within('.shape', () => readShape(record['shape'], budget));
   if (kind === 'pattern') {
+    budget.tiles -= patternTileCount(shape, budget.page);
+    if (budget.tiles < 0) {
+      return refuse('shape', 'TOO_MANY_ITEMS');
+    }
     return { kind, shape, pattern: readChoice(record, 'pattern', TAG_PATTERNS) };
   }
   const color = readColor(record['color']);
@@ -202,13 +226,13 @@ function readTextOrder(record: UnknownRecord): TextOrder {
   };
 }
 
-/** Reads the shape an order fills, strokes or covers with a pattern. */
-function readShape(value: unknown): PrintShape {
+/** Reads the shape an order fills, strokes, covers with a pattern or clips to, the numbers of a path counted against what is left of the budget. */
+function readShape(value: unknown, budget: Budget): PrintShape {
   const record = readObject(value, '');
   const kind = record['kind'];
   if (kind === 'path') {
     checkKeys(record, PATH_KEYS);
-    return { kind, segments: readSegments(record['segments']) };
+    return { kind, segments: readSegments(record['segments'], budget) };
   }
   if (kind !== 'rect') {
     return refuse('kind', 'OUT_OF_RANGE');
@@ -232,12 +256,16 @@ function readBox(record: UnknownRecord): Box {
   return { x, y, width, height };
 }
 
-/** Reads the flat numbers of a path, which starts with a move and holds whole operations with coordinates in range. */
-function readSegments(value: unknown): number[] {
+/** Reads the flat numbers of a path, which starts with a move and holds whole operations with coordinates in range, within what is left of the numbers of paths of the document. */
+function readSegments(value: unknown, budget: Budget): number[] {
   if (!Array.isArray(value) || value.length > MAX_PRINT_PATH_NUMBERS || value[0] !== PATH_MOVE) {
     return refuse('segments', 'OUT_OF_RANGE');
   }
-  const numbers: unknown[] = value;
+  if (value.length > budget.pathNumbers) {
+    return refuse('segments', 'TOO_MANY_ITEMS');
+  }
+  budget.pathNumbers -= value.length;
+  const numbers: unknown[] = Array.from(value);
   let index = 0;
   while (index < numbers.length) {
     const count = coordinatesAfter(numbers[index] as number);
@@ -260,7 +288,7 @@ function readDash(value: unknown): number[] {
   if (value.length > MAX_PRINT_DASH_LENGTH) {
     return refuse('dash', 'TOO_MANY_ITEMS');
   }
-  const steps: unknown[] = value;
+  const steps: unknown[] = Array.from(value);
   if (!steps.every((step) => typeof step === 'number' && step > 0 && step <= MAX_DASH_STEP)) {
     return refuse('dash', 'OUT_OF_RANGE');
   }

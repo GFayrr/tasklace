@@ -1,20 +1,22 @@
-import type { TagPattern } from '../tags/tag-appearance';
-import { pageSizeOf } from './paper';
+import { pageSizeOf, type PageSize } from './paper';
 import {
   PATTERN_INK_COLOR,
   PATTERN_INK_OPACITY,
   PATTERN_LINE_WIDTH,
-  PATTERN_TILE_SIZE,
+  patternTileCorners,
   patternTileOf,
+  type PatternTile,
+  type TileCorner,
 } from './pattern-tiles';
 import {
   pathSegments,
   type DrawOrder,
   type PathSegment,
-  type PrintDocument,
+  type PatternOrder,
   type PrintOrder,
   type PrintShape,
 } from './print-document';
+import type { CheckedPrintDocument } from './read-print-document';
 
 export const PRINT_FONT_FAMILY = 'Jost Print';
 
@@ -33,18 +35,18 @@ const MARKUP_CHARACTERS = /[&<>"']/g;
 
 interface PageWriter {
   readonly prefix: string;
-  readonly patterns: Set<TagPattern>;
+  readonly page: PageSize;
   readonly clips: string[];
 }
 
 /** Writes one page of a validated document as an SVG image sized in points, its identifiers starting with the page number so that several pages can share one HTML page. */
-export function printPageSvg(document: PrintDocument, pageIndex: number): string {
+export function printPageSvg(document: CheckedPrintDocument, pageIndex: number): string {
   const orders = document.pages[pageIndex];
   if (orders === undefined) {
     throw new RangeError(`No page ${String(pageIndex)} to write.`);
   }
   const size = pageSizeOf(document.paper, document.orientation);
-  const writer: PageWriter = { prefix: `p${String(pageIndex)}`, patterns: new Set(), clips: [] };
+  const writer: PageWriter = { prefix: `p${String(pageIndex)}`, page: size, clips: [] };
   const body = orders.map((order) => printOrderSvg(order, writer)).join('');
   const width = svgNumber(size.width);
   const height = svgNumber(size.height);
@@ -71,13 +73,19 @@ function printOrderSvg(order: PrintOrder, writer: PageWriter): string {
   if (order.kind !== 'clip') {
     return drawOrderSvg(order, writer);
   }
-  const id = `${writer.prefix}-c${String(writer.clips.length)}`;
-  writer.clips.push(`<clipPath id="${id}">${shapeSvg(order.shape, '')}</clipPath>`);
-  const inner = order.orders.map((held) => printOrderSvg(held, writer)).join('');
-  return `<g clip-path="url(#${id})">${inner}</g>`;
+  return clippedSvg(order.shape, writer, () =>
+    order.orders.map((held) => printOrderSvg(held, writer)).join(''),
+  );
 }
 
-/** Writes an order that draws, noting the patterns it uses. */
+/** Writes some markup kept inside a shape by a clip path of the page, numbered before the markup is written so that clips are numbered in the order of the document. */
+function clippedSvg(shape: PrintShape, writer: PageWriter, inner: () => string): string {
+  const id = `${writer.prefix}-c${String(writer.clips.length)}`;
+  writer.clips.push(`<clipPath id="${id}">${shapeSvg(shape, '')}</clipPath>`);
+  return `<g clip-path="url(#${id})">${inner()}</g>`;
+}
+
+/** Writes an order that draws. */
 function drawOrderSvg(order: DrawOrder, writer: PageWriter): string {
   if (order.kind === 'text') {
     return (
@@ -87,8 +95,7 @@ function drawOrderSvg(order: DrawOrder, writer: PageWriter): string {
     );
   }
   if (order.kind === 'pattern') {
-    writer.patterns.add(order.pattern);
-    return shapeSvg(order.shape, `fill="url(#${writer.prefix}-${order.pattern})"`);
+    return patternOrderSvg(order, writer);
   }
   const opacity = order.opacity < 1 ? ` ${order.kind}-opacity="${svgNumber(order.opacity)}"` : '';
   if (order.kind === 'fill') {
@@ -134,29 +141,43 @@ function segmentData(segment: PathSegment): string {
   return `${segment.kind === 'move' ? 'M' : 'L'}${end}`;
 }
 
-/** Writes the clip paths and patterns a page uses, or nothing when it uses none. */
+/** Writes the clip paths a page uses, or nothing when it uses none. */
 function definitionsSvg(writer: PageWriter): string {
-  if (writer.clips.length === 0 && writer.patterns.size === 0) {
-    return '';
-  }
-  const patterns = [...writer.patterns].map((pattern) => patternSvg(pattern, writer.prefix));
-  return `<defs>${writer.clips.join('')}${patterns.join('')}</defs>`;
+  return writer.clips.length === 0 ? '' : `<defs>${writer.clips.join('')}</defs>`;
 }
 
-/** Writes a tag pattern as a tile repeated from the corner of the page, drawn like the tile of the timeline on screen. */
-function patternSvg(pattern: TagPattern, prefix: string): string {
-  const tile = patternTileOf(pattern);
-  const size = svgNumber(PATTERN_TILE_SIZE);
+/** Covers a shape with a tag pattern drawn as real lines or dots, tile by tile from the corner of the page as on screen, kept inside the shape and the page, so that the browser never turns it into an image. */
+function patternOrderSvg(order: PatternOrder, writer: PageWriter): string {
+  const corners = patternTileCorners(order.shape, writer.page);
+  if (corners.length === 0) {
+    return '';
+  }
+  const tile = patternTileOf(order.pattern);
+  const data = corners.map((corner) => tileData(tile, corner)).join('');
   const ink = `"${PATTERN_INK_COLOR}"`;
-  const opacity = svgNumber(PATTERN_INK_OPACITY);
-  const content =
+  const opacity = `"${svgNumber(PATTERN_INK_OPACITY)}"`;
+  const paint =
     tile.kind === 'dot'
-      ? `<circle cx="${svgNumber(tile.x)}" cy="${svgNumber(tile.y)}" r="${svgNumber(tile.radius)}"` +
-        ` fill=${ink} fill-opacity="${opacity}"/>`
-      : `<path d="${tile.lines.map(([x1, y1, x2, y2]) => `M${svgNumber(x1)} ${svgNumber(y1)}L${svgNumber(x2)} ${svgNumber(y2)}`).join('')}"` +
-        ` fill="none" stroke=${ink} stroke-opacity="${opacity}" stroke-width="${svgNumber(PATTERN_LINE_WIDTH)}"/>`;
-  return (
-    `<pattern id="${prefix}-${pattern}" width="${size}" height="${size}"` +
-    ` patternUnits="userSpaceOnUse">${content}</pattern>`
-  );
+      ? `fill=${ink} fill-opacity=${opacity}`
+      : `fill="none" stroke=${ink} stroke-opacity=${opacity} stroke-width="${svgNumber(PATTERN_LINE_WIDTH)}"`;
+  return clippedSvg(order.shape, writer, () => `<path d="${data}" ${paint}/>`);
+}
+
+/** Writes the dot, as two half circles, or the lines of one tile of a pattern at a corner as SVG path data. */
+function tileData(tile: PatternTile, [left, top]: TileCorner): string {
+  if (tile.kind === 'dot') {
+    const radius = svgNumber(tile.radius);
+    const diameter = svgNumber(tile.radius + tile.radius);
+    const arc = `a${radius} ${radius} 0 1 0`;
+    return (
+      `M${svgNumber(left + tile.x - tile.radius)} ${svgNumber(top + tile.y)}` +
+      `${arc} ${diameter} 0${arc} -${diameter} 0Z`
+    );
+  }
+  return tile.lines
+    .map(
+      ([x1, y1, x2, y2]) =>
+        `M${svgNumber(left + x1)} ${svgNumber(top + y1)}L${svgNumber(left + x2)} ${svgNumber(top + y2)}`,
+    )
+    .join('');
 }

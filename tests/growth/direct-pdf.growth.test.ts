@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { PrintDocument, PrintOrder } from '../../src/core/print/print-document';
+import { checkedOrThrow } from '../../src/core/testing/print-arbitrary';
 import { printFontsIn } from '../../src/main/pdf-export';
 import { writeDirectPdf } from '../../src/main/pdf/direct-pdf';
 import { LARGE_TASK_COUNT, LINEAR_MAX_RATIO, SMALL_TASK_COUNT } from './measure-growth';
@@ -57,8 +58,8 @@ async function medianAsyncDuration(run: () => Promise<unknown>): Promise<number>
 
 describe('growth of writing a PDF without the browser with the size of the plan', () => {
   it('writes the PDF in linear time', async () => {
-    const small = documentOf(SMALL_TASK_COUNT);
-    const large = documentOf(LARGE_TASK_COUNT);
+    const small = checkedOrThrow(documentOf(SMALL_TASK_COUNT));
+    const large = checkedOrThrow(documentOf(LARGE_TASK_COUNT));
     const ratio =
       (await medianAsyncDuration(() => writeDirectPdf(large, FONTS))) /
       (await medianAsyncDuration(() => writeDirectPdf(small, FONTS)));

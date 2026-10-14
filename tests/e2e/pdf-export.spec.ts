@@ -18,6 +18,7 @@ import { zlibCompressor } from '../../src/main/zlib-compressor';
 import { buildPdfSample } from '../fixtures/pdf-samples';
 import { closeDiscarding, launchApplication } from './application';
 import { answerDialogs } from './dialogs';
+import { readPdfTexts } from './pdf-texts';
 
 const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
 const HEAVY_PDF_TIMEOUT_MS = 120_000;
@@ -162,7 +163,7 @@ function pageCount(pdf: Buffer): number {
   return (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length;
 }
 
-test('writes the plan as a PDF of vector pages with the Jost typeface embedded', async () => {
+test('writes the plan as a PDF of vector pages without any image, patterns included, with the Jost typeface embedded and its title and texts reading back', async () => {
   const path = join(folder, 'Thesis.pdf');
   const dialog = await openExport();
   await answerDialogs(application, { save: path });
@@ -173,6 +174,27 @@ test('writes the plan as a PDF of vector pages with the Jost typeface embedded',
   expect(pdf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
   expect(pageCount(pdf)).toBe(1);
   expect(pdf.toString('latin1')).toMatch(/\/BaseFont\s*\/[A-Z]{6}\+Jost/);
+  expect(pdf.toString('latin1').match(/\/Subtype\s*\/Image/g)).toBeNull();
+  const { title, texts } = readPdfTexts(pdf);
+  const [heading, exported, ...rest] = texts;
+  expect([title, heading]).toEqual(['Thesis', 'Thesis']);
+  expect(exported).toMatch(/^Exported \S/);
+  expect(rest).toEqual([
+    'September 2026',
+    'October 2026',
+    ...['28', '29', '30'],
+    ...Array.from({ length: 12 }, (_unused, day) => String(day + 1)),
+    'Name',
+    'Research',
+    'Survey design',
+    'Interviews',
+    'Writing',
+    'Defense',
+    'Design',
+    'Documentation',
+    'Critical',
+    'Page 1 of 1',
+  ]);
 });
 
 test('prints a long plan on as many PDF pages as the preview announces, with no blank page', async () => {

@@ -102,7 +102,7 @@ export function createPrintPageStore(): PrintPageStore {
   };
 }
 
-/** Creates the handler of the application scheme, answering with a file of the interface, its type and the security headers, or not found for an address outside the interface or an unreadable file, logged when it exists. */
+/** Creates the handler of the application scheme, answering with a page held for printing or a file of the interface, its type and the security headers, or not found for an address outside the interface or an unreadable file, logged when it exists. */
 export function createAppFileServer(
   rendererRoot: string,
   securityHeaders: Readonly<Record<string, string>>,

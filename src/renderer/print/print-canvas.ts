@@ -1,4 +1,6 @@
+import { MAX_PRINT_PATH_NUMBERS } from '../../core/limits';
 import {
+  MAX_CLIP_DEPTH,
   PATH_CLOSE,
   PATH_CURVE,
   PATH_LINE,
@@ -10,6 +12,7 @@ import {
 } from '../../core/print/print-document';
 import { valueAt } from '../../core/table-value';
 import type { TagPattern } from '../../core/tags/tag-appearance';
+import type { TimelineBodyContext } from '../plan/timeline-painter';
 
 export interface PrintBounds {
   readonly x: number;
@@ -22,11 +25,13 @@ type Paint =
   | { readonly kind: 'color'; readonly color: string; readonly opacity: number }
   | { readonly kind: 'pattern'; readonly pattern: TagPattern };
 
+type CanvasPaint = TimelineBodyContext['fillStyle'];
+
 interface DrawingState {
   fill: Paint;
   stroke: Paint;
-  fillStyle: unknown;
-  strokeStyle: unknown;
+  fillStyle: CanvasPaint;
+  strokeStyle: CanvasPaint;
   lineWidth: number;
   dash: readonly number[];
   scaleX: number;
@@ -71,7 +76,7 @@ export function printPattern(pattern: TagPattern): CanvasPattern {
 }
 
 /** A drawing context that records what the timeline draws as print orders in points, dropping what falls outside the printed area and refusing any drawing call it does not know. */
-export class PrintCanvas {
+export class PrintCanvas implements TimelineBodyContext {
   readonly #lists: PrintOrder[][] = [[]];
   readonly #saved: DrawingState[] = [];
   readonly #box: Box;
@@ -104,8 +109,8 @@ export class PrintCanvas {
   }
 
   /** Returns this canvas as the drawing context the timeline painter expects. */
-  get context(): CanvasRenderingContext2D {
-    return this as unknown as CanvasRenderingContext2D;
+  get context(): TimelineBodyContext {
+    return this;
   }
 
   /** Returns the orders recorded so far, clips left open being closed. */
@@ -115,23 +120,23 @@ export class PrintCanvas {
   }
 
   /** Returns the fill style last set. */
-  get fillStyle(): unknown {
+  get fillStyle(): CanvasPaint {
     return this.#state.fillStyle;
   }
 
   /** Sets the paint of the next fills, a color or a tag pattern. */
-  set fillStyle(value: unknown) {
+  set fillStyle(value: CanvasPaint) {
     this.#state.fill = paintOf(value);
     this.#state.fillStyle = value;
   }
 
   /** Returns the stroke style last set. */
-  get strokeStyle(): unknown {
+  get strokeStyle(): CanvasPaint {
     return this.#state.strokeStyle;
   }
 
   /** Sets the color of the next strokes, refusing a pattern. */
-  set strokeStyle(value: unknown) {
+  set strokeStyle(value: CanvasPaint) {
     const paint = paintOf(value);
     if (paint.kind === 'pattern') {
       throw new TypeError('A printed line cannot be drawn with a pattern.');
@@ -271,12 +276,15 @@ export class PrintCanvas {
     this.#paint(this.#rectShape(x, y, width, height), this.#state.stroke, this.#strokeLook());
   }
 
-  /** Keeps the next drawings inside the current path until the state is restored, hiding them when the path lies outside the printed area. */
+  /** Keeps the next drawings inside the current path until the state is restored, hiding them when the path lies outside the printed area, and refuses a clip deeper than a printed document allows. */
   clip(): void {
     const shape = this.#pathShape();
     if (shape === null || this.#state.hidden) {
       this.#state.hidden = true;
       return;
+    }
+    if (this.#state.clipDepth >= MAX_CLIP_DEPTH) {
+      throw new RangeError(`A printed page cannot nest more than ${String(MAX_CLIP_DEPTH)} clips.`);
     }
     const clip: ClipOrder = { kind: 'clip', shape, orders: [] };
     this.#current().push(clip);
@@ -318,11 +326,16 @@ export class PrintCanvas {
     }
   }
 
-  /** Returns the current path kept within the printed area, or null when it does not reach it. */
+  /** Returns the current path kept within the printed area, or null when it does not reach it, and refuses a path longer than a printed document allows. */
   #pathShape(): PrintShape | null {
     const box = this.#pathBox;
     if (box === null || !overlaps(box, this.#box)) {
       return null;
+    }
+    if (this.#path.length > MAX_PRINT_PATH_NUMBERS) {
+      throw new RangeError(
+        `A printed path cannot hold more than ${String(MAX_PRINT_PATH_NUMBERS)} numbers.`,
+      );
     }
     return { kind: 'path', segments: clampPath(this.#path, this.#box) };
   }
@@ -344,7 +357,7 @@ export class PrintCanvas {
     return { kind: 'rect', x: left, y: top, width: right - left, height: bottom - top };
   }
 
-  /** Returns the width and dash of a stroke, scaled like the drawing. */
+  /** Returns the width and dash of a stroke, scaled by the horizontal scale of the drawing, which printing keeps equal to the vertical one. */
   #strokeLook(): { readonly width: number; readonly dash: number[] } {
     const scale = Math.abs(this.#state.scaleX);
     return {
@@ -445,7 +458,7 @@ function overlaps(first: Box, second: Box): boolean {
   );
 }
 
-/** Keeps every point of a path within a box, walking the path once, operations unchanged. */
+/** Keeps every point of a path within a box, walking the path once, a point outside being moved onto the edge, which bends a line that crosses it. */
 function clampPath(path: readonly number[], box: Box): number[] {
   const clamped: number[] = [];
   let index = 0;

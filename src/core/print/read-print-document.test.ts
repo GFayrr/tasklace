@@ -68,9 +68,22 @@ describe('readPrintDocument', () => {
     expect(readPrintDocument(document)).toEqual({ ok: true, value: document });
   });
 
-  it('gives back copies that hold no property the document did not need', () => {
-    const result = readPrintDocument(documentWith(FILL));
-    expect(result.ok && result.value.pages[0]?.[0]).not.toBe(FILL);
+  it('gives back a copy that a later change of the document it read leaves untouched, down to its lists', () => {
+    const dash = [...STROKE.dash];
+    const segments = [...STROKE.shape.segments];
+    const clipOrders = [...CLIP.orders];
+    const page: unknown[] = [
+      { ...STROKE, shape: { kind: 'path', segments }, dash },
+      { ...CLIP, orders: clipOrders },
+    ];
+    const pages = [page];
+    const result = readPrintDocument({ ...documentWith(), pages });
+    dash.fill(MAX_DASH_STEP);
+    segments.fill(PATH_MOVE);
+    clipOrders.length = 0;
+    page.length = 0;
+    pages.push([]);
+    expect(result).toEqual({ ok: true, value: documentWith(STROKE, CLIP) });
   });
 
   it('accepts any valid document unchanged', () => {
@@ -157,6 +170,40 @@ describe('readPrintDocument', () => {
       { path: 'pages[1][1].color', code: 'INVALID_COLOR' },
     ]);
   });
+
+  it.each([
+    ['a page', { ...documentWith(), pages: [[FILL], , [FILL]] }, 'pages[1]', 'WRONG_TYPE'],
+    ['an order', { ...documentWith(), pages: [[FILL, , FILL]] }, 'pages[0][1]', 'WRONG_TYPE'],
+    [
+      'an order of a clip',
+      documentWith({ ...CLIP, orders: [FILL, , FILL] }),
+      'pages[0][0].orders[1]',
+      'WRONG_TYPE',
+    ],
+    [
+      'a coordinate of a path',
+      documentWith({ ...STROKE, shape: { kind: 'path', segments: [PATH_MOVE, , 0] } }),
+      'pages[0][0].shape.segments',
+      'OUT_OF_RANGE',
+    ],
+    [
+      'an operation of a path',
+      documentWith({ ...STROKE, shape: { kind: 'path', segments: [PATH_MOVE, 0, 0, , 1, 1] } }),
+      'pages[0][0].shape.segments',
+      'OUT_OF_RANGE',
+    ],
+    [
+      'a step of a dash',
+      documentWith({ ...STROKE, dash: [3, , 2] }),
+      'pages[0][0].dash',
+      'OUT_OF_RANGE',
+    ],
+  ])(
+    'refuses a hole in a list as a missing value, kept by the copy between processes: %s',
+    (_name, document, path, code) => {
+      expect(issuesOf(structuredClone(document))).toEqual([{ path, code }]);
+    },
+  );
 
   it.each([
     ['an order that is no object', 1, '', 'WRONG_TYPE'],

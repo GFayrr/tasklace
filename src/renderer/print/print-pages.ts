@@ -1,6 +1,17 @@
 import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
 import type { Dependency, Project, TaskId } from '../../core/model/project';
-import type { PaperName, PaperOrientation } from '../../core/print/paper';
+import {
+  MAX_PRINT_DOCUMENT_PATH_NUMBERS,
+  MAX_PRINT_ORDERS,
+  MAX_PRINT_PATTERN_TILES,
+} from '../../core/limits';
+import {
+  pageSizeOf,
+  type PageSize,
+  type PaperName,
+  type PaperOrientation,
+} from '../../core/print/paper';
+import { printCostOf } from '../../core/print/print-cost';
 import {
   MIN_TEXT_POINTS,
   PATH_LINE,
@@ -92,7 +103,7 @@ export interface PrintedPlan {
   readonly period: HourSpan;
 }
 
-export type PrintRefusal = PrintLayoutRefusal | 'EMPTY_PERIOD';
+export type PrintRefusal = PrintLayoutRefusal | 'EMPTY_PERIOD' | 'TOO_DETAILED';
 
 interface HourSpan {
   readonly start: ProjectHour;
@@ -144,7 +155,9 @@ const TITLE_BASELINE = 14;
 const DATE_BASELINE = 31;
 const CELL_PADDING = 4;
 const INDENT = 10;
-const MAX_NAME_WIDTH = 220;
+const MAX_COLUMN_WIDTH = 220;
+const MIN_NAME_ROOM = 80;
+const MAX_INDENT = MAX_COLUMN_WIDTH - MIN_NAME_ROOM;
 const SWATCH_WIDTH = 12;
 const SWATCH_HEIGHT = 8;
 const SWATCH_TOP = 4;
@@ -171,7 +184,7 @@ const SHORTEST_UNIT_HOURS: Readonly<Record<ZoomLevel, number>> = {
 };
 const HALF = 2;
 
-/** Lays a plan out on printed pages and draws all of them, or the first ones up to a limit for a preview: header, scale, columns, timeline rows without today line, selection, deadlines, baseline or conflicts, legend and page numbers. */
+/** Lays a plan out on printed pages and draws all of them, or the first ones for a preview: header, scale, columns, bars and links only, legend and page numbers, refusing pages that hold more than a document allows. */
 export function buildPrintDocument(
   source: PrintSource,
   settings: PrintSettings,
@@ -223,7 +236,14 @@ export function buildPrintDocument(
     ticks: (from, to) => buildScaleTicks(zoom, from, to, labels),
     measure,
   };
-  const pages = layout.pages.slice(0, pageLimit).map((page) => pageOrders(context, page));
+  const pages = drawPages(
+    context,
+    layout.pages.slice(0, pageLimit),
+    pageSizeOf(settings.paper, settings.orientation),
+  );
+  if (pages === null) {
+    return failure('TOO_DETAILED');
+  }
   return success({
     document: {
       paper: settings.paper,
@@ -237,6 +257,34 @@ export function buildPrintDocument(
   });
 }
 
+/** Draws pages one after the other, or nothing as soon as they hold more orders, numbers of paths or pattern tiles than a document allows, so that a page never sends what the main process would refuse. */
+function drawPages(
+  context: PageContext,
+  pages: readonly PrintPage[],
+  size: PageSize,
+): PrintOrder[][] | null {
+  const drawn: PrintOrder[][] = [];
+  let orders = 0;
+  let pathNumbers = 0;
+  let tiles = 0;
+  for (const page of pages) {
+    const pageDrawn = pageOrders(context, page);
+    const cost = printCostOf(pageDrawn, size);
+    orders += cost.orders;
+    pathNumbers += cost.pathNumbers;
+    tiles += cost.tiles;
+    if (
+      orders > MAX_PRINT_ORDERS ||
+      pathNumbers > MAX_PRINT_DOCUMENT_PATH_NUMBERS ||
+      tiles > MAX_PRINT_PATTERN_TILES
+    ) {
+      return null;
+    }
+    drawn.push(pageDrawn);
+  }
+  return drawn;
+}
+
 /** Returns the hours printed: the whole plan, or the chosen days, or null for days that end before they start. */
 function printPeriod(source: PrintSource, period: PrintPeriod): HourSpan | null {
   const days = period.kind === 'days' ? period : wholePlanDays(source.project, source.schedule);
@@ -245,7 +293,7 @@ function printPeriod(source: PrintSource, period: PrintPeriod): HourSpan | null 
     : { start: startOfDay(days.firstDay), end: startOfDay(days.lastDay + 1) };
 }
 
-/** Returns the days of a plan, from the day of its first start, or of the project start, to the day of its last end. */
+/** Returns the days of a plan, from the earlier of the project start and the first start of a task to the day of its last end, an end at midnight counting for the day before. */
 export function wholePlanDays(
   project: Project,
   schedule: Schedule,
@@ -261,7 +309,7 @@ export function wholePlanDays(
   return { firstDay, lastDay: Math.max(lastDay, firstDay) };
 }
 
-/** Builds the columns printed beside the timeline: the WBS when chosen, the names, always, then the other chosen columns in their usual order, each as wide as its widest text. */
+/** Builds the columns printed beside the timeline: the WBS when chosen, the names, always, then the other chosen columns in their usual order, each as wide as its widest text but at most 220 points, longer texts being cut. */
 function columnTable(
   source: PrintSource,
   chosen: readonly PrintColumn[],
@@ -283,7 +331,7 @@ function columnTable(
     align: TextAlign;
     kind: PrintColumn | 'total' | 'free';
   }[] = [];
-  /** Adds a column when it was chosen. */
+  /** Adds a column to those to print, with its header, cells and alignment. */
   const add = (
     kind: PrintColumn | 'total' | 'free',
     header: string,
@@ -356,18 +404,18 @@ function columnTable(
       'end',
     );
   }
-  const indents = rows.map((row) => row.depth * INDENT);
+  const indents = rows.map((row) => Math.min(row.depth * INDENT, MAX_INDENT));
   const summaryRows = new Set(
     rows.flatMap((row, index) => (row.task.kind === 'summary' ? [index] : [])),
   );
   const nameWidth =
     Math.min(
-      MAX_NAME_WIDTH,
+      MAX_COLUMN_WIDTH,
       Math.max(
         measure(messages.table.name, TEXT_SIZE, SEMIBOLD),
         ...rows.map(
           (row, index) =>
-            (indents[index] ?? 0) +
+            valueAt(indents, index) +
             measure(row.task.name, TEXT_SIZE, summaryRows.has(index) ? SEMIBOLD : REGULAR),
         ),
       ),
@@ -385,11 +433,14 @@ function columnTable(
     left += width;
     return column;
   };
-  /** Measures the widest text of a column, its header included. */
+  /** Measures the widest text of a column, its header included, up to the widest a column may be. */
   const widthOf = (header: string, values: readonly string[]) =>
-    Math.max(
-      measure(header, TEXT_SIZE, SEMIBOLD),
-      ...values.map((value) => measure(value, TEXT_SIZE, REGULAR)),
+    Math.min(
+      MAX_COLUMN_WIDTH,
+      Math.max(
+        measure(header, TEXT_SIZE, SEMIBOLD),
+        ...values.map((value) => measure(value, TEXT_SIZE, REGULAR)),
+      ),
     ) +
     CELL_PADDING * HALF;
   const before = contents.filter((content) => content.kind === 'wbs');
@@ -478,17 +529,23 @@ function linksByBand(
 ): Dependency[][] {
   const bands = Array.from({ length: bandCount }, (): Dependency[] => []);
   for (const dependency of dependencies) {
-    const from = outline.rowIndexById.get(dependency.predecessorId);
-    const to = outline.rowIndexById.get(dependency.successorId);
-    if (from === undefined || to === undefined) {
-      continue;
-    }
+    const from = rowOf(outline, dependency.predecessorId);
+    const to = rowOf(outline, dependency.successorId);
     const last = Math.floor(Math.max(from, to) / rowsPerPage);
     for (let band = Math.floor(Math.min(from, to) / rowsPerPage); band <= last; band += 1) {
-      bands[band]?.push(dependency);
+      valueAt(bands, band).push(dependency);
     }
   }
   return bands;
+}
+
+/** Returns the printed row of a task, every task having one since every row is unfolded, and throws for a task that has none. */
+function rowOf(outline: PlanOutline, taskId: TaskId): number {
+  const row = outline.rowIndexById.get(taskId);
+  if (row === undefined) {
+    throw new RangeError(`The linked task ${taskId} has no printed row.`);
+  }
+  return row;
 }
 
 /** Builds the scene of the timeline as printed: white paper, every row unfolded, nothing but bars, links, days off and the critical underline. */
@@ -521,7 +578,7 @@ function printScene(
   };
 }
 
-/** Draws one page: header, time scale, columns, timeline rows and footer. */
+/** Draws one page: header, time scale, columns, timeline rows, grid lines and footer. */
 function pageOrders(context: PageContext, page: PrintPage): PrintOrder[] {
   return [
     ...headerOrders(context),
@@ -635,9 +692,9 @@ function columnOrders(context: PageContext, page: PrintPage): DrawOrder[] {
     for (let offset = 0; offset < page.rowCount; offset += 1) {
       const row = page.firstRow + offset;
       const isName = column === table.name;
-      const indent = isName ? (table.indents[row] ?? 0) : 0;
+      const indent = isName ? valueAt(table.indents, row) : 0;
       const weight = isName && table.summaryRows.has(row) ? SEMIBOLD : REGULAR;
-      const value = fitText(column.cells[row] ?? '', inner - indent, TEXT_SIZE, weight, measure);
+      const value = fitText(valueAt(column.cells, row), inner - indent, TEXT_SIZE, weight, measure);
       const baseline = frame.rowsTop + offset * PRINT_ROW_HEIGHT + TEXT_BASELINE;
       orders.push(...text(context, value, x + indent, baseline, { weight, align: column.align }));
     }
@@ -662,7 +719,7 @@ function bodyOrders(context: PageContext, page: PrintPage): PrintOrder[] {
   drawing.translate(area.x, area.y);
   drawing.scale(PRINT_SCALE, PRINT_SCALE);
   const band = Math.floor(page.firstRow / context.layout.rowsPerPage);
-  const scene = { ...context.scene, dependencies: context.bandLinks[band] ?? [] };
+  const scene = { ...context.scene, dependencies: valueAt(context.bandLinks, band) };
   paintTimelineBody(drawing, scene, {
     left: page.timelineStart / PRINT_SCALE,
     top: page.firstRow * ROW_HEIGHT,
@@ -752,7 +809,7 @@ function swatchOrders(theme: Theme, item: LegendItem, x: number, top: number): D
   return swatch;
 }
 
-/** Writes a line of text at the printed size, or nothing for an empty text. */
+/** Returns the order that writes a line of text, 10 points and regular by default, or nothing for a text made only of spaces. */
 function text(
   context: PageContext,
   value: string,

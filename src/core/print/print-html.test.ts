@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { PrintDocument } from './print-document';
+import { checkedOrThrow } from '../testing/print-arbitrary';
 import { printHtml } from './print-html';
 import { printPageSvg } from './print-svg';
 
-const DOCUMENT: PrintDocument = {
+const DOCUMENT = checkedOrThrow({
   paper: 'a4',
   orientation: 'landscape',
   title: 'R&D <plan>',
@@ -22,7 +22,7 @@ const DOCUMENT: PrintDocument = {
     ],
     [],
   ],
-};
+});
 
 describe('printHtml', () => {
   it('writes the escaped title, the stylesheets of the application and every page in order, with no script or inline style', () => {

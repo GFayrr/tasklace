@@ -3,6 +3,7 @@
   import { MAX_PRINT_PAGES } from '../../core/limits';
   import { pageSizeOf, PAPER_NAMES, PAPER_ORIENTATIONS } from '../../core/print/paper';
   import { valueAt } from '../../core/table-value';
+  import { failure, type Result } from '../../core/result';
   import { MAX_DAY_INDEX, MIN_DAY_INDEX, type DayIndex } from '../../core/time';
   import type { AppState, HeavyPdf } from '../app/app-state.svelte';
   import { countMessage, fillMessage } from '../i18n/messages';
@@ -13,12 +14,18 @@
     PRINT_COLUMNS,
     wholePlanDays,
     type PrintColumn,
+    type PrintedPlan,
+    type PrintRefusal,
     type PrintSettings,
     type PrintSource,
     type PrintZoomChoice,
   } from '../print/print-pages';
   import { paintPrintPage } from '../print/print-preview';
-  import { readPrintSettings, rememberPrintSettings } from '../print/print-settings';
+  import {
+    DEFAULT_PRINT_SETTINGS,
+    readPrintSettings,
+    rememberPrintSettings,
+  } from '../print/print-settings';
   import { pageMeasure, type MeasureText } from '../print/print-text';
   import Icon from './Icon.svelte';
 
@@ -41,9 +48,11 @@
 
   const text = $derived(app.messages.print);
   const opening = $derived(app.pdfExport);
-  let settings = $state.raw<PrintSettings>(readPrintSettings(null, ''));
+  let settings = $state.raw<PrintSettings>(DEFAULT_PRINT_SETTINGS);
   let measure = $state.raw<MeasureText | null>(null);
+  let measureFailed = $state(false);
   let previewFailed = $state(false);
+  let exportRefusal = $state.raw<PrintRefusal | 'NOT_DRAWN' | null>(null);
   const patternFor = createPatternCache(
     () => document.createElement('canvas'),
     () => document.createElement('canvas').getContext('2d'),
@@ -70,7 +79,7 @@
     };
   });
   const printed = $derived(
-    source === null || measure === null ? null : buildPrintDocument(source, settings, measure, 1),
+    source === null || measure === null ? null : drawPages(source, measure, 1),
   );
   let heavy = $state.raw<HeavyPdf | null>(null);
   const megabyte = $derived(
@@ -89,18 +98,18 @@
   );
   const status = $derived.by(() => {
     if (!current.ok) {
-      return text.waiting;
+      return current.error === 'SCHEDULE_STOPPED' ? text.scheduleStopped : text.waiting;
     }
     if (schedule === null) {
       return text.scheduleFailed;
     }
-    if (previewFailed) {
-      return text.previewUnavailable;
+    if (measureFailed) {
+      return text.measureUnavailable;
     }
-    if (printed?.ok === false) {
-      return fillMessage(text.refusals[printed.error], { limit: String(MAX_PRINT_PAGES) });
+    if (exportRefusal !== null) {
+      return refusalText(exportRefusal);
     }
-    return null;
+    return printed?.ok === false ? refusalText(printed.error) : null;
   });
   const dateFormat = $derived(
     new Intl.DateTimeFormat(app.locale, { dateStyle: 'medium', timeZone: 'UTC' }),
@@ -110,7 +119,9 @@
   function followOpening(dialog: HTMLDialogElement): void {
     if (opening !== null && !dialog.open) {
       settings = readPrintSettings(storage, opening.documentId);
+      measureFailed = false;
       previewFailed = false;
+      exportRefusal = null;
       heavy = null;
       void prepareMeasure();
       dialog.showModal();
@@ -119,21 +130,46 @@
     }
   }
 
-  /** Waits for the printed font to be loaded, then measures texts with it, the preview being unavailable when the page cannot measure text. */
+  /** Waits for the printed font to be loaded, then measures texts with it, printing being impossible, and the reason logged, when the page cannot measure text. */
   async function prepareMeasure(): Promise<void> {
     try {
       measure = await pageMeasure(document);
-      previewFailed = measure === null;
+      if (measure === null) {
+        console.error('Printed texts cannot be measured: the canvas gave no drawing context.');
+        measureFailed = true;
+      }
     } catch (error) {
       console.error('The printed font could not be loaded:', error);
-      previewFailed = true;
+      measureFailed = true;
     }
+  }
+
+  /** Draws the pages with the settings chosen, all of them or the first ones up to a limit, logging an error of the drawing and saying the pages could not be drawn rather than leaving the window stuck. */
+  function drawPages(
+    from: PrintSource,
+    measured: MeasureText,
+    pageLimit?: number,
+  ): Result<PrintedPlan, PrintRefusal | 'NOT_DRAWN'> {
+    try {
+      return buildPrintDocument(from, settings, measured, pageLimit);
+    } catch (error) {
+      console.error('The printed pages could not be drawn:', error);
+      return failure('NOT_DRAWN');
+    }
+  }
+
+  /** Returns the text that explains why the pages cannot be printed. */
+  function refusalText(refusal: PrintRefusal | 'NOT_DRAWN'): string {
+    return refusal === 'NOT_DRAWN'
+      ? text.notDrawn
+      : fillMessage(text.refusals[refusal], { limit: String(MAX_PRINT_PAGES) });
   }
 
   /** Changes the settings and remembers them for the project on this computer. */
   function change(changes: Partial<PrintSettings>): void {
     settings = { ...settings, ...changes };
     heavy = null;
+    exportRefusal = null;
     if (opening !== null) {
       rememberPrintSettings(storage, opening.documentId, settings);
     }
@@ -173,7 +209,7 @@
     change({ period: { ...settings.period, [edge]: day } });
   }
 
-  /** Draws the first page of the preview whenever it changes, sized for the screen density. */
+  /** Draws the first page of the preview whenever it changes, sized for the screen density, saying the preview cannot be drawn when the canvas gives no context while the export stays possible. */
   function drawPreview(canvas: HTMLCanvasElement): void {
     if (printed?.ok !== true) {
       return;
@@ -188,6 +224,7 @@
     canvas.style.height = `${String(size.height * scale)}px`;
     const context = canvas.getContext('2d');
     if (context === null) {
+      console.error('The preview could not be drawn: the canvas gave no drawing context.');
       previewFailed = true;
       return;
     }
@@ -208,15 +245,17 @@
     return labels[column];
   }
 
-  /** Prints every page to PDF with the settings chosen, keeping the size of a PDF heavier than expected so that the user can choose what to do. */
+  /** Prints every page to PDF with the settings chosen, explaining why the pages cannot be printed and keeping the size of a PDF heavier than expected so that the user can choose what to do. */
   async function exportPdf(): Promise<void> {
     if (source === null || measure === null) {
       return;
     }
-    const built = buildPrintDocument(source, settings, measure);
-    if (built.ok) {
-      heavy = await app.exportPdf(built.value.document);
+    const built = drawPages(source, measure);
+    if (!built.ok) {
+      exportRefusal = built.error;
+      return;
     }
+    heavy = await app.exportPdf(built.value.document);
   }
 
   /** Writes a size in bytes in kilobytes, or in megabytes from one megabyte on, in the regional format. */
@@ -262,7 +301,7 @@
     </div>
     <div class="body">
       <div class="settings">
-        <fieldset>
+        <fieldset disabled={app.fileActionRunning}>
           <legend>{text.paper}</legend>
           <div class="segments">
             {#each PAPER_NAMES as paper (paper)}
@@ -293,7 +332,7 @@
             {/each}
           </div>
         </fieldset>
-        <fieldset>
+        <fieldset disabled={app.fileActionRunning}>
           <legend>{text.period}</legend>
           <label class="choice">
             <input
@@ -341,7 +380,7 @@
             </div>
           {/if}
         </fieldset>
-        <fieldset>
+        <fieldset disabled={app.fileActionRunning}>
           <legend>{text.zoom}</legend>
           <div class="segments">
             {#each ZOOM_CHOICES as zoom (zoom)}
@@ -365,7 +404,7 @@
             >
           {/if}
         </fieldset>
-        <fieldset>
+        <fieldset disabled={app.fileActionRunning}>
           <legend>{text.columns}</legend>
           <label class="choice"><input type="checkbox" checked disabled />{text.nameAlways}</label>
           {#each PRINT_COLUMNS as column (column)}
@@ -402,7 +441,11 @@
           <p class="caption">
             {fillMessage(text.preview, { count: String(printed.value.layout.pages.length) })}
           </p>
-          <canvas aria-label={text.previewLabel} {@attach drawPreview}></canvas>
+          {#if previewFailed}
+            <p class="status" role="status">{text.previewUnavailable}</p>
+          {:else}
+            <canvas aria-label={text.previewLabel} {@attach drawPreview}></canvas>
+          {/if}
         {/if}
       </div>
     </div>

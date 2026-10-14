@@ -58,6 +58,7 @@ const bridge: TasklaceBridge = {
   exportPdf: (document, suggestedName) => request(IPC_CHANNELS.exportPdf, document, suggestedName),
   saveHeldPdf: () => request(IPC_CHANNELS.saveHeldPdf),
   exportLighterPdf: () => request(IPC_CHANNELS.exportLighterPdf),
+  discardHeldPdf: () => request(IPC_CHANNELS.discardHeldPdf),
   onFlushRequested: (flush) => {
     pageFlush = flush;
   },

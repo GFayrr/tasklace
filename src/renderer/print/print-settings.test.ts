@@ -63,6 +63,16 @@ describe('print settings', () => {
     expect(readPrintSettings(store, DOCUMENT)).toEqual(edges);
   });
 
+  it('reads back days that end before they start, so that the window explains them instead of forgetting every setting', () => {
+    const store = storeWith();
+    const inverted: PrintSettings = {
+      ...CHOSEN,
+      period: { kind: 'days', firstDay: 20_730, lastDay: 20_700 },
+    };
+    rememberPrintSettings(store, DOCUMENT, inverted);
+    expect(readPrintSettings(store, DOCUMENT)).toEqual(inverted);
+  });
+
   it.each([
     ['text that is no JSON', '{'],
     ['a value that is no object', '[]'],
@@ -72,10 +82,6 @@ describe('print settings', () => {
     ['an unknown orientation', JSON.stringify({ ...CHOSEN, orientation: 'square' })],
     ['an unknown zoom', JSON.stringify({ ...CHOSEN, zoom: 'year' })],
     ['an unknown period', JSON.stringify({ ...CHOSEN, period: { kind: 'all' } })],
-    [
-      'days that end before they start',
-      JSON.stringify({ ...CHOSEN, period: { kind: 'days', firstDay: 5, lastDay: 4 } }),
-    ],
     [
       'a day that is no whole number',
       JSON.stringify({ ...CHOSEN, period: { kind: 'days', firstDay: 20_700.5, lastDay: 20_730 } }),

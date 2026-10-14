@@ -8,7 +8,7 @@ import {
   createPrintPageStore,
   isAppAddress,
 } from './app-files';
-import { MAX_FILE_WORKER_HEAP_MEBIBYTES } from '../core/limits';
+import { MAX_FILE_WORKER_HEAP_MEBIBYTES, MAX_PDF_RENDER_MILLISECONDS } from '../core/limits';
 import { contentSecurityPolicy } from './content-security-policy';
 import { flushBeforeClosing, registerFlushHandler } from './close-flush';
 import { runInFileWorker } from './file-worker-client';
@@ -30,7 +30,7 @@ import {
   writeLogBeforeQuitting,
 } from './log-file';
 import { createMainWindow, createPrintWindow } from './window';
-import { PDF_RENDER_TIMEOUT_MS, printFontsIn, registerPdfHandlers } from './pdf-export';
+import { printFontsIn, registerPdfHandlers } from './pdf-export';
 
 const developmentUrl = app.isPackaged ? null : (process.env['ELECTRON_RENDERER_URL'] ?? null);
 const developmentOrigin = developmentUrl === null ? null : new URL(developmentUrl).origin;
@@ -82,18 +82,21 @@ function start(): void {
     runTask: (task) => runInFileWorker(createFileWorker, task),
     userDataFolder: app.getPath('userData'),
   });
-  registerPdfHandlers({
+  const pdf = registerPdfHandlers({
     assertTrusted,
     pages: printPages,
     createPrintWindow,
-    timeoutMs: PDF_RENDER_TIMEOUT_MS,
+    timeoutMs: MAX_PDF_RENDER_MILLISECONDS,
     runTask: (task) => runInFileWorker(createFileWorker, task),
     fonts: printFontsIn(join(rendererRoot, 'fonts')),
   });
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath);
   logPageMessages(window.webContents, log);
-  flushBeforeClosing(window, windowProjectKind, forgetWindowProject);
+  flushBeforeClosing(window, windowProjectKind, (sender) => {
+    forgetWindowProject(sender);
+    pdf.forgetHeldPdf(sender);
+  });
   let closing = false;
   window.once('close', () => {
     closing = true;
