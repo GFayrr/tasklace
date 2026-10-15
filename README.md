@@ -80,7 +80,7 @@ What Tasklace already supports:
 - [ ] End-to-end encrypted relay and deployment guide
 - [ ] Portable Windows executable
 
-Windows comes first; the code stays cross-platform so that macOS and Linux versions can follow. The [detailed roadmap](docs/roadmap.md) describes each step.
+Windows comes first; the code stays cross-platform so that macOS and Linux versions can follow. The [roadmap](docs/roadmap.md) gives the status of each step.
 
 ## Install
 
