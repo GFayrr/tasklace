@@ -11,7 +11,7 @@ import {
 } from 'electron';
 import { MAX_CSV_FILE_BYTES, MAX_FILE_BYTES, MAX_JSON_FILE_BYTES } from '../core/limits';
 import { failure, success } from '../core/result';
-import { isDocumentId, type DocumentId } from '../core/shared/shared-document';
+import { isDocumentId, requireDocumentId, type DocumentId } from '../core/shared/shared-document';
 import { MIN_PROJECT_HOUR } from '../core/time';
 import {
   IPC_CHANNELS,
@@ -119,7 +119,9 @@ export function registerProjectFileHandlers(services: ProjectFileServices): void
     );
   };
   handle(IPC_CHANNELS.regionalFormat, () => regionalFormatOf(app.getSystemLocale()));
-  handle(IPC_CHANNELS.newProject, (event) => offerProject(event.sender, null, randomUUID()));
+  handle(IPC_CHANNELS.newProject, (event) =>
+    offerProject(event.sender, null, requireDocumentId(randomUUID())),
+  );
   handle(IPC_CHANNELS.adoptProject, (event, documentId) =>
     adoptProject(services, event.sender, documentId),
   );
@@ -207,7 +209,11 @@ async function openRecent(
   value: unknown,
 ): Promise<BridgeResult<OpenedProject>> {
   const index = readRecentIndex(value) ?? refuseMessage();
-  const paths = await readRecentProjects(recentStore(services));
+  const read = await readRecentPaths(services);
+  if (!read.ok) {
+    return read;
+  }
+  const paths = read.value;
   const path = paths[index];
   if (path === undefined) {
     console.error(
@@ -222,14 +228,23 @@ async function openRecent(
 async function listRecent(
   services: ProjectFileServices,
 ): Promise<BridgeResult<readonly RecentProject[]>> {
+  const read = await readRecentPaths(services);
+  return read.ok
+    ? success(
+        read.value.map((path) => ({
+          name: projectNameFromPath(path, MESSAGES.projects.untitled),
+          folder: dirname(path),
+        })),
+      )
+    : read;
+}
+
+/** Reads the paths of the recent projects, a failure of the system being logged and reported as a failed read. */
+async function readRecentPaths(
+  services: ProjectFileServices,
+): Promise<BridgeResult<readonly string[]>> {
   try {
-    const paths = await readRecentProjects(recentStore(services));
-    return success(
-      paths.map((path) => ({
-        name: projectNameFromPath(path, MESSAGES.projects.untitled),
-        folder: dirname(path),
-      })),
-    );
+    return success(await readRecentProjects(recentStore(services)));
   } catch (error) {
     if (!isSystemError(error)) {
       throw error;
@@ -272,7 +287,7 @@ async function importProject(
   if (tooLarge !== null) {
     return tooLarge;
   }
-  const documentId = randomUUID();
+  const documentId = requireDocumentId(randomUUID());
   const options = {
     format: regionalFormatOf(app.getSystemLocale()),
     projectName: projectNameFromPath(path, MESSAGES.projects.untitled),
@@ -291,7 +306,7 @@ async function importProject(
   return success(openedProject(loaded.value, path));
 }
 
-/** Saves the project of a window: to its file, or where the user chooses when saving as, the name of the project being suggested, a project without file keeping only its local copy so that saving automatically never opens a dialog; once a file chosen by saving as is written, it becomes the file of the window and a recent project, even when its local copy failed. */
+/** Saves the project of a window: to its file, or where the user chooses when saving as, the name of the project being suggested, a project without file keeping only its local copy so that saving automatically never opens a dialog, and a file chosen by saving as becoming, once written, the file of the window and a recent project, even when its local copy failed. */
 async function saveProject(
   services: ProjectFileServices,
   sender: WebContents,
@@ -319,7 +334,7 @@ async function saveProject(
       state,
       documentId,
       localCopyFolder: join(services.userDataFolder, LOCAL_COPY_FOLDER),
-      savedAt: Date.now(),
+      savedAt: new Date(),
     }),
   );
   if (!saved.ok) {

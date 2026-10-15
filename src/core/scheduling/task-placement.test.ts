@@ -140,7 +140,6 @@ describe('placeTask', () => {
   });
 
   it.each<[string, readonly [number, number][]]>([
-    ['no block', []],
     ['a gap before the first block', [[7, 1]]],
     [
       'a negative gap',
@@ -300,7 +299,10 @@ describe('placeTaskLatest', () => {
     const placed = unwrap(result);
     const lastDay = unwrap(placeTask(calendar, partDay, placed.start));
     expect(placed).toEqual(lastDay);
-    expect(placed.end).toBeLessThanOrEqual(END_PROJECT_HOUR);
+    expect([format(placed.start), format(placed.end)]).toEqual([
+      '2200-12-18 15:00',
+      '2200-12-31 11:00',
+    ]);
     const later = placeTask(calendar, partDay, placed.start + 24);
     expect(later).toEqual({ ok: false, error: 'BEYOND_PLANNING_HORIZON' });
   });
@@ -329,12 +331,7 @@ describe('placement edge cases', () => {
     expect(placed.ok && placed.value.start).toBe(at(2026, 9, 29, 10));
   });
 
-  it('refuses a work task without any block, and slots for a block the task does not have', () => {
-    const empty = { ...workTask('a'), segments: [] };
-    expect(placeTask(COMPILED, empty, at(2026, 9, 28, 9))).toEqual({
-      ok: false,
-      error: 'INVALID_SEGMENTS',
-    });
+  it('refuses slots for a block the task does not have', () => {
     const task = workTask('a');
     const placement = unwrap(placeTask(COMPILED, task, at(2026, 9, 28, 9)));
     const extra = {

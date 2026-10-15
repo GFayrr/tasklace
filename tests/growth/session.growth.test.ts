@@ -3,7 +3,11 @@ import * as Y from 'yjs';
 import type { Project } from '../../src/core/model/project';
 import { repairProject } from '../../src/core/shared/repair-project';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
-import { openSharedSession, type SharedSession } from '../../src/core/shared/shared-session';
+import {
+  openSharedSession,
+  type SharedSession,
+  sessionDocument,
+} from '../../src/core/shared/shared-session';
 import { buildLargeProject, LARGE_PROJECT_SEED } from '../fixtures/large-project';
 import {
   batched,
@@ -21,6 +25,7 @@ import {
   splitTask,
   TEST_DOCUMENT_ID,
   workTask,
+  segmentsOrThrow,
 } from '../../src/core/testing/project-builder';
 
 const WARM_UP_RUNS = 1;
@@ -55,7 +60,7 @@ function taskRenamer(session: SharedSession): (index: number) => void {
 function recordRemoteEdits(document: Y.Doc): Uint8Array[] {
   const remote = openCopy(document);
   const updates: Uint8Array[] = [];
-  remote.document.on('update', (update: Uint8Array) => {
+  sessionDocument(remote).on('update', (update: Uint8Array) => {
     updates.push(update);
   });
   const rename = taskRenamer(remote);
@@ -126,11 +131,13 @@ describe('growth of shared session operations with the size of the project', () 
       }
       return batched(1, (index) => {
         const blockCount = MIN_HUB_BLOCKS + (index % 2);
-        const segments = Array.from({ length: blockCount }, () => ({
-          durationHours: HUB_BLOCK_HOURS,
-          gapDaysBefore: 0,
-          startNoEarlierThan: null,
-        }));
+        const segments = segmentsOrThrow(
+          Array.from({ length: blockCount }, () => ({
+            durationHours: HUB_BLOCK_HOURS,
+            gapDaysBefore: 0,
+            startNoEarlierThan: null,
+          })),
+        );
         expect(session.apply({ type: 'putTask', task: { ...hub, segments } }).ok).toBe(true);
       });
     };

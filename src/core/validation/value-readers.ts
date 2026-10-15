@@ -199,7 +199,7 @@ export function readPatternString(
   return text;
 }
 
-/** Reads a value that may be null, using another reader otherwise; undefined means invalid. */
+/** Reads a value that may be null, using another reader otherwise, undefined meaning an invalid value. */
 export function readNullable<T>(
   field: Field,
   issues: IssueList,

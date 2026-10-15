@@ -62,8 +62,10 @@ import {
 } from './shared-project';
 
 export interface SharedSession {
-  readonly document: Y.Doc;
   readonly documentId: DocumentId;
+  readonly onChange: (listener: () => void) => () => void;
+  readonly encodeState: (stateVector?: Uint8Array) => Uint8Array;
+  readonly encodeStateVector: () => Uint8Array;
   readonly openingRepairs: readonly SharedRepair[];
   readonly project: () => Project;
   readonly apply: (operation: SharedOperation) => Result<void, ValidationIssues>;
@@ -123,6 +125,7 @@ export type StateOpeningFailure =
 
 const INCOMPLETE_STATE = 'The state depends on updates it does not hold.';
 const UNDO_CAPTURE_TIMEOUT_MS = 0;
+const SESSION_DOCUMENTS = new WeakMap<SharedSession, Y.Doc>();
 const HISTORY_ROOTS = [PROJECT_ROOT, TASKS_ROOT, DEPENDENCIES_ROOT, TAGS_ROOT] as const;
 
 type SharedType = Y.Transaction['changed'] extends Map<infer Type, unknown> ? Type : never;
@@ -164,15 +167,6 @@ function openSession(
   return read.ok ? success(validatedSession(document, read.value, documentId, decodedFrom)) : read;
 }
 
-/** Opens a session on a shared document whose project was already read and validated, so that it is not validated twice. */
-export function openValidatedSession(
-  document: Y.Doc,
-  project: Project,
-  documentId: DocumentId,
-): SharedSession {
-  return validatedSession(document, project, documentId, null);
-}
-
 /** Opens a session on a shared document whose project was validated, its trial copy decoded from the unchanged state the document was just decoded from when one is given and the opening cleared nothing, and copied from the document otherwise. */
 function validatedSession(
   document: Y.Doc,
@@ -204,9 +198,20 @@ function validatedSession(
       Y.applyUpdate(session.shadow, update);
     }
   });
-  return {
-    document,
+  const shared: SharedSession = {
     documentId,
+    onChange: (listener) => {
+      /** Calls the listener for any change of the document, wherever it comes from. */
+      const changed = (): void => {
+        listener();
+      };
+      document.on('update', changed);
+      return () => {
+        document.off('update', changed);
+      };
+    },
+    encodeState: (stateVector) => Y.encodeStateAsUpdate(document, stateVector),
+    encodeStateVector: () => Y.encodeStateVector(document),
     openingRepairs: cleared
       .map((task): SharedRepair => ({ code: 'TAG_CLEARED', id: task.id }))
       .sort((left, right) => compareStrings(left.id, right.id)),
@@ -216,6 +221,17 @@ function validatedSession(
     merge: (update) => mergeIntoSession(session, document, update),
     history: createHistory(session, document),
   };
+  SESSION_DOCUMENTS.set(shared, document);
+  return shared;
+}
+
+/** Returns the shared document behind a session, for the shared model and its tests only, which a repository test enforces, since a write outside the session would escape its checks and repairs. */
+export function sessionDocument(session: SharedSession): Y.Doc {
+  const document = SESSION_DOCUMENTS.get(session);
+  if (document === undefined) {
+    throw new Error('This session was not opened by openSharedSession.');
+  }
+  return document;
 }
 
 /** Keeps the local changes of a session in an undo history that ignores the changes of others, each undone or redone step being checked and repaired like a received update. */

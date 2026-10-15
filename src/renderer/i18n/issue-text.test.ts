@@ -90,6 +90,20 @@ describe('repairText', () => {
     );
   });
 
+  it('never names a task for an adjustment of a link or a tag, even one sharing the identifier of a task', () => {
+    /** Returns the name of the task whose identifier the link and the tag share. */
+    const name = (id: string) => (id === 'same' ? 'Write report' : null);
+    expect(
+      (['DEPENDENCY_REMOVED', 'BLOCK_LINK_CLEARED', 'TAG_REMOVED'] as const).map((code) =>
+        repairText(english, { code, id: 'same' }, name),
+      ),
+    ).toEqual([
+      english.repairCodes.DEPENDENCY_REMOVED,
+      english.repairCodes.BLOCK_LINK_CLEARED,
+      english.repairCodes.TAG_REMOVED,
+    ]);
+  });
+
   it('gives the reason alone for an adjustment of a task that no longer exists', () => {
     expect(repairText(english, { code: 'TAG_CLEARED', id: 'gone' }, () => null)).toBe(
       english.repairCodes.TAG_CLEARED,

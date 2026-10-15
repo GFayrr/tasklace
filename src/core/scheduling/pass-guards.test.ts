@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { Project } from '../model/project';
 import { unwrap } from '../testing/arbitraries';
 import { compileOrThrow } from '../testing/civil-time';
-import { link, milestone, project, splitTask, workTask } from '../testing/project-builder';
+import {
+  link,
+  milestone,
+  project,
+  splitTask,
+  workTask,
+  segmentsOrThrow,
+} from '../testing/project-builder';
 import { END_PROJECT_HOUR } from '../time';
 import { runBackwardPass } from './backward-pass';
 import type { DependencyGraph, ScheduleUnit } from './dependency-graph';
@@ -85,7 +92,9 @@ describe('the forward pass facing inconsistent inputs', () => {
     const second = unitOf(graph, 'b', 1);
     const shortened = {
       ...second.task,
-      segments: second.task.kind === 'task' ? second.task.segments.slice(0, 1) : [],
+      segments: segmentsOrThrow(
+        second.task.kind === 'task' ? second.task.segments.slice(0, 1) : [],
+      ),
     };
     const units = graph.units.map((unit) =>
       unit.index === second.index ? { ...unit, task: shortened } : unit,

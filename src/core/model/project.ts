@@ -26,9 +26,11 @@ interface DatedTaskBase extends TaskBase {
   readonly deadline: ProjectHour | null;
 }
 
+export type TaskSegments = readonly [TaskSegment, ...TaskSegment[]];
+
 export interface WorkTask extends DatedTaskBase {
   readonly kind: 'task';
-  readonly segments: readonly TaskSegment[];
+  readonly segments: TaskSegments;
   readonly hoursPerDay: number | null;
   readonly dailyStartHour: number | null;
 }

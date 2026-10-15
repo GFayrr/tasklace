@@ -4,7 +4,6 @@ import * as Y from 'yjs';
 import {
   encodeTasklaceFile,
   HEADER_BYTES,
-  openTasklaceFile,
   readTasklaceFile,
 } from '../../src/core/file/tasklace-file';
 import { createSharedDocument, readSharedData } from '../../src/core/shared/shared-document';
@@ -13,6 +12,7 @@ import { buildLargeProject } from '../fixtures/large-project';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 import { forgeFile } from './forge-file';
 import { TEST_DOCUMENT_ID } from '../../src/core/testing/project-builder';
+import { openTasklaceFile } from '../../src/core/testing/open-tasklace-file';
 
 const MEBIBYTE = 1_024 * 1_024;
 const BOMB_MEBIBYTES = 64;

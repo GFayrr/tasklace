@@ -295,21 +295,41 @@ describe('TaskTable', () => {
     });
     picker.value = '';
     picker.dispatchEvent(new Event('change', { bubbles: true }));
+    const refusal = new DOMException('Not allowed', 'NotAllowedError');
     Object.assign(picker, {
       showPicker: () => {
-        throw new DOMException('Not allowed', 'NotAllowedError');
+        throw refusal;
       },
     });
     app.select('b');
     update();
     expect(grid.getAttribute('aria-activedescendant')).toBe('cell-b-start');
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let calls: unknown[][] = [];
     try {
       press(grid, 'ArrowDown', { altKey: true });
+      calls = [...logged.mock.calls];
     } finally {
       logged.mockRestore();
     }
+    expect(calls).toEqual([['The date picker could not open:', refusal]]);
     expect(app.notices.map((notice) => notice.text)).toEqual([english.notices.pickerUnavailable]);
+  });
+
+  it('refuses a date chosen on the calendar of the system outside the years handled, saying so, the calendar offering only those years', async () => {
+    const { app, root } = await renderTable();
+    const picker = single(root, 'input.picker') as HTMLInputElement;
+    Object.assign(picker, { showPicker: vi.fn() });
+    expect([picker.min, picker.max]).toEqual(['2020-01-01T00:00', '2200-12-31T23:45']);
+    const before = app.project;
+    click(button(root, 'Choose the start of Read on a calendar'));
+    picker.value = '2201-01-01T10:00';
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(app.project).toBe(before);
+    expect(app.notices.map((notice) => notice.text)).toEqual([
+      english.editErrors.DATE_OUT_OF_YEARS,
+    ]);
   });
 
   it('lets an unexpected failure of the calendar of the system through, without calling it unavailable', async () => {

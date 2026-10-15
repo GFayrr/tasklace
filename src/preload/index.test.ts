@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrintDocument } from '../core/print/print-document';
 import { BRIDGE_NAME, IPC_CHANNELS, type TasklaceBridge } from './bridge-contract';
+import { requireDocumentId } from '../core/shared/shared-document';
 
 const PRINTED: PrintDocument = {
   paper: 'a4',
@@ -71,7 +72,7 @@ describe('the bridge exposed to the page', () => {
     await bridge.openProject();
     await bridge.openRecentProject(2);
     await bridge.importProject('csv');
-    await bridge.adoptProject('11111111-1111-4111-8111-111111111111');
+    await bridge.adoptProject(requireDocumentId('11111111-1111-4111-8111-111111111111'));
     await bridge.saveProject(state);
     await bridge.saveProjectAs(state, 'Plan');
     await bridge.exportProject('json', '{}', 'Plan');

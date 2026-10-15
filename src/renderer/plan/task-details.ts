@@ -7,6 +7,7 @@ import type {
   TagId,
   TaskId,
   TaskSegment,
+  TaskSegments,
 } from '../../core/model/project';
 import { failure, success, type Result } from '../../core/result';
 import { HOURS_PER_DAY, QUARTER_HOUR, type ProjectHour } from '../../core/time';
@@ -14,6 +15,7 @@ import { formatTimeOfDay, parseTimeOfDay } from './time-of-day';
 import { hourFromPicker } from './cell-editing';
 import { durationEditorText, parseDuration } from './durations';
 import type { InterfaceRefusal } from './edit-refusal';
+import { nonEmptySegments } from '../../core/task-segments';
 
 export interface BlockDraft {
   readonly duration: string;
@@ -258,7 +260,7 @@ function readTime(text: string): number | null | undefined {
 function readBlocks(
   blocks: readonly BlockDraft[],
   dayHours: number,
-): Result<TaskSegment[], InterfaceRefusal> {
+): Result<TaskSegments, InterfaceRefusal> {
   const segments: TaskSegment[] = [];
   for (const [index, block] of blocks.entries()) {
     const durationHours = parseDuration(block.duration, dayHours);
@@ -275,7 +277,8 @@ function readBlocks(
     }
     segments.push({ durationHours, gapDaysBefore: gap, startNoEarlierThan: start });
   }
-  return segments.length === 0 ? failure('INVALID_BLOCK') : success(segments);
+  const read = nonEmptySegments(segments);
+  return read === null ? failure('INVALID_BLOCK') : success(read);
 }
 
 /** Reads a gap of whole days between two blocks, zero meaning the same day, or null. */

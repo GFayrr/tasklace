@@ -1,5 +1,5 @@
 import type { CsvWarningCode } from '../../core/exchange/csv/csv-rows';
-import type { SharedRepairCode } from '../../core/shared/shared-project';
+import { REPAIR_SUBJECTS, type SharedRepairCode } from '../../core/shared/shared-project';
 import type { ValidationIssueCode } from '../../core/validation/validation-issues';
 import { fillMessage, type Messages } from './messages';
 
@@ -41,14 +41,14 @@ export function issueText(messages: Messages, issue: ReportedIssue): string {
   return fillMessage(messages.issuePlaces.located, { place, field: fields.join(', '), reason });
 }
 
-/** Writes an adjustment made to keep a project valid, naming the task it concerns when it is a task that still exists. */
+/** Writes an adjustment made to keep a project valid, naming the task it concerns when it concerns a task that still exists, never a link or a tag. */
 export function repairText(
   messages: Messages,
   repair: { readonly code: SharedRepairCode; readonly id: string },
   taskName: (id: string) => string | null,
 ): string {
   const reasons: Readonly<Record<SharedRepairCode, string>> = messages.repairCodes;
-  const name = taskName(repair.id);
+  const name = REPAIR_SUBJECTS[repair.code] === 'task' ? taskName(repair.id) : null;
   if (name === null) {
     return reasons[repair.code];
   }

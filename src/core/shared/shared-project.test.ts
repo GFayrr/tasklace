@@ -16,7 +16,12 @@ import {
   workTask,
   TEST_DOCUMENT_ID,
 } from '../testing/project-builder';
-import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
+import {
+  createSharedDocument,
+  readSharedData,
+  TASKS_ROOT,
+  requireDocumentId,
+} from './shared-document';
 import {
   applySharedChange,
   mergeSharedUpdate,
@@ -369,7 +374,7 @@ function mergeTampered(from: Y.Doc, to: Y.Doc, tamper: (malicious: Y.Doc) => voi
   };
 }
 
-const OTHER_DOCUMENT_ID = '00000000-0000-4000-8000-000000000002';
+const OTHER_DOCUMENT_ID = requireDocumentId('00000000-0000-4000-8000-000000000002');
 
 describe('merging updates that break the shared schema', () => {
   it.each<[string, (malicious: Y.Doc) => void]>([
@@ -580,7 +585,7 @@ describe('merging interrupted and concurrent updates', () => {
         ...current,
         dependencies: [...current.dependencies, link(second, first)],
       }));
-      expect(sync(left, right).length).toBeGreaterThan(0);
+      expect(sync(left, right)).toEqual([{ code: 'DEPENDENCY_REMOVED', id: `${second}-${first}` }]);
       syncAll([left, right]);
     }
     expect([left.clientID, right.clientID]).toEqual(identities);

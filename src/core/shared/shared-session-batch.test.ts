@@ -8,7 +8,7 @@ import { readSharedData } from './shared-document';
 import { createSharedDocument } from './shared-document';
 import { applyOperation, type SharedOperation } from './shared-operations';
 import { readSharedProject } from './shared-project';
-import { openSharedSession, type SharedSession } from './shared-session';
+import { openSharedSession, type SharedSession, sessionDocument } from './shared-session';
 
 const BASE: Project = project(
   [workTask('a'), workTask('b'), workTask('c')],
@@ -31,7 +31,7 @@ function reference(base: Project, operations: readonly SharedOperation[]): Proje
 
 /** Reads the project stored in the document of a session. */
 function stored(session: SharedSession): Project | null {
-  const read = readSharedProject(session.document);
+  const read = readSharedProject(sessionDocument(session));
   return read.ok ? read.value : null;
 }
 
@@ -45,7 +45,7 @@ describe('grouped operations', () => {
       { type: 'putTask', task: workTask('c', { parentId: 'b' }) },
     ];
     let transactions = 0;
-    session.document.on('afterTransaction', () => {
+    sessionDocument(session).on('afterTransaction', () => {
       transactions += 1;
     });
     expect(session.applyAll(operations)).toEqual({ ok: true, value: undefined });
@@ -60,7 +60,7 @@ describe('grouped operations', () => {
 
   it('changes nothing when one operation is refused, even after earlier ones were accepted', () => {
     const session = openOn(BASE);
-    const before = Y.encodeStateAsUpdate(session.document);
+    const before = Y.encodeStateAsUpdate(sessionDocument(session));
     const refused = session.applyAll([
       { type: 'updateProject', fields: { name: 'Renamed' } },
       { type: 'removeDependency', id: 'a-b' },
@@ -71,7 +71,7 @@ describe('grouped operations', () => {
       ok: false,
       error: [{ path: 'dependencies.loop', code: 'DEPENDENCY_CYCLE' }],
     });
-    expect(Y.encodeStateAsUpdate(session.document)).toEqual(before);
+    expect(Y.encodeStateAsUpdate(sessionDocument(session))).toEqual(before);
     expect(session.project()).toEqual(BASE);
     expect(session.history.canUndo()).toBe(false);
     expect(session.apply({ type: 'removeDependency', id: 'a-b' }).ok).toBe(true);
@@ -119,7 +119,9 @@ describe('grouped operations, compared with operations one at a time', () => {
         const result = grouped.applyAll(operations);
         expect(result.ok).toBe(allAccepted);
         const expected = allAccepted ? single : openOn(BASE);
-        expect(readSharedData(grouped.document)).toEqual(readSharedData(expected.document));
+        expect(readSharedData(sessionDocument(grouped))).toEqual(
+          readSharedData(sessionDocument(expected)),
+        );
         expect(grouped.project()).toEqual(stored(grouped));
       }),
     );

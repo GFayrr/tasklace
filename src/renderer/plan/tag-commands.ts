@@ -23,7 +23,7 @@ export function addTag(context: EditContext, baseName: string): Edit {
   return success([{ type: 'putTag', tag }]);
 }
 
-/** Renames a tag with the trimmed text, refusing an empty name and a name another tag already has, case counting as in the CSV; this is a rule of the settings only, since a merge may still bring two tags of the same name. */
+/** Renames a tag with the trimmed text, refusing an empty name and a name another tag already has, case counting as in the CSV, a rule of the settings only since a merge may still bring two tags of the same name. */
 export function renameTag(context: EditContext, id: TagId, text: string): Edit {
   const name = text.trim();
   if (name === '') {

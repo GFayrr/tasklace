@@ -302,19 +302,32 @@ describe('the export to PDF', () => {
     expect(control.pdfExports).toHaveLength(1);
   });
 
-  it('ignores a date outside the years handled, keeping the days chosen', async () => {
+  it('refuses a date outside the years handled or none, putting back the day chosen and saying why until a day is chosen again', async () => {
     const { root } = await renderExport();
     pick(choice(root, TEXT.days));
     const first = single(root, `input[aria-label="${TEXT.firstDay}"]`) as HTMLInputElement;
     const last = single(root, `input[aria-label="${TEXT.lastDay}"]`) as HTMLInputElement;
+    expect([first.min, first.max, last.min, last.max]).toEqual([
+      '2020-01-01',
+      '2200-12-31',
+      '2020-01-01',
+      '2200-12-31',
+    ]);
+    const shown = [first.value, last.value];
     first.value = '2019-12-31';
     first.dispatchEvent(new Event('change', { bubbles: true }));
-    last.value = '2201-01-01';
+    last.value = '';
     last.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
+    expect([first.value, last.value]).toEqual(shown);
     expect(
       (JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? 'null') as PrintSettings).period,
     ).toEqual({ kind: 'days', firstDay: 20_724, lastDay: 20_725 });
+    expect(single(root, '.days + [role="alert"]').textContent).toBe(TEXT.dayOutOfYears);
+    first.value = '2026-09-29';
+    first.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    expect(root.querySelectorAll('.days + [role="alert"]')).toHaveLength(0);
   });
 
   it('prints with the settings chosen when the local storage is refused, warning that they will not be remembered', async () => {

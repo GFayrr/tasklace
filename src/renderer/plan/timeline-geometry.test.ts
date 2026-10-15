@@ -10,7 +10,7 @@ import {
   summary,
   workTask,
 } from '../../core/testing/project-builder';
-import { at } from '../../core/testing/civil-time';
+import { at, format } from '../../core/testing/civil-time';
 import { buildPlanOutline } from './plan-outline';
 import { pixelsPerHour } from './time-scale';
 import {
@@ -104,10 +104,10 @@ describe('timelineFrame with deadlines', () => {
     const perHour = pixelsPerHour('hour');
     const frame = timelineFrame(start, schedule, start, perHour, [at(2020, 1, 6, 9)]);
     expect(frame.end).toBe(last - (last % 24) + 30 * 24);
-    expect(xOf(frame, frame.end)).toBeLessThanOrEqual(2 ** 24);
-    expect(xOf(frame, frame.end)).toBeGreaterThan(2 ** 24 - 24 * perHour);
-    expect(frame.origin).toBeLessThanOrEqual(at(2075, 2, 25));
-    expect(frame.origin).toBeGreaterThan(at(2020, 1, 6, 9));
+    expect([xOf(frame, frame.end), format(frame.origin)]).toEqual([
+      2 ** 24 - 256,
+      '2027-06-01 00:00',
+    ]);
   });
 });
 

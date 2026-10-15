@@ -16,7 +16,8 @@
     type EditableColumn,
   } from '../plan/cell-editing';
   import { groupIncoming, predecessorText, type PlanRow } from '../plan/plan-outline';
-  import { isPickerRefusal } from '../plan/table-dates';
+  import { failure } from '../../core/result';
+  import { isPickerRefusal, PICKER_BOUNDS } from '../plan/table-dates';
   import { createMomentFormatter } from '../i18n/format';
   import {
     dateConflictTitles,
@@ -252,12 +253,17 @@
     }
   }
 
-  /** Applies the date and time chosen on the calendar. */
+  /** Applies the date and time chosen on the calendar, refusing with a reason a date outside the years handled, a cleared calendar changing nothing. */
   function applyPicked(): void {
     const target = picking;
-    const hour = picker === undefined ? null : hourFromPicker(picker.value);
+    const value = picker?.value ?? '';
+    const hour = hourFromPicker(value);
     picking = null;
-    if (target === null || hour === null) {
+    if (target === null || value === '') {
+      return;
+    }
+    if (hour === null) {
+      app.edit(() => failure('DATE_OUT_OF_YEARS'));
       return;
     }
     const text = pickerValue(hour);
@@ -453,6 +459,8 @@
     class="picker"
     type="datetime-local"
     step="900"
+    min={PICKER_BOUNDS.dateTime.min}
+    max={PICKER_BOUNDS.dateTime.max}
     tabindex="-1"
     aria-hidden="true"
     bind:this={picker}

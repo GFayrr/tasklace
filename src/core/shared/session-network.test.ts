@@ -14,10 +14,18 @@ import {
   workTask,
 } from '../testing/project-builder';
 import type { SharedOperation } from './shared-operations';
-import { createSharedDocument, PROJECT_ROOT, readSharedData, TASKS_ROOT } from './shared-document';
+import {
+  createSharedDocument,
+  PROJECT_ROOT,
+  readSharedData,
+  TASKS_ROOT,
+  requireDocumentId,
+} from './shared-document';
 import { mergeSharedUpdate, readSharedProject } from './shared-project';
 import type { SharedSession } from './shared-session';
 import { sessionOn } from '../testing/session-copy';
+import { success } from '../result';
+import { sessionDocument } from './shared-session';
 
 const repairing = vi.hoisted(() => ({ refused: false }));
 
@@ -34,7 +42,7 @@ vi.mock('./shared-project', async (importOriginal) => {
 
 const SAMPLE = project([workTask('a'), workTask('b')]);
 const MORNING_ONLY = [{ startHour: 9, endHour: 12 }];
-const OTHER_DOCUMENT_ID = '00000000-0000-4000-8000-000000000002';
+const OTHER_DOCUMENT_ID = requireDocumentId('00000000-0000-4000-8000-000000000002');
 const DESIGN: Tag = {
   id: 'design',
   name: 'Design',
@@ -67,12 +75,12 @@ function tamperedUpdate(origin: Y.Doc, tamper: (malicious: Y.Doc) => void): Uint
 
 /** Returns the update a peer sends after renaming a task. */
 function renameUpdate(peer: SharedSession, id: string, name: string): Uint8Array {
-  const before = Y.encodeStateVector(peer.document);
+  const before = Y.encodeStateVector(sessionDocument(peer));
   const applied = peer.apply({ type: 'putTask', task: workTask(id, { name }) });
   if (!applied.ok) {
     throw new Error(JSON.stringify(applied.error));
   }
-  return Y.encodeStateAsUpdate(peer.document, before);
+  return Y.encodeStateAsUpdate(sessionDocument(peer), before);
 }
 
 describe('a session receiving updates from the network', () => {
@@ -105,15 +113,15 @@ describe('a session receiving updates from the network', () => {
     (_label, tamper) => {
       const origin = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
       const victim = sessionOn(origin, 1);
-      const reference = sessionOn(origin, 2).document;
-      const data = readSharedData(victim.document);
+      const reference = sessionDocument(sessionOn(origin, 2));
+      const data = readSharedData(sessionDocument(victim));
       const before = victim.project();
       const update = tamperedUpdate(origin, tamper);
       const merged = victim.merge(update);
       const full = mergeSharedUpdate(reference, update);
       expect(merged.ok).toBe(false);
       expect(merged).toEqual(full);
-      expect(readSharedData(victim.document)).toEqual(data);
+      expect(readSharedData(sessionDocument(victim))).toEqual(data);
       expect(victim.project()).toEqual(before);
       const honest = sessionOn(origin, 3);
       expect(victim.merge(renameUpdate(honest, 'a', 'Honest')).ok).toBe(true);
@@ -144,10 +152,10 @@ describe('a session receiving updates from the network', () => {
     const receiver = sessionOn(origin, 2);
     const first = renameUpdate(sender, 'a', 'First');
     const second = renameUpdate(sender, 'a', 'Second');
-    const data = readSharedData(receiver.document);
+    const data = readSharedData(sessionDocument(receiver));
     const before = receiver.project();
     expect(receiver.merge(second)).toEqual({ ok: false, error: { kind: 'incompleteUpdate' } });
-    expect(readSharedData(receiver.document)).toEqual(data);
+    expect(readSharedData(sessionDocument(receiver))).toEqual(data);
     expect(receiver.project()).toEqual(before);
     expect(receiver.merge(Y.mergeUpdates([second, first]))).toEqual({ ok: true, value: [] });
     expect(receiver.project()).toEqual(sender.project());
@@ -161,7 +169,7 @@ describe('a session receiving updates from the network', () => {
       fields: { calendar: { ...SAMPLE.calendar, workingTimeRanges: MORNING_ONLY } },
     });
     expect(changed.ok).toBe(true);
-    const data = readSharedData(session.document);
+    const data = readSharedData(sessionDocument(session));
     const before = session.project();
     repairing.refused = true;
     expect(session.history.undo()).toEqual({
@@ -171,7 +179,7 @@ describe('a session receiving updates from the network', () => {
         issues: [{ path: 'calendar', code: 'NO_WORKING_WEEKDAY' }],
       },
     });
-    expect(readSharedData(session.document)).toEqual(data);
+    expect(readSharedData(sessionDocument(session))).toEqual(data);
     expect(session.project()).toEqual(before);
     expect(session.history.canUndo()).toBe(true);
     repairing.refused = false;
@@ -179,7 +187,7 @@ describe('a session receiving updates from the network', () => {
     expect(session.project().calendar.workingTimeRanges).toEqual(SAMPLE.calendar.workingTimeRanges);
     const peer = sessionOn(origin, 2);
     expect(session.merge(renameUpdate(peer, 'b', 'After')).ok).toBe(true);
-    const read = readSharedProject(session.document);
+    const read = readSharedProject(sessionDocument(session));
     expect(read.ok && read.value.tasks.find((task) => task.id === 'b')?.name).toBe('After');
   });
 
@@ -187,19 +195,19 @@ describe('a session receiving updates from the network', () => {
     const origin = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const alice = sessionOn(origin, 1);
     const bob = sessionOn(origin, 2);
-    const before = Y.encodeStateVector(alice.document);
+    const before = Y.encodeStateVector(sessionDocument(alice));
     const options = { ...SAMPLE.options, baselineEnabled: true };
     expect(alice.apply({ type: 'updateProject', fields: { options } }).ok).toBe(true);
-    expect(bob.merge(Y.encodeStateAsUpdate(alice.document, before))).toEqual({
+    expect(bob.merge(Y.encodeStateAsUpdate(sessionDocument(alice), before))).toEqual({
       ok: true,
       value: [],
     });
     expect(bob.project().options).toEqual(options);
     const forger = new Y.Doc();
-    Y.applyUpdate(forger, Y.encodeStateAsUpdate(alice.document));
+    Y.applyUpdate(forger, Y.encodeStateAsUpdate(sessionDocument(alice)));
     const forged = Y.encodeStateVector(forger);
     forger.getMap(PROJECT_ROOT).set('baselineEnabled', 'yes');
-    const data = readSharedData(bob.document);
+    const data = readSharedData(sessionDocument(bob));
     expect(bob.merge(Y.encodeStateAsUpdate(forger, forged))).toEqual({
       ok: false,
       error: {
@@ -207,7 +215,7 @@ describe('a session receiving updates from the network', () => {
         issues: [{ path: 'options.baselineEnabled', code: 'WRONG_TYPE' }],
       },
     });
-    expect(readSharedData(bob.document)).toEqual(data);
+    expect(readSharedData(sessionDocument(bob))).toEqual(data);
   });
 
   it('keeps one whole baseline when two participants take one at the same time, the same for both', () => {
@@ -226,12 +234,12 @@ describe('a session receiving updates from the network', () => {
     });
     const fromAlice = baselineOf(1);
     const fromBob = baselineOf(2);
-    const aliceBefore = Y.encodeStateVector(alice.document);
-    const bobBefore = Y.encodeStateVector(bob.document);
+    const aliceBefore = Y.encodeStateVector(sessionDocument(alice));
+    const bobBefore = Y.encodeStateVector(sessionDocument(bob));
     expect(alice.apply({ type: 'updateProject', fields: { baseline: fromAlice } }).ok).toBe(true);
     expect(bob.apply({ type: 'updateProject', fields: { baseline: fromBob } }).ok).toBe(true);
-    const aliceUpdate = Y.encodeStateAsUpdate(alice.document, aliceBefore);
-    const bobUpdate = Y.encodeStateAsUpdate(bob.document, bobBefore);
+    const aliceUpdate = Y.encodeStateAsUpdate(sessionDocument(alice), aliceBefore);
+    const bobUpdate = Y.encodeStateAsUpdate(sessionDocument(bob), bobBefore);
     expect(alice.merge(bobUpdate).ok).toBe(true);
     expect(bob.merge(aliceUpdate).ok).toBe(true);
     const kept = alice.project().baseline;
@@ -254,15 +262,15 @@ describe('a session receiving updates from the network', () => {
     );
     const sender = sessionOn(origin, 1);
     const receiver = sessionOn(origin, 2);
-    const reference = sessionOn(origin, 3).document;
-    const before = Y.encodeStateVector(sender.document);
+    const reference = sessionDocument(sessionOn(origin, 3));
+    const before = Y.encodeStateVector(sessionDocument(sender));
     expect(
       sender.applyAll([
         { type: 'removeTasks', ids: ['a'] },
         { type: 'removeTag', id: 'design' },
       ]).ok,
     ).toBe(true);
-    const update = Y.encodeStateAsUpdate(sender.document, before);
+    const update = Y.encodeStateAsUpdate(sessionDocument(sender), before);
     const merged = receiver.merge(update);
     expect(merged).toEqual(mergeSharedUpdate(reference, update));
     expect(merged.ok).toBe(true);
@@ -342,13 +350,62 @@ describe('a session receiving updates from the network', () => {
     const alice = sessionOn(origin, 1);
     const bob = sessionOn(origin, 2);
     expect(alice.applyAll(fromAlice).ok).toBe(true);
-    const reference = sessionOn(alice.document, 3).document;
-    const before = Y.encodeStateVector(bob.document);
+    const reference = sessionDocument(sessionOn(sessionDocument(alice), 3));
+    const before = Y.encodeStateVector(sessionDocument(bob));
     expect(bob.applyAll(fromBob).ok).toBe(true);
-    const update = Y.encodeStateAsUpdate(bob.document, before);
+    const update = Y.encodeStateAsUpdate(sessionDocument(bob), before);
     const merged = alice.merge(update);
     expect(merged).toEqual(mergeSharedUpdate(reference, update));
     expect(merged.ok && merged.value.map((repair) => repair.code)).toEqual(expected);
+  });
+
+  it('brings a task back to the whole working day when the day becomes shorter than an hour, in either order, both copies agreeing', () => {
+    const halfHour = [{ startHour: 8, endHour: 8.5 }];
+    const origin = createSharedDocument(project([workTask('a')]), TEST_DOCUMENT_ID);
+    const alice = sessionOn(origin, 1);
+    const bob = sessionOn(origin, 2);
+    const aliceBefore = Y.encodeStateVector(sessionDocument(alice));
+    const bobBefore = Y.encodeStateVector(sessionDocument(bob));
+    expect(
+      alice.apply({
+        type: 'updateProject',
+        fields: { calendar: { ...SAMPLE.calendar, workingTimeRanges: halfHour } },
+      }).ok,
+    ).toBe(true);
+    expect(bob.apply({ type: 'putTask', task: workTask('a', { hoursPerDay: 2 }) }).ok).toBe(true);
+    const fromAlice = Y.encodeStateAsUpdate(sessionDocument(alice), aliceBefore);
+    const fromBob = Y.encodeStateAsUpdate(sessionDocument(bob), bobBefore);
+    expect(alice.merge(fromBob)).toEqual(success([{ code: 'HOURS_PER_DAY_REDUCED', id: 'a' }]));
+    expect(bob.merge(fromAlice)).toEqual(success([{ code: 'HOURS_PER_DAY_REDUCED', id: 'a' }]));
+    alice.merge(Y.encodeStateAsUpdate(sessionDocument(bob)));
+    bob.merge(Y.encodeStateAsUpdate(sessionDocument(alice)));
+    expect(alice.project()).toEqual(bob.project());
+    expect(alice.project().tasks.map((task) => task.kind === 'task' && task.hoursPerDay)).toEqual([
+      null,
+    ]);
+  });
+
+  it('changes nothing and reports nothing when an update that needed a repair arrives again, nor when its own update comes back', () => {
+    const origin = createSharedDocument(project([workTask('a'), workTask('b')]), TEST_DOCUMENT_ID);
+    const alice = sessionOn(origin, 1);
+    const bob = sessionOn(origin, 2);
+    const aliceBefore = Y.encodeStateVector(sessionDocument(alice));
+    const bobBefore = Y.encodeStateVector(sessionDocument(bob));
+    expect(alice.apply({ type: 'putDependency', dependency: link('a', 'b') }).ok).toBe(true);
+    expect(bob.apply({ type: 'putDependency', dependency: link('b', 'a') }).ok).toBe(true);
+    const fromAlice = Y.encodeStateAsUpdate(sessionDocument(alice), aliceBefore);
+    const fromBob = Y.encodeStateAsUpdate(sessionDocument(bob), bobBefore);
+    expect(alice.merge(fromBob)).toEqual(success([{ code: 'DEPENDENCY_REMOVED', id: 'b-a' }]));
+    expect(alice.project().dependencies.map((dependency) => dependency.id)).toEqual(['a-b']);
+    const data = readSharedData(sessionDocument(alice));
+    const repaired = alice.project();
+    const history = [alice.history.canUndo(), alice.history.canRedo()];
+    expect(alice.merge(fromBob)).toEqual(success([]));
+    expect(alice.merge(fromAlice)).toEqual(success([]));
+    expect(alice.merge(Y.encodeStateAsUpdate(sessionDocument(alice)))).toEqual(success([]));
+    expect(readSharedData(sessionDocument(alice))).toEqual(data);
+    expect(alice.project()).toEqual(repaired);
+    expect([alice.history.canUndo(), alice.history.canRedo()]).toEqual(history);
   });
 
   it(
@@ -365,13 +422,13 @@ describe('a session receiving updates from the network', () => {
             const altered = Uint8Array.from(honest);
             altered[index] = value;
             const session = sessionOn(origin, 1);
-            const data = readSharedData(session.document);
+            const data = readSharedData(sessionDocument(session));
             const merged = session.merge(altered);
             if (merged.ok) {
-              expect(readSharedProject(session.document).ok).toBe(true);
-              expect(session.project()).toEqual(unwrapProject(session.document));
+              expect(readSharedProject(sessionDocument(session)).ok).toBe(true);
+              expect(session.project()).toEqual(unwrapProject(sessionDocument(session)));
             } else {
-              expect(readSharedData(session.document)).toEqual(data);
+              expect(readSharedData(sessionDocument(session))).toEqual(data);
             }
           },
         ),

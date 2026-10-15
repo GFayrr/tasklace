@@ -115,6 +115,22 @@ describe('parseCsvDate', () => {
     expect(parseCsvDate('10/5/99', AMERICAN)).toEqual(failure('INVALID_DATE'));
   });
 
+  it.each([
+    ['10/5/20', 2020],
+    ['10/5/29', 2029],
+  ])('places the year of %j in the 2000s, below the pivot of Excel', (text, year) => {
+    expect(parseCsvDate(text, AMERICAN)).toEqual(
+      success({ kind: 'date', day: dayOf(year, 10, 5) }),
+    );
+  });
+
+  it.each(['10/5/30', '10/5/19', '10/5/7', '10/5/0'])(
+    'refuses %j, a year the pivot places in the 1900s or before 2020',
+    (text) => {
+      expect(parseCsvDate(text, AMERICAN)).toEqual(failure('INVALID_DATE'));
+    },
+  );
+
   it.each(['2026-10-05T14:00:00Z', '2026-10-05T14:00+02:00'])(
     'refuses the date %j, which carries a time zone the project does not use',
     (text) => {

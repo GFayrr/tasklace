@@ -26,6 +26,20 @@ import {
 
 export type SharedRepairCode = RepairCode | 'MILESTONE_PROGRESS_ROUNDED';
 
+export type RepairSubject = 'task' | 'dependency' | 'tag';
+
+export const REPAIR_SUBJECTS: Readonly<Record<SharedRepairCode, RepairSubject>> = {
+  TASK_REMOVED: 'task',
+  DEPENDENCY_REMOVED: 'dependency',
+  BLOCK_LINK_CLEARED: 'dependency',
+  TAG_REMOVED: 'tag',
+  TAG_CLEARED: 'task',
+  MOVED_TO_ROOT: 'task',
+  HOURS_PER_DAY_REDUCED: 'task',
+  DAILY_START_HOUR_CLEARED: 'task',
+  MILESTONE_PROGRESS_ROUNDED: 'task',
+};
+
 export interface SharedRepair {
   readonly code: SharedRepairCode;
   readonly id: string;

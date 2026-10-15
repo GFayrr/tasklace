@@ -3,6 +3,7 @@
   import type { AppState } from '../app/app-state.svelte';
   import { fillMessage } from '../i18n/messages';
   import { draftFromTask, withoutBlock, type TaskDraft } from '../plan/task-details';
+  import { PICKER_BOUNDS } from '../plan/table-dates';
   import Icon from './Icon.svelte';
 
   let { app, project }: { app: AppState; project: Project } = $props();
@@ -98,7 +99,13 @@
         </div>
         <label class="field">
           <span>{text.start}</span>
-          <input type="datetime-local" step="900" bind:value={draft.start} />
+          <input
+            type="datetime-local"
+            step="900"
+            min={PICKER_BOUNDS.dateTime.min}
+            max={PICKER_BOUNDS.dateTime.max}
+            bind:value={draft.start}
+          />
           <small>{text.startHint}</small>
         </label>
         {#if project.options.dateConstraintsEnabled}
@@ -106,12 +113,24 @@
             <legend>{text.dateConstraints}</legend>
             <label class="field">
               <span>{text.mustFinishOn}</span>
-              <input type="datetime-local" step="900" bind:value={draft.mustFinishOn} />
+              <input
+                type="datetime-local"
+                step="900"
+                min={PICKER_BOUNDS.dateTime.min}
+                max={PICKER_BOUNDS.dateTime.max}
+                bind:value={draft.mustFinishOn}
+              />
               <small>{text.mustFinishOnHint}</small>
             </label>
             <label class="field">
               <span>{text.deadline}</span>
-              <input type="datetime-local" step="900" bind:value={draft.deadline} />
+              <input
+                type="datetime-local"
+                step="900"
+                min={PICKER_BOUNDS.dateTime.min}
+                max={PICKER_BOUNDS.dateTime.max}
+                bind:value={draft.deadline}
+              />
               <small>{text.deadlineHint}</small>
             </label>
           </fieldset>
@@ -144,7 +163,13 @@
                 </label>
                 <label class="field start">
                   <span>{fillMessage(text.blockStart, { number: String(index + 1) })}</span>
-                  <input type="datetime-local" step="900" bind:value={block.start} />
+                  <input
+                    type="datetime-local"
+                    step="900"
+                    min={PICKER_BOUNDS.dateTime.min}
+                    max={PICKER_BOUNDS.dateTime.max}
+                    bind:value={block.start}
+                  />
                 </label>
               {/if}
               <label class="field">

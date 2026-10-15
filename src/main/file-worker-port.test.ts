@@ -61,15 +61,22 @@ describe('serveFileTask', () => {
   it('runs the real file tasks by default, a missing file giving a read failure', async () => {
     const port = fakePort();
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       serveFileTask(port);
       port.deliver(TASK);
       await vi.waitFor(() => {
         expect(port.sent).toEqual([failure({ code: 'READ_FAILED' })]);
       });
-      expect(logged).toHaveBeenCalledTimes(1);
+      expect(logged.mock.calls).toEqual([
+        ['The file could not be read:', expect.objectContaining({ code: 'ENOENT' })],
+      ]);
+      expect(warned.mock.calls).toEqual([
+        ['The project file /nowhere/Plan.tasklace could not be opened: READ_FAILED.'],
+      ]);
     } finally {
       logged.mockRestore();
+      warned.mockRestore();
     }
   });
 });

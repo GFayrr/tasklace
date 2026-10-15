@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   lint-and-test:
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -25,7 +26,27 @@ jobs:
       - run: npm run lint
       - run: npm test
 
+  time-zones:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        time-zone: [America/Los_Angeles, Pacific/Kiritimati]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run the unit tests far from UTC (${{ matrix.time-zone }})
+        run: npx vitest run --coverage.enabled=false --reporter=verbose
+        env:
+          TZ: ${{ matrix.time-zone }}
+
   end-to-end:
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -53,6 +74,7 @@ jobs:
           retention-days: 7
 
   growth-and-benchmarks:
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

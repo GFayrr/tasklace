@@ -5,7 +5,7 @@ import type { Project, Tag } from '../model/project';
 import { createSharedDocument } from './shared-document';
 import type { SharedOperation } from './shared-operations';
 import { mergeSharedUpdate } from './shared-project';
-import { openSharedSession, type SharedSession } from './shared-session';
+import { openSharedSession, type SharedSession, sessionDocument } from './shared-session';
 import { sessionOn } from '../testing/session-copy';
 
 vi.mock('../limits', async (importOriginal) => {
@@ -79,10 +79,10 @@ describe('a session at the limits of a project', () => {
       const alice = sessionOn(origin, 1);
       const bob = sessionOn(origin, 2);
       expect(alice.apply(fromAlice).ok).toBe(true);
-      const reference = sessionOn(alice.document, 3).document;
-      const before = Y.encodeStateVector(bob.document);
+      const reference = sessionDocument(sessionOn(sessionDocument(alice), 3));
+      const before = Y.encodeStateVector(sessionDocument(bob));
       expect(bob.apply(fromBob).ok).toBe(true);
-      const update = Y.encodeStateAsUpdate(bob.document, before);
+      const update = Y.encodeStateAsUpdate(sessionDocument(bob), before);
       const merged = alice.merge(update);
       expect(merged).toEqual(mergeSharedUpdate(reference, update));
       expect(merged.ok && merged.value.map((repair) => repair.code)).toEqual(expected);

@@ -5,7 +5,7 @@ import { expect, test, type ElectronApplication, type Page } from '@playwright/t
 import { exportProjectCsv } from '../../src/core/exchange/csv/project-csv-export';
 import { encodeTasklaceFile, readTasklaceFile } from '../../src/core/file/tasklace-file';
 import type { Project } from '../../src/core/model/project';
-import { createSharedDocument } from '../../src/core/shared/shared-document';
+import { createSharedDocument, requireDocumentId } from '../../src/core/shared/shared-document';
 import { readSharedProject } from '../../src/core/shared/shared-project';
 import { unwrap } from '../../src/core/testing/arbitraries';
 import { link, project, scheduleOrThrow, workTask } from '../../src/core/testing/project-builder';
@@ -56,7 +56,7 @@ async function projectIn(path: string): Promise<Project> {
 async function writeProject(name: string): Promise<string> {
   const path = join(folder, `${name}.tasklace`);
   const named = { ...project([workTask('a'), workTask('b')], [link('a', 'b')]), name };
-  const document = createSharedDocument(named, crypto.randomUUID());
+  const document = createSharedDocument(named, requireDocumentId(crypto.randomUUID()));
   await writeFile(path, encodeTasklaceFile(document, zlibCompressor));
   return path;
 }

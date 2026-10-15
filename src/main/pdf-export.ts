@@ -45,6 +45,8 @@ interface HeldPdf {
 
 interface HeldPdfStore {
   readonly start: (sender: WebContents) => number;
+  readonly current: (sender: WebContents) => number;
+  readonly isCurrent: (sender: WebContents, ticket: number) => boolean;
   readonly hold: (sender: WebContents, ticket: number, kept: HeldPdf) => boolean;
   readonly get: (sender: WebContents) => HeldPdf | undefined;
   readonly forget: (sender: WebContents) => void;
@@ -107,6 +109,8 @@ function createHeldPdfStore(): HeldPdfStore {
       forget(sender);
       return tickets.get(sender) ?? 0;
     },
+    current: (sender) => tickets.get(sender) ?? 0,
+    isCurrent: (sender, ticket) => tickets.get(sender) === ticket,
     hold: (sender, ticket, pdf) => {
       if (tickets.get(sender) !== ticket) {
         return false;
@@ -119,7 +123,7 @@ function createHeldPdfStore(): HeldPdfStore {
   };
 }
 
-/** Prints a document sent by a page to PDF once it is checked, keeping the PDF back when it weighs more than 50 kB per page, at least 10 pages being counted, so that the page can offer a choice, and otherwise asking where to write it. */
+/** Prints a checked document to PDF, keeping the PDF back when it weighs more than 50 kB per page, at least 10 pages counted, for the page to choose, and otherwise asking where to write it unless the export closed meanwhile. */
 async function exportPdf(
   services: PdfServices,
   held: HeldPdfStore,
@@ -145,6 +149,9 @@ async function exportPdf(
       ? success({ kind: 'heavy', bytes: pdf.length, pages })
       : closedWhilePrinting();
   }
+  if (!held.isCurrent(sender, ticket)) {
+    return closedWhilePrinting();
+  }
   const written = await writePdf(sender, pdf, name);
   return written.ok ? success({ kind: 'exported', fileName: written.value.fileName }) : written;
 }
@@ -165,6 +172,9 @@ async function printChecked(
     return failure({ code: 'PRINT_FAILED' });
   }
   if (pdf.length > MAX_PDF_BYTES) {
+    console.warn(
+      `The printed PDF weighs ${String(pdf.length)} bytes, more than the ${String(MAX_PDF_BYTES)} a PDF may weigh.`,
+    );
     return failure({ code: 'TOO_LARGE' });
   }
   if (!isCompletePdf(pdf, document.pages.length)) {
@@ -193,12 +203,13 @@ async function saveHeldPdf(
   return written;
 }
 
-/** Writes the document kept back for a page as a PDF made without the browser, in the file worker, as the user chose the lighter PDF, writing it whatever its weight within the size a PDF may have. */
+/** Writes the document kept back for a page as a lighter PDF made in the file worker, whatever its weight within the size a PDF may have, cancelling it when the page closed its export meanwhile. */
 async function exportLighterPdf(
   services: PdfServices,
   held: HeldPdfStore,
   sender: WebContents,
 ): Promise<BridgeResult<ExportedFile>> {
+  const ticket = held.current(sender);
   const kept = held.get(sender);
   if (kept === undefined) {
     console.error('No PDF was kept back for this window.');
@@ -211,6 +222,9 @@ async function exportLighterPdf(
   });
   if (!made.ok) {
     return made;
+  }
+  if (!held.isCurrent(sender, ticket)) {
+    return closedWhilePrinting();
   }
   const written = await writePdf(sender, made.value.pdf, kept.name);
   if (written.ok) {

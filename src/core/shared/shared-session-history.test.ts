@@ -5,7 +5,7 @@ import type { Project } from '../model/project';
 import { link, project, TEST_DOCUMENT_ID, workTask } from '../testing/project-builder';
 import { createSharedDocument } from './shared-document';
 import { readSharedProject } from './shared-project';
-import { openSharedSession, type SharedSession } from './shared-session';
+import { openSharedSession, type SharedSession, sessionDocument } from './shared-session';
 
 const BASE: Project = project([workTask('a'), workTask('b'), workTask('c')], [link('a', 'b')]);
 
@@ -35,13 +35,16 @@ function openOne(base: Project): SharedSession {
 
 /** Sends what one participant has and the other lacks. */
 function sync(from: SharedSession, to: SharedSession): void {
-  const update = Y.encodeStateAsUpdate(from.document, Y.encodeStateVector(to.document));
+  const update = Y.encodeStateAsUpdate(
+    sessionDocument(from),
+    Y.encodeStateVector(sessionDocument(to)),
+  );
   expect(to.merge(update).ok).toBe(true);
 }
 
 /** Checks that the indexed project of a session matches its document. */
 function expectConsistent(session: SharedSession): void {
-  const read = readSharedProject(session.document);
+  const read = readSharedProject(sessionDocument(session));
   expect(read.ok && read.value).toEqual(session.project());
 }
 

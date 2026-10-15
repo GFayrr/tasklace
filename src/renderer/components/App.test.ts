@@ -18,7 +18,6 @@ import {
   type RowShape,
   type TimelineFrame,
 } from '../plan/timeline-geometry';
-import { localHourOf } from '../project/new-project';
 import { SAND_GRAPHITE } from '../theme/sand-graphite';
 import App from './App.svelte';
 import { press, render, single, update } from './testing/render';
@@ -154,7 +153,7 @@ describe('Workspace', () => {
     const frame = timelineFrame(
       PLAN.startDate,
       rendered.app.schedule,
-      localHourOf(TODAY),
+      at(2026, 9, 28, 12),
       pixelsPerHour('day'),
       [],
     );
@@ -349,7 +348,13 @@ describe('Workspace', () => {
     const scroller = single(root, '.scroller');
     resize(scroller, 800, 400);
     expect(app.schedule).toBeNull();
-    const frame = timelineFrame(PLAN.startDate, null, localHourOf(TODAY), pixelsPerHour('day'), []);
+    const frame = timelineFrame(
+      PLAN.startDate,
+      null,
+      at(2026, 9, 28, 12),
+      pixelsPerHour('day'),
+      [],
+    );
     expect(scroller.scrollLeft).toBe(xOf(frame, PLAN.startDate - 48));
   });
 
@@ -369,7 +374,7 @@ describe('Workspace', () => {
     expect(single(root, '.rows').style.transform).toBe('translateY(-20px)');
   });
 
-  it('moves the today line as time passes', async () => {
+  it('moves the today line as time passes, to the quarter hour', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
     vi.setSystemTime(TODAY);
     const { scroller } = await renderSized();
@@ -385,16 +390,29 @@ describe('Workspace', () => {
       return Number(lines[0]?.args[0]);
     };
     const before = todayLineX();
-    vi.setSystemTime(new Date(2026, 8, 28, 15));
+    vi.setSystemTime(new Date(2026, 8, 28, 15, 42));
     vi.advanceTimersByTime(60_000);
     update();
     pointer(scroller, 'pointermove', 1, 1);
-    expect(todayLineX() - before).toBe(3 * pixelsPerHour('day'));
+    expect(todayLineX() - before).toBeCloseTo(3.5 * pixelsPerHour('day'), 9);
+  });
+
+  it('draws no today line while the clock is outside the years handled', async () => {
+    vi.setSystemTime(new Date(2240, 0, 1, 9));
+    const { scroller } = await renderSized();
+    pointer(scroller, 'pointermove', 1, 1);
+    const lines = drawFrames().filter(
+      (call) =>
+        call.name === 'fillRect' &&
+        call.fillStyle === SAND_GRAPHITE.error &&
+        call.args[3] === SCROLLER_HEIGHT,
+    );
+    expect(lines).toEqual([]);
   });
 
   it('keeps the same moment in view when the zoom changes', async () => {
     const { app, scroller, scrollLeft } = await renderSized();
-    app.zoom = 'week';
+    app.setZoom('week');
     update();
     expect(scroller.scrollLeft).toBe(zoomedScrollLeft(scrollLeft, 800, 'day', 'week'));
   });

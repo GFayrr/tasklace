@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAX_CSV_FILE_BYTES, MAX_FILE_BYTES, MAX_JSON_FILE_BYTES } from '../core/limits';
+import { requireDocumentId } from '../core/shared/shared-document';
 
 const fileSystem = vi.hoisted(() => ({ open: vi.fn() }));
 
@@ -14,13 +15,13 @@ const OPEN_TASK = { kind: 'openProject', path: '/plan.tasklace' } as const;
 const JSON_TASK = {
   kind: 'importJson',
   path: '/plan.json',
-  documentId: '00000000-0000-4000-8000-000000000000',
+  documentId: requireDocumentId('00000000-0000-4000-8000-000000000000'),
   naming: { untitled: 'Untitled project', fromFile: 'plan' },
 } as const;
 const CSV_TASK = {
   kind: 'importCsv',
   path: '/plan.csv',
-  documentId: '00000000-0000-4000-8000-000000000000',
+  documentId: requireDocumentId('00000000-0000-4000-8000-000000000000'),
   options: {
     format: {
       listSeparator: ';',

@@ -51,7 +51,10 @@ describe('table width', () => {
       expect(() => {
         rememberTableWidth(BROKEN, 400);
       }).not.toThrow();
-      expect(warned).toHaveBeenCalledTimes(2);
+      expect(warned.mock.calls).toEqual([
+        ['The remembered width of the table could not be read:', new Error('blocked')],
+        ['The width of the table could not be remembered:', new Error('blocked')],
+      ]);
     } finally {
       warned.mockRestore();
     }

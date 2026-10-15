@@ -335,11 +335,23 @@ describe('exporting to PDF', () => {
     );
   });
 
-  it('refuses a PDF larger than the limit before keeping or writing it', async () => {
+  it('refuses a PDF larger than the limit before keeping or writing it, logging its size', async () => {
     printsBytes(MOCKED_MAX_PDF_BYTES + 1);
-    expect(
-      await request(IPC_CHANNELS.exportPdf, page(), documentOf(PDF_GUARD_MIN_PAGES * 4), 'Plan'),
-    ).toEqual(failure({ code: 'TOO_LARGE' }));
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const answer = await request(
+      IPC_CHANNELS.exportPdf,
+      page(),
+      documentOf(PDF_GUARD_MIN_PAGES * 4),
+      'Plan',
+    );
+    const calls = [...warned.mock.calls];
+    warned.mockRestore();
+    expect(answer).toEqual(failure({ code: 'TOO_LARGE' }));
+    expect(calls).toEqual([
+      [
+        `The printed PDF weighs ${String(MOCKED_MAX_PDF_BYTES + 1)} bytes, more than the ${String(MOCKED_MAX_PDF_BYTES)} a PDF may weigh.`,
+      ],
+    ]);
     expect(dialogs.save).not.toHaveBeenCalled();
   });
 
@@ -596,6 +608,53 @@ describe('exporting to PDF', () => {
     expect(await exporting).toEqual(failure({ code: 'CANCELLED' }));
     expect(warned.mock.calls).toEqual([['The export closed while its PDF was being made.']]);
     warned.mockRestore();
+    expect((await quietly(() => request(IPC_CHANNELS.saveHeldPdf, sender))).answer).toEqual(
+      failure({ code: 'TASK_FAILED' }),
+    );
+  });
+
+  it('asks nothing for a light PDF whose export the page closed while Chromium was still printing it', async () => {
+    const sender = page();
+    let answer: (pdf: Buffer) => void = () => undefined;
+    printing.answer = () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      });
+    const exporting = request(IPC_CHANNELS.exportPdf, sender, DOCUMENT, 'Thesis');
+    await vi.waitFor(() => {
+      expect(windows).toHaveLength(1);
+    });
+    await request(IPC_CHANNELS.discardHeldPdf, sender);
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    chooseToSave(join(folder, 'light.pdf'));
+    answer(fakePdf(1));
+    expect(await exporting).toEqual(failure({ code: 'CANCELLED' }));
+    expect(warned.mock.calls).toEqual([['The export closed while its PDF was being made.']]);
+    warned.mockRestore();
+    expect(dialogs.save).not.toHaveBeenCalled();
+  });
+
+  it('asks nothing for a lighter PDF whose export the page closed while the file worker was still making it, the PDF kept back being forgotten', async () => {
+    const sender = page();
+    printsBytes(PDF_GUARD_BYTES_PER_PAGE * PDF_GUARD_MIN_PAGES + 1);
+    await request(IPC_CHANNELS.exportPdf, sender, DOCUMENT, 'Thesis');
+    let answer: (result: FileTaskResult) => void = () => undefined;
+    lighter.answer = () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      });
+    const exporting = request(IPC_CHANNELS.exportLighterPdf, sender);
+    await vi.waitFor(() => {
+      expect(tasks).toHaveLength(1);
+    });
+    await request(IPC_CHANNELS.discardHeldPdf, sender);
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    chooseToSave(join(folder, 'lighter.pdf'));
+    answer(success({ kind: 'directPdf', pdf: LIGHTER_PDF }));
+    expect(await exporting).toEqual(failure({ code: 'CANCELLED' }));
+    expect(warned.mock.calls).toEqual([['The export closed while its PDF was being made.']]);
+    warned.mockRestore();
+    expect(dialogs.save).not.toHaveBeenCalled();
     expect((await quietly(() => request(IPC_CHANNELS.saveHeldPdf, sender))).answer).toEqual(
       failure({ code: 'TASK_FAILED' }),
     );

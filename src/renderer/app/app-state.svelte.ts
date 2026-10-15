@@ -119,7 +119,7 @@ function isDailyWindowCode(code: ValidationIssueCode): code is DailyWindowErrorC
   return DAILY_WINDOW_CODES.includes(code);
 }
 
-/** Returns hours a task must have to be refused for them, failing loudly when it has none. */
+/** Returns the hours of the day a task was refused for, throwing when it has none, since only a programming error can refuse a task for hours it does not have. */
 function requiredHours(hours: number | null): number {
   if (hours === null) {
     throw new Error('A task refused for its hours of the day has none.');
@@ -185,7 +185,7 @@ export class AppState {
   #canRedo = $state(false);
   #recentProjects = $state.raw<readonly RecentProject[]>([]);
   #notices = $state.raw<readonly Notice[]>([]);
-  zoom = $state<ZoomLevel>('day');
+  #zoom = $state<ZoomLevel>('day');
   #selectedTaskId = $state<TaskId | null>(null);
   #editRequest = $state<EditRequest | null>(null);
   #revealRequest = $state<RevealRequest | null>(null);
@@ -201,9 +201,9 @@ export class AppState {
   #fileActionRunning = $state(false);
   #report = $state.raw<Report | null>(null);
   #lastQuestion: Promise<unknown> = Promise.resolve();
-  collapsed = $state.raw<ReadonlySet<TaskId>>(NOTHING_COLLAPSED);
+  #collapsed = $state.raw<ReadonlySet<TaskId>>(NOTHING_COLLAPSED);
   #openedCount = $state(0);
-  readonly outline = $derived(buildPlanOutline(this.project?.tasks ?? [], this.collapsed));
+  readonly outline = $derived(buildPlanOutline(this.project?.tasks ?? [], this.#collapsed));
   readonly calendar = $derived.by(() => {
     const compiled = this.project === null ? null : compileCalendar(this.project.calendar);
     return compiled?.ok === true ? compiled.value : null;
@@ -224,6 +224,7 @@ export class AppState {
   readonly #files: ProjectFiles;
   readonly #scheduler: Scheduler;
   #session: SharedSession | null = null;
+  #stopFollowing: () => void = () => undefined;
   #refreshQueued = false;
   #changedSinceOpened = false;
   #nextNoticeId = 0;
@@ -398,6 +399,21 @@ export class AppState {
     return this.#closePrompt;
   }
 
+  /** Returns the zoom of the timeline. */
+  get zoom(): ZoomLevel {
+    return this.#zoom;
+  }
+
+  /** Changes the zoom of the timeline. */
+  setZoom(level: ZoomLevel): void {
+    this.#zoom = level;
+  }
+
+  /** Returns the summary tasks folded in the table and on the timeline. */
+  get collapsed(): ReadonlySet<TaskId> {
+    return this.#collapsed;
+  }
+
   /** Tells whether a file action started by the user runs, during which the project cannot be changed. */
   get fileActionRunning(): boolean {
     return this.#fileActionRunning;
@@ -506,19 +522,27 @@ export class AppState {
     return !this.#refuseWhileFileActionRuns() && (await this.readyToClose());
   }
 
-  /** Starts a new empty project. */
+  /** Starts a new empty project today, or on the first day handled when the clock lies outside the years handled, which is logged and told. */
   async newProject(): Promise<void> {
     if (!(await this.#readyToReplace())) {
       return;
     }
     const { messages, createId, now } = this.#context;
-    const project = buildNewProject(messages.projects.untitled, now(), createId);
+    const moment = now();
+    const project = buildNewProject(messages.projects.untitled, moment, createId);
     const created = await this.#files.create(project);
     if (!created.ok) {
       this.#showResult(created);
       return;
     }
     this.#attach(created.value);
+    if (localQuarterOf(moment) === null) {
+      console.warn(
+        'The clock is outside the supported years; the new project starts on the first day handled:',
+        moment,
+      );
+      this.#notify('warning', messages.notices.clockOutOfRange);
+    }
   }
 
   /** Asks for a project file and opens it. */
@@ -649,14 +673,14 @@ export class AppState {
   /** Opens or closes a summary task from the keyboard, doing nothing for a task that is not a summary or already in that state. */
   setSummaryOpen(id: TaskId, open: boolean): void {
     const isSummary = this.project?.tasks.some((task) => task.id === id && task.kind === 'summary');
-    if (isSummary === true && this.collapsed.has(id) === open) {
-      this.collapsed = toggledSummary(this.collapsed, id);
+    if (isSummary === true && this.#collapsed.has(id) === open) {
+      this.#collapsed = toggledSummary(this.#collapsed, id);
     }
   }
 
   /** Opens or closes a summary task. */
   toggleSummary(id: TaskId): void {
-    this.collapsed = toggledSummary(this.collapsed, id);
+    this.#collapsed = toggledSummary(this.#collapsed, id);
   }
 
   /** Applies a change built from the current project, telling the user why when it is refused. */
@@ -711,7 +735,7 @@ export class AppState {
       this.#notify('warning', this.messages.editErrors.SCHEDULE_PENDING);
       return;
     }
-    this.collapsed = withAncestorsOpen(this.collapsed, project.tasks, taskId);
+    this.#collapsed = withAncestorsOpen(this.#collapsed, project.tasks, taskId);
     this.#selectedTaskId = taskId;
     this.#revealRequest = { taskId, hour };
   }
@@ -1093,7 +1117,7 @@ export class AppState {
 
   /** Follows the changes of a newly opened project. */
   #attach(session: SharedSession): void {
-    this.#session?.document.off('update', this.#queueRefresh);
+    this.#stopFollowing();
     this.#session = session;
     this.#computed = null;
     this.#peopleLines = [];
@@ -1107,9 +1131,9 @@ export class AppState {
     this.closePdfExport();
     this.settings.close();
     this.#changedSinceOpened = false;
-    this.collapsed = NOTHING_COLLAPSED;
+    this.#collapsed = NOTHING_COLLAPSED;
     this.#openedCount += 1;
-    session.document.on('update', this.#queueRefresh);
+    this.#stopFollowing = session.onChange(this.#queueRefresh);
     this.#refresh();
   }
 

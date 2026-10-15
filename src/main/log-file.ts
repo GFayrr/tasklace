@@ -2,7 +2,7 @@ import { appendFile, mkdir, rename, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { format } from 'node:util';
 import type { Readable } from 'node:stream';
-import type { WebContents } from 'electron';
+import type { App, WebContents } from 'electron';
 import { MAX_LOG_BYTES, MAX_LOG_ENTRY_LENGTH } from '../core/limits';
 import { createSerialQueue } from './serial-queue';
 import { isMissingFile } from './stored-files';
@@ -24,8 +24,9 @@ const PREVIOUS_LOG_NAME = 'tasklace.previous.log';
 const LINE_BREAKS = /\r\n|\r|\n/g;
 const LINE_SEPARATOR = ' | ';
 const ENCODER = new TextEncoder();
+const CLEAN_EXIT = 'clean-exit';
 
-/** Keeps a log file in a folder, appending one dated line per entry, one write at a time, and setting the log aside under another name once it would grow past its limit, a failure being reported on the error output and a log that cannot be set aside being tried again once another limit of entries is written. */
+/** Keeps a log file in a folder, appending one dated line per entry, one write at a time, and setting the log aside under another name once it would grow past its limit, a failure being reported on the error output and a log that cannot be set aside being tried again once another limit of bytes is written. */
 export function createLogFile(
   folder: string,
   now: () => Date,
@@ -87,6 +88,15 @@ export function logProcessErrors(source: ProcessErrorSource): void {
   });
   source.on('unhandledRejection', (reason) => {
     console.error('Unhandled rejection in the main process:', reason);
+  });
+}
+
+/** Logs a helper process of Electron, such as the GPU or network process, that ended for any reason but a clean exit. */
+export function logChildProcessesGone(application: Pick<App, 'on'>): void {
+  application.on('child-process-gone', (_event, details) => {
+    if (details.reason !== CLEAN_EXIT) {
+      console.error('A process of Tasklace ended:', details);
+    }
   });
 }
 

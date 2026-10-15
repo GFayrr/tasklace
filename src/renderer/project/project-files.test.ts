@@ -1,7 +1,12 @@
 import * as Y from 'yjs';
 import type { PrintDocument } from '../../core/print/print-document';
 import { describe, expect, it, vi } from 'vitest';
-import { createSharedDocument, readDocumentId } from '../../core/shared/shared-document';
+import {
+  createSharedDocument,
+  readDocumentId,
+  requireDocumentId,
+  type DocumentId,
+} from '../../core/shared/shared-document';
 import type { SharedSession } from '../../core/shared/shared-session';
 import { project, TEST_DOCUMENT_ID, workTask } from '../../core/testing/project-builder';
 import type { BridgeResult, OpenedProject, SavedProject } from '../../preload/bridge-contract';
@@ -17,7 +22,7 @@ import {
 import { manualTimer } from './testing/manual-timer';
 import { settle } from '../app/testing/fake-app-context';
 
-const OTHER_ID = '00000000-0000-4000-8000-000000000002';
+const OTHER_ID = requireDocumentId('00000000-0000-4000-8000-000000000002');
 const SAMPLE = project([workTask('a')]);
 const PRINTED: PrintDocument = {
   paper: 'a4',
@@ -90,7 +95,7 @@ function fakeBridge(
 }
 
 /** Returns an opened project answer for a document. */
-function openedOf(documentId: string): BridgeResult<OpenedProject> {
+function openedOf(documentId: DocumentId): BridgeResult<OpenedProject> {
   const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, documentId));
   return {
     ok: true,
@@ -418,6 +423,9 @@ describe('createProjectFiles', () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       expect(await files.open()).toEqual({ ok: false, error: { code: 'INVALID_CONTENT' } });
+      expect(logged.mock.calls).toEqual([
+        ['The opened project could not be decoded:', new Error('Unexpected end of array')],
+      ]);
     } finally {
       logged.mockRestore();
     }
@@ -533,7 +541,9 @@ describe('createProjectFiles', () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       expect(await files.open()).toEqual({ ok: false, error: { code: 'INVALID_CONTENT' } });
-      expect(logged).toHaveBeenCalledTimes(1);
+      expect(logged.mock.calls).toEqual([
+        ['The opened project could not be decoded:', new Error('Unexpected end of array')],
+      ]);
     } finally {
       logged.mockRestore();
     }

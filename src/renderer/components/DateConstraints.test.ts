@@ -9,7 +9,6 @@ import english from '../locales/en.json';
 import { toggleProjectOption } from '../plan/project-commands';
 import { pixelsPerHour } from '../plan/time-scale';
 import { MILESTONE_SIZE, ROW_HEIGHT, timelineFrame, xOf } from '../plan/timeline-geometry';
-import { localHourOf } from '../project/new-project';
 import { SAND_GRAPHITE } from '../theme/sand-graphite';
 import App from './App.svelte';
 import { pixels } from './css-length';
@@ -81,7 +80,7 @@ function frameOf(app: AppState) {
   return timelineFrame(
     opened.startDate,
     app.schedule,
-    localHourOf(TODAY),
+    at(2026, 9, 28, 8),
     pixelsPerHour(app.zoom),
     app.shownDeadlines,
   );

@@ -8,6 +8,8 @@ const CHECKED_FOLDERS = ['src', 'tests'];
 const ROOT_FILES = /^[^/]+\.ts$/;
 const SCRIPT_BLOCK = /<script[^>]*>([\s\S]*?)<\/script>/g;
 const SENTENCE_BREAK = /[.!?]\s+[A-Z]/;
+const JOINED_SENTENCES = /;\s/;
+const QUOTED_EXAMPLE = /"[^"]*"|“[^”]*”/g;
 const SENTENCE_END = /[.!?]$/;
 const DOC_COMMENT = /^\/\*\*([\s\S]*)\*\/$/;
 const COMMENT_LINE_START = /^\s*\*? ?/gm;
@@ -113,7 +115,7 @@ function commentProblem(place: string, comment: string | null): CommentFinding |
   if (comment === null || comment.length === 0) {
     return { place, problem: 'missing' };
   }
-  if (SENTENCE_BREAK.test(comment)) {
+  if (SENTENCE_BREAK.test(comment) || JOINED_SENTENCES.test(comment.replace(QUOTED_EXAMPLE, ''))) {
     return { place, problem: 'severalSentences' };
   }
   if (!SENTENCE_END.test(comment)) {
@@ -187,6 +189,10 @@ describe('comments of the functions', () => {
       'function bare(): void {}',
       '/** Does one thing. Then another. */',
       'function twice(): void {}',
+      '/** Does one thing; then another. */',
+      'function joined(): void {}',
+      '/** Reads "4h; +2d 3h" as two blocks. */',
+      'function quoted(): void {}',
       '/** Does one thing */',
       'function unfinished(): void {}',
       `/** Does ${long}. */`,
@@ -200,6 +206,7 @@ describe('comments of the functions', () => {
     expect(commentFindings('sample.ts', script)).toEqual([
       { place: 'sample.ts:bare', problem: 'missing' },
       { place: 'sample.ts:twice', problem: 'severalSentences' },
+      { place: 'sample.ts:joined', problem: 'severalSentences' },
       { place: 'sample.ts:unfinished', problem: 'noFinalStop' },
       { place: 'sample.ts:verbose', problem: 'tooLong', length: `Does ${long}.`.length },
       { place: 'sample.ts:inner', problem: 'missing' },

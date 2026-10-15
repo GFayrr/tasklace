@@ -22,12 +22,12 @@ export function dayOf(year: number, month: number, day: number): DayIndex {
   return dayIndexOf(at(year, month, day));
 }
 
-/** Formats a project hour as "YYYY-MM-DD HH:00" to make assertions readable. */
+/** Formats a project hour as "YYYY-MM-DD HH:MM", minutes included, to make assertions readable and exact to the quarter hour. */
 export function format(hour: ProjectHour): string {
-  const { year, month, day, hour: hourOfDay } = fromProjectHour(hour);
+  const { year, month, day, hour: hourOfDay, minute } = fromProjectHour(hour);
   /** Writes a number on two digits. */
   const pad = (value: number): string => String(value).padStart(2, '0');
-  return `${String(year)}-${pad(month)}-${pad(day)} ${pad(hourOfDay)}:00`;
+  return `${String(year)}-${pad(month)}-${pad(day)} ${pad(hourOfDay)}:${pad(minute)}`;
 }
 
 /** Compiles a calendar, failing the test when it is invalid. */

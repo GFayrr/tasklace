@@ -1,6 +1,6 @@
 import { isQuarterHours } from '../../time';
 import { MAX_DEPENDENCIES, MAX_SEGMENTS_PER_TASK } from '../../limits';
-import type { TaskSegment } from '../../model/project';
+import type { TaskSegments } from '../../model/project';
 import { failure, success, type Result } from '../../result';
 import {
   createIssueList,
@@ -49,7 +49,7 @@ export interface ParsedRow {
   readonly progressPercent: number | null;
   readonly predecessors: readonly PredecessorReference[];
   readonly tagName: string | null;
-  readonly blocks: readonly TaskSegment[] | null;
+  readonly blocks: TaskSegments | null;
   readonly blockWaits: readonly BlockWait[];
 }
 

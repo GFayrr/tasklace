@@ -60,17 +60,13 @@ describe('colorDistance', () => {
   it('shows that red and green collapse for red-green color blindness only', () => {
     const red = '#d03030';
     const green = '#3a9a30';
-    expect(colorDistance(red, green, 'normal')).toBeGreaterThan(20);
-    expect(colorDistance(red, green, 'deuteranopia')).toBeLessThan(
-      colorDistance(red, green, 'normal') / 2,
-    );
+    expect(colorDistance(red, green, 'normal')).toBeCloseTo(31.26, 2);
+    expect(colorDistance(red, green, 'deuteranopia')).toBeCloseTo(3.1, 2);
   });
 
   it('only keeps lightness differences in grayscale', () => {
     expect(colorDistance('#ff0000', '#ff0000', 'grayscale')).toBe(0);
-    expect(colorDistance('#ff0000', '#0000ff', 'grayscale')).toBeGreaterThan(0);
-    expect(colorDistance('#ff0000', '#0000ff', 'grayscale')).toBeLessThan(
-      colorDistance('#ff0000', '#0000ff', 'normal'),
-    );
+    expect(colorDistance('#ff0000', '#0000ff', 'grayscale')).toBeCloseTo(18.04, 2);
+    expect(colorDistance('#ff0000', '#0000ff', 'normal')).toBeCloseTo(53.71, 2);
   });
 });

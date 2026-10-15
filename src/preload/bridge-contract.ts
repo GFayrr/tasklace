@@ -35,6 +35,7 @@ export type FileFailureCode =
   | 'READ_FAILED'
   | 'WRITE_FAILED'
   | 'LOCAL_COPY_FAILED'
+  | 'TOO_LARGE_TO_SAVE'
   | 'TOO_COMPLEX'
   | 'INVALID_ENCODING'
   | 'INVALID_IMPORT'
@@ -82,7 +83,7 @@ export interface RecentProject {
 
 export interface TasklaceBridge {
   readonly regionalFormat: () => Promise<RegionalFormat>;
-  readonly newProject: () => Promise<DocumentId>;
+  readonly newProject: () => Promise<string>;
   readonly openProject: () => Promise<BridgeResult<OpenedProject>>;
   readonly openRecentProject: (index: number) => Promise<BridgeResult<OpenedProject>>;
   readonly recentProjects: () => Promise<BridgeResult<readonly RecentProject[]>>;
@@ -111,7 +112,7 @@ export interface TasklaceBridge {
 
 export interface ChannelAnswers {
   readonly [IPC_CHANNELS.regionalFormat]: RegionalFormat;
-  readonly [IPC_CHANNELS.newProject]: DocumentId;
+  readonly [IPC_CHANNELS.newProject]: string;
   readonly [IPC_CHANNELS.openProject]: BridgeResult<OpenedProject>;
   readonly [IPC_CHANNELS.openRecentProject]: BridgeResult<OpenedProject>;
   readonly [IPC_CHANNELS.recentProjects]: BridgeResult<readonly RecentProject[]>;

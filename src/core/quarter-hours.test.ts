@@ -133,7 +133,7 @@ describe('quarter hours in schedules and exchanges', () => {
     );
     expect(
       imported.project.tasks.map((task) =>
-        task.kind === 'task' ? task.segments[0]?.durationHours : null,
+        task.kind === 'task' ? task.segments[0].durationHours : null,
       ),
     ).toEqual([0.75, 1.25]);
   });

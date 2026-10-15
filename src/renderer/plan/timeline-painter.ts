@@ -157,7 +157,7 @@ export function visibleRows(viewport: Viewport, rowCount: number): RowRange {
   return { first, last };
 }
 
-/** Lists the non-working periods between two instants: whole days off and, at the hour zoom, the hours outside the working hours; at the month zoom, where a day is only a few pixels wide, only the periods off entered by the user. */
+/** Lists the non-working periods between two instants: whole days off and, at the hour zoom, the hours outside the working hours, and at the month zoom, where a day is only a few pixels wide, only the periods off entered by the user. */
 export function nonWorkingIntervals(
   calendar: CompiledCalendar,
   periods: readonly DayRange[],
@@ -215,7 +215,7 @@ export function splitAtDaysOff(
   return { parts, daysOff: mergeIntervals(daysOff) };
 }
 
-/** Draws the rows of the timeline that a viewport shows: non-working periods, selection, links, baseline ghosts, bars, deadlines and the today line when the scene has one. */
+/** Draws the rows of the timeline that a viewport shows: non-working periods, row lines, selection, links, baseline ghosts, bars, deadlines, link handles, the dragged preview and the today line when the scene has one. */
 export function paintTimelineBody(
   context: TimelineBodyContext,
   scene: TimelineScene,

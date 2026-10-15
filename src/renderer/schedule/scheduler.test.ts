@@ -112,7 +112,7 @@ describe('createScheduler', () => {
     const stale = {
       version: SCHEDULE_PROTOCOL_VERSION,
       generation: 99,
-      result: { ok: false, error: { code: 'EMPTY_CALENDAR' } },
+      result: { ok: false, error: { kind: 'startDate' } },
     };
     const worker = pool.latest();
     worker.port.onmessage?.(new MessageEvent('message', { data: stale }));
@@ -139,6 +139,57 @@ describe('createScheduler', () => {
         },
       },
     ],
+    [
+      {
+        version: SCHEDULE_PROTOCOL_VERSION,
+        generation: 1,
+        result: {
+          ok: true,
+          value: { placements: new Map(), summaries: new Map(), wbsNumbers: new Map() },
+        },
+      },
+    ],
+    [
+      {
+        version: SCHEDULE_PROTOCOL_VERSION,
+        generation: 1,
+        result: {
+          ok: true,
+          value: {
+            placements: new Map(),
+            summaries: new Map(),
+            wbsNumbers: new Map(),
+            floats: {},
+            conflicts: [],
+            tagConflicts: { conflicts: [], tasksWithUnknownTag: [] },
+          },
+        },
+      },
+    ],
+    [
+      {
+        version: SCHEDULE_PROTOCOL_VERSION,
+        generation: 1,
+        result: {
+          ok: true,
+          value: {
+            placements: new Map(),
+            summaries: new Map(),
+            wbsNumbers: new Map(),
+            floats: null,
+            conflicts: [],
+            tagConflicts: { conflicts: [] },
+          },
+        },
+      },
+    ],
+    [
+      {
+        version: SCHEDULE_PROTOCOL_VERSION,
+        generation: 1,
+        result: { ok: false, error: { code: 'EMPTY_CALENDAR' } },
+      },
+    ],
   ])(
     'replaces a worker that sends the unreadable answer %j, asking the new one for the latest project',
     (data) => {
@@ -151,7 +202,12 @@ describe('createScheduler', () => {
       const logged = quietly(() => {
         first.port.onmessage?.(new MessageEvent('message', { data }));
       });
-      expect(logged).toHaveLength(1);
+      expect(logged).toEqual([
+        [
+          'The schedule worker failed and was restarted:',
+          new Error('The schedule worker sent an unreadable answer.'),
+        ],
+      ]);
       expect(record.failures).toEqual([]);
       expect(first.isTerminated()).toBe(true);
       expect(first.port.onmessage).toBeNull();

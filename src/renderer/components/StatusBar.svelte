@@ -86,7 +86,9 @@
         type="button"
         class="zoom-level"
         aria-pressed={app.zoom === level}
-        onclick={() => (app.zoom = level)}
+        onclick={() => {
+          app.setZoom(level);
+        }}
       >
         {text.zoom[level]}
       </button>

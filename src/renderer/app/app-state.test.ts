@@ -3,6 +3,7 @@ import type { Project } from '../../core/model/project';
 import type { BridgeResult, ExportedFile, OpenedProject } from '../../preload/bridge-contract';
 import { scheduleProject } from '../../core/scheduling/schedule-project';
 import { at } from '../../core/testing/civil-time';
+import { MIN_PROJECT_HOUR } from '../../core/time';
 import {
   milestone,
   project,
@@ -15,6 +16,7 @@ import { issueText } from '../i18n/issue-text';
 import { draftFromTask } from '../plan/task-details';
 import { deleteTasks, setStart } from '../plan/task-commands';
 import { AUTOSAVE_DELAY_MS } from '../project/autosave';
+import { FileActionError } from '../project/project-files';
 import { AppState } from './app-state.svelte';
 import { fakeAppContext, openedProjectOf, settle } from './testing/fake-app-context';
 
@@ -75,6 +77,24 @@ describe('new projects', () => {
     expect(app.notices).toEqual([]);
   });
 
+  it('starts a new project on the first day handled when the clock is outside the years handled, saying so and logging it', async () => {
+    const fake = fakeAppContext();
+    const wrong = new Date(2240, 0, 1, 9);
+    const app = new AppState({ ...fake.context, now: () => wrong });
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await app.newProject();
+    const calls = [...warned.mock.calls];
+    warned.mockRestore();
+    expect(app.project?.startDate).toBe(MIN_PROJECT_HOUR);
+    expect(noticeTexts(app)).toEqual([english.notices.clockOutOfRange]);
+    expect(calls).toEqual([
+      [
+        'The clock is outside the supported years; the new project starts on the first day handled:',
+        wrong,
+      ],
+    ]);
+  });
+
   it('tells why a new project could not be created, keeping the open one', async () => {
     const { app, control } = await withNewProject();
     const before = app.project;
@@ -82,7 +102,9 @@ describe('new projects', () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       await app.newProject();
-      expect(logged).toHaveBeenCalledTimes(1);
+      expect(logged.mock.calls).toEqual([
+        ['The main process gave a new project an invalid identifier:', 'not an identifier'],
+      ]);
     } finally {
       logged.mockRestore();
     }
@@ -822,6 +844,9 @@ describe('unexpected failures of the main process', () => {
       });
       app.closePrompt?.answer('discard');
       expect(await closing).toBe(true);
+      expect(logged.mock.calls).toEqual([
+        ['The project could not be saved before closing:', new Error('bridge gone')],
+      ]);
     } finally {
       logged.mockRestore();
     }
@@ -935,7 +960,12 @@ describe('one file action at a time', () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       await app.newProject();
-      expect(logged).toHaveBeenCalledTimes(1);
+      expect(logged.mock.calls).toEqual([
+        [
+          'The open project could not be saved before another replaced it:',
+          new FileActionError({ code: 'WRITE_FAILED' }),
+        ],
+      ]);
     } finally {
       logged.mockRestore();
     }
@@ -1088,6 +1118,9 @@ describe('the schedule an edit relies on', () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       scheduler.listener().failed(new Error('worker gone'));
+      expect(logged.mock.calls).toEqual([
+        ['The schedule could not be computed:', new Error('worker gone')],
+      ]);
     } finally {
       logged.mockRestore();
     }
@@ -1106,6 +1139,9 @@ describe('the schedule an edit relies on', () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       scheduler.listener().scheduled({ ok: false, error: { kind: 'startDate' } }, latest);
+      expect(logged.mock.calls).toEqual([
+        ['The schedule could not be computed:', { kind: 'startDate' }],
+      ]);
     } finally {
       logged.mockRestore();
     }

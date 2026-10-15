@@ -32,7 +32,9 @@ export type SharedProjectData = { readonly [Key in keyof Project]: unknown } & {
   readonly tasks: readonly unknown[];
 };
 
-export type DocumentId = string;
+declare const DOCUMENT_ID_BRAND: unique symbol;
+
+export type DocumentId = string & { readonly [DOCUMENT_ID_BRAND]: true };
 
 export const DOCUMENT_ID_KEY = 'documentId';
 
@@ -89,6 +91,14 @@ export function createSharedDocument(project: Project, documentId: DocumentId): 
 /** Tells whether a value is a document identifier: a lower-case UUID. */
 export function isDocumentId(value: unknown): value is DocumentId {
   return typeof value === 'string' && DOCUMENT_ID_PATTERN.test(value);
+}
+
+/** Gives a value known to be a document identifier as one, throwing for any other value since only a programming error can give one. */
+export function requireDocumentId(value: unknown): DocumentId {
+  if (!isDocumentId(value)) {
+    throw new TypeError(`Not a document identifier: ${String(value)}`);
+  }
+  return value;
 }
 
 /** Returns the identifier of a shared document, or null when it has none or an invalid one. */

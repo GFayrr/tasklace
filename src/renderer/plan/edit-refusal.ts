@@ -7,6 +7,7 @@ export type TaskEditError =
   | 'INVALID_NAME'
   | 'INVALID_DURATION'
   | 'INVALID_DATE'
+  | 'DATE_OUT_OF_YEARS'
   | 'INVALID_END'
   | 'OUT_OF_RANGE'
   | 'INVALID_PROGRESS'

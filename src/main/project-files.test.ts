@@ -14,6 +14,7 @@ import {
   windowProjectKind,
 } from './project-files';
 import type { FakeIpcMain } from './testing/fake-electron';
+import { requireDocumentId } from '../core/shared/shared-document';
 
 const dialogs = vi.hoisted(() => ({
   open: vi.fn<() => Promise<{ canceled: boolean; filePaths: string[] }>>(),
@@ -64,8 +65,8 @@ vi.mock('electron', async () => {
 
 const ipcMain = electronIpcMain as unknown as FakeIpcMain;
 const STATE = Uint8Array.from([1, 2, 3]);
-const DOCUMENT_ID = '11111111-1111-4111-8111-111111111111';
-const OTHER_ID = '22222222-2222-4222-8222-222222222222';
+const DOCUMENT_ID = requireDocumentId('11111111-1111-4111-8111-111111111111');
+const OTHER_ID = requireDocumentId('22222222-2222-4222-8222-222222222222');
 const LOADED = { kind: 'loaded', state: STATE, documentId: DOCUMENT_ID, warnings: [] } as const;
 const SAVED = { kind: 'saved', localCopySaved: true } as const;
 const tasks: FileTask[] = [];
@@ -221,6 +222,19 @@ describe('opening projects', () => {
     );
   });
 
+  it('reports a project whose size cannot be read as a failed read, logging why, without decoding it', async () => {
+    const path = join(folder, 'Locked.tasklace');
+    await writeFile(path, 'project');
+    const denied = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    examining.failure = denied;
+    chooseToOpen(path);
+    expect(await quietly(() => request(IPC_CHANNELS.openProject, {}))).toEqual({
+      answer: failure({ code: 'READ_FAILED' }),
+      logged: [['The size of the file could not be read:', denied]],
+    });
+    expect(runTask).not.toHaveBeenCalled();
+  });
+
   it('opens a project even when the recent list cannot be read or written, logging why and reporting the unreadable list', async () => {
     await mkdir(join(userData, 'recent-projects.json'));
     const opened = await quietly(() => openedIn(join(folder, 'Plan.tasklace')));
@@ -230,6 +244,11 @@ describe('opening projects', () => {
     const listed = await quietly(() => request(IPC_CHANNELS.recentProjects, {}));
     expect(listed.answer).toEqual(failure({ code: 'READ_FAILED' }));
     expect(listed.logged).toEqual([
+      ['The recent projects could not be read:', expect.objectContaining({ code: 'EISDIR' })],
+    ]);
+    const reopened = await quietly(() => request(IPC_CHANNELS.openRecentProject, {}, 0));
+    expect(reopened.answer).toEqual(failure({ code: 'READ_FAILED' }));
+    expect(reopened.logged).toEqual([
       ['The recent projects could not be read:', expect.objectContaining({ code: 'EISDIR' })],
     ]);
   });
@@ -410,7 +429,7 @@ describe('new and imported projects', () => {
         state: STATE,
         documentId,
         localCopyFolder: join(userData, 'local-copies'),
-        savedAt: expect.any(Number) as number,
+        savedAt: expect.any(Date) as Date,
       },
     ]);
   });
@@ -511,16 +530,33 @@ describe('saving projects', () => {
     expect(await request(IPC_CHANNELS.saveProjectAs, sender, STATE, 'Plan')).toEqual(
       failure({ code: 'CANCELLED' }),
     );
-    expect(dialogs.message).toHaveBeenCalledWith(
-      dialogs.window.value,
-      expect.objectContaining({ message: expect.stringContaining('Taken.tasklace') as string }),
-    );
+    expect(dialogs.message.mock.calls).toEqual([
+      [
+        dialogs.window.value,
+        {
+          type: 'question',
+          buttons: ['Replace', 'Cancel'],
+          defaultId: 1,
+          cancelId: 1,
+          message: 'Taken.tasklace already exists. Do you want to replace it?',
+        },
+      ],
+    ]);
     dialogs.window.value = null;
     chooseToSave(join(folder, 'Taken'));
     dialogs.message.mockResolvedValueOnce({ response: 0 });
     expect(await request(IPC_CHANNELS.saveProjectAs, sender, STATE, 'Plan')).toEqual(
       success({ localCopySaved: true }),
     );
+    expect(dialogs.message.mock.calls.at(-1)).toEqual([
+      {
+        type: 'question',
+        buttons: ['Replace', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        message: 'Taken.tasklace already exists. Do you want to replace it?',
+      },
+    ]);
   });
 
   it('keeps the new file of a save whose local copy failed, telling that the copy is missing', async () => {
