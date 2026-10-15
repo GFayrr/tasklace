@@ -33,11 +33,27 @@ function electronExecutable(): string {
   return path;
 }
 
-/** Launches the application a second time on the same user data, returning the exit code of that process once it ends on its own. */
-function launchAgain(): Promise<number | null> {
+interface Ending {
+  readonly code: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly errors: string;
+}
+
+/** Returns the arguments of a second launch on the same user data, with the sandbox turned off on Linux as Playwright does for the first one, since the machines of the CI cannot start the sandbox of Chromium. */
+function secondLaunchArguments(): string[] {
+  const shared = ['.', `--user-data-dir=${userData}`];
+  return process.platform === 'linux' ? ['--no-sandbox', ...shared] : shared;
+}
+
+/** Launches the application a second time on the same user data, returning how that process ended on its own and what it wrote as errors. */
+function launchAgain(): Promise<Ending> {
   return new Promise((resolve, reject) => {
-    const second = spawn(electronExecutable(), ['.', `--user-data-dir=${userData}`], {
-      stdio: 'ignore',
+    const second = spawn(electronExecutable(), secondLaunchArguments(), {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    const errors: string[] = [];
+    second.stderr.on('data', (chunk: Buffer) => {
+      errors.push(chunk.toString());
     });
     const timer = setTimeout(() => {
       second.kill();
@@ -49,9 +65,9 @@ function launchAgain(): Promise<number | null> {
       clearTimeout(timer);
       reject(error);
     });
-    second.once('exit', (code) => {
+    second.once('close', (code, signal) => {
       clearTimeout(timer);
-      resolve(code);
+      resolve({ code, signal, errors: errors.join('') });
     });
   });
 }
@@ -62,7 +78,8 @@ test('keeps a single instance: a second launch ends at once and brings the first
       Reflect.set(globalThis, 'secondInstanceSeen', true);
     });
   });
-  expect(await launchAgain()).toBe(0);
+  const ending = await launchAgain();
+  expect([ending.code, ending.signal], ending.errors).toEqual([0, null]);
   await expect
     .poll(() => application.evaluate(() => Reflect.get(globalThis, 'secondInstanceSeen') === true))
     .toBe(true);
