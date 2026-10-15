@@ -51,7 +51,7 @@ What Tasklace already supports:
 - Milestones, nested summary tasks with duration-weighted progress, and WBS numbering (1, 1.1, 1.2…).
 - Optional advanced features, disabled by default: critical path with total and free float, "must finish on" dates and deadlines, with conflicts reported rather than enforced.
 - Optional tags that color the blocks: a 12-color default palette, any custom color, and automatic patterns when two colors could be confused, including for color-blind readers and grayscale prints.
-- Tags representing a person or a team: overlapping work is detected hour by hour and reported as grouped conflict periods, without moving anything.
+- Tags representing a person or a team: overlapping work is detected to the quarter hour and reported as grouped conflict periods, without moving anything.
 - Results that never depend on the order of the data, a prerequisite for real-time collaboration.
 - Complete validation of untrusted project data before anything is loaded, with each problem reported at its exact location.
 - `.tasklace` project files: compressed, checksummed and fully checked before opening, so that a damaged or forged file is refused without ever being loaded.
@@ -112,7 +112,7 @@ The following commands are for development only.
 | `npm run format`       | Format the code with Prettier                                   |
 | `npm run format:check` | Check formatting without changing files                         |
 
-The test suite covers edge cases extensively and uses property-based testing to check scheduling invariants and data exchange on thousands of random projects, and to make sure that no malformed input is ever accepted. Continuous integration runs formatting, linting, unit tests and end-to-end tests on Windows and Linux, and the growth checks of key operations, for every push and pull request.
+The test suite covers edge cases extensively and uses property-based testing to check scheduling invariants and data exchange on thousands of random projects, and to make sure that no malformed input is ever accepted. Continuous integration runs formatting, linting, unit tests and end-to-end tests on Windows and Linux, the unit tests again in two time zones far from UTC, and the growth checks of key operations, for every push and pull request.
 
 ## Project structure
 
@@ -132,9 +132,9 @@ src/core/            pure logic, independent of any user interface
 src/main/            Electron main process: window, security, files, file worker, PDF printing
 src/preload/         minimal typed bridge between the page and the main process
 src/renderer/        Svelte user interface: theme, messages, schedule worker, components, printed pages
-docs/                roadmap and user documentation
+docs/                roadmap, and user documentation to come
 tests/e2e/           end-to-end journeys in the running application (Playwright)
-tests/file/          .tasklace files with real compression, decompression bombs
+tests/file/          .tasklace files with real compression and generated decompression bombs
 tests/fixtures/      large test projects and PDF sample plans generated from fixed seeds
 tests/growth/        growth checks of key operations, run in CI
 tests/perf/          performance benchmark
@@ -154,4 +154,4 @@ The project is at an early stage and is not accepting pull requests yet. Bug rep
 
 [AGPL-3.0-or-later](LICENSE) © Fayr
 
-The Jost font is embedded under the [SIL Open Font License 1.1](src/renderer/assets/fonts/OFL.txt).
+The Jost font is embedded under the [SIL Open Font License 1.1](src/renderer/public/fonts/OFL.txt).

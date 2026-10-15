@@ -306,7 +306,7 @@ async function importProject(
   return success(openedProject(loaded.value, path));
 }
 
-/** Saves the project of a window: to its file, or where the user chooses when saving as, the name of the project being suggested, a project without file keeping only its local copy so that saving automatically never opens a dialog; once a file chosen by saving as is written, it becomes the file of the window and a recent project, even when its local copy failed. */
+/** Saves the project of a window: to its file, or where the user chooses when saving as, the name of the project being suggested, a project without file keeping only its local copy so that saving automatically never opens a dialog, and a file chosen by saving as becoming, once written, the file of the window and a recent project, even when its local copy failed. */
 async function saveProject(
   services: ProjectFileServices,
   sender: WebContents,

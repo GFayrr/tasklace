@@ -168,7 +168,7 @@ export function renameTask(context: EditContext, id: TaskId, text: string): Edit
   return name === '' ? failure('INVALID_NAME') : success([putTask({ ...task, name })]);
 }
 
-/** Sets the duration written in hours, minutes or working days, rounded to the quarter hour, a work task becoming a milestone at zero and a milestone a work task above zero; for a split task, the last block takes the difference. */
+/** Sets the duration written in hours, minutes or working days, rounded to the quarter hour, a work task becoming a milestone at zero and a milestone a work task above zero, and the last block of a split task taking the difference. */
 export function setDuration(context: EditContext, id: TaskId, text: string): Edit {
   const task = findTask(context, id);
   if (task === undefined || task.kind === 'summary') {
@@ -218,7 +218,7 @@ export function setStart(
   return moveStart(context, id, hour, scheduledStart);
 }
 
-/** Sets the end of a work task, written as an ISO date, changing the duration of its last block, or moves a milestone to that instant; a date without time ends the task at the end of that day. */
+/** Sets the end of a work task, written as an ISO date, changing the duration of its last block, or moves a milestone to that instant, a date without time ending the task at the end of that day. */
 export function setEnd(
   context: EditContext,
   id: TaskId,

@@ -160,7 +160,7 @@ async function crashReport(): Promise<string> {
   return `events: ${JSON.stringify(events)}; log: ${log}`;
 }
 
-/** Kills the process of the page of the window, as the system would, without waiting for what follows since the main process may quit at once; asking the page to crash itself left it hanging on the Linux runners of the CI. */
+/** Kills the process of the page of the window, as the system would, without waiting for what follows since the main process may quit at once, asking the page to crash itself having left it hanging on the Linux runners of the CI. */
 async function crashPage(): Promise<void> {
   await recordCrashEvents();
   await application.evaluate(({ BrowserWindow }) => {

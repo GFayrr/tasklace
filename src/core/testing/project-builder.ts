@@ -132,7 +132,7 @@ export function blockLink(
   };
 }
 
-/** Builds a project starting on Monday 28 September 2026 at 09:00 with the default calendar. */
+/** Builds a project starting on Monday 28 September 2026 at 09:00 with the test calendar, whose working day has a lunch break. */
 export function project(
   tasks: readonly Task[],
   dependencies: readonly Dependency[] = [],

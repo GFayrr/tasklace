@@ -17,7 +17,7 @@ export function projectNameFromPath(path: string, fallbackName: string): string 
   return shortened === '' ? fallbackName : shortened;
 }
 
-/** Returns the project hour of a moment in local time, or the fallback when the moment lies outside the supported years. */
+/** Returns the project hour of a moment in local time, rounded down to the hour, or the fallback when the moment lies outside the supported years. */
 export function localProjectHour(moment: Date, fallback: ProjectHour): ProjectHour {
   const hour = toProjectHour({
     year: moment.getFullYear(),

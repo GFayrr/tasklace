@@ -26,7 +26,7 @@ const LINE_SEPARATOR = ' | ';
 const ENCODER = new TextEncoder();
 const CLEAN_EXIT = 'clean-exit';
 
-/** Keeps a log file in a folder, appending one dated line per entry, one write at a time, and setting the log aside under another name once it would grow past its limit, a failure being reported on the error output and a log that cannot be set aside being tried again once another limit of entries is written. */
+/** Keeps a log file in a folder, appending one dated line per entry, one write at a time, and setting the log aside under another name once it would grow past its limit, a failure being reported on the error output and a log that cannot be set aside being tried again once another limit of bytes is written. */
 export function createLogFile(
   folder: string,
   now: () => Date,

@@ -79,7 +79,7 @@ export async function saveLocalCopy(
   });
 }
 
-/** Reads the local copy index from its store, a missing index meaning no copy yet, and sets a damaged index aside under a name ending with the time in milliseconds before it is rewritten, so that what it held can still be recovered; an index that cannot be set aside is only logged and then rewritten with its well-formed entries. */
+/** Reads the local copy index from its store, a missing index meaning no copy yet, and sets a damaged index aside under a name ending with the time in milliseconds before it is rewritten, so that what it held can still be recovered, an index that cannot be set aside being only logged and then rewritten with its well-formed entries. */
 async function readIndex(indexPath: string, now: Date): Promise<LocalCopyIndex> {
   const { index, damaged } = readIndexText(await readStoredText(indexPath));
   if (damaged) {

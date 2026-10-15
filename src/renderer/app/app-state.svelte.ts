@@ -119,7 +119,7 @@ function isDailyWindowCode(code: ValidationIssueCode): code is DailyWindowErrorC
   return DAILY_WINDOW_CODES.includes(code);
 }
 
-/** Returns hours a task must have to be refused for them, failing loudly when it has none. */
+/** Returns the hours of the day a task was refused for, throwing when it has none, since only a programming error can refuse a task for hours it does not have. */
 function requiredHours(hours: number | null): number {
   if (hours === null) {
     throw new Error('A task refused for its hours of the day has none.');

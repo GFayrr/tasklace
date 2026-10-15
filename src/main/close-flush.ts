@@ -53,7 +53,7 @@ function windowOf(sender: WebContents, channel: string): PageWindow | undefined 
   return known;
 }
 
-/** Holds the closing of a window until its page has saved its pending changes and agreed to close; a page that crashed, could not load or lost its bridge lets its window close and, when nobody asked to close, is offered a reload that forgets its project, unless its first load failed, which the failed start reports, and a page that stops responding while asked to save lets the user wait for it or close anyway. */
+/** Holds the closing of a window until its page has saved its pending changes and agreed to close, while a page that crashed, could not load or lost its bridge lets its window close and, when nobody asked to close, is offered a reload that forgets its project, unless its first load failed, which the failed start reports, and a page that stops responding while asked to save lets the user wait for it or close anyway. */
 export function flushBeforeClosing(
   window: BrowserWindow,
   projectKind: (contents: WebContents) => WindowProjectKind,
