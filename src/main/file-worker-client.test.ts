@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { Worker } from 'node:worker_threads';
 import { describe, expect, it, vi } from 'vitest';
 import { runInFileWorker } from './file-worker-client';
@@ -48,6 +49,23 @@ describe('runInFileWorker', () => {
     await vi.waitFor(() => {
       expect(worker?.threadId).toBe(-1);
     });
+  });
+
+  it('reports an answer that could not be received as failed, logging why rather than the stop of the worker that follows', async () => {
+    const unreadable = new RangeError('Array buffer allocation failed');
+    const worker = Object.assign(new EventEmitter(), {
+      postMessage: () => {
+        worker.emit('messageerror', unreadable);
+        worker.emit('exit', 0);
+      },
+      terminate: () => Promise.resolve(0),
+    });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const result = await runInFileWorker(() => worker as unknown as Worker, TASK);
+    const calls = [...logged.mock.calls];
+    logged.mockRestore();
+    expect(result).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
+    expect(calls).toEqual([['The file task openProject failed:', unreadable]]);
   });
 
   it('reports a worker that runs out of memory as too complex, the caller surviving', async () => {

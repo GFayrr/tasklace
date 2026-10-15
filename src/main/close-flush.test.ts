@@ -291,7 +291,28 @@ describe('a page that fails', () => {
     expect(logged).toEqual([['The page of a window stopped:', details]]);
   });
 
-  it('logs a page that could not load and offers to reload it, unless the load was only aborted or concerned a frame', async () => {
+  it('logs a first load that failed without asking anything, the failed start of the application reporting it, and lets the window close', async () => {
+    const logged = await logsOf(async () => {
+      window.webContents.emit(
+        'did-fail-load',
+        {},
+        -6,
+        'ERR_FILE_NOT_FOUND',
+        'app://tasklace/',
+        true,
+      );
+      await settle();
+    });
+    expect(logged).toEqual([
+      ['The page of a window could not load app://tasklace/: ERR_FILE_NOT_FOUND (-6).'],
+    ]);
+    expect([questionsShown(), window.webContents.reloads]).toEqual([[], 0]);
+    window.close();
+    expect([window.closed, window.webContents.sent]).toEqual([true, []]);
+  });
+
+  it('logs a page that could not load again and offers to reload it, unless the load was only aborted or concerned a frame', async () => {
+    window.webContents.emit('did-finish-load');
     const logged = await logsOf(async () => {
       answerQuestionWith(FIRST_BUTTON);
       window.webContents.emit(

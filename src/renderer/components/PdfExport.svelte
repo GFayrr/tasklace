@@ -27,6 +27,7 @@
     rememberPrintSettings,
   } from '../print/print-settings';
   import { pageMeasure, type MeasureText } from '../print/print-text';
+  import { PICKER_BOUNDS } from '../plan/table-dates';
   import Icon from './Icon.svelte';
 
   let { app, project }: { app: AppState; project: Project } = $props();
@@ -52,6 +53,7 @@
   let measure = $state.raw<MeasureText | null>(null);
   let measureFailed = $state(false);
   let previewFailed = $state(false);
+  let dayRefused = $state(false);
   let exportRefusal = $state.raw<PrintRefusal | 'NOT_DRAWN' | null>(null);
   const patternFor = createPatternCache(
     () => document.createElement('canvas'),
@@ -121,6 +123,7 @@
       settings = readPrintSettings(storage, opening.documentId);
       measureFailed = false;
       previewFailed = false;
+      dayRefused = false;
       exportRefusal = null;
       heavy = null;
       void prepareMeasure();
@@ -200,10 +203,15 @@
     }
   }
 
-  /** Sets the first or the last day printed from a date field, leaving the period as it was for a date that cannot be read. */
-  function setDay(edge: 'firstDay' | 'lastDay', value: string): void {
-    const day = dayOf(value);
-    if (day === null || settings.period.kind !== 'days') {
+  /** Sets the first or the last day printed from a date field, a date that cannot be read or lies outside the years handled putting the day printed back in the field and saying why. */
+  function setDay(edge: 'firstDay' | 'lastDay', field: HTMLInputElement): void {
+    const day = dayOf(field.value);
+    if (settings.period.kind !== 'days') {
+      return;
+    }
+    dayRefused = day === null;
+    if (day === null) {
+      field.value = dayValue(settings.period[edge]);
       return;
     }
     change({ period: { ...settings.period, [edge]: day } });
@@ -364,20 +372,27 @@
               <input
                 type="date"
                 aria-label={text.firstDay}
+                min={PICKER_BOUNDS.date.min}
+                max={PICKER_BOUNDS.date.max}
                 value={dayValue(settings.period.firstDay)}
                 onchange={(event) => {
-                  setDay('firstDay', event.currentTarget.value);
+                  setDay('firstDay', event.currentTarget);
                 }}
               />
               <input
                 type="date"
                 aria-label={text.lastDay}
+                min={PICKER_BOUNDS.date.min}
+                max={PICKER_BOUNDS.date.max}
                 value={dayValue(settings.period.lastDay)}
                 onchange={(event) => {
-                  setDay('lastDay', event.currentTarget.value);
+                  setDay('lastDay', event.currentTarget);
                 }}
               />
             </div>
+            {#if dayRefused}
+              <p class="message warning" role="alert">{text.dayOutOfYears}</p>
+            {/if}
           {/if}
         </fieldset>
         <fieldset disabled={app.fileActionRunning}>

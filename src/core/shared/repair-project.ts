@@ -452,14 +452,13 @@ function fitDailyPatterns(project: Project): RepairedProject {
   };
 }
 
-/** Fits the daily working pattern of one work task into the calendar. */
+/** Fits the daily working pattern of one work task into the calendar, a task asking for more hours than the working day being brought back to the whole working day, valid even when that day is shorter than the shortest a task may ask for. */
 export function fitDailyPattern(
   task: WorkTask,
   calendar: CompiledCalendar,
 ): { readonly task: Task; readonly repairs: readonly Repair[] } {
-  const hoursPerWorkingDay = calendar.workingHoursPerDay;
-  const tooManyHours = task.hoursPerDay !== null && task.hoursPerDay > hoursPerWorkingDay;
-  const reduced = tooManyHours ? { ...task, hoursPerDay: hoursPerWorkingDay } : task;
+  const tooManyHours = task.hoursPerDay !== null && task.hoursPerDay > calendar.workingHoursPerDay;
+  const reduced = tooManyHours ? { ...task, hoursPerDay: null } : task;
   const window = computeDailyWindow(calendar, reduced);
   const cleared = window.ok ? reduced : { ...reduced, dailyStartHour: null };
   const repairs: Repair[] = [];

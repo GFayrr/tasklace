@@ -53,7 +53,7 @@ function windowOf(sender: WebContents, channel: string): PageWindow | undefined 
   return known;
 }
 
-/** Holds the closing of a window until its page has saved its pending changes and agreed to close; a page that crashed, could not load or lost its bridge lets its window close and, when nobody asked to close, is offered a reload that forgets its project, and a page that stops responding while asked to save lets the user wait for it or close anyway. */
+/** Holds the closing of a window until its page has saved its pending changes and agreed to close; a page that crashed, could not load or lost its bridge lets its window close and, when nobody asked to close, is offered a reload that forgets its project, unless its first load failed, which the failed start reports, and a page that stops responding while asked to save lets the user wait for it or close anyway. */
 export function flushBeforeClosing(
   window: BrowserWindow,
   projectKind: (contents: WebContents) => WindowProjectKind,
@@ -66,6 +66,7 @@ export function flushBeforeClosing(
   let bridgeMissing = false;
   let unresponsive = false;
   let askingToWait = false;
+  let loadedOnce = false;
   /** Closes the window once, letting it close for good. */
   const closeNow = (): void => {
     if (!released) {
@@ -135,6 +136,7 @@ export function flushBeforeClosing(
   });
   contents.on('did-finish-load', () => {
     pageGone = false;
+    loadedOnce = true;
   });
   contents.on(
     'did-fail-load',
@@ -142,8 +144,11 @@ export function flushBeforeClosing(
       console.error(
         `The page of a window could not load ${address}: ${description} (${String(code)}).`,
       );
-      if (isMainFrame && code !== ABORTED_LOAD) {
-        pageGone = true;
+      if (!isMainFrame || code === ABORTED_LOAD) {
+        return;
+      }
+      pageGone = true;
+      if (loadedOnce) {
         offerReload(window, MESSAGES.pageProblems.startFailedBody, forgetProject);
       }
     },

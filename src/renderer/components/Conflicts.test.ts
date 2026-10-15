@@ -9,7 +9,6 @@ import { createPeriodFormatter } from '../i18n/format';
 import english from '../locales/en.json';
 import { pixelsPerHour } from '../plan/time-scale';
 import { ROW_HEIGHT, timelineFrame, xOf } from '../plan/timeline-geometry';
-import { localHourOf } from '../project/new-project';
 import App from './App.svelte';
 import { button, click, render, single, update } from './testing/render';
 import { resize } from './testing/timeline-environment';
@@ -115,7 +114,7 @@ describe('the conflicts of people and teams', () => {
     const frame = timelineFrame(
       PLAN.startDate,
       schedule,
-      localHourOf(TODAY),
+      at(2026, 9, 28, 10),
       pixelsPerHour(app.zoom),
       [],
     );

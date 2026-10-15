@@ -32,7 +32,7 @@
   } from '../plan/timeline-gestures';
   import { baselineMarks, ROW_HEIGHT, timelineFrame, xOf } from '../plan/timeline-geometry';
   import { tagStylesOf } from '../plan/tag-styles';
-  import { localHourOf } from '../project/new-project';
+  import { localQuarterOf } from '../project/new-project';
   import { pixels } from './css-length';
   import TaskTable from './TaskTable.svelte';
   import Timeline from './Timeline.svelte';
@@ -56,7 +56,7 @@
   let scrollTop = $state(0);
   let viewportHeight = $state(0);
   let timelineWidth = 0;
-  let today = $state(localHourOf(new Date()));
+  let today = $state(localQuarterOf(new Date()));
 
   const outline = $derived(app.outline);
   const calendar = $derived(app.calendar);
@@ -80,12 +80,18 @@
       : null,
   );
   const frame = $derived(
-    timelineFrame(project.startDate, app.schedule, today, pixelsPerHour(app.zoom), [
-      ...app.shownDeadlines,
-      ...baselineMarks(project.options.baselineEnabled ? project.baseline : null, (id) =>
-        outline.wbsById.has(id),
-      ),
-    ]),
+    timelineFrame(
+      project.startDate,
+      app.schedule,
+      today ?? project.startDate,
+      pixelsPerHour(app.zoom),
+      [
+        ...app.shownDeadlines,
+        ...baselineMarks(project.options.baselineEnabled ? project.baseline : null, (id) =>
+          outline.wbsById.has(id),
+        ),
+      ],
+    ),
   );
   let scrollLeft = $state(untrack(() => startScrollLeft()));
   const formatters = $derived(createTableFormatters(app.locale));
@@ -112,7 +118,7 @@
 
   $effect(() => {
     const timer = setInterval(() => {
-      today = localHourOf(new Date());
+      today = localQuarterOf(new Date());
     }, TODAY_REFRESH_MS);
     return () => {
       clearInterval(timer);

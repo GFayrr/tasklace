@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import type { WebContents } from 'electron';
+import type { App, WebContents } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_LOG_BYTES, MAX_LOG_ENTRY_LENGTH } from '../core/limits';
 import {
@@ -11,6 +11,7 @@ import {
   createLogFile,
   logLine,
   logPageMessages,
+  logChildProcessesGone,
   logProcessErrors,
   logWorkerErrors,
   type LogConsole,
@@ -142,6 +143,26 @@ describe('logProcessErrors', () => {
         ['Uncaught exception in the main process (uncaughtException):', error],
         ['Unhandled rejection in the main process:', 'refused'],
       ]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+});
+
+describe('logChildProcessesGone', () => {
+  it('logs a helper process of Electron that ended abnormally, leaving out one that ended cleanly', () => {
+    const application = new EventEmitter();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      logChildProcessesGone(application as unknown as Pick<App, 'on'>);
+      const crashed = { type: 'GPU', reason: 'crashed', exitCode: 139 };
+      application.emit('child-process-gone', {}, crashed);
+      application.emit(
+        'child-process-gone',
+        {},
+        { type: 'Utility', reason: 'clean-exit', exitCode: 0 },
+      );
+      expect(logged.mock.calls).toEqual([['A process of Tasklace ended:', crashed]]);
     } finally {
       logged.mockRestore();
     }

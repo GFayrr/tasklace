@@ -25,6 +25,7 @@
     "READ_FAILED": "This file could not be read. Check that it still exists and that you are allowed to open it.",
     "WRITE_FAILED": "This file could not be written. Check that the folder still exists and that you are allowed to write in it.",
     "LOCAL_COPY_FAILED": "The project could not be kept on this computer. Check the free space on your disk, or use “Save as” to choose a file.",
+    "TOO_LARGE_TO_SAVE": "This project has grown too large to be saved in a file Tasklace can open again. Remove tasks you no longer need, then save it again.",
     "TOO_COMPLEX": "This file is too complex to be opened safely.",
     "INVALID_ENCODING": "This file is not UTF-8 text. Save it again as UTF-8, then import it.",
     "INVALID_IMPORT": "This file contains errors and cannot be imported.",
@@ -110,6 +111,7 @@
   },
   "notices": {
     "dismiss": "Dismiss",
+    "clockOutOfRange": "The clock of this computer is outside the years Tasklace handles, so the new project starts on the first day Tasklace handles. Check the date of the computer, then set the start of the project in its settings.",
     "label": "Messages",
     "importWarnings": {
       "one": "Imported with {count} warning.",
@@ -218,6 +220,7 @@
     "INVALID_NAME": "A task needs a name.",
     "INVALID_DURATION": "Write the duration in hours, such as 14 or 1 h 30, in minutes, such as 45 min, or in working days, such as 2d.",
     "INVALID_DATE": "This date could not be read. Write it as 2026-10-05, or as 2026-10-05 14:30 with a time on a quarter hour (:00, :15, :30 or :45).",
+    "DATE_OUT_OF_YEARS": "This date is outside the years Tasklace handles.",
     "INVALID_PROGRESS": "Write the progress as a whole number from 0 to 100.",
     "INVALID_PREDECESSORS": "Write the predecessors by task number, such as 1.2, 3SS+2h, or 3#2 for block 2 of task 3, each one once.",
     "UNKNOWN_BLOCK": "The task you named has no block with this number. Blocks are counted from 1, on split tasks only.",
@@ -559,6 +562,7 @@
     "days": "From – to",
     "firstDay": "First day printed",
     "lastDay": "Last day printed",
+    "dayOutOfYears": "Choose a day within the years Tasklace handles.",
     "zoom": "Zoom",
     "automatic": "Automatic",
     "automaticHint": "Automatic fits the period on the fewest pages: {zoom} here.",

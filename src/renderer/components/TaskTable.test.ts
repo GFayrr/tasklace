@@ -312,6 +312,22 @@ describe('TaskTable', () => {
     expect(app.notices.map((notice) => notice.text)).toEqual([english.notices.pickerUnavailable]);
   });
 
+  it('refuses a date chosen on the calendar of the system outside the years handled, saying so, the calendar offering only those years', async () => {
+    const { app, root } = await renderTable();
+    const picker = single(root, 'input.picker') as HTMLInputElement;
+    Object.assign(picker, { showPicker: vi.fn() });
+    expect([picker.min, picker.max]).toEqual(['2020-01-01T00:00', '2200-12-31T23:45']);
+    const before = app.project;
+    click(button(root, 'Choose the start of Read on a calendar'));
+    picker.value = '2201-01-01T10:00';
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(app.project).toBe(before);
+    expect(app.notices.map((notice) => notice.text)).toEqual([
+      english.editErrors.DATE_OUT_OF_YEARS,
+    ]);
+  });
+
   it('lets an unexpected failure of the calendar of the system through, without calling it unavailable', async () => {
     const { app, root, grid } = await renderTable();
     const picker = single(root, 'input.picker');

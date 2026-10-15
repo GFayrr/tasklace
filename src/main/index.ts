@@ -24,6 +24,7 @@ import { installApplicationMenu } from './platform/application-menu';
 import {
   captureConsole,
   createLogFile,
+  logChildProcessesGone,
   logPageMessages,
   logProcessErrors,
   logWorkerErrors,
@@ -47,6 +48,7 @@ const log = createLogFile(
 );
 captureConsole(console, log);
 logProcessErrors(process);
+logChildProcessesGone(app);
 writeLogBeforeQuitting(app, log);
 
 protocol.registerSchemesAsPrivileged([

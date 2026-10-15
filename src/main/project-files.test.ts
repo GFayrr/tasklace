@@ -232,6 +232,11 @@ describe('opening projects', () => {
     expect(listed.logged).toEqual([
       ['The recent projects could not be read:', expect.objectContaining({ code: 'EISDIR' })],
     ]);
+    const reopened = await quietly(() => request(IPC_CHANNELS.openRecentProject, {}, 0));
+    expect(reopened.answer).toEqual(failure({ code: 'READ_FAILED' }));
+    expect(reopened.logged).toEqual([
+      ['The recent projects could not be read:', expect.objectContaining({ code: 'EISDIR' })],
+    ]);
   });
 
   it('keeps an adoption and a save that happened when recording the recent project fails unexpectedly, logging why', async () => {

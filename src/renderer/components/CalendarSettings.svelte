@@ -18,6 +18,7 @@
   } from '../plan/project-commands';
   import type { Edit, EditContext } from '../plan/task-commands';
   import { createWeekdayNamer } from '../i18n/format';
+  import { PICKER_BOUNDS } from '../plan/table-dates';
   import { commitField } from './commit-field';
   import Icon from './Icon.svelte';
 
@@ -163,6 +164,8 @@
       <div class="row">
         <input
           type="date"
+          min={PICKER_BOUNDS.date.min}
+          max={PICKER_BOUNDS.date.max}
           aria-label={fillMessage(text.periodFirst, { number })}
           value={shown.first}
           {@attach commitField(
@@ -180,6 +183,8 @@
         <span class="dash">{text.to}</span>
         <input
           type="date"
+          min={PICKER_BOUNDS.date.min}
+          max={PICKER_BOUNDS.date.max}
           aria-label={fillMessage(text.periodLast, { number })}
           value={shown.last}
           {@attach commitField(

@@ -153,8 +153,17 @@ function lighterPdfRefusal(error: unknown): 'TOO_LARGE' | 'MISSING_CHARACTERS' |
   return error instanceof MissingCharacter ? 'MISSING_CHARACTERS' : null;
 }
 
-/** Reads a .tasklace file and checks it completely, giving back its Yjs state and document identifier. */
+/** Reads a .tasklace file and checks it completely, giving back its Yjs state and document identifier, a file refused being logged with its code. */
 async function openProject(path: string): Promise<FileTaskResult> {
+  const opened = await readProjectFile(path);
+  if (!opened.ok) {
+    console.warn(`The project file ${path} could not be opened: ${opened.error.code}.`);
+  }
+  return opened;
+}
+
+/** Reads a .tasklace file and checks it completely, giving back its Yjs state and document identifier. */
+async function readProjectFile(path: string): Promise<FileTaskResult> {
   const bytes = await readBytes(path, MAX_FILE_BYTES);
   if (!bytes.ok) {
     return bytes;
@@ -234,7 +243,7 @@ function loaded(
   return { kind: 'loaded', state, documentId, warnings };
 }
 
-/** Checks the state to save, then writes the project file safely when it has one and its local copy in every case, so that a failed file still leaves a local copy: the save fails when the file could not be written, or for a project without file when its local copy could not be, and otherwise tells whether the local copy was written. */
+/** Checks the state to save and the size of its file, which must be one Tasklace can open again, then writes the project file safely when it has one and its local copy in every case, so that a failed file still leaves a local copy: the save fails when the file could not be written, or for a project without file when its local copy could not be, and otherwise tells whether the local copy was written. */
 async function saveProject(
   task: Extract<FileTask, { kind: 'saveProject' }>,
 ): Promise<FileTaskResult> {
@@ -243,6 +252,12 @@ async function saveProject(
     return failure(checked.error);
   }
   const file = encodeTasklaceState(task.state, zlibCompressor);
+  if (file.length > MAX_FILE_BYTES) {
+    console.error(
+      `The project was not saved: its file would weigh ${String(file.length)} bytes, more than the ${String(MAX_FILE_BYTES)} a project file may weigh to be opened again.`,
+    );
+    return failure({ code: 'TOO_LARGE_TO_SAVE' });
+  }
   const { path } = task;
   const fileWritten =
     path === null || (await attemptWrite('The project file', () => writeFileSafely(path, file)));

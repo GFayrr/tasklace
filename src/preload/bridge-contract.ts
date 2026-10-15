@@ -35,6 +35,7 @@ export type FileFailureCode =
   | 'READ_FAILED'
   | 'WRITE_FAILED'
   | 'LOCAL_COPY_FAILED'
+  | 'TOO_LARGE_TO_SAVE'
   | 'TOO_COMPLEX'
   | 'INVALID_ENCODING'
   | 'INVALID_IMPORT'

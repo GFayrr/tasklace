@@ -10,7 +10,6 @@ import { setDuration } from '../plan/task-commands';
 import { pixelsPerHour } from '../plan/time-scale';
 import { baselineMarks, ROW_HEIGHT, timelineFrame, xOf } from '../plan/timeline-geometry';
 import { paleColor } from '../plan/tag-styles';
-import { localHourOf } from '../project/new-project';
 import { SAND_GRAPHITE } from '../theme/sand-graphite';
 import App from './App.svelte';
 import { pixels } from './css-length';
@@ -288,7 +287,7 @@ describe('the baseline in the table and on the timeline', () => {
     const frame = timelineFrame(
       PLAN.startDate,
       app.schedule,
-      localHourOf(NOW),
+      at(2026, 9, 28, 8) + 0.25,
       pixelsPerHour(app.zoom),
       baselineMarks(app.project?.baseline ?? null, (id) => app.outline.wbsById.has(id)),
     );
@@ -326,7 +325,7 @@ describe('the baseline in the table and on the timeline', () => {
       timelineFrame(
         PLAN.startDate,
         shown.app.schedule,
-        localHourOf(NOW),
+        at(2026, 9, 28, 8) + 0.25,
         pixelsPerHour('day'),
         marks,
       );

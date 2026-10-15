@@ -506,19 +506,27 @@ export class AppState {
     return !this.#refuseWhileFileActionRuns() && (await this.readyToClose());
   }
 
-  /** Starts a new empty project. */
+  /** Starts a new empty project today, or on the first day handled when the clock lies outside the years handled, which is logged and told. */
   async newProject(): Promise<void> {
     if (!(await this.#readyToReplace())) {
       return;
     }
     const { messages, createId, now } = this.#context;
-    const project = buildNewProject(messages.projects.untitled, now(), createId);
+    const moment = now();
+    const project = buildNewProject(messages.projects.untitled, moment, createId);
     const created = await this.#files.create(project);
     if (!created.ok) {
       this.#showResult(created);
       return;
     }
     this.#attach(created.value);
+    if (localQuarterOf(moment) === null) {
+      console.warn(
+        'The clock is outside the supported years; the new project starts on the first day handled:',
+        moment,
+      );
+      this.#notify('warning', messages.notices.clockOutOfRange);
+    }
   }
 
   /** Asks for a project file and opens it. */

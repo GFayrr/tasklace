@@ -376,6 +376,33 @@ describe('file tasks', () => {
     });
   });
 
+  it('logs every project file it refuses to open, with its code, so that a refusal reported by a user can be found', async () => {
+    const empty = join(folder, 'empty.tasklace');
+    const text = join(folder, 'notes.tasklace');
+    const huge = join(folder, 'huge.tasklace');
+    await writeFile(empty, '');
+    await writeFile(text, 'These are notes, not a project file.');
+    await writeFile(huge, '');
+    await truncate(huge, MAX_FILE_BYTES + 1);
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const results = [];
+    for (const path of [empty, text, huge]) {
+      results.push(await runFileTask({ kind: 'openProject', path }));
+    }
+    const calls = [...warned.mock.calls];
+    warned.mockRestore();
+    expect(results.map((result) => !result.ok && result.error.code)).toEqual([
+      'TRUNCATED',
+      'NOT_A_TASKLACE_FILE',
+      'TOO_LARGE',
+    ]);
+    expect(calls).toEqual([
+      [`The project file ${empty} could not be opened: TRUNCATED.`],
+      [`The project file ${text} could not be opened: NOT_A_TASKLACE_FILE.`],
+      [`The project file ${huge} could not be opened: TOO_LARGE.`],
+    ]);
+  });
+
   it('never writes a state of another document, a broken state or an invalid project', async () => {
     const path = join(folder, 'plan.tasklace');
     /** Saves a state to the project file and its local copy. */

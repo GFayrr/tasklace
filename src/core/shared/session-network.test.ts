@@ -18,6 +18,7 @@ import { createSharedDocument, PROJECT_ROOT, readSharedData, TASKS_ROOT } from '
 import { mergeSharedUpdate, readSharedProject } from './shared-project';
 import type { SharedSession } from './shared-session';
 import { sessionOn } from '../testing/session-copy';
+import { success } from '../result';
 
 const repairing = vi.hoisted(() => ({ refused: false }));
 
@@ -349,6 +350,32 @@ describe('a session receiving updates from the network', () => {
     const merged = alice.merge(update);
     expect(merged).toEqual(mergeSharedUpdate(reference, update));
     expect(merged.ok && merged.value.map((repair) => repair.code)).toEqual(expected);
+  });
+
+  it('brings a task back to the whole working day when the day becomes shorter than an hour, in either order, both copies agreeing', () => {
+    const halfHour = [{ startHour: 8, endHour: 8.5 }];
+    const origin = createSharedDocument(project([workTask('a')]), TEST_DOCUMENT_ID);
+    const alice = sessionOn(origin, 1);
+    const bob = sessionOn(origin, 2);
+    const aliceBefore = Y.encodeStateVector(alice.document);
+    const bobBefore = Y.encodeStateVector(bob.document);
+    expect(
+      alice.apply({
+        type: 'updateProject',
+        fields: { calendar: { ...SAMPLE.calendar, workingTimeRanges: halfHour } },
+      }).ok,
+    ).toBe(true);
+    expect(bob.apply({ type: 'putTask', task: workTask('a', { hoursPerDay: 2 }) }).ok).toBe(true);
+    const fromAlice = Y.encodeStateAsUpdate(alice.document, aliceBefore);
+    const fromBob = Y.encodeStateAsUpdate(bob.document, bobBefore);
+    expect(alice.merge(fromBob)).toEqual(success([{ code: 'HOURS_PER_DAY_REDUCED', id: 'a' }]));
+    expect(bob.merge(fromAlice)).toEqual(success([{ code: 'HOURS_PER_DAY_REDUCED', id: 'a' }]));
+    alice.merge(Y.encodeStateAsUpdate(bob.document));
+    bob.merge(Y.encodeStateAsUpdate(alice.document));
+    expect(alice.project()).toEqual(bob.project());
+    expect(alice.project().tasks.map((task) => task.kind === 'task' && task.hoursPerDay)).toEqual([
+      null,
+    ]);
   });
 
   it(

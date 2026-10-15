@@ -2,6 +2,7 @@
   import { formatDateTime } from '../../core/civil-format';
   import type { Project } from '../../core/model/project';
   import type { AppState } from '../app/app-state.svelte';
+  import { PICKER_BOUNDS } from '../plan/table-dates';
   import { commitField } from './commit-field';
 
   let { app, project }: { app: AppState; project: Project } = $props();
@@ -50,6 +51,8 @@
       id="settings-project-start"
       type="datetime-local"
       step="900"
+      min={PICKER_BOUNDS.dateTime.min}
+      max={PICKER_BOUNDS.dateTime.max}
       value={start}
       {@attach commitField(
         () => start,

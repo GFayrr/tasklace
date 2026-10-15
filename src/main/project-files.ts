@@ -207,7 +207,11 @@ async function openRecent(
   value: unknown,
 ): Promise<BridgeResult<OpenedProject>> {
   const index = readRecentIndex(value) ?? refuseMessage();
-  const paths = await readRecentProjects(recentStore(services));
+  const read = await readRecentPaths(services);
+  if (!read.ok) {
+    return read;
+  }
+  const paths = read.value;
   const path = paths[index];
   if (path === undefined) {
     console.error(
@@ -222,14 +226,23 @@ async function openRecent(
 async function listRecent(
   services: ProjectFileServices,
 ): Promise<BridgeResult<readonly RecentProject[]>> {
+  const read = await readRecentPaths(services);
+  return read.ok
+    ? success(
+        read.value.map((path) => ({
+          name: projectNameFromPath(path, MESSAGES.projects.untitled),
+          folder: dirname(path),
+        })),
+      )
+    : read;
+}
+
+/** Reads the paths of the recent projects, a failure of the system being logged and reported as a failed read. */
+async function readRecentPaths(
+  services: ProjectFileServices,
+): Promise<BridgeResult<readonly string[]>> {
   try {
-    const paths = await readRecentProjects(recentStore(services));
-    return success(
-      paths.map((path) => ({
-        name: projectNameFromPath(path, MESSAGES.projects.untitled),
-        folder: dirname(path),
-      })),
-    );
+    return success(await readRecentProjects(recentStore(services)));
   } catch (error) {
     if (!isSystemError(error)) {
       throw error;

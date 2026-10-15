@@ -1,12 +1,28 @@
-import { formatDateTime, parseDate, parseDateTime } from '../../core/civil-format';
+import { formatDate, formatDateTime, parseDate, parseDateTime } from '../../core/civil-format';
 import { failure, success, type Result } from '../../core/result';
-import type { DayIndex, ProjectHour } from '../../core/time';
+import {
+  END_PROJECT_HOUR,
+  MAX_DAY_INDEX,
+  MIN_DAY_INDEX,
+  MIN_PROJECT_HOUR,
+  QUARTER_HOUR,
+  type DayIndex,
+  type ProjectHour,
+} from '../../core/time';
 
 export type TableDate =
   | { readonly kind: 'date'; readonly day: DayIndex }
   | { readonly kind: 'dateTime'; readonly hour: ProjectHour };
 
 const SPACE_BEFORE_TIME = /^(\d{4}-\d{2}-\d{2}) (?=\d)/;
+
+export const PICKER_BOUNDS = {
+  dateTime: {
+    min: formatDateTime(MIN_PROJECT_HOUR),
+    max: formatDateTime(END_PROJECT_HOUR - QUARTER_HOUR),
+  },
+  date: { min: formatDate(MIN_DAY_INDEX), max: formatDate(MAX_DAY_INDEX) },
+} as const;
 
 /** Writes an instant as the table shows it, "YYYY-MM-DD HH:MM", the same on every computer. */
 export function formatTableDateTime(hour: ProjectHour): string {

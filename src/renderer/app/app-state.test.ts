@@ -3,6 +3,7 @@ import type { Project } from '../../core/model/project';
 import type { BridgeResult, ExportedFile, OpenedProject } from '../../preload/bridge-contract';
 import { scheduleProject } from '../../core/scheduling/schedule-project';
 import { at } from '../../core/testing/civil-time';
+import { MIN_PROJECT_HOUR } from '../../core/time';
 import {
   milestone,
   project,
@@ -73,6 +74,24 @@ describe('new projects', () => {
     expect(app.saveStatus).toBe('saved');
     expect(app.openedCount).toBe(1);
     expect(app.notices).toEqual([]);
+  });
+
+  it('starts a new project on the first day handled when the clock is outside the years handled, saying so and logging it', async () => {
+    const fake = fakeAppContext();
+    const wrong = new Date(2240, 0, 1, 9);
+    const app = new AppState({ ...fake.context, now: () => wrong });
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await app.newProject();
+    const calls = [...warned.mock.calls];
+    warned.mockRestore();
+    expect(app.project?.startDate).toBe(MIN_PROJECT_HOUR);
+    expect(noticeTexts(app)).toEqual([english.notices.clockOutOfRange]);
+    expect(calls).toEqual([
+      [
+        'The clock is outside the supported years; the new project starts on the first day handled:',
+        wrong,
+      ],
+    ]);
   });
 
   it('tells why a new project could not be created, keeping the open one', async () => {
