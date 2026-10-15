@@ -378,6 +378,29 @@ describe('a session receiving updates from the network', () => {
     ]);
   });
 
+  it('changes nothing and reports nothing when an update that needed a repair arrives again, nor when its own update comes back', () => {
+    const origin = createSharedDocument(project([workTask('a'), workTask('b')]), TEST_DOCUMENT_ID);
+    const alice = sessionOn(origin, 1);
+    const bob = sessionOn(origin, 2);
+    const aliceBefore = Y.encodeStateVector(alice.document);
+    const bobBefore = Y.encodeStateVector(bob.document);
+    expect(alice.apply({ type: 'putDependency', dependency: link('a', 'b') }).ok).toBe(true);
+    expect(bob.apply({ type: 'putDependency', dependency: link('b', 'a') }).ok).toBe(true);
+    const fromAlice = Y.encodeStateAsUpdate(alice.document, aliceBefore);
+    const fromBob = Y.encodeStateAsUpdate(bob.document, bobBefore);
+    expect(alice.merge(fromBob)).toEqual(success([{ code: 'DEPENDENCY_REMOVED', id: 'b-a' }]));
+    expect(alice.project().dependencies.map((dependency) => dependency.id)).toEqual(['a-b']);
+    const data = readSharedData(alice.document);
+    const repaired = alice.project();
+    const history = [alice.history.canUndo(), alice.history.canRedo()];
+    expect(alice.merge(fromBob)).toEqual(success([]));
+    expect(alice.merge(fromAlice)).toEqual(success([]));
+    expect(alice.merge(Y.encodeStateAsUpdate(alice.document))).toEqual(success([]));
+    expect(readSharedData(alice.document)).toEqual(data);
+    expect(alice.project()).toEqual(repaired);
+    expect([alice.history.canUndo(), alice.history.canRedo()]).toEqual(history);
+  });
+
   it(
     'never throws on an honest update with one byte changed, refusing it intact or keeping a valid project',
     { timeout: PROPERTY_TEST_TIMEOUT_MS },

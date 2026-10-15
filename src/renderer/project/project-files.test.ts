@@ -418,6 +418,9 @@ describe('createProjectFiles', () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       expect(await files.open()).toEqual({ ok: false, error: { code: 'INVALID_CONTENT' } });
+      expect(logged.mock.calls).toEqual([
+        ['The opened project could not be decoded:', new Error('Unexpected end of array')],
+      ]);
     } finally {
       logged.mockRestore();
     }
@@ -533,7 +536,9 @@ describe('createProjectFiles', () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       expect(await files.open()).toEqual({ ok: false, error: { code: 'INVALID_CONTENT' } });
-      expect(logged).toHaveBeenCalledTimes(1);
+      expect(logged.mock.calls).toEqual([
+        ['The opened project could not be decoded:', new Error('Unexpected end of array')],
+      ]);
     } finally {
       logged.mockRestore();
     }

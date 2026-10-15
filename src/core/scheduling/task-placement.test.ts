@@ -300,7 +300,10 @@ describe('placeTaskLatest', () => {
     const placed = unwrap(result);
     const lastDay = unwrap(placeTask(calendar, partDay, placed.start));
     expect(placed).toEqual(lastDay);
-    expect(placed.end).toBeLessThanOrEqual(END_PROJECT_HOUR);
+    expect([format(placed.start), format(placed.end)]).toEqual([
+      '2200-12-18 15:00',
+      '2200-12-31 11:00',
+    ]);
     const later = placeTask(calendar, partDay, placed.start + 24);
     expect(later).toEqual({ ok: false, error: 'BEYOND_PLANNING_HORIZON' });
   });

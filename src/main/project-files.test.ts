@@ -221,6 +221,19 @@ describe('opening projects', () => {
     );
   });
 
+  it('reports a project whose size cannot be read as a failed read, logging why, without decoding it', async () => {
+    const path = join(folder, 'Locked.tasklace');
+    await writeFile(path, 'project');
+    const denied = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    examining.failure = denied;
+    chooseToOpen(path);
+    expect(await quietly(() => request(IPC_CHANNELS.openProject, {}))).toEqual({
+      answer: failure({ code: 'READ_FAILED' }),
+      logged: [['The size of the file could not be read:', denied]],
+    });
+    expect(runTask).not.toHaveBeenCalled();
+  });
+
   it('opens a project even when the recent list cannot be read or written, logging why and reporting the unreadable list', async () => {
     await mkdir(join(userData, 'recent-projects.json'));
     const opened = await quietly(() => openedIn(join(folder, 'Plan.tasklace')));
@@ -516,16 +529,33 @@ describe('saving projects', () => {
     expect(await request(IPC_CHANNELS.saveProjectAs, sender, STATE, 'Plan')).toEqual(
       failure({ code: 'CANCELLED' }),
     );
-    expect(dialogs.message).toHaveBeenCalledWith(
-      dialogs.window.value,
-      expect.objectContaining({ message: expect.stringContaining('Taken.tasklace') as string }),
-    );
+    expect(dialogs.message.mock.calls).toEqual([
+      [
+        dialogs.window.value,
+        {
+          type: 'question',
+          buttons: ['Replace', 'Cancel'],
+          defaultId: 1,
+          cancelId: 1,
+          message: 'Taken.tasklace already exists. Do you want to replace it?',
+        },
+      ],
+    ]);
     dialogs.window.value = null;
     chooseToSave(join(folder, 'Taken'));
     dialogs.message.mockResolvedValueOnce({ response: 0 });
     expect(await request(IPC_CHANNELS.saveProjectAs, sender, STATE, 'Plan')).toEqual(
       success({ localCopySaved: true }),
     );
+    expect(dialogs.message.mock.calls.at(-1)).toEqual([
+      {
+        type: 'question',
+        buttons: ['Replace', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        message: 'Taken.tasklace already exists. Do you want to replace it?',
+      },
+    ]);
   });
 
   it('keeps the new file of a save whose local copy failed, telling that the copy is missing', async () => {

@@ -74,6 +74,9 @@ describe('a CSV export', () => {
       const computed = scheduling.calls;
       await app.exportFile('csv');
       expect(scheduling.calls).toBe(computed + 1);
+      expect(logged.mock.calls).toEqual([
+        ['The schedule could not be computed:', { kind: 'startDate' }],
+      ]);
     } finally {
       logged.mockRestore();
     }

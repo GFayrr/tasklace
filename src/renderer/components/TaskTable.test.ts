@@ -295,20 +295,24 @@ describe('TaskTable', () => {
     });
     picker.value = '';
     picker.dispatchEvent(new Event('change', { bubbles: true }));
+    const refusal = new DOMException('Not allowed', 'NotAllowedError');
     Object.assign(picker, {
       showPicker: () => {
-        throw new DOMException('Not allowed', 'NotAllowedError');
+        throw refusal;
       },
     });
     app.select('b');
     update();
     expect(grid.getAttribute('aria-activedescendant')).toBe('cell-b-start');
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let calls: unknown[][] = [];
     try {
       press(grid, 'ArrowDown', { altKey: true });
+      calls = [...logged.mock.calls];
     } finally {
       logged.mockRestore();
     }
+    expect(calls).toEqual([['The date picker could not open:', refusal]]);
     expect(app.notices.map((notice) => notice.text)).toEqual([english.notices.pickerUnavailable]);
   });
 

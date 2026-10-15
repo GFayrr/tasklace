@@ -222,6 +222,9 @@ describe('the questions and messages of the baseline', () => {
     try {
       click(button(dialog, TEXT.setBaseline));
       update();
+      expect(logged.mock.calls).toEqual([
+        ['Tasks could not be frozen in the baseline:', [{ taskId: 'm', reason: 'NO_DATES' }]],
+      ]);
     } finally {
       logged.mockRestore();
     }

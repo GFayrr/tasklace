@@ -151,7 +151,12 @@ describe('createScheduler', () => {
       const logged = quietly(() => {
         first.port.onmessage?.(new MessageEvent('message', { data }));
       });
-      expect(logged).toHaveLength(1);
+      expect(logged).toEqual([
+        [
+          'The schedule worker failed and was restarted:',
+          new Error('The schedule worker sent an unreadable answer.'),
+        ],
+      ]);
       expect(record.failures).toEqual([]);
       expect(first.isTerminated()).toBe(true);
       expect(first.port.onmessage).toBeNull();

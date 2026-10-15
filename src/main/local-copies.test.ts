@@ -84,15 +84,19 @@ describe('local copies', () => {
   it('keeps a damaged index aside before writing a new one, so that nothing it held is lost', async () => {
     await writeFile(join(folder, 'index.json'), '{"version":1,"copies":{"broken"');
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let calls: unknown[][] = [];
     try {
       await saveLocalCopy(folder, FIRST, Uint8Array.from([1]), null, SAVED_AT);
-      expect(logged).toHaveBeenCalledTimes(1);
+      calls = [...logged.mock.calls];
     } finally {
       logged.mockRestore();
     }
     const files = await readdir(folder);
     const aside = files.filter((name) => name.startsWith('index.json.damaged-'));
     expect(aside).toHaveLength(1);
+    expect(calls).toEqual([
+      [`The local copy index was damaged and was kept as ${join(folder, aside[0] ?? '')}.`],
+    ]);
     expect(await readFile(join(folder, aside[0] ?? ''), 'utf8')).toBe(
       '{"version":1,"copies":{"broken"',
     );

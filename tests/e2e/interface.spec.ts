@@ -116,7 +116,10 @@ test('opens a project from the Open menu and shows its schedule', async () => {
 test('keeps the project from changing while another one is being opened', async () => {
   await page.getByRole('button', { name: /New project/ }).click();
   const rows = page.getByRole('grid', { name: 'Tasks' }).getByRole('row');
-  const rowsBefore = await rows.count();
+  const empty = await rows.count();
+  await addTaskButton(page).click();
+  await expect(rows).toHaveCount(empty + 1);
+  const rowsBefore = empty + 1;
   await application.evaluate(({ dialog }) => {
     dialog.showOpenDialog = () =>
       new Promise((resolve) => {
@@ -129,11 +132,20 @@ test('keeps the project from changing while another one is being opened', async 
   });
   await page.getByRole('button', { name: 'Open' }).click();
   await page.getByRole('menuitem', { name: 'Open a file…' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Do not save' }).click();
   const shell = page.locator('.shell');
   await expect(shell).toHaveAttribute('aria-busy', 'true');
   await addTaskButton(page).click({ force: true });
+  await settled();
+  expect(await rows.count()).toBe(rowsBefore);
   await page.keyboard.press('Control+z');
-  await expect(rows).toHaveCount(rowsBefore);
+  await settled();
+  expect(await rows.count()).toBe(rowsBefore);
+  await expect
+    .poll(() =>
+      application.evaluate(() => typeof Reflect.get(globalThis, 'cancelOpening') === 'function'),
+    )
+    .toBe(true);
   await application.evaluate(() => {
     const cancel: unknown = Reflect.get(globalThis, 'cancelOpening');
     if (typeof cancel === 'function') {
@@ -142,10 +154,21 @@ test('keeps the project from changing while another one is being opened', async 
   });
   await expect(shell).toHaveAttribute('aria-busy', 'false');
   await expect(rows).toHaveCount(rowsBefore);
-  await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
-  await addTaskButton(page).click();
-  await expect(rows).toHaveCount(rowsBefore + 1);
+  await page.keyboard.press('Control+z');
+  await expect(rows).toHaveCount(empty);
 });
+
+/** Waits until the page has drawn a frame and run the tasks queued after it, so that every event sent before has been handled. */
+async function settled(): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          setTimeout(resolve);
+        });
+      }),
+  );
+}
 
 test('explains why a file cannot be opened, until the message is dismissed', async () => {
   const forged = join(folder, 'forged.tasklace');

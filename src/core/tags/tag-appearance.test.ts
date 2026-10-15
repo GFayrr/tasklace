@@ -30,21 +30,39 @@ describe('TAG_PALETTE', () => {
   });
 
   it('keeps neighboring colors apart for normal vision and red-green color blindness', () => {
-    TAG_PALETTE.forEach((color, index) => {
-      const next = TAG_PALETTE[index + 1];
-      if (next === undefined) {
-        return;
-      }
-      expect(colorDistance(color, next, 'normal')).toBeGreaterThanOrEqual(
-        NORMAL_VISION_MIN_DISTANCE,
+    const tooClose = TAG_PALETTE.slice(1).flatMap((next, index) => {
+      const color = TAG_PALETTE[index] ?? next;
+      const normal = colorDistance(color, next, 'normal') < NORMAL_VISION_MIN_DISTANCE;
+      const redGreen = (['protanopia', 'deuteranopia'] as const).filter(
+        (vision) => colorDistance(color, next, vision) < SIMULATED_VISION_MIN_DISTANCE,
       );
-      expect(colorDistance(color, next, 'protanopia')).toBeGreaterThanOrEqual(
-        SIMULATED_VISION_MIN_DISTANCE,
-      );
-      expect(colorDistance(color, next, 'deuteranopia')).toBeGreaterThanOrEqual(
-        SIMULATED_VISION_MIN_DISTANCE,
+      return [...(normal ? ['normal'] : []), ...redGreen].map(
+        (vision) => `${color} ${next} ${vision}`,
       );
     });
+    expect(tooClose).toEqual([]);
+  });
+
+  it('gives a pattern to the second of two neighboring colors too close for any simulated color vision, tritanopia and grayscale included', () => {
+    const confused = TAG_PALETTE.slice(1).flatMap((next, index) => {
+      const color = TAG_PALETTE[index] ?? next;
+      const close = SIMULATED_VISIONS.some(
+        (vision) => colorDistance(color, next, vision) < SIMULATED_VISION_MIN_DISTANCE,
+      );
+      return close ? [[color, next] as const] : [];
+    });
+    expect(confused).toEqual([
+      ['#eb6834', '#1baf7a'],
+      ['#1baf7a', '#eda100'],
+      ['#eda100', '#e87ba4'],
+      ['#e34948', '#c000f8'],
+      ['#a00070', '#884800'],
+    ]);
+    expect(
+      confused.map(([color, next]) =>
+        appearancesOf([tag('a', color), tag('b', next)]).map((appearance) => appearance.pattern),
+      ),
+    ).toEqual(confused.map(() => [null, TAG_PATTERNS[0]]));
   });
 });
 

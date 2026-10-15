@@ -1,7 +1,12 @@
 import { EventEmitter } from 'node:events';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { Readable } from 'node:stream';
 import { Worker } from 'node:worker_threads';
 import { describe, expect, it, vi } from 'vitest';
-import { runInFileWorker } from './file-worker-client';
+import { MAX_FILE_WORKER_HEAP_MEBIBYTES } from '../core/limits';
+import { runInFileWorker, startFileWorker } from './file-worker-client';
 
 const TASK = { kind: 'openProject', path: '/nowhere' } as const;
 const SMALL_HEAP_MEBIBYTES = 16;
@@ -96,5 +101,27 @@ describe('runInFileWorker', () => {
       ok: false,
       error: { code: 'TASK_FAILED' },
     });
+  });
+});
+
+describe('startFileWorker', () => {
+  it('starts the worker of a script with the memory limit of file tasks, handing its error output to be logged', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'tasklace-worker-'));
+    const script = join(folder, 'worker.cjs');
+    await writeFile(script, "process.stderr.write('started');");
+    try {
+      const outputs: Readable[] = [];
+      const worker = startFileWorker(script, (stderr) => {
+        outputs.push(stderr);
+      });
+      expect(worker.resourceLimits?.maxOldGenerationSizeMb).toBe(MAX_FILE_WORKER_HEAP_MEBIBYTES);
+      expect(outputs).toEqual([worker.stderr]);
+      const written: string[] = [];
+      worker.stderr.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+      await new Promise((resolve) => worker.once('exit', resolve));
+      expect(written.join('')).toBe('started');
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
   });
 });

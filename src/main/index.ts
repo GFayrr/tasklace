@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { Worker } from 'node:worker_threads';
+import type { Worker } from 'node:worker_threads';
 import { app, BrowserWindow, dialog, protocol, session } from 'electron';
 import {
   APP_ENTRY_URL,
@@ -8,10 +8,10 @@ import {
   createPrintPageStore,
   isAppAddress,
 } from './app-files';
-import { MAX_FILE_WORKER_HEAP_MEBIBYTES, MAX_PDF_RENDER_MILLISECONDS } from '../core/limits';
+import { MAX_PDF_RENDER_MILLISECONDS } from '../core/limits';
 import { contentSecurityPolicy } from './content-security-policy';
 import { flushBeforeClosing, registerFlushHandler } from './close-flush';
-import { runInFileWorker } from './file-worker-client';
+import { runInFileWorker, startFileWorker } from './file-worker-client';
 import { createTrustCheck } from './ipc-trust';
 import {
   forgetWindowProject,
@@ -112,14 +112,11 @@ function start(): void {
   });
 }
 
-/** Starts a worker for one file task, with the memory limit that keeps a forged file from exhausting the application, what it reports as errors going to the log. */
+/** Starts a worker for one file task, what it reports as errors going to the log. */
 function createFileWorker(): Worker {
-  const worker = new Worker(fileWorkerPath, {
-    resourceLimits: { maxOldGenerationSizeMb: MAX_FILE_WORKER_HEAP_MEBIBYTES },
-    stderr: true,
+  return startFileWorker(fileWorkerPath, (stderr) => {
+    logWorkerErrors(stderr, log, process.stderr);
   });
-  logWorkerErrors(worker.stderr, log, process.stderr);
-  return worker;
 }
 
 /** Brings the first window forward when the application is launched a second time. */

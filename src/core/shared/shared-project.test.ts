@@ -580,7 +580,7 @@ describe('merging interrupted and concurrent updates', () => {
         ...current,
         dependencies: [...current.dependencies, link(second, first)],
       }));
-      expect(sync(left, right).length).toBeGreaterThan(0);
+      expect(sync(left, right)).toEqual([{ code: 'DEPENDENCY_REMOVED', id: `${second}-${first}` }]);
       syncAll([left, right]);
     }
     expect([left.clientID, right.clientID]).toEqual(identities);

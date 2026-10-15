@@ -1,10 +1,22 @@
-import type { Worker } from 'node:worker_threads';
+import type { Readable } from 'node:stream';
+import { Worker } from 'node:worker_threads';
+import { MAX_FILE_WORKER_HEAP_MEBIBYTES } from '../core/limits';
 import { failure } from '../core/result';
 import { isResultOf, type FileTask, type ResultOfTask } from './file-tasks';
 
 export type FileWorkerFactory = () => Worker;
 
 const OUT_OF_MEMORY_CODE = 'ERR_WORKER_OUT_OF_MEMORY';
+
+/** Starts a worker for one file task from its script, with the memory limit that keeps a forged file from exhausting the application, handing its error output to be logged. */
+export function startFileWorker(path: string, logErrors: (stderr: Readable) => void): Worker {
+  const worker = new Worker(path, {
+    resourceLimits: { maxOldGenerationSizeMb: MAX_FILE_WORKER_HEAP_MEBIBYTES },
+    stderr: true,
+  });
+  logErrors(worker.stderr);
+  return worker;
+}
 
 /** Runs one file task in its own worker, stopped afterwards, a worker out of memory giving a “too complex” failure and any other stop, unsent task, answer not received or foreign to the task a task failure whose cause is logged. */
 export function runInFileWorker<T extends FileTask>(

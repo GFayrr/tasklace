@@ -15,6 +15,7 @@ const HOURS_PER_DAY = 24;
 const DAY_WIDTH = HOURS_PER_DAY * pixelsPerHour('day');
 const DAYS_DRAGGED = 3;
 const HALF = 0.5;
+const FIXED_NOW = new Date(2026, 9, 14, 10, 7);
 
 let userData: string;
 let application: ElectronApplication;
@@ -28,8 +29,10 @@ test.beforeEach(async () => {
   page = await application.firstWindow();
   await page.setViewportSize({ width: 1440, height: 800 });
   await expect(page.locator('#app')).toHaveAttribute('data-started', 'true');
+  await page.clock.setFixedTime(FIXED_NOW);
   await page.getByRole('button', { name: /New project/ }).click();
   today = new Date(await page.evaluate(() => Date.now()));
+  expect(today.getTime()).toBe(FIXED_NOW.getTime());
   grid = page.getByRole('grid', { name: 'Tasks' });
 });
 

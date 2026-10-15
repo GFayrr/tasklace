@@ -3,13 +3,9 @@ import { contentSecurityPolicy } from './content-security-policy';
 
 describe('contentSecurityPolicy', () => {
   it('allows only the application itself in production, with no inline code, no eval and no framing', () => {
-    const policy = contentSecurityPolicy(false);
-    expect(policy).toContain("default-src 'none'");
-    expect(policy).toContain("script-src 'self'");
-    expect(policy).toContain("frame-ancestors 'none'");
-    expect(policy).toContain("object-src 'none'");
-    expect(policy).not.toContain('unsafe');
-    expect(policy).not.toContain('ws:');
+    expect(contentSecurityPolicy(false)).toBe(
+      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'",
+    );
   });
 
   it('adds only inline styles and the reload socket of the development server', () => {
