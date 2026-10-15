@@ -8,7 +8,11 @@ import { exportProjectCsv } from '../core/exchange/csv/project-csv-export';
 import { exportProjectJson } from '../core/exchange/project-json';
 import { encodeTasklaceFile, encodeTasklaceState } from '../core/file/tasklace-file';
 import { MAX_FILE_BYTES } from '../core/limits';
-import { createSharedDocument, readDocumentId } from '../core/shared/shared-document';
+import {
+  createSharedDocument,
+  readDocumentId,
+  requireDocumentId,
+} from '../core/shared/shared-document';
 import { readSharedProject } from '../core/shared/shared-project';
 import { unwrap } from '../core/testing/arbitraries';
 import {
@@ -36,7 +40,7 @@ import { readIndexText } from './local-copies';
 import { zlibCompressor } from './zlib-compressor';
 
 const NAMING = { untitled: 'Untitled project', fromFile: 'From the file' };
-const NEW_DOCUMENT_ID = '00000000-0000-4000-8000-00000000000f';
+const NEW_DOCUMENT_ID = requireDocumentId('00000000-0000-4000-8000-00000000000f');
 const SAMPLE = project([workTask('a', { name: 'Écrire' }), workTask('b')], [link('a', 'b')]);
 const FRENCH = {
   listSeparator: ';',
@@ -44,7 +48,7 @@ const FRENCH = {
   dateSeparator: '/',
   twelveHourClock: false,
 } as const;
-const SAVED_AT = Date.UTC(2026, 8, 30, 10);
+const SAVED_AT = new Date(Date.UTC(2026, 8, 30, 10));
 const LARGE_STATE_TASKS = 2_000;
 
 let folder: string;
@@ -441,7 +445,7 @@ describe('isResultOf', () => {
       state: Uint8Array.of(),
       documentId: TEST_DOCUMENT_ID,
       localCopyFolder: '/copies',
-      savedAt: 0,
+      savedAt: new Date(0),
     } as const;
     const loaded = { ok: true, value: { kind: 'loaded' } };
     const saved = { ok: true, value: { kind: 'saved' } };

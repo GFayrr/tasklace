@@ -2,6 +2,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { requireDocumentId } from '../core/shared/shared-document';
 
 const asideFailure = vi.hoisted((): { error: Error | null } => ({ error: null }));
 
@@ -17,7 +18,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 
 const { readIndexText, saveLocalCopy } = await import('./local-copies');
 
-const DOCUMENT = '00000000-0000-4000-8000-000000000001';
+const DOCUMENT = requireDocumentId('00000000-0000-4000-8000-000000000001');
 const SAVED_AT = new Date(Date.UTC(2026, 8, 30, 10));
 const DAMAGED = '{"version":1,"copies":{"broken"';
 

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
 import type { Project } from '../../src/core/model/project';
-import { createSharedDocument } from '../../src/core/shared/shared-document';
+import { createSharedDocument, requireDocumentId } from '../../src/core/shared/shared-document';
 import { at } from '../../src/core/testing/civil-time';
 import {
   link,
@@ -85,7 +85,10 @@ test.beforeEach(async () => {
   const path = join(folder, 'Thesis.tasklace');
   await writeFile(
     path,
-    encodeTasklaceFile(createSharedDocument(PLAN, crypto.randomUUID()), zlibCompressor),
+    encodeTasklaceFile(
+      createSharedDocument(PLAN, requireDocumentId(crypto.randomUUID())),
+      zlibCompressor,
+    ),
   );
   await answerDialogs(application, { open: path });
   await page.getByRole('button', { name: /Open…/ }).click();
@@ -213,7 +216,10 @@ test('prints a long plan on as many PDF pages as the preview announces, with no 
   const source = join(folder, 'Long plan.tasklace');
   await writeFile(
     source,
-    encodeTasklaceFile(createSharedDocument(long, crypto.randomUUID()), zlibCompressor),
+    encodeTasklaceFile(
+      createSharedDocument(long, requireDocumentId(crypto.randomUUID())),
+      zlibCompressor,
+    ),
   );
   await answerDialogs(application, { open: source });
   await page.getByRole('button', { name: 'Open', exact: true }).click();
@@ -298,7 +304,10 @@ test('prints a chosen period at a chosen zoom on portrait A3 pages, as many as t
   const source = join(folder, `${plan.name}.tasklace`);
   await writeFile(
     source,
-    encodeTasklaceFile(createSharedDocument(plan, crypto.randomUUID()), zlibCompressor),
+    encodeTasklaceFile(
+      createSharedDocument(plan, requireDocumentId(crypto.randomUUID())),
+      zlibCompressor,
+    ),
   );
   await answerDialogs(application, { open: source });
   await page.getByRole('button', { name: 'Open', exact: true }).click();

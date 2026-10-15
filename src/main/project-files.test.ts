@@ -14,6 +14,7 @@ import {
   windowProjectKind,
 } from './project-files';
 import type { FakeIpcMain } from './testing/fake-electron';
+import { requireDocumentId } from '../core/shared/shared-document';
 
 const dialogs = vi.hoisted(() => ({
   open: vi.fn<() => Promise<{ canceled: boolean; filePaths: string[] }>>(),
@@ -64,8 +65,8 @@ vi.mock('electron', async () => {
 
 const ipcMain = electronIpcMain as unknown as FakeIpcMain;
 const STATE = Uint8Array.from([1, 2, 3]);
-const DOCUMENT_ID = '11111111-1111-4111-8111-111111111111';
-const OTHER_ID = '22222222-2222-4222-8222-222222222222';
+const DOCUMENT_ID = requireDocumentId('11111111-1111-4111-8111-111111111111');
+const OTHER_ID = requireDocumentId('22222222-2222-4222-8222-222222222222');
 const LOADED = { kind: 'loaded', state: STATE, documentId: DOCUMENT_ID, warnings: [] } as const;
 const SAVED = { kind: 'saved', localCopySaved: true } as const;
 const tasks: FileTask[] = [];
@@ -428,7 +429,7 @@ describe('new and imported projects', () => {
         state: STATE,
         documentId,
         localCopyFolder: join(userData, 'local-copies'),
-        savedAt: expect.any(Number) as number,
+        savedAt: expect.any(Date) as Date,
       },
     ]);
   });

@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import type { Project } from '../../../core/model/project';
 import type { PrintDocument } from '../../../core/print/print-document';
 import { scheduleProject } from '../../../core/scheduling/schedule-project';
-import { createSharedDocument } from '../../../core/shared/shared-document';
+import { createSharedDocument, requireDocumentId } from '../../../core/shared/shared-document';
 import { TEST_DOCUMENT_ID } from '../../../core/testing/project-builder';
 import type {
   BridgeResult,
@@ -19,7 +19,7 @@ import type { Scheduler, ScheduleListener } from '../../schedule/scheduler';
 import { SAND_GRAPHITE } from '../../theme/sand-graphite';
 import { AppState, type AppContext } from '../app-state.svelte';
 
-export const OPENED_DOCUMENT_ID = '22222222-2222-4222-8222-222222222222';
+export const OPENED_DOCUMENT_ID = requireDocumentId('22222222-2222-4222-8222-222222222222');
 export const FRENCH_FORMAT = {
   listSeparator: ';',
   dateOrder: 'dayMonthYear',

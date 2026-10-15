@@ -12,6 +12,7 @@ import {
   openSharedSession,
   openSharedSessionFromState,
   type SharedSession,
+  sessionDocument,
 } from './shared-session';
 
 /** Decodes a Yjs state into a new document. */
@@ -34,12 +35,12 @@ function sessionFrom(state: Uint8Array, fromState: boolean): SharedSession {
 
 /** Returns the update a peer sends after operations, the peer holding everything a session's document holds, its opening repairs included. */
 function peerUpdate(session: SharedSession, operations: readonly SharedOperation[]): Uint8Array {
-  const peer = sessionFrom(Y.encodeStateAsUpdate(session.document), false);
-  const before = Y.encodeStateVector(peer.document);
+  const peer = sessionFrom(Y.encodeStateAsUpdate(sessionDocument(session)), false);
+  const before = Y.encodeStateVector(sessionDocument(peer));
   operations.forEach((operation) => {
     peer.apply(operation);
   });
-  return Y.encodeStateAsUpdate(peer.document, before);
+  return Y.encodeStateAsUpdate(sessionDocument(peer), before);
 }
 
 /** Checks that a session opened from a state takes the same decisions as one opened on the document that state gives, on updates from peers, a local change and an undo. */
@@ -57,7 +58,9 @@ function expectSameDecisions(
   updates.forEach(([forState, forBefore]) => {
     expect(forState && fromState.merge(forState)).toEqual(forBefore && asBefore.merge(forBefore));
   });
-  expect(readSharedData(fromState.document)).toEqual(readSharedData(asBefore.document));
+  expect(readSharedData(sessionDocument(fromState))).toEqual(
+    readSharedData(sessionDocument(asBefore)),
+  );
   const local = { type: 'putTask', task: workTask('local', { name: 'Local' }) } as const;
   expect(fromState.apply(local)).toEqual(asBefore.apply(local));
   expect(fromState.history.undo()).toEqual(asBefore.history.undo());
@@ -111,16 +114,16 @@ describe('opening a session from a state', () => {
       createSharedDocument(project([workTask('a')]), TEST_DOCUMENT_ID),
     );
     const session = sessionFrom(state, true);
-    const peer = documentOf(Y.encodeStateAsUpdate(session.document));
+    const peer = documentOf(Y.encodeStateAsUpdate(sessionDocument(session)));
     const before = Y.encodeStateVector(peer);
     const task: unknown = peer.getMap(TASKS_ROOT).get('a');
     if (!(task instanceof Y.Map)) {
       throw new Error('The task is missing.');
     }
     task.set('tagId', 'missing');
-    const documentClient = session.document.clientID;
+    const documentClient = sessionDocument(session).clientID;
     const clients = new Set<number>();
-    session.document.on('update', (update: Uint8Array) => {
+    sessionDocument(session).on('update', (update: Uint8Array) => {
       Y.decodeUpdate(update).structs.forEach((struct) => clients.add(struct.id.client));
     });
     const merged = session.merge(Y.encodeStateAsUpdate(peer, before));
@@ -130,7 +133,7 @@ describe('opening a session from a state', () => {
     expect(others).toEqual([]);
     expect(repairer).not.toBeUndefined();
     expect(repairer).not.toBe(documentClient);
-    expect(session.document.clientID).toBe(documentClient);
+    expect(sessionDocument(session).clientID).toBe(documentClient);
   });
 
   it('refuses a state that cannot be read, that depends on updates it lacks, or whose project is not valid', () => {

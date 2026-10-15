@@ -112,7 +112,7 @@ describe('createScheduler', () => {
     const stale = {
       version: SCHEDULE_PROTOCOL_VERSION,
       generation: 99,
-      result: { ok: false, error: { code: 'EMPTY_CALENDAR' } },
+      result: { ok: false, error: { kind: 'startDate' } },
     };
     const worker = pool.latest();
     worker.port.onmessage?.(new MessageEvent('message', { data: stale }));
@@ -137,6 +137,57 @@ describe('createScheduler', () => {
           ok: true,
           value: { placements: new Map(), summaries: new Map(), wbsNumbers: {} },
         },
+      },
+    ],
+    [
+      {
+        version: SCHEDULE_PROTOCOL_VERSION,
+        generation: 1,
+        result: {
+          ok: true,
+          value: { placements: new Map(), summaries: new Map(), wbsNumbers: new Map() },
+        },
+      },
+    ],
+    [
+      {
+        version: SCHEDULE_PROTOCOL_VERSION,
+        generation: 1,
+        result: {
+          ok: true,
+          value: {
+            placements: new Map(),
+            summaries: new Map(),
+            wbsNumbers: new Map(),
+            floats: {},
+            conflicts: [],
+            tagConflicts: { conflicts: [], tasksWithUnknownTag: [] },
+          },
+        },
+      },
+    ],
+    [
+      {
+        version: SCHEDULE_PROTOCOL_VERSION,
+        generation: 1,
+        result: {
+          ok: true,
+          value: {
+            placements: new Map(),
+            summaries: new Map(),
+            wbsNumbers: new Map(),
+            floats: null,
+            conflicts: [],
+            tagConflicts: { conflicts: [] },
+          },
+        },
+      },
+    ],
+    [
+      {
+        version: SCHEDULE_PROTOCOL_VERSION,
+        generation: 1,
+        result: { ok: false, error: { code: 'EMPTY_CALENDAR' } },
       },
     ],
   ])(

@@ -224,6 +224,7 @@ export class AppState {
   readonly #files: ProjectFiles;
   readonly #scheduler: Scheduler;
   #session: SharedSession | null = null;
+  #stopFollowing: () => void = () => undefined;
   #refreshQueued = false;
   #changedSinceOpened = false;
   #nextNoticeId = 0;
@@ -1101,7 +1102,7 @@ export class AppState {
 
   /** Follows the changes of a newly opened project. */
   #attach(session: SharedSession): void {
-    this.#session?.document.off('update', this.#queueRefresh);
+    this.#stopFollowing();
     this.#session = session;
     this.#computed = null;
     this.#peopleLines = [];
@@ -1117,7 +1118,7 @@ export class AppState {
     this.#changedSinceOpened = false;
     this.collapsed = NOTHING_COLLAPSED;
     this.#openedCount += 1;
-    session.document.on('update', this.#queueRefresh);
+    this.#stopFollowing = session.onChange(this.#queueRefresh);
     this.#refresh();
   }
 

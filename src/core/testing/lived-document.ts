@@ -2,7 +2,7 @@ import fc from 'fast-check';
 import * as Y from 'yjs';
 import type { Project } from '../model/project';
 import { createSharedDocument } from '../shared/shared-document';
-import { openSharedSession, type SharedSession } from '../shared/shared-session';
+import { openSharedSession, type SharedSession, sessionDocument } from '../shared/shared-session';
 import { TEST_DOCUMENT_ID, workTask } from './project-builder';
 
 const MAX_RANDOM_EDITS = 6;
@@ -27,7 +27,7 @@ function sessionOf(state: Uint8Array): SharedSession {
 /** Returns the state of a document that lived: built by one participant, changed in turn by two participants whose edits remove tasks as well as add them, then merged into one. */
 export function livedState(source: Project, edits: readonly number[]): Uint8Array {
   const first = sessionOf(Y.encodeStateAsUpdate(createSharedDocument(source, TEST_DOCUMENT_ID)));
-  const second = sessionOf(Y.encodeStateAsUpdate(first.document));
+  const second = sessionOf(Y.encodeStateAsUpdate(sessionDocument(first)));
   edits.forEach((edit, index) => {
     const task = source.tasks[edit % Math.max(source.tasks.length, 1)];
     const editor = index % PARTICIPANTS === 0 ? first : second;
@@ -37,6 +37,8 @@ export function livedState(source: Project, edits: readonly number[]): Uint8Arra
     }
     editor.apply({ type: 'putTask', task: workTask(`added${String(index)}`) });
   });
-  first.merge(Y.encodeStateAsUpdate(second.document, Y.encodeStateVector(first.document)));
-  return Y.encodeStateAsUpdate(first.document);
+  first.merge(
+    Y.encodeStateAsUpdate(sessionDocument(second), Y.encodeStateVector(sessionDocument(first))),
+  );
+  return Y.encodeStateAsUpdate(sessionDocument(first));
 }

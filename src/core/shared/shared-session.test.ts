@@ -17,7 +17,7 @@ import {
 import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
 import { applyOperation, taskOfCalendarIssue, type SharedOperation } from './shared-operations';
 import { applySharedChange, mergeSharedUpdate, readSharedProject } from './shared-project';
-import { openSharedSession, type SharedSession } from './shared-session';
+import { openSharedSession, type SharedSession, sessionDocument } from './shared-session';
 
 const DESIGN: Tag = {
   id: 'design',
@@ -66,18 +66,18 @@ function copyOf(document: Y.Doc): Y.Doc {
 
 /** Checks that a session's indexed project matches its document. */
 function expectConsistent(session: SharedSession): void {
-  const read = readSharedProject(session.document);
+  const read = readSharedProject(sessionDocument(session));
   expect(read.ok).toBe(true);
   expect(read.ok && read.value).toEqual(session.project());
 }
 
 /** Applies an operation to a session and, on a copy, through the reference, checking that both agree. */
 function applyBoth(session: SharedSession, operation: SharedOperation): boolean {
-  const reference = copyOf(session.document);
+  const reference = copyOf(sessionDocument(session));
   const expected = applySharedChange(reference, (current) => applyOperation(current, operation));
   const result = session.apply(operation);
   expect(result.ok).toBe(expected.ok);
-  expect(readSharedData(session.document)).toEqual(readSharedData(reference));
+  expect(readSharedData(sessionDocument(session))).toEqual(readSharedData(reference));
   expectConsistent(session);
   return result.ok;
 }
@@ -93,7 +93,7 @@ function entryOf(document: Y.Doc, id: string): Y.Map<unknown> {
 
 /** Merges an update into a session and, on a copy, through the reference, checking that both agree. */
 function mergeBoth(session: SharedSession, update: Uint8Array): boolean {
-  const reference = copyOf(session.document);
+  const reference = copyOf(sessionDocument(session));
   const expected = mergeSharedUpdate(reference, update);
   const result = session.merge(update);
   expect(result.ok || result.error.kind).toEqual(expected.ok || expected.error.kind);
@@ -102,7 +102,7 @@ function mergeBoth(session: SharedSession, update: Uint8Array): boolean {
       [...expected.value].sort(compareRepairs),
     );
   }
-  expect(readSharedData(session.document)).toEqual(readSharedData(reference));
+  expect(readSharedData(sessionDocument(session))).toEqual(readSharedData(reference));
   expectConsistent(session);
   return result.ok && result.value.length > 0;
 }
@@ -117,14 +117,18 @@ function compareRepairs(
 
 /** Sends to a session everything it is missing from another one, through both implementations. */
 function syncBoth(from: SharedSession, to: SharedSession): boolean {
-  return mergeBoth(to, Y.encodeStateAsUpdate(from.document, Y.encodeStateVector(to.document)));
+  return mergeBoth(
+    to,
+    Y.encodeStateAsUpdate(sessionDocument(from), Y.encodeStateVector(sessionDocument(to))),
+  );
 }
 
 describe('shared session', () => {
   it('opens only on a valid document and gives back its project', () => {
     const [session] = openSessions(BASE_PROJECT, 1);
     expect(session?.project()).toEqual(
-      readSharedProject(session?.document ?? new Y.Doc()).ok && session?.project(),
+      readSharedProject(session === undefined ? new Y.Doc() : sessionDocument(session)).ok &&
+        session?.project(),
     );
     const broken = createSharedDocument(BASE_PROJECT, TEST_DOCUMENT_ID);
     broken.getMap(TASKS_ROOT).set('z', 'not a task');
@@ -168,7 +172,7 @@ describe('shared session', () => {
       throw new Error('Missing session');
     }
     const updates: Uint8Array[] = [];
-    session.document.on('update', (update: Uint8Array) => {
+    sessionDocument(session).on('update', (update: Uint8Array) => {
       updates.push(update);
     });
     expect(session.apply({ type: 'putTask', task: workTask('c', { name: 'Renamed' }) }).ok).toBe(
@@ -228,6 +232,49 @@ describe('shared session', () => {
     expect(applyBoth(session, { type: 'removeTag', id: 'design' })).toBe(true);
     expect(session.project().dependencies).toEqual([]);
     expect(session.project().tasks.find((task) => task.id === 'a')).toMatchObject({ tagId: null });
+  });
+});
+
+describe('the reach of a shared session', () => {
+  it('tells every change of its document, local or received, until it is no longer followed', () => {
+    const [alice, bob] = openSessions(project([workTask('a')]), 2);
+    if (alice === undefined || bob === undefined) {
+      throw new Error('Missing participant');
+    }
+    let changes = 0;
+    const stop = alice.onChange(() => {
+      changes += 1;
+    });
+    expect(alice.apply({ type: 'updateProject', fields: { name: 'Local' } }).ok).toBe(true);
+    expect(bob.apply({ type: 'updateProject', fields: { name: 'Received' } }).ok).toBe(true);
+    expect(alice.merge(bob.encodeState(alice.encodeStateVector())).ok).toBe(true);
+    expect(changes).toBe(2);
+    stop();
+    expect(alice.apply({ type: 'updateProject', fields: { name: 'Unfollowed' } }).ok).toBe(true);
+    expect(changes).toBe(2);
+  });
+
+  it('encodes its whole state, or only what a state vector lacks, as its document does', () => {
+    const [alice] = openSessions(project([workTask('a')]), 1);
+    if (alice === undefined) {
+      throw new Error('Missing participant');
+    }
+    const document = sessionDocument(alice);
+    const before = alice.encodeStateVector();
+    expect(before).toEqual(Y.encodeStateVector(document));
+    expect(alice.apply({ type: 'updateProject', fields: { name: 'Changed' } }).ok).toBe(true);
+    expect(alice.encodeState()).toEqual(Y.encodeStateAsUpdate(document));
+    expect(alice.encodeState(before)).toEqual(Y.encodeStateAsUpdate(document, before));
+  });
+
+  it('refuses to give the document of a session it did not open', () => {
+    const [alice] = openSessions(project([workTask('a')]), 1);
+    if (alice === undefined) {
+      throw new Error('Missing participant');
+    }
+    expect(() => sessionDocument({ ...alice })).toThrow(
+      'This session was not opened by openSharedSession.',
+    );
   });
 });
 
@@ -317,11 +364,14 @@ describe('shared session edge cases', () => {
     if (source === undefined || victim === undefined) {
       throw new Error('Missing session');
     }
-    const malicious = copyOf(source.document);
+    const malicious = copyOf(sessionDocument(source));
     malicious.clientID = 77;
     malicious.getMap('project').set('name', 5);
     expect(
-      mergeBoth(victim, Y.encodeStateAsUpdate(malicious, Y.encodeStateVector(victim.document))),
+      mergeBoth(
+        victim,
+        Y.encodeStateAsUpdate(malicious, Y.encodeStateVector(sessionDocument(victim))),
+      ),
     ).toBe(false);
   });
 
@@ -331,15 +381,15 @@ describe('shared session edge cases', () => {
       throw new Error('Missing session');
     }
     expect(victim.documentId).toBe(TEST_DOCUMENT_ID);
-    const malicious = copyOf(source.document);
+    const malicious = copyOf(sessionDocument(source));
     malicious.clientID = 77;
     malicious.getMap('project').set('documentId', '00000000-0000-4000-8000-000000000002');
-    const update = Y.encodeStateAsUpdate(malicious, Y.encodeStateVector(victim.document));
+    const update = Y.encodeStateAsUpdate(malicious, Y.encodeStateVector(sessionDocument(victim)));
     expect(victim.merge(update)).toEqual({
       ok: false,
       error: { kind: 'invalidProject', issues: [{ path: 'documentId', code: 'READ_ONLY_FIELD' }] },
     });
-    expect(victim.document.getMap('project').get('documentId')).toBe(TEST_DOCUMENT_ID);
+    expect(sessionDocument(victim).getMap('project').get('documentId')).toBe(TEST_DOCUMENT_ID);
   });
 
   it('refuses to open a document without identifier', () => {
@@ -360,13 +410,13 @@ describe('shared session edge cases', () => {
     if (source === undefined || victim === undefined) {
       throw new Error('Missing session');
     }
-    const malicious = copyOf(source.document);
+    const malicious = copyOf(sessionDocument(source));
     malicious.clientID = 77;
     hideListContent(target(malicious));
-    const update = Y.encodeStateAsUpdate(malicious, Y.encodeStateVector(victim.document));
-    const before = readSharedData(victim.document);
+    const update = Y.encodeStateAsUpdate(malicious, Y.encodeStateVector(sessionDocument(victim)));
+    const before = readSharedData(sessionDocument(victim));
     expect(victim.merge(update).ok).toBe(false);
-    expect(readSharedData(victim.document)).toEqual(before);
+    expect(readSharedData(sessionDocument(victim))).toEqual(before);
   });
 
   it('names the task a shorter working day refuses, and no task for any other issue', () => {
@@ -414,7 +464,7 @@ describe('shared session edge cases', () => {
     expect(applyBoth(left, { type: 'removeTag', id: 'alice' })).toBe(true);
     expect(syncBoth(right, left)).toBe(true);
     syncBoth(left, right);
-    expect(readSharedData(left.document)).toEqual(readSharedData(right.document));
+    expect(readSharedData(sessionDocument(left))).toEqual(readSharedData(sessionDocument(right)));
   });
 });
 
@@ -716,8 +766,14 @@ function playStep(
       : from === undefined
         ? undefined
         : step.type === 'sync'
-          ? Y.encodeStateAsUpdate(from.document, Y.encodeStateVector(to.document))
-          : tamperedUpdate(from.document, to.document, step.key, step.value, 1_000 + index);
+          ? Y.encodeStateAsUpdate(sessionDocument(from), Y.encodeStateVector(sessionDocument(to)))
+          : tamperedUpdate(
+              sessionDocument(from),
+              sessionDocument(to),
+              step.key,
+              step.value,
+              1_000 + index,
+            );
   if (update !== undefined) {
     updates.push(update);
     counters.repairs += mergeBoth(to, update) ? 1 : 0;
@@ -757,7 +813,9 @@ describe('shared session properties', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () 
                 counters.repairs += syncBoth(from, to) ? 1 : 0;
               }
             }
-            const [first, ...others] = sessions.map((session) => readSharedData(session.document));
+            const [first, ...others] = sessions.map((session) =>
+              readSharedData(sessionDocument(session)),
+            );
             others.forEach((data) => {
               expect(data).toEqual(first);
             });

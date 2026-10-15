@@ -6,7 +6,7 @@ import { compileCalendar } from '../../src/core/calendar/compile-calendar';
 import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
 import type { Project } from '../../src/core/model/project';
 import type { PrintDocument } from '../../src/core/print/print-document';
-import { createSharedDocument } from '../../src/core/shared/shared-document';
+import { createSharedDocument, requireDocumentId } from '../../src/core/shared/shared-document';
 import { checkedOrThrow } from '../../src/core/testing/print-arbitrary';
 import { scheduleOrThrow } from '../../src/core/testing/project-builder';
 import { writeDirectPdf } from '../../src/main/pdf/direct-pdf';
@@ -155,7 +155,10 @@ async function exportThroughWindow(plan: Project, size: PdfSampleSize): Promise<
   const source = join(folder, `${plan.name}.tasklace`);
   await writeFile(
     source,
-    encodeTasklaceFile(createSharedDocument(plan, crypto.randomUUID()), zlibCompressor),
+    encodeTasklaceFile(
+      createSharedDocument(plan, requireDocumentId(crypto.randomUUID())),
+      zlibCompressor,
+    ),
   );
   await answerDialogs(application, { open: source });
   const welcome = page.getByRole('button', { name: /Open…/ });

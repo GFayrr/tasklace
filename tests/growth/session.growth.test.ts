@@ -3,7 +3,11 @@ import * as Y from 'yjs';
 import type { Project } from '../../src/core/model/project';
 import { repairProject } from '../../src/core/shared/repair-project';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
-import { openSharedSession, type SharedSession } from '../../src/core/shared/shared-session';
+import {
+  openSharedSession,
+  type SharedSession,
+  sessionDocument,
+} from '../../src/core/shared/shared-session';
 import { buildLargeProject, LARGE_PROJECT_SEED } from '../fixtures/large-project';
 import {
   batched,
@@ -55,7 +59,7 @@ function taskRenamer(session: SharedSession): (index: number) => void {
 function recordRemoteEdits(document: Y.Doc): Uint8Array[] {
   const remote = openCopy(document);
   const updates: Uint8Array[] = [];
-  remote.document.on('update', (update: Uint8Array) => {
+  sessionDocument(remote).on('update', (update: Uint8Array) => {
     updates.push(update);
   });
   const rename = taskRenamer(remote);

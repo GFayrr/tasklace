@@ -4,7 +4,7 @@ import { link, project, TEST_DOCUMENT_ID, workTask } from '../testing/project-bu
 import { createSharedDocument } from './shared-document';
 import type { SharedOperation } from './shared-operations';
 import { readSharedProject } from './shared-project';
-import { openSharedSession, type SharedSession } from './shared-session';
+import { openSharedSession, type SharedSession, sessionDocument } from './shared-session';
 
 const failing = vi.hoisted(() => ({ name: null as string | null }));
 
@@ -51,7 +51,7 @@ function expectUnchanged(
   before: ReturnType<SharedSession['project']>,
 ): void {
   expect(session.project()).toEqual(before);
-  const read = readSharedProject(session.document);
+  const read = readSharedProject(sessionDocument(session));
   expect(read.ok && read.value.tasks.map((task) => task.id).sort()).toEqual(['a', 'b']);
   const linked = session.apply({ type: 'putDependency', dependency: link('a', 'c') });
   expect(linked).toEqual({
@@ -90,7 +90,7 @@ describe('a session whose change fails partway', () => {
   it('puts its state back when writing to the document raises, for one operation or a group', () => {
     const session = openSession();
     const before = session.project();
-    const transact = vi.spyOn(session.document, 'transact');
+    const transact = vi.spyOn(sessionDocument(session), 'transact');
     transact.mockImplementationOnce(() => {
       throw new Error('write broken');
     });
@@ -107,8 +107,8 @@ describe('a session whose change fails partway', () => {
 
   it('refuses to keep a wrong state when its document no longer holds a valid project', () => {
     const session = openSession();
-    Y.transact(session.document, () => {
-      session.document.getMap('project').set('name', 42);
+    Y.transact(sessionDocument(session), () => {
+      sessionDocument(session).getMap('project').set('name', 42);
     });
     expect(() =>
       session.applyAll([adding('c', 'Valid'), { type: 'updateProject', fields: { name: '' } }]),
@@ -117,8 +117,8 @@ describe('a session whose change fails partway', () => {
 
   it('raises the error of the change and that of the reset together when the document no longer holds a valid project either', () => {
     const session = openSession();
-    Y.transact(session.document, () => {
-      session.document.getMap('project').set('name', 42);
+    Y.transact(sessionDocument(session), () => {
+      sessionDocument(session).getMap('project').set('name', 42);
     });
     failing.name = EXPLODING;
     let raised: unknown = null;

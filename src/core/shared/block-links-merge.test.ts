@@ -10,7 +10,7 @@ import {
 } from '../testing/project-builder';
 import { createSharedDocument, DEPENDENCIES_ROOT, TASKS_ROOT } from './shared-document';
 import type { SharedRepair } from './shared-project';
-import { openSharedSession, type SharedSession } from './shared-session';
+import { openSharedSession, type SharedSession, sessionDocument } from './shared-session';
 
 const DEVELOPMENT = splitTask('dev', [
   [7, 0],
@@ -42,10 +42,10 @@ function openPair(base: Project = BASE): readonly [SharedSession, SharedSession]
 /** Sends to each participant what the other has and returns the repairs both reported. */
 function syncBoth(left: SharedSession, right: SharedSession): readonly SharedRepair[] {
   const toLeft = left.merge(
-    Y.encodeStateAsUpdate(right.document, Y.encodeStateVector(left.document)),
+    Y.encodeStateAsUpdate(sessionDocument(right), Y.encodeStateVector(sessionDocument(left))),
   );
   const toRight = right.merge(
-    Y.encodeStateAsUpdate(left.document, Y.encodeStateVector(right.document)),
+    Y.encodeStateAsUpdate(sessionDocument(left), Y.encodeStateVector(sessionDocument(right))),
   );
   if (!toLeft.ok || !toRight.ok) {
     throw new Error('A merge was refused');
@@ -175,9 +175,12 @@ describe('block links checked on a local change', () => {
   it('refuses a received link whose block number is not a valid number, leaving the project intact', () => {
     const [alice, bob] = openPair();
     linked(bob, blockLink('dev', 'test', { from: 1 }));
-    const update = Y.encodeStateAsUpdate(bob.document, Y.encodeStateVector(alice.document));
+    const update = Y.encodeStateAsUpdate(
+      sessionDocument(bob),
+      Y.encodeStateVector(sessionDocument(alice)),
+    );
     const tampered = new Y.Doc();
-    Y.applyUpdate(tampered, Y.encodeStateAsUpdate(bob.document));
+    Y.applyUpdate(tampered, Y.encodeStateAsUpdate(sessionDocument(bob)));
     tampered.clientID = 3;
     const entry = tampered.getMap(DEPENDENCIES_ROOT).get('dev_1-test');
     if (!(entry instanceof Y.Map)) {
@@ -187,7 +190,7 @@ describe('block links checked on a local change', () => {
     const before = alice.project();
     const forged = Y.mergeUpdates([
       update,
-      Y.encodeStateAsUpdate(tampered, Y.encodeStateVector(bob.document)),
+      Y.encodeStateAsUpdate(tampered, Y.encodeStateVector(sessionDocument(bob))),
     ]);
     const merged = alice.merge(forged);
     expect(merged).toEqual({
@@ -203,7 +206,7 @@ describe('block links checked on a local change', () => {
   it('refuses a received start date on the first block of a task, leaving the project intact', () => {
     const [alice, bob] = openPair();
     const tampered = new Y.Doc();
-    Y.applyUpdate(tampered, Y.encodeStateAsUpdate(bob.document));
+    Y.applyUpdate(tampered, Y.encodeStateAsUpdate(sessionDocument(bob)));
     tampered.clientID = 3;
     const entry = tampered.getMap(TASKS_ROOT).get('dev');
     if (!(entry instanceof Y.Map)) {
@@ -215,7 +218,7 @@ describe('block links checked on a local change', () => {
     ]);
     const before = alice.project();
     const merged = alice.merge(
-      Y.encodeStateAsUpdate(tampered, Y.encodeStateVector(alice.document)),
+      Y.encodeStateAsUpdate(tampered, Y.encodeStateVector(sessionDocument(alice))),
     );
     expect(merged.ok).toBe(false);
     expect(!merged.ok && merged.error.kind).toBe('invalidProject');

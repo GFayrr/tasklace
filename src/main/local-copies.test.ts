@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatLocalCopyIndex, localCopyPath, readIndexText, saveLocalCopy } from './local-copies';
+import { requireDocumentId } from '../core/shared/shared-document';
+import { forgedDocumentId } from '../core/testing/project-builder';
 
-const FIRST = '00000000-0000-4000-8000-000000000001';
-const SECOND = '00000000-0000-4000-8000-000000000002';
+const FIRST = requireDocumentId('00000000-0000-4000-8000-000000000001');
+const SECOND = requireDocumentId('00000000-0000-4000-8000-000000000002');
 const SOURCE = resolve('/projects/plan.tasklace');
 const SAVED_AT = new Date(Date.UTC(2026, 8, 30, 10));
 
@@ -28,7 +30,7 @@ describe('local copies', () => {
       'A0000000-0000-4000-8000-000000000001',
       '',
     ]) {
-      expect(localCopyPath(folder, identifier)).toBeNull();
+      expect(localCopyPath(folder, forgedDocumentId(identifier))).toBeNull();
     }
   });
 
@@ -106,7 +108,7 @@ describe('local copies', () => {
 
   it('refuses to write a copy under an invalid identifier', async () => {
     await expect(
-      saveLocalCopy(folder, '../escape', Uint8Array.from([1]), null, SAVED_AT),
+      saveLocalCopy(folder, forgedDocumentId('../escape'), Uint8Array.from([1]), null, SAVED_AT),
     ).rejects.toThrow();
     expect(await readdir(folder)).toEqual([]);
   });

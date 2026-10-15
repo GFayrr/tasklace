@@ -32,24 +32,40 @@ export function answerScheduleRequest(message: unknown): ScheduleResponse {
   };
 }
 
-/** Tells whether a message is a schedule response of the current protocol version, whose result says whether it succeeded and, when it did, holds the tables of a schedule. */
+/** Tells whether a message is a schedule response of the current protocol version: a failure of a known kind, or a schedule with every field of its first level, the contents of its tables being trusted since the worker runs the code of this application. */
 export function isScheduleResponse(message: unknown): message is ScheduleResponse {
   if (!hasVersionAndGeneration(message) || !('result' in message)) {
     return false;
   }
   const ok: unknown = Reflect.get(Object(message.result), 'ok');
+  if (ok === false) {
+    const error: unknown = Reflect.get(Object(message.result), 'error');
+    const kind: unknown = Reflect.get(Object(error), 'kind');
+    return typeof kind === 'string' && Object.hasOwn(FAILURE_KINDS, kind);
+  }
+  return ok === true && holdsSchedule(Reflect.get(Object(message.result), 'value'));
+}
+
+/** Tells whether a value holds every field of a schedule: its tables, its floats when computed, its conflicts and the report of its tags. */
+function holdsSchedule(value: unknown): boolean {
+  const floats: unknown = Reflect.get(Object(value), 'floats');
+  const tagConflicts: unknown = Reflect.get(Object(value), 'tagConflicts');
   return (
-    ok === false ||
-    (ok === true && holdsScheduleTables(Reflect.get(Object(message.result), 'value')))
+    SCHEDULE_TABLES.every((table) => Reflect.get(Object(value), table) instanceof Map) &&
+    (floats === null || floats instanceof Map) &&
+    Array.isArray(Reflect.get(Object(value), 'conflicts')) &&
+    Array.isArray(Reflect.get(Object(tagConflicts), 'conflicts')) &&
+    Array.isArray(Reflect.get(Object(tagConflicts), 'tasksWithUnknownTag'))
   );
 }
 
-/** Tells whether a value holds the tables of a schedule that the table, the timeline and the CSV export read. */
-function holdsScheduleTables(value: unknown): boolean {
-  return SCHEDULE_TABLES.every((table) => Reflect.get(Object(value), table) instanceof Map);
-}
-
 const SCHEDULE_TABLES = ['placements', 'summaries', 'wbsNumbers'] as const;
+const FAILURE_KINDS = {
+  calendar: true,
+  startDate: true,
+  structure: true,
+  task: true,
+} as const satisfies Readonly<Record<SchedulingFailure['kind'], true>>;
 
 /** Tells whether a message is a schedule request of the current protocol version. */
 function isScheduleRequest(message: unknown): message is ScheduleRequest {

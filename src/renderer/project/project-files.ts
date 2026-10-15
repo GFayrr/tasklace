@@ -1,4 +1,3 @@
-import * as Y from 'yjs';
 import type { Project } from '../../core/model/project';
 import type { PrintDocument } from '../../core/print/print-document';
 import { createSharedDocument, isDocumentId } from '../../core/shared/shared-document';
@@ -109,6 +108,7 @@ export class FileActionError extends Error {
 interface Current {
   readonly session: SharedSession;
   hasFile: boolean;
+  readonly stopFollowing: () => void;
 }
 
 const NOTHING_TO_SAVE: ActionResult<never> = { ok: false, error: { code: 'NO_PROJECT' } };
@@ -128,7 +128,7 @@ export function createProjectFiles(
     saving: (state: Uint8Array) => Promise<BridgeResult<SavedProject>>,
   ): Promise<ActionResult<SavedProject>> => {
     const sent = lastSave.then((): Promise<ActionResult<SavedProject>> => {
-      const state = current === null ? null : Y.encodeStateAsUpdate(current.session.document);
+      const state = current === null ? null : current.session.encodeState();
       return state === null ? Promise.resolve(NOTHING_TO_SAVE) : saving(state);
     });
     lastSave = sent.catch(() => undefined);
@@ -202,9 +202,8 @@ export function createProjectFiles(
     if (!adopted.ok) {
       return adopted;
     }
-    current?.session.document.off('update', changed);
-    current = { session, hasFile };
-    session.document.on('update', changed);
+    current?.stopFollowing();
+    current = { session, hasFile, stopFollowing: session.onChange(changed) };
     listener.saveStatus('saved');
     return { ok: true, value: session };
   };

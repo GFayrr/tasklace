@@ -1,10 +1,8 @@
 import * as Y from 'yjs';
 import { MAX_FILE_BYTES, MAX_UNCOMPRESSED_BYTES } from '../limits';
 import { failure, success, type Result } from '../result';
-import { openValidatedSession, type SharedSession } from '../shared/shared-session';
 import { DOCUMENT_ID_KEY, readDocumentId, type DocumentId } from '../shared/shared-document';
 import { validateSharedDocument } from '../shared/shared-project';
-import type { Project } from '../model/project';
 import type { ValidationIssue } from '../validation/validation-issues';
 import { crc32 } from './crc32';
 
@@ -48,7 +46,6 @@ export type StateCheckError =
 interface ValidatedFile {
   readonly state: Uint8Array;
   readonly document: Y.Doc;
-  readonly project: Project;
   readonly documentId: DocumentId;
 }
 
@@ -87,19 +84,6 @@ export function checkStateToSave(
   return project.ok ? success(null) : failure({ code: 'INVALID_STATE', issues: project.error });
 }
 
-/** Reads an untrusted .tasklace file step by step and opens a shared session on it, loading nothing when any check fails. */
-export function openTasklaceFile(
-  file: Uint8Array,
-  compressor: Compressor,
-): Result<SharedSession, FileError> {
-  const read = readValidatedFile(file, compressor);
-  if (!read.ok) {
-    return read;
-  }
-  const { document, project, documentId } = read.value;
-  return success(openValidatedSession(document, project, documentId));
-}
-
 /** Reads an untrusted .tasklace file into a shared document holding a valid project, checking size, header, checksum, decompression, content and project in this order. */
 export function readTasklaceFile(
   file: Uint8Array,
@@ -118,7 +102,7 @@ export function readTasklaceDocument(
   return read.ok ? success({ state: read.value.state, documentId: read.value.documentId }) : read;
 }
 
-/** Reads and checks an untrusted .tasklace file, returning the state it decompressed, the shared document decoded from it, the project it validated and its identifier. */
+/** Reads and checks an untrusted .tasklace file, its project included, returning the state it decompressed, the shared document decoded from it and its identifier. */
 function readValidatedFile(
   file: Uint8Array,
   compressor: Compressor,
@@ -145,7 +129,7 @@ function readValidatedFile(
         code: 'INVALID_PROJECT',
         issues: [{ path: DOCUMENT_ID_KEY, code: 'MISSING_FIELD' }],
       })
-    : success({ state: state.value, document: document.value, project: project.value, documentId });
+    : success({ state: state.value, document: document.value, documentId });
 }
 
 /** Checks the size, signature, version, flags and checksum of a file and returns the uncompressed size it declares. */

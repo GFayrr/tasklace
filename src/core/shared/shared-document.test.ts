@@ -5,6 +5,7 @@ import {
   createSharedDocument,
   isDocumentId,
   readDocumentId,
+  requireDocumentId,
   viewTaskFields,
 } from './shared-document';
 
@@ -12,6 +13,15 @@ describe('document identifier', () => {
   it('is written once when the shared document is created', () => {
     expect(readDocumentId(createSharedDocument(project([]), TEST_DOCUMENT_ID))).toBe(
       TEST_DOCUMENT_ID,
+    );
+  });
+
+  it('gives a valid identifier as one, and throws for any other value, which only a programming error can give', () => {
+    expect(requireDocumentId('a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d')).toBe(
+      'a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d',
+    );
+    expect(() => requireDocumentId('../escape')).toThrow(
+      new TypeError('Not a document identifier: ../escape'),
     );
   });
 

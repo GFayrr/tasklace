@@ -46,7 +46,7 @@ export type FileTask =
       readonly state: Uint8Array;
       readonly documentId: DocumentId;
       readonly localCopyFolder: string;
-      readonly savedAt: number;
+      readonly savedAt: Date;
     }
   | {
       readonly kind: 'writeDirectPdf';
@@ -262,7 +262,7 @@ async function saveProject(
   const fileWritten =
     path === null || (await attemptWrite('The project file', () => writeFileSafely(path, file)));
   const localCopySaved = await attemptWrite('The local copy', () =>
-    saveLocalCopy(task.localCopyFolder, task.documentId, file, path, new Date(task.savedAt)),
+    saveLocalCopy(task.localCopyFolder, task.documentId, file, path, task.savedAt),
   );
   if (!fileWritten) {
     return failure({ code: 'WRITE_FAILED' });

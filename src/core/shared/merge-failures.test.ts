@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { link, project, TEST_DOCUMENT_ID, workTask } from '../testing/project-builder';
 import { createSharedDocument, readSharedData } from './shared-document';
 import { mergeSharedUpdate } from './shared-project';
-import { openSharedSession, type SharedSession } from './shared-session';
+import { openSharedSession, type SharedSession, sessionDocument } from './shared-session';
 import { sessionOn } from '../testing/session-copy';
 
 const repairing = vi.hoisted(() => ({ broken: false, skipped: false, fittingBroken: false }));
@@ -41,7 +41,7 @@ afterEach(() => {
 
 /** Checks that the indexed state of a session matches its document: the project read from scratch, and a link to a task the document lacks refused. */
 function expectConsistent(session: SharedSession): void {
-  const reopened = openSharedSession(session.document);
+  const reopened = openSharedSession(sessionDocument(session));
   expect(reopened.ok && reopened.value.project()).toEqual(session.project());
   expect(session.apply({ type: 'putDependency', dependency: link('a', 'zzz') })).toEqual({
     ok: false,
@@ -52,7 +52,7 @@ function expectConsistent(session: SharedSession): void {
 /** Returns the update a peer sends after changing the calendar, a change that repairs the whole project. */
 function calendarUpdate(origin: Y.Doc): Uint8Array {
   const peer = sessionOn(origin);
-  const before = Y.encodeStateVector(peer.document);
+  const before = Y.encodeStateVector(sessionDocument(peer));
   const applied = peer.apply({
     type: 'updateProject',
     fields: { calendar: { ...SAMPLE.calendar, workingTimeRanges: MORNING_ONLY } },
@@ -60,7 +60,7 @@ function calendarUpdate(origin: Y.Doc): Uint8Array {
   if (!applied.ok) {
     throw new Error(JSON.stringify(applied.error));
   }
-  return Y.encodeStateAsUpdate(peer.document, before);
+  return Y.encodeStateAsUpdate(sessionDocument(peer), before);
 }
 
 describe('a merge whose repair raises an exception', () => {
@@ -68,14 +68,14 @@ describe('a merge whose repair raises an exception', () => {
     const origin = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const session = sessionOn(origin);
     const update = calendarUpdate(origin);
-    const data = readSharedData(session.document);
+    const data = readSharedData(sessionDocument(session));
     const before = session.project();
     repairing.broken = true;
     expect(session.merge(update)).toEqual({
       ok: false,
       error: { kind: 'repairFailed', error: new Error('repair broken') },
     });
-    expect(readSharedData(session.document)).toEqual(data);
+    expect(readSharedData(sessionDocument(session))).toEqual(data);
     expect(session.project()).toEqual(before);
     expectConsistent(session);
     repairing.broken = false;
@@ -85,7 +85,7 @@ describe('a merge whose repair raises an exception', () => {
 
   it('fails as a failed repair in a full merge, leaving the document as it was', () => {
     const origin = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
-    const document = sessionOn(origin).document;
+    const document = sessionDocument(sessionOn(origin));
     const data = readSharedData(document);
     repairing.broken = true;
     expect(mergeSharedUpdate(document, calendarUpdate(origin))).toEqual({
@@ -99,7 +99,10 @@ describe('a merge whose repair raises an exception', () => {
     const origin = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const session = sessionOn(origin);
     const garbage = Uint8Array.from([255, 255, 255, 255, 1]);
-    for (const merged of [session.merge(garbage), mergeSharedUpdate(session.document, garbage)]) {
+    for (const merged of [
+      session.merge(garbage),
+      mergeSharedUpdate(sessionDocument(session), garbage),
+    ]) {
       expect(merged.ok || merged.error.kind).toBe('malformedUpdate');
       expect(
         !merged.ok && merged.error.kind === 'malformedUpdate' && merged.error.error,
@@ -112,33 +115,33 @@ describe('a merge whose repair raises an exception', () => {
     const alice = sessionOn(origin);
     const bob = sessionOn(origin);
     expect(alice.apply({ type: 'putDependency', dependency: link('a', 'b') }).ok).toBe(true);
-    const before = Y.encodeStateVector(bob.document);
+    const before = Y.encodeStateVector(sessionDocument(bob));
     expect(bob.apply({ type: 'putDependency', dependency: link('b', 'a') }).ok).toBe(true);
-    const update = Y.encodeStateAsUpdate(bob.document, before);
-    const data = readSharedData(alice.document);
+    const update = Y.encodeStateAsUpdate(sessionDocument(bob), before);
+    const data = readSharedData(sessionDocument(alice));
     repairing.skipped = true;
-    const merged = mergeSharedUpdate(alice.document, update);
+    const merged = mergeSharedUpdate(sessionDocument(alice), update);
     expect(merged.ok || merged.error.kind).toBe('invalidProject');
     expect(
       merged.ok || ('issues' in merged.error && merged.error.issues.map((issue) => issue.code)),
     ).toEqual(['DEPENDENCY_CYCLE', 'DEPENDENCY_CYCLE']);
-    expect(readSharedData(alice.document)).toEqual(data);
+    expect(readSharedData(sessionDocument(alice))).toEqual(data);
   });
 
   it('fails as a failed repair when the repair of only what changed raises, keeping the session consistent, then merges again', () => {
     const origin = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const session = sessionOn(origin);
     const peer = sessionOn(origin);
-    const before = Y.encodeStateVector(peer.document);
+    const before = Y.encodeStateVector(sessionDocument(peer));
     expect(peer.apply({ type: 'putTask', task: workTask('a', { name: 'Renamed' }) }).ok).toBe(true);
-    const update = Y.encodeStateAsUpdate(peer.document, before);
-    const data = readSharedData(session.document);
+    const update = Y.encodeStateAsUpdate(sessionDocument(peer), before);
+    const data = readSharedData(sessionDocument(session));
     repairing.fittingBroken = true;
     expect(session.merge(update)).toEqual({
       ok: false,
       error: { kind: 'repairFailed', error: new Error('fitting broken') },
     });
-    expect(readSharedData(session.document)).toEqual(data);
+    expect(readSharedData(sessionDocument(session))).toEqual(data);
     expectConsistent(session);
     repairing.fittingBroken = false;
     expect(session.merge(update).ok).toBe(true);
@@ -151,24 +154,24 @@ describe('an undo or redo whose repair raises an exception', () => {
     const session = sessionOn(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
     const calendar = { ...SAMPLE.calendar, workingTimeRanges: MORNING_ONLY };
     expect(session.apply({ type: 'updateProject', fields: { calendar } }).ok).toBe(true);
-    const changed = readSharedData(session.document);
+    const changed = readSharedData(sessionDocument(session));
     repairing.broken = true;
     const failed = {
       ok: false,
       error: { kind: 'repairFailed', error: new Error('repair broken') },
     };
     expect(session.history.undo()).toEqual(failed);
-    expect(readSharedData(session.document)).toEqual(changed);
+    expect(readSharedData(sessionDocument(session))).toEqual(changed);
     expect(session.project().calendar.workingTimeRanges).toEqual(MORNING_ONLY);
     expect(session.history.canUndo()).toBe(true);
     expectConsistent(session);
     repairing.broken = false;
     expect(session.history.undo().ok).toBe(true);
     expect(session.project().calendar).toEqual(SAMPLE.calendar);
-    const undone = readSharedData(session.document);
+    const undone = readSharedData(sessionDocument(session));
     repairing.broken = true;
     expect(session.history.redo()).toEqual(failed);
-    expect(readSharedData(session.document)).toEqual(undone);
+    expect(readSharedData(sessionDocument(session))).toEqual(undone);
     expect(session.history.canRedo()).toBe(true);
     expectConsistent(session);
     repairing.broken = false;

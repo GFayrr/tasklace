@@ -10,6 +10,7 @@ import {
   readSharedData,
   TAGS_ROOT,
   TASKS_ROOT,
+  requireDocumentId,
 } from '../shared/shared-document';
 import { mergeSharedUpdate, readSharedProject } from '../shared/shared-project';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
@@ -31,11 +32,11 @@ import {
   encodeTasklaceFile,
   encodeTasklaceState,
   HEADER_BYTES,
-  openTasklaceFile,
   readTasklaceDocument,
   readTasklaceFile,
   type Compressor,
 } from './tasklace-file';
+import { openTasklaceFile } from '../testing/open-tasklace-file';
 
 const STORED_MARKER = 1;
 const CHECKSUM_OFFSET = 8;
@@ -228,7 +229,7 @@ describe('tasklace file', () => {
     });
     const opened = openTasklaceFile(lost, storingCompressor);
     if (!opened.ok) {
-      throw new Error(opened.error.code);
+      throw new Error(JSON.stringify(opened.error));
     }
     expect(opened.value.openingRepairs).toEqual([{ code: 'TAG_CLEARED', id: 'b' }]);
     expect(opened.value.project().tasks.find((task) => task.id === 'b')).toMatchObject({
@@ -497,7 +498,7 @@ describe('reading a file whose content was altered behind a valid checksum', () 
 });
 
 describe('checking a state before saving it', () => {
-  const OTHER_DOCUMENT_ID = '00000000-0000-4000-8000-0000000000aa';
+  const OTHER_DOCUMENT_ID = requireDocumentId('00000000-0000-4000-8000-0000000000aa');
 
   it('accepts the complete state of a valid project of the expected document', () => {
     const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));

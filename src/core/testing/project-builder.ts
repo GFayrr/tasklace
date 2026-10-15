@@ -11,8 +11,14 @@ import type {
 import { scheduleProject, type Schedule } from '../scheduling/schedule-project';
 import type { ProjectHour } from '../time';
 import { at } from './civil-time';
+import { requireDocumentId, type DocumentId } from '../shared/shared-document';
 
-export const TEST_DOCUMENT_ID = '00000000-0000-4000-8000-000000000001';
+/** Gives any text as a document identifier, to check that a forged one is still refused where it is used. */
+export function forgedDocumentId(text: string): DocumentId {
+  return text as DocumentId;
+}
+
+export const TEST_DOCUMENT_ID = requireDocumentId('00000000-0000-4000-8000-000000000001');
 
 export const PROJECT_START = at(2026, 9, 28, 9);
 

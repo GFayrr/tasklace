@@ -3,8 +3,10 @@ import { MAX_DAY_INDEX, MIN_DAY_INDEX } from '../../core/time';
 import type { WidthStore } from '../plan/table-width';
 import type { PrintSettings } from './print-pages';
 import { DEFAULT_PRINT_SETTINGS, readPrintSettings, rememberPrintSettings } from './print-settings';
+import { requireDocumentId } from '../../core/shared/shared-document';
 
-const DOCUMENT = '00000000-0000-4000-8000-000000000001';
+const DOCUMENT = requireDocumentId('00000000-0000-4000-8000-000000000001');
+const OTHER = requireDocumentId('00000000-0000-4000-8000-000000000009');
 const KEY = `tasklace.printSettings.${DOCUMENT}`;
 const CHOSEN: PrintSettings = {
   paper: 'a3',
@@ -47,10 +49,10 @@ describe('print settings', () => {
   it('remembers the settings of each project apart and reads them back', () => {
     const store = storeWith();
     rememberPrintSettings(store, DOCUMENT, CHOSEN);
-    rememberPrintSettings(store, 'other', DEFAULT_PRINT_SETTINGS);
+    rememberPrintSettings(store, OTHER, DEFAULT_PRINT_SETTINGS);
     expect(readPrintSettings(store, DOCUMENT)).toEqual(CHOSEN);
-    expect(readPrintSettings(store, 'other')).toEqual(DEFAULT_PRINT_SETTINGS);
-    expect(Object.keys(store.entries)).toEqual([KEY, 'tasklace.printSettings.other']);
+    expect(readPrintSettings(store, OTHER)).toEqual(DEFAULT_PRINT_SETTINGS);
+    expect(Object.keys(store.entries)).toEqual([KEY, `tasklace.printSettings.${OTHER}`]);
   });
 
   it('reads back days at the edges of the years handled', () => {

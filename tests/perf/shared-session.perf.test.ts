@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
-import { openSharedSession, type SharedSession } from '../../src/core/shared/shared-session';
+import {
+  openSharedSession,
+  type SharedSession,
+  sessionDocument,
+} from '../../src/core/shared/shared-session';
 import { buildLargeProject } from '../fixtures/large-project';
 import { TEST_DOCUMENT_ID } from '../../src/core/testing/project-builder';
 import { medianDuration } from '../growth/measure-growth';
@@ -38,7 +42,7 @@ describe('shared session performance (10,000 tasks, 20,000 dependencies)', () =>
 
   it(`merges a received edit in less than ${String(FRAME_MILLISECONDS)} ms`, () => {
     const updates: Uint8Array[] = [];
-    remote.document.on('update', (update: Uint8Array) => {
+    sessionDocument(remote).on('update', (update: Uint8Array) => {
       updates.push(update);
     });
     for (let index = 0; index <= MEASURED_RUNS; index += 1) {

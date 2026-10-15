@@ -11,7 +11,7 @@ import {
 } from 'electron';
 import { MAX_CSV_FILE_BYTES, MAX_FILE_BYTES, MAX_JSON_FILE_BYTES } from '../core/limits';
 import { failure, success } from '../core/result';
-import { isDocumentId, type DocumentId } from '../core/shared/shared-document';
+import { isDocumentId, requireDocumentId, type DocumentId } from '../core/shared/shared-document';
 import { MIN_PROJECT_HOUR } from '../core/time';
 import {
   IPC_CHANNELS,
@@ -119,7 +119,9 @@ export function registerProjectFileHandlers(services: ProjectFileServices): void
     );
   };
   handle(IPC_CHANNELS.regionalFormat, () => regionalFormatOf(app.getSystemLocale()));
-  handle(IPC_CHANNELS.newProject, (event) => offerProject(event.sender, null, randomUUID()));
+  handle(IPC_CHANNELS.newProject, (event) =>
+    offerProject(event.sender, null, requireDocumentId(randomUUID())),
+  );
   handle(IPC_CHANNELS.adoptProject, (event, documentId) =>
     adoptProject(services, event.sender, documentId),
   );
@@ -285,7 +287,7 @@ async function importProject(
   if (tooLarge !== null) {
     return tooLarge;
   }
-  const documentId = randomUUID();
+  const documentId = requireDocumentId(randomUUID());
   const options = {
     format: regionalFormatOf(app.getSystemLocale()),
     projectName: projectNameFromPath(path, MESSAGES.projects.untitled),
@@ -332,7 +334,7 @@ async function saveProject(
       state,
       documentId,
       localCopyFolder: join(services.userDataFolder, LOCAL_COPY_FOLDER),
-      savedAt: Date.now(),
+      savedAt: new Date(),
     }),
   );
   if (!saved.ok) {

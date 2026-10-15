@@ -18,7 +18,7 @@ vi.mock('../core/limits', async (importOriginal) => ({
   },
 }));
 
-const SAVED_AT = Date.UTC(2026, 8, 30, 10);
+const SAVED_AT = new Date(Date.UTC(2026, 8, 30, 10));
 const GOOD_CONTENT = 'The good file';
 const STATE = Y.encodeStateAsUpdate(
   createSharedDocument(project([workTask('a'), workTask('b')]), TEST_DOCUMENT_ID),
