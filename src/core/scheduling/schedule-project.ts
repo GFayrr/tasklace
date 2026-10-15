@@ -15,6 +15,7 @@ import type { Placement } from './task-placement';
 import { detectTagConflicts, type TagConflictReport } from '../tags/tag-conflicts';
 import { computeWbsNumbers } from './wbs';
 
+/** The schedule of a project: where each task is placed, the dates of its summaries, its numbering, its floats, null while the critical path is turned off, and its conflicts. */
 export interface Schedule {
   readonly placements: ReadonlyMap<TaskId, Placement>;
   readonly summaries: ReadonlyMap<TaskId, SummarySchedule>;

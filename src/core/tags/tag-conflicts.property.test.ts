@@ -7,7 +7,13 @@ import type { Schedule } from '../scheduling/schedule-project';
 import { computePlacementSlots } from '../scheduling/task-placement';
 import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { compileOrThrow } from '../testing/civil-time';
-import { PROJECT_START, project, scheduleOrThrow, workTask } from '../testing/project-builder';
+import {
+  PROJECT_START,
+  project,
+  scheduleOrThrow,
+  workTask,
+  segmentsOrThrow,
+} from '../testing/project-builder';
 import type { ProjectHour } from '../time';
 
 const TAGS: Tag[] = [
@@ -44,11 +50,13 @@ function buildTasks(shapes: readonly TaskShape[]): Task[] {
     const fitsAfternoon = shape.hoursPerDay !== null && shape.hoursPerDay <= LATEST_AFTERNOON_HOURS;
     return workTask(`t${String(index).padStart(2, '0')}`, {
       tagId: shape.tagId,
-      segments: shape.blocks.map((block, position) => ({
-        durationHours: block.durationHours,
-        gapDaysBefore: position === 0 ? 0 : block.gapDaysBefore,
-        startNoEarlierThan: null,
-      })),
+      segments: segmentsOrThrow(
+        shape.blocks.map((block, position) => ({
+          durationHours: block.durationHours,
+          gapDaysBefore: position === 0 ? 0 : block.gapDaysBefore,
+          startNoEarlierThan: null,
+        })),
+      ),
       hoursPerDay: shape.hoursPerDay,
       dailyStartHour: fitsAfternoon ? shape.dailyStartHour : null,
       startNoEarlierThan: PROJECT_START + shape.startOffset,

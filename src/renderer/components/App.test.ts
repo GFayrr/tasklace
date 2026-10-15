@@ -412,7 +412,7 @@ describe('Workspace', () => {
 
   it('keeps the same moment in view when the zoom changes', async () => {
     const { app, scroller, scrollLeft } = await renderSized();
-    app.zoom = 'week';
+    app.setZoom('week');
     update();
     expect(scroller.scrollLeft).toBe(zoomedScrollLeft(scrollLeft, 800, 'day', 'week'));
   });

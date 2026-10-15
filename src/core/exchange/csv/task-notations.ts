@@ -1,8 +1,9 @@
 import { MAX_HIERARCHY_DEPTH, MAX_SEGMENTS_PER_TASK } from '../../limits';
-import type { DependencyType, TaskSegment } from '../../model/project';
+import type { DependencyType, TaskSegment, TaskSegments } from '../../model/project';
 import { failure, success, type Result } from '../../result';
 import { formatDateTime, parseDateTime } from '../../civil-format';
 import { isQuarterHours, type ProjectHour } from '../../time';
+import { nonEmptySegments } from '../../task-segments';
 
 export type WbsNumber = string;
 
@@ -19,7 +20,7 @@ export interface BlockWait {
 }
 
 export interface ParsedBlocks {
-  readonly segments: readonly TaskSegment[];
+  readonly segments: TaskSegments;
   readonly waits: readonly BlockWait[];
 }
 
@@ -158,7 +159,8 @@ export function parseBlocks(
     segments.push(parsed.value.segment);
     waits.push(...parsed.value.waits);
   }
-  return segments.length === 0 ? failure('INVALID_NOTATION') : success({ segments, waits });
+  const blocks = nonEmptySegments(segments);
+  return blocks === null ? failure('INVALID_NOTATION') : success({ segments: blocks, waits });
 }
 
 /** Reads one block and what it waits for after the keyword "after", counting the references before splitting them and bounding each part before any pattern runs. */

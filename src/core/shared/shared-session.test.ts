@@ -13,6 +13,7 @@ import {
   summary,
   workTask,
   TEST_DOCUMENT_ID,
+  segmentsOrThrow,
 } from '../testing/project-builder';
 import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
 import { applyOperation, taskOfCalendarIssue, type SharedOperation } from './shared-operations';
@@ -669,11 +670,13 @@ function toOperation(shape: OperationShape, current: Project, newId: string): Sh
             type: 'putTask',
             task: {
               ...task,
-              segments: Array.from({ length: shape.count }, (_unused, index) => ({
-                durationHours: 3,
-                gapDaysBefore: index === 0 ? 0 : 1,
-                startNoEarlierThan: null,
-              })),
+              segments: segmentsOrThrow(
+                Array.from({ length: shape.count }, (_unused, index) => ({
+                  durationHours: 3,
+                  gapDaysBefore: index === 0 ? 0 : 1,
+                  startNoEarlierThan: null,
+                })),
+              ),
             },
           }
         : noOperation();

@@ -6,11 +6,14 @@ import type {
   Project,
   SummaryTask,
   Task,
+  TaskSegment,
+  TaskSegments,
   WorkTask,
 } from '../model/project';
 import { scheduleProject, type Schedule } from '../scheduling/schedule-project';
 import type { ProjectHour } from '../time';
 import { at } from './civil-time';
+import { nonEmptySegments } from '../task-segments';
 import { requireDocumentId, type DocumentId } from '../shared/shared-document';
 
 /** Gives any text as a document identifier, to check that a forged one is still refused where it is used. */
@@ -52,12 +55,23 @@ export function splitTask(
   ])[],
   overrides: Partial<WorkTask> = {},
 ): WorkTask {
-  const segments = blocks.map(([durationHours, gapDaysBefore, startNoEarlierThan]) => ({
-    durationHours,
-    gapDaysBefore,
-    startNoEarlierThan: startNoEarlierThan ?? null,
-  }));
+  const segments = segmentsOrThrow(
+    blocks.map(([durationHours, gapDaysBefore, startNoEarlierThan]) => ({
+      durationHours,
+      gapDaysBefore,
+      startNoEarlierThan: startNoEarlierThan ?? null,
+    })),
+  );
   return workTask(id, { segments, ...overrides });
+}
+
+/** Gives a list of blocks as the blocks of a work task, failing the test for an empty list. */
+export function segmentsOrThrow(segments: readonly TaskSegment[]): TaskSegments {
+  const blocks = nonEmptySegments(segments);
+  if (blocks === null) {
+    throw new Error('A work task needs one block at least.');
+  }
+  return blocks;
 }
 
 /** Builds a milestone with no constraint, then applies overrides. */

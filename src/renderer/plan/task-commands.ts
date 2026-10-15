@@ -30,6 +30,7 @@ import { dayIndexOf, QUARTER_HOUR, startOfDay, type ProjectHour } from '../../co
 import { relinkBlocks } from './block-links';
 import { parseDuration } from './durations';
 import { predecessorText, taskIdOfNumber, type PlanOutline } from './plan-outline';
+import { mapSegments, withLastSegment } from '../../core/task-segments';
 
 export type Edit = Result<readonly SharedOperation[], EditError>;
 
@@ -185,13 +186,14 @@ export function setDuration(context: EditContext, id: TaskId, text: string): Edi
   }
   const earlier = task.segments.slice(0, -1);
   const last = hours - earlier.reduce((sum, segment) => sum + segment.durationHours, 0);
-  const lastSegment = task.segments.at(-1);
-  if (last < QUARTER_HOUR || lastSegment === undefined) {
+  if (last < QUARTER_HOUR) {
     return failure('INVALID_DURATION');
   }
-  return success([
-    putTask({ ...task, segments: [...earlier, { ...lastSegment, durationHours: last }] }),
-  ]);
+  const segments = withLastSegment(task.segments, (segment) => ({
+    ...segment,
+    durationHours: last,
+  }));
+  return success([putTask({ ...task, segments })]);
 }
 
 /** Sets the date a task may not start before, written as an ISO date, an empty text removing it, the start dates of its later blocks moving by as much as the task when its scheduled start is known. */
@@ -472,7 +474,7 @@ function withBlockStartsShifted(task: WorkTask, shift: number): WorkTask {
   if (shift === 0) {
     return task;
   }
-  const segments = task.segments.map((segment) =>
+  const segments = mapSegments(task.segments, (segment) =>
     segment.startNoEarlierThan === null
       ? segment
       : { ...segment, startNoEarlierThan: segment.startNoEarlierThan + shift },
@@ -518,7 +520,7 @@ export function moveBlock(
     ? dayIndexOf(hour) - dayIndexOf(previousEnd - QUARTER_HOUR)
     : 0;
   const startNoEarlierThan = afterPrevious ? hour : null;
-  const segments = task.segments.map((segment, index) =>
+  const segments = mapSegments(task.segments, (segment, index) =>
     index === block ? { ...segment, gapDaysBefore, startNoEarlierThan } : segment,
   );
   return success([putTask({ ...task, segments })]);
@@ -547,8 +549,7 @@ export function stretchEnd(
   calendar: CompiledCalendar,
 ): Edit {
   const task = findTask(context, id);
-  const lastSegment = task?.kind === 'task' ? task.segments.at(-1) : undefined;
-  if (task?.kind !== 'task' || lastSegment === undefined) {
+  if (task?.kind !== 'task') {
     return failure('NOT_POSSIBLE');
   }
   const hours = countWorkingHours(calendar, lastBlockStart, Math.max(end, lastBlockStart));
@@ -556,7 +557,7 @@ export function stretchEnd(
     return failure('OUT_OF_RANGE');
   }
   const durationHours = Math.max(QUARTER_HOUR, hours.value);
-  const segments = [...task.segments.slice(0, -1), { ...lastSegment, durationHours }];
+  const segments = withLastSegment(task.segments, (segment) => ({ ...segment, durationHours }));
   return success([putTask({ ...task, segments })]);
 }
 

@@ -203,7 +203,7 @@ function findFirstStartWhere(
 
 /** Tells whether a task has a supported number of blocks with valid durations and gaps. */
 function hasValidSegments(segments: readonly TaskSegment[]): boolean {
-  if (segments.length === 0 || segments.length > MAX_SEGMENTS_PER_TASK) {
+  if (segments.length > MAX_SEGMENTS_PER_TASK) {
     return false;
   }
   return segments.every(
@@ -228,25 +228,22 @@ function placeSegments(
   task: WorkTask,
   earliestStart: ProjectHour,
 ): PlacementResult {
-  const segments: ScheduledSegment[] = [];
-  let resumeFrom = earliestStart;
-  for (const segment of task.segments) {
-    const previous = segments.at(-1);
-    if (previous !== undefined) {
-      resumeFrom = blockResumption(previous.end, segment);
-    }
-    const placed = placeSegment(calendar, task, segment, resumeFrom);
+  const [firstSegment, ...laterSegments] = task.segments;
+  const first = placeSegment(calendar, task, firstSegment, earliestStart);
+  if (!first.ok) {
+    return first;
+  }
+  const segments: ScheduledSegment[] = [first.value];
+  let previous = first.value;
+  for (const segment of laterSegments) {
+    const placed = placeSegment(calendar, task, segment, blockResumption(previous.end, segment));
     if (!placed.ok) {
       return placed;
     }
     segments.push(placed.value);
+    previous = placed.value;
   }
-  const first = segments[0];
-  const last = segments.at(-1);
-  if (first === undefined || last === undefined) {
-    return failure('INVALID_SEGMENTS');
-  }
-  return success({ start: first.start, end: last.end, segments });
+  return success({ start: first.value.start, end: previous.end, segments });
 }
 
 /** Places a single block of a work task from an instant. */

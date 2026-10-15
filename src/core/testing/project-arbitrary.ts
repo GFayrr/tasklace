@@ -6,7 +6,7 @@ import type { Dependency, DependencyType, Project, SchedulableTask, Task } from 
 import { fromQuarters, QUARTER_HOUR, QUARTERS_PER_HOUR, toQuarters } from '../time';
 import { calendarArbitrary, instantArbitrary, quarterHoursArbitrary, unwrap } from './arbitraries';
 import { analyzeProjectStructure } from '../scheduling/project-structure';
-import { milestone, project, summary, workTask } from './project-builder';
+import { milestone, project, summary, workTask, segmentsOrThrow } from './project-builder';
 
 const MAX_TASKS = 20;
 const MAX_BLOCK_HOURS = 30;
@@ -65,11 +65,13 @@ function buildTask(index: number, shape: TaskShape, hoursPerWorkingDay: number):
     const progressPercent = shape.progressPercent < HALF_PROGRESS ? 0 : FULL_PROGRESS;
     return milestone(id, { ...common, progressPercent });
   }
-  const segments = shape.blocks.map((block, blockIndex) => ({
-    durationHours: block.durationHours,
-    gapDaysBefore: blockIndex === 0 ? 0 : block.gapDaysBefore,
-    startNoEarlierThan: blockIndex === 0 ? null : block.startNoEarlierThan,
-  }));
+  const segments = segmentsOrThrow(
+    shape.blocks.map((block, blockIndex) => ({
+      durationHours: block.durationHours,
+      gapDaysBefore: blockIndex === 0 ? 0 : block.gapDaysBefore,
+      startNoEarlierThan: blockIndex === 0 ? null : block.startNoEarlierThan,
+    })),
+  );
   const hoursPerDay =
     shape.hoursPerDayRatio === null || hoursPerWorkingDay < 1
       ? null

@@ -31,6 +31,7 @@ import type {
   Tag,
   Task,
   TaskSegment,
+  TaskSegments,
   WorkTask,
 } from '../model/project';
 import { failure, success, type Result } from '../result';
@@ -71,6 +72,7 @@ import {
   type Field,
   type UnknownRecord,
 } from './value-readers';
+import { nonEmptySegments } from '../task-segments';
 
 export interface ValueCodec {
   readonly readInstant: (field: Field, issues: IssueList) => ProjectHour | undefined;
@@ -455,14 +457,15 @@ function readSegments(
   field: Field,
   issues: IssueList,
   codec: ValueCodec,
-): TaskSegment[] | undefined {
-  const segments = readList(field, issues, MAX_SEGMENTS_PER_TASK, (item, list, index) =>
+): TaskSegments | undefined {
+  const read = readList(field, issues, MAX_SEGMENTS_PER_TASK, (item, list, index) =>
     readSegment(item, list, index === 0, codec),
   );
-  if (segments === undefined) {
+  if (read === undefined) {
     return undefined;
   }
-  if (segments.length === 0) {
+  const segments = nonEmptySegments(read);
+  if (segments === null) {
     issues.add(field.path, 'EMPTY_LIST');
     return undefined;
   }

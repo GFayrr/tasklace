@@ -25,6 +25,7 @@ import {
   splitTask,
   TEST_DOCUMENT_ID,
   workTask,
+  segmentsOrThrow,
 } from '../../src/core/testing/project-builder';
 
 const WARM_UP_RUNS = 1;
@@ -130,11 +131,13 @@ describe('growth of shared session operations with the size of the project', () 
       }
       return batched(1, (index) => {
         const blockCount = MIN_HUB_BLOCKS + (index % 2);
-        const segments = Array.from({ length: blockCount }, () => ({
-          durationHours: HUB_BLOCK_HOURS,
-          gapDaysBefore: 0,
-          startNoEarlierThan: null,
-        }));
+        const segments = segmentsOrThrow(
+          Array.from({ length: blockCount }, () => ({
+            durationHours: HUB_BLOCK_HOURS,
+            gapDaysBefore: 0,
+            startNoEarlierThan: null,
+          })),
+        );
         expect(session.apply({ type: 'putTask', task: { ...hub, segments } }).ok).toBe(true);
       });
     };

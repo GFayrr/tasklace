@@ -16,6 +16,7 @@ import {
   summary,
   TEST_DOCUMENT_ID,
   workTask,
+  segmentsOrThrow,
 } from '../../core/testing/project-builder';
 import { buildPlanOutline, predecessorText, taskIdOfNumber } from './plan-outline';
 import {
@@ -532,7 +533,9 @@ describe('block edits refused with a reason', () => {
     const { session, context } = openPlan(plan);
     const task = workTaskOf(session, 'd');
     expect(toggleMilestone(context(), 'd')).toEqual({ ok: false, error: 'LINKS_WOULD_MERGE' });
-    const lastOnly = task.segments.slice(1).map((segment) => ({ ...segment, gapDaysBefore: 0 }));
+    const lastOnly = segmentsOrThrow(
+      task.segments.slice(1).map((segment) => ({ ...segment, gapDaysBefore: 0 })),
+    );
     expect(
       replaceTask(context(), { ...task, segments: lastOnly }, [{ origin: 1, waitsFor: '1SS+4h' }]),
     ).toEqual({ ok: false, error: 'LINKS_WOULD_MERGE' });
@@ -562,7 +565,9 @@ describe('block edits refused with a reason', () => {
     const task = workTaskOf(session, 'd');
     const single = {
       ...task,
-      segments: task.segments.slice(1).map((segment) => ({ ...segment, gapDaysBefore: 0 })),
+      segments: segmentsOrThrow(
+        task.segments.slice(1).map((segment) => ({ ...segment, gapDaysBefore: 0 })),
+      ),
     };
     expect(replaceTask(context(), single, [{ origin: 1, waitsFor: '' }])).toEqual({
       ok: false,
@@ -657,7 +662,9 @@ describe('links to and from blocks', () => {
     if (task?.kind !== 'task') {
       throw new Error('Missing task');
     }
-    const kept = [task.segments[0], task.segments[2]].filter((segment) => segment !== undefined);
+    const kept = segmentsOrThrow(
+      [task.segments[0], task.segments[2]].filter((segment) => segment !== undefined),
+    );
     applied(
       session,
       replaceTask(context(), { ...task, segments: kept }, [
@@ -695,7 +702,7 @@ describe('links to and from blocks', () => {
     }
     applied(
       session,
-      replaceTask(context(), { ...task, segments: task.segments.slice(0, 1) }, [
+      replaceTask(context(), { ...task, segments: segmentsOrThrow(task.segments.slice(0, 1)) }, [
         { origin: 0, waitsFor: '' },
       ]),
     );
@@ -822,12 +829,12 @@ function blockEdit(context: EditContext, kind: string, id: string): Edit {
       [...blocks, { origin: null, waitsFor: '' }],
     );
   }
-  const [first, ...rest] = task.segments;
-  if (first === undefined || rest.length === 0) {
+  const rest = task.segments.slice(1);
+  if (rest.length === 0) {
     return { ok: false, error: 'NOT_POSSIBLE' };
   }
-  const segments = rest.map((segment, index) =>
-    index === 0 ? { ...segment, gapDaysBefore: 0 } : segment,
+  const segments = segmentsOrThrow(
+    rest.map((segment, index) => (index === 0 ? { ...segment, gapDaysBefore: 0 } : segment)),
   );
   return replaceTask(context, { ...task, segments }, blocks.slice(1));
 }

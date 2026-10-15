@@ -10,6 +10,7 @@ import {
   type PrintSettings,
   type PrintZoomChoice,
 } from './print-pages';
+import { isOneOf } from '../../core/one-of';
 
 export const DEFAULT_PRINT_SETTINGS: PrintSettings = {
   paper: 'a4',
@@ -65,21 +66,15 @@ function settingsOf(value: unknown): PrintSettings | null {
   const readPeriod = periodOf(period);
   const readColumns = columnsOf(columns);
   if (
-    !PAPER_NAMES.some((name) => name === paper) ||
-    !PAPER_ORIENTATIONS.some((name) => name === orientation) ||
-    !ZOOM_CHOICES.some((choice) => choice === zoom) ||
+    !isOneOf(PAPER_NAMES, paper) ||
+    !isOneOf(PAPER_ORIENTATIONS, orientation) ||
+    !isOneOf(ZOOM_CHOICES, zoom) ||
     readPeriod === null ||
     readColumns === null
   ) {
     return null;
   }
-  return {
-    paper: paper as PrintSettings['paper'],
-    orientation: orientation as PrintSettings['orientation'],
-    period: readPeriod,
-    zoom: zoom as PrintZoomChoice,
-    columns: readColumns,
-  };
+  return { paper, orientation, period: readPeriod, zoom, columns: readColumns };
 }
 
 /** Reads a printed period: the whole plan, or whole days within the years handled, kept even when the last comes before the first so that the window explains it rather than forgetting every setting. */
@@ -103,8 +98,10 @@ function columnsOf(value: unknown): PrintColumn[] | null {
     return null;
   }
   const columns: unknown[] = value;
-  const known = columns.every((column) => PRINT_COLUMNS.some((name) => name === column));
-  return known && new Set(columns).size === columns.length ? (columns as PrintColumn[]) : null;
+  if (!columns.every((column) => isOneOf(PRINT_COLUMNS, column))) {
+    return null;
+  }
+  return new Set(columns).size === columns.length ? [...columns] : null;
 }
 
 /** Tells whether a value is a whole day within the years Tasklace handles. */

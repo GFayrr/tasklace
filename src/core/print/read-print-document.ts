@@ -46,6 +46,7 @@ import {
   type TextOrder,
   type TextWeight,
 } from './print-document';
+import { isOneOf } from '../one-of';
 
 declare const CHECKED: unique symbol;
 
@@ -163,14 +164,10 @@ function readOrderList(value: unknown, budget: Budget, clipDepth: number): Print
 function readOrder(value: unknown, budget: Budget, clipDepth: number): PrintOrder {
   const record = readObject(value, '');
   const kind = record['kind'];
-  if (
-    typeof kind !== 'string' ||
-    !Object.hasOwn(ORDER_KEYS, kind) ||
-    (kind === 'clip' && clipDepth >= MAX_CLIP_DEPTH)
-  ) {
+  if (!isOrderKind(kind) || (kind === 'clip' && clipDepth >= MAX_CLIP_DEPTH)) {
     return refuse('kind', 'OUT_OF_RANGE');
   }
-  const orderKind = kind as PrintOrder['kind'];
+  const orderKind = kind;
   checkKeys(record, ORDER_KEYS[orderKind]);
   if (orderKind === 'clip') {
     const shape = within('.shape', () => readShape(record['shape'], budget));
@@ -266,18 +263,22 @@ function readSegments(value: unknown, budget: Budget): number[] {
   }
   budget.pathNumbers -= value.length;
   const numbers: unknown[] = Array.from(value);
-  let index = 0;
-  while (index < numbers.length) {
-    const count = coordinatesAfter(numbers[index] as number);
-    if (count === null || index + count >= numbers.length) {
+  const read: number[] = [];
+  while (read.length < numbers.length) {
+    const operation = numbers[read.length];
+    const count = typeof operation === 'number' ? coordinatesAfter(operation) : null;
+    const coordinates = numbers.slice(read.length + 1, read.length + 1 + (count ?? 0));
+    if (
+      typeof operation !== 'number' ||
+      count === null ||
+      coordinates.length < count ||
+      !coordinates.every(isCoordinate)
+    ) {
       return refuse('segments', 'OUT_OF_RANGE');
     }
-    if (!numbers.slice(index + 1, index + 1 + count).every(isCoordinate)) {
-      return refuse('segments', 'OUT_OF_RANGE');
-    }
-    index += count + 1;
+    read.push(operation, ...coordinates);
   }
-  return [...(numbers as number[])];
+  return read;
 }
 
 /** Reads the dash of a stroke, a short list of lengths that are all above zero. */
@@ -289,16 +290,20 @@ function readDash(value: unknown): number[] {
     return refuse('dash', 'TOO_MANY_ITEMS');
   }
   const steps: unknown[] = Array.from(value);
-  if (!steps.every((step) => typeof step === 'number' && step > 0 && step <= MAX_DASH_STEP)) {
+  if (
+    !steps.every(
+      (step): step is number => typeof step === 'number' && step > 0 && step <= MAX_DASH_STEP,
+    )
+  ) {
     return refuse('dash', 'OUT_OF_RANGE');
   }
-  return [...(steps as number[])];
+  return [...steps];
 }
 
 /** Reads a value of a record that must be one of a list of choices. */
 function readChoice<T>(record: UnknownRecord, key: string, choices: readonly T[]): T {
   const value = record[key];
-  return choices.includes(value as T) ? (value as T) : refuse(key, 'OUT_OF_RANGE');
+  return isOneOf(choices, value) ? value : refuse(key, 'OUT_OF_RANGE');
 }
 
 /** Reads a color written #RRGGBB. */
@@ -345,10 +350,15 @@ function checkKeys(record: UnknownRecord, keys: readonly string[]): void {
 }
 
 /** Tells whether a value is a coordinate within the range a page allows. */
-function isCoordinate(value: unknown): boolean {
+function isCoordinate(value: unknown): value is number {
   return (
     typeof value === 'number' && value >= -MAX_PRINT_COORDINATE && value <= MAX_PRINT_COORDINATE
   );
+}
+
+/** Tells whether a text names a kind of drawing order. */
+function isOrderKind(kind: unknown): kind is PrintOrder['kind'] {
+  return typeof kind === 'string' && Object.hasOwn(ORDER_KEYS, kind);
 }
 
 /** Reads a value inside another, placing any refusal it raises under the place of that value. */

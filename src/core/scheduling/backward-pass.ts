@@ -19,6 +19,7 @@ import {
 } from './forward-pass';
 import { placeTaskLatest, type PlacementErrorCode, type ScheduledSegment } from './task-placement';
 
+/** The floats of a task whose latest dates fall within the supported years, the task being critical exactly when its total float is zero or less, which only computeTaskFloat decides. */
 export interface KnownTaskFloat {
   readonly lateStart: ProjectHour;
   readonly lateFinish: ProjectHour;
