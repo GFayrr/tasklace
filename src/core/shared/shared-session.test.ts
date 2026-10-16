@@ -275,6 +275,25 @@ describe('the reach of a shared session', () => {
     expect(changes).toBe(2);
   });
 
+  it('gives the bytes of each change with its source, merged updates being remote and every other change local, until it is no longer followed', () => {
+    const [alice, bob] = openSessions(project([workTask('a')]), 2);
+    if (alice === undefined || bob === undefined) {
+      throw new Error('Missing participant');
+    }
+    const seen: string[] = [];
+    const stop = alice.onUpdate((update, source) => {
+      seen.push(source);
+      expect(update.length).toBeGreaterThan(0);
+    });
+    expect(alice.apply({ type: 'updateProject', fields: { name: 'Local' } }).ok).toBe(true);
+    expect(alice.history.undo().ok).toBe(true);
+    expect(bob.apply({ type: 'updateProject', fields: { name: 'Received' } }).ok).toBe(true);
+    expect(alice.merge(bob.encodeState(alice.encodeStateVector())).ok).toBe(true);
+    stop();
+    expect(alice.apply({ type: 'updateProject', fields: { name: 'Unfollowed' } }).ok).toBe(true);
+    expect(seen).toEqual(['local', 'local', 'remote']);
+  });
+
   it('encodes its whole state, or only what a state vector lacks, as its document does', () => {
     const [alice] = openSessions(project([workTask('a')]), 1);
     if (alice === undefined) {
