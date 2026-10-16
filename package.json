@@ -26,6 +26,7 @@
     "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@types/node": "^24.19.0",
     "@types/pdfkit": "0.17.6",
+    "@types/ws": "8.18.2",
     "@vitest/coverage-v8": "^5.0.2",
     "electron": "^44.4.5",
     "electron-vite": "^5.0.0",
@@ -42,8 +43,12 @@
     "vitest": "^5.0.2"
   },
   "dependencies": {
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0",
+    "bonjour-service": "1.4.4",
     "pdfkit": "0.20.2",
     "svelte": "5.57.1",
+    "ws": "8.22.0",
     "yjs": "13.6.33"
   },
   "main": "out/main/index.js"
