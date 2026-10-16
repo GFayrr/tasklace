@@ -6,7 +6,7 @@ import {
   shiftWorkingHours,
   subtractWorkingHours,
 } from '../calendar/working-time';
-import type { Project, SchedulableTask, WorkTask } from '../model/project';
+import type { Project, SchedulableTask, WorkTask, TaskId } from '../model/project';
 import {
   instantArbitrary,
   permutationOf,
@@ -24,6 +24,7 @@ import { blockResumption } from './block-links';
 import { constrainsSuccessorStart, dependencyAnchor } from './forward-pass';
 import { scheduleProject, type Schedule } from './schedule-project';
 import { placeTask, type Placement } from './task-placement';
+import { testId } from '../testing/project-builder';
 
 /** Compiles the calendar of a generated project, which is always valid. */
 function compiledCalendarOf(input: Project): CompiledCalendar {
@@ -40,7 +41,7 @@ function scheduleGenerated(input: Project): Schedule {
 }
 
 /** Returns the placement of a task, failing the property when it is missing. */
-function placementOf(schedule: Schedule, taskId: string): Placement {
+function placementOf(schedule: Schedule, taskId: TaskId): Placement {
   const placement = schedule.placements.get(taskId);
   if (placement === undefined) {
     throw new Error(`Missing placement for ${taskId}`);
@@ -72,7 +73,7 @@ function scheduledBlocks(input: Project, schedule: Schedule): ScheduledBlock[] {
 /** Returns the block of a task a dependency acts on: the block it names, or the first block for its start and the last for its end. */
 function actedBlock(
   schedule: Schedule,
-  taskId: string,
+  taskId: TaskId,
   block: number | null,
   onStart: boolean,
 ): Placement {
@@ -189,11 +190,11 @@ describe.each([
         const schedule = scheduleGenerated(input);
         const leaves = schedulableTasks(input);
         /** Returns the tasks a summary contains, through the nested summary too. */
-        const descendantsOf = (summaryId: string): SchedulableTask[] =>
+        const descendantsOf = (summaryId: TaskId): SchedulableTask[] =>
           leaves.filter(
             (leaf) => leaf.parentId === summaryId || (summaryId === 's0' && leaf.parentId === 's1'),
           );
-        for (const summaryId of ['s0', 's1', 's2']) {
+        for (const summaryId of [testId('s0'), testId('s1'), testId('s2')]) {
           const placements = descendantsOf(summaryId).map((leaf) => placementOf(schedule, leaf.id));
           const expectedStart =
             placements.length === 0 ? null : Math.min(...placements.map((p) => p.start));

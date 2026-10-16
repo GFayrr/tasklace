@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { END_PROJECT_HOUR } from '../../core/time';
 import fc from 'fast-check';
 import { TEST_CALENDAR } from '../../core/testing/test-calendar';
-import type { Project, Task, WorkTask } from '../../core/model/project';
+import type { Project, Task, WorkTask, TaskId } from '../../core/model/project';
 import { createSharedDocument } from '../../core/shared/shared-document';
 import { openSharedSession, type SharedSession } from '../../core/shared/shared-session';
 import { at, compileOrThrow } from '../../core/testing/civil-time';
@@ -17,6 +17,7 @@ import {
   TEST_DOCUMENT_ID,
   workTask,
   segmentsOrThrow,
+  testId,
 } from '../../core/testing/project-builder';
 import { buildPlanOutline, predecessorText, taskIdOfNumber } from './plan-outline';
 import {
@@ -50,8 +51,8 @@ const CALENDAR = compileOrThrow(TEST_CALENDAR);
 const PLAN = project(
   [
     summary('s', { sortKey: 'a' }),
-    workTask('a', { parentId: 's', sortKey: 'a' }),
-    workTask('b', { parentId: 's', sortKey: 'b' }),
+    workTask('a', { parentId: testId('s'), sortKey: 'a' }),
+    workTask('b', { parentId: testId('s'), sortKey: 'b' }),
     workTask('c', { sortKey: 'b' }),
     splitTask(
       'd',
@@ -76,7 +77,7 @@ function writtenTask(edit: Edit): Task | undefined {
 }
 
 /** Names a whole task as one end of a link. */
-function whole(taskId: string): LinkEnd {
+function whole(taskId: TaskId): LinkEnd {
   return { taskId, block: null };
 }
 
@@ -94,7 +95,7 @@ function openPlan(plan: Project = PLAN) {
     return {
       project: current,
       outline: buildPlanOutline(current.tasks, new Set()),
-      createId: () => `new${String((next += 1))}`,
+      createId: () => testId(`new${String((next += 1))}`),
       dayHours: 7,
     };
   };
@@ -130,17 +131,17 @@ function normalized(plan: Project): Project {
 }
 
 /** Finds a task of a session. */
-function taskOf(session: SharedSession, id: string): Task | undefined {
+function taskOf(session: SharedSession, id: TaskId): Task | undefined {
   return session.project().tasks.find((task) => task.id === id);
 }
 
 describe('adding, deleting and reordering tasks', () => {
   it('adds a one-day task after the selected one, or at the end', () => {
     const { session, context } = openPlan();
-    const inserted = insertTask(context(), 'a', 'New task');
+    const inserted = insertTask(context(), testId('a'), 'New task');
     applied(session, { ok: true, value: inserted.operations });
     expect(rowsOf(session).slice(0, 4)).toEqual(['1 s', '1.1 a', '1.2 new1', '1.3 b']);
-    expect(taskOf(session, 'new1')).toMatchObject({
+    expect(taskOf(session, testId('new1'))).toMatchObject({
       name: 'New task',
       segments: [{ durationHours: 7 }],
     });
@@ -151,21 +152,24 @@ describe('adding, deleting and reordering tasks', () => {
 
   it('deletes a summary with everything under it and their links', () => {
     const { session, context } = openPlan();
-    applied(session, deleteTasks(context(), ['s']));
+    applied(session, deleteTasks(context(), [testId('s')]));
     expect(rowsOf(session)).toEqual(['1 c', '2 d', '3 m']);
     expect(session.project().dependencies).toEqual([link('c', 'd')]);
-    expect(deleteTasks(context(), ['unknown'])).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    expect(deleteTasks(context(), [testId('unknown')])).toEqual({
+      ok: false,
+      error: 'NOT_POSSIBLE',
+    });
   });
 
   it('moves a task up and down among its siblings only', () => {
     const { session, context } = openPlan();
-    applied(session, moveTask(context(), 'b', -1));
+    applied(session, moveTask(context(), testId('b'), -1));
     expect(rowsOf(session).slice(0, 3)).toEqual(['1 s', '1.1 b', '1.2 a']);
-    expect(moveTask(context(), 'b', -1)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
-    expect(moveTask(context(), 'missing', 1)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
-    applied(session, moveTask(context(), 'd', 1));
+    expect(moveTask(context(), testId('b'), -1)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    expect(moveTask(context(), testId('missing'), 1)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    applied(session, moveTask(context(), testId('d'), 1));
     expect(rowsOf(session).slice(-2)).toEqual(['3 m', '4 d']);
-    expect(moveTask(context(), 'd', 1)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    expect(moveTask(context(), testId('d'), 1)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
   });
 
   it('spreads the keys of siblings again when two of them share a key', () => {
@@ -175,7 +179,7 @@ describe('adding, deleting and reordering tasks', () => {
       workTask('z', { sortKey: 'k' }),
     ]);
     const { session, context } = openPlan(tied);
-    applied(session, moveTask(context(), 'z', -1));
+    applied(session, moveTask(context(), testId('z'), -1));
     expect(rowsOf(session)).toEqual(['1 x', '2 z', '3 y']);
   });
 });
@@ -183,9 +187,9 @@ describe('adding, deleting and reordering tasks', () => {
 describe('indenting and outdenting', () => {
   it('puts a task under the one above, which becomes a summary without links', () => {
     const { session, context } = openPlan();
-    applied(session, indentTask(context(), 'd'));
-    expect(taskOf(session, 'c')?.kind).toBe('summary');
-    expect(taskOf(session, 'd')?.parentId).toBe('c');
+    applied(session, indentTask(context(), testId('d')));
+    expect(taskOf(session, testId('c'))?.kind).toBe('summary');
+    expect(taskOf(session, testId('d'))?.parentId).toBe('c');
     expect(session.project().dependencies).toEqual([link('a', 'b')]);
     expect(rowsOf(session)).toEqual(['1 s', '1.1 a', '1.2 b', '2 c', '2.1 d', '3 m']);
     session.history.undo();
@@ -194,59 +198,70 @@ describe('indenting and outdenting', () => {
 
   it('adds a task at the end of a summary above it', () => {
     const { session, context } = openPlan();
-    applied(session, indentTask(context(), 'c'));
+    applied(session, indentTask(context(), testId('c')));
     expect(rowsOf(session).slice(0, 4)).toEqual(['1 s', '1.1 a', '1.2 b', '1.3 c']);
-    expect(indentTask(context(), 'a')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    expect(indentTask(context(), testId('a'))).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
   });
 
   it('moves a task out of its summary, right after it', () => {
     const { session, context } = openPlan();
-    applied(session, outdentTask(context(), 'a'));
+    applied(session, outdentTask(context(), testId('a')));
     expect(rowsOf(session)).toEqual(['1 s', '1.1 b', '2 a', '3 c', '4 d', '5 m']);
-    expect(outdentTask(context(), 'c')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    expect(outdentTask(context(), testId('c'))).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
   });
 });
 
 describe('editing cells', () => {
   it('renames a task and refuses an empty name', () => {
     const { session, context } = openPlan();
-    applied(session, renameTask(context(), 'a', '  Plan  '));
-    expect(taskOf(session, 'a')?.name).toBe('Plan');
-    expect(renameTask(context(), 'a', '  ')).toEqual({ ok: false, error: 'INVALID_NAME' });
+    applied(session, renameTask(context(), testId('a'), '  Plan  '));
+    expect(taskOf(session, testId('a'))?.name).toBe('Plan');
+    expect(renameTask(context(), testId('a'), '  ')).toEqual({ ok: false, error: 'INVALID_NAME' });
   });
 
   it('reads durations in hours or working days, turning zero into a milestone and back', () => {
     const { session, context } = openPlan();
-    applied(session, setDuration(context(), 'a', '2d'));
-    expect(taskOf(session, 'a')).toMatchObject({ segments: [{ durationHours: 14 }] });
-    applied(session, setDuration(context(), 'a', '1 h 30'));
-    expect(taskOf(session, 'a')).toMatchObject({ segments: [{ durationHours: 1.5 }] });
-    applied(session, setDuration(context(), 'a', '0'));
-    expect(taskOf(session, 'a')?.kind).toBe('milestone');
-    applied(session, setDuration(context(), 'a', '5 h'));
-    expect(taskOf(session, 'a')).toMatchObject({ kind: 'task', segments: [{ durationHours: 5 }] });
-    applied(session, setDuration(context(), 'd', '20'));
-    expect(taskOf(session, 'd')).toMatchObject({
+    applied(session, setDuration(context(), testId('a'), '2d'));
+    expect(taskOf(session, testId('a'))).toMatchObject({ segments: [{ durationHours: 14 }] });
+    applied(session, setDuration(context(), testId('a'), '1 h 30'));
+    expect(taskOf(session, testId('a'))).toMatchObject({ segments: [{ durationHours: 1.5 }] });
+    applied(session, setDuration(context(), testId('a'), '0'));
+    expect(taskOf(session, testId('a'))?.kind).toBe('milestone');
+    applied(session, setDuration(context(), testId('a'), '5 h'));
+    expect(taskOf(session, testId('a'))).toMatchObject({
+      kind: 'task',
+      segments: [{ durationHours: 5 }],
+    });
+    applied(session, setDuration(context(), testId('d'), '20'));
+    expect(taskOf(session, testId('d'))).toMatchObject({
       segments: [
         { durationHours: 7 },
         { durationHours: 13, gapDaysBefore: 2, startNoEarlierThan: null },
       ],
     });
-    expect(setDuration(context(), 'd', '7')).toEqual({ ok: false, error: 'INVALID_DURATION' });
-    expect(setDuration(context(), 'a', 'soon')).toEqual({ ok: false, error: 'INVALID_DURATION' });
-    expect(setDuration(context(), 's', '3')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    expect(setDuration(context(), testId('d'), '7')).toEqual({
+      ok: false,
+      error: 'INVALID_DURATION',
+    });
+    expect(setDuration(context(), testId('a'), 'soon')).toEqual({
+      ok: false,
+      error: 'INVALID_DURATION',
+    });
+    expect(setDuration(context(), testId('s'), '3')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
   });
 
   it('reads a start date only as ISO, with or without a time, an empty text removing it', () => {
     const { session, context } = openPlan();
-    applied(session, setStart(context(), 'c', '2026-10-05 14:00'));
-    expect(taskOf(session, 'c')).toMatchObject({ startNoEarlierThan: at(2026, 10, 5, 14) });
-    applied(session, setStart(context(), 'c', '2026-10-06'));
-    expect(taskOf(session, 'c')).toMatchObject({ startNoEarlierThan: at(2026, 10, 6) });
-    applied(session, setStart(context(), 'c', ' '));
-    expect(taskOf(session, 'c')).toMatchObject({ startNoEarlierThan: null });
-    applied(session, setStart(context(), 'c', '2026-10-07T09:45'));
-    expect(taskOf(session, 'c')).toMatchObject({ startNoEarlierThan: at(2026, 10, 7, 9) + 0.75 });
+    applied(session, setStart(context(), testId('c'), '2026-10-05 14:00'));
+    expect(taskOf(session, testId('c'))).toMatchObject({ startNoEarlierThan: at(2026, 10, 5, 14) });
+    applied(session, setStart(context(), testId('c'), '2026-10-06'));
+    expect(taskOf(session, testId('c'))).toMatchObject({ startNoEarlierThan: at(2026, 10, 6) });
+    applied(session, setStart(context(), testId('c'), ' '));
+    expect(taskOf(session, testId('c'))).toMatchObject({ startNoEarlierThan: null });
+    applied(session, setStart(context(), testId('c'), '2026-10-07T09:45'));
+    expect(taskOf(session, testId('c'))).toMatchObject({
+      startNoEarlierThan: at(2026, 10, 7, 9) + 0.75,
+    });
     for (const text of [
       '2026-02-31',
       '05/10/2026',
@@ -254,35 +269,37 @@ describe('editing cells', () => {
       '2026-10-05 9:00',
       '2026-10-05 09:10',
     ]) {
-      expect(setStart(context(), 'c', text)).toEqual({ ok: false, error: 'INVALID_DATE' });
+      expect(setStart(context(), testId('c'), text)).toEqual({ ok: false, error: 'INVALID_DATE' });
     }
   });
 
   it('sets the end of a task through the duration of its last block, or moves a milestone', () => {
     const { session, context } = openPlan();
     const placed = { lastBlockStart: at(2026, 9, 28, 9), calendar: CALENDAR };
-    applied(session, setEnd(context(), 'c', '2026-09-28 11:30', placed));
-    expect(taskOf(session, 'c')).toMatchObject({ segments: [{ durationHours: 2.5 }] });
-    applied(session, setEnd(context(), 'c', '2026-09-29', placed));
-    expect(taskOf(session, 'c')).toMatchObject({ segments: [{ durationHours: 14 }] });
-    expect(setEnd(context(), 'c', '2026-09-28 08:00', placed)).toEqual({
+    applied(session, setEnd(context(), testId('c'), '2026-09-28 11:30', placed));
+    expect(taskOf(session, testId('c'))).toMatchObject({ segments: [{ durationHours: 2.5 }] });
+    applied(session, setEnd(context(), testId('c'), '2026-09-29', placed));
+    expect(taskOf(session, testId('c'))).toMatchObject({ segments: [{ durationHours: 14 }] });
+    expect(setEnd(context(), testId('c'), '2026-09-28 08:00', placed)).toEqual({
       ok: false,
       error: 'INVALID_END',
     });
-    expect(setEnd(context(), 'c', 'soon', placed)).toEqual({
+    expect(setEnd(context(), testId('c'), 'soon', placed)).toEqual({
       ok: false,
       error: 'INVALID_DATE',
     });
-    applied(session, setEnd(context(), 'm', '2026-10-02 15:00', placed));
-    expect(taskOf(session, 'm')).toMatchObject({ startNoEarlierThan: at(2026, 10, 2, 15) });
+    applied(session, setEnd(context(), testId('m'), '2026-10-02 15:00', placed));
+    expect(taskOf(session, testId('m'))).toMatchObject({ startNoEarlierThan: at(2026, 10, 2, 15) });
   });
 
   it('moves the project start to the day of a task placed before it', () => {
     const { session, context } = openPlan();
-    applied(session, setStart(context(), 'c', '2026-09-21 10:15'));
+    applied(session, setStart(context(), testId('c'), '2026-09-21 10:15'));
     expect(session.project().startDate).toBe(at(2026, 9, 21));
-    expect(taskOf(session, 'c')).toMatchObject({ startNoEarlierThan: at(2026, 9, 21, 10) + 0.25 });
-    applied(session, moveStart(context(), 'm', at(2026, 9, 14, 9)));
+    expect(taskOf(session, testId('c'))).toMatchObject({
+      startNoEarlierThan: at(2026, 9, 21, 10) + 0.25,
+    });
+    applied(session, moveStart(context(), testId('m'), at(2026, 9, 14, 9)));
     expect(session.project().startDate).toBe(at(2026, 9, 14));
     session.history.undo();
     expect(session.project().startDate).toBe(at(2026, 9, 21));
@@ -290,12 +307,15 @@ describe('editing cells', () => {
 
   it('reads a whole progress from 0 to 100', () => {
     const { session, context } = openPlan();
-    applied(session, setProgress(context(), 'a', '45 %'));
-    expect(taskOf(session, 'a')).toMatchObject({ progressPercent: 45 });
+    applied(session, setProgress(context(), testId('a'), '45 %'));
+    expect(taskOf(session, testId('a'))).toMatchObject({ progressPercent: 45 });
     for (const text of ['101', '-1', '4.5', 'half', '']) {
-      expect(setProgress(context(), 'a', text)).toEqual({ ok: false, error: 'INVALID_PROGRESS' });
+      expect(setProgress(context(), testId('a'), text)).toEqual({
+        ok: false,
+        error: 'INVALID_PROGRESS',
+      });
     }
-    expect(setProgress(context(), 's', '10')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    expect(setProgress(context(), testId('s'), '10')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
   });
 
   it('links to a task hidden under a collapsed summary by its number', () => {
@@ -311,7 +331,7 @@ describe('editing cells', () => {
       outline: buildPlanOutline(visible.project.tasks, new Set([summary])),
     };
     expect(collapsed.outline.rowIndexById.has(hidden)).toBe(false);
-    applied(session, setPredecessors(collapsed, 'c', '1.1FS'));
+    applied(session, setPredecessors(collapsed, testId('c'), '1.1FS'));
     expect(
       session
         .project()
@@ -322,33 +342,33 @@ describe('editing cells', () => {
 
   it('replaces predecessors, keeping the identifiers of the links that stay', () => {
     const { session, context } = openPlan();
-    applied(session, setPredecessors(context(), 'c', '1.1SS+2h, 1.2'));
+    applied(session, setPredecessors(context(), testId('c'), '1.1SS+2h, 1.2'));
     const incoming = session
       .project()
       .dependencies.filter((dependency) => dependency.successorId === 'c');
     expect(incoming).toContainEqual(link('b', 'c'));
     expect(incoming).toContainEqual({
-      id: 'new1',
-      predecessorId: 'a',
+      id: testId('new1'),
+      predecessorId: testId('a'),
       predecessorBlock: null,
-      successorId: 'c',
+      successorId: testId('c'),
       successorBlock: null,
       type: 'startToStart',
       lagHours: 2,
     });
-    applied(session, setPredecessors(context(), 'c', ''));
+    applied(session, setPredecessors(context(), testId('c'), ''));
     expect(
       session.project().dependencies.filter((dependency) => dependency.successorId === 'c'),
     ).toEqual([]);
-    expect(setPredecessors(context(), 'c', '9')).toEqual({
+    expect(setPredecessors(context(), testId('c'), '9')).toEqual({
       ok: false,
       error: 'UNKNOWN_TASK_NUMBER',
     });
-    expect(setPredecessors(context(), 'c', '1.1, 1.1FF')).toEqual({
+    expect(setPredecessors(context(), testId('c'), '1.1, 1.1FF')).toEqual({
       ok: false,
       error: 'INVALID_PREDECESSORS',
     });
-    expect(setPredecessors(context(), 'c', 'soon')).toEqual({
+    expect(setPredecessors(context(), testId('c'), 'soon')).toEqual({
       ok: false,
       error: 'INVALID_PREDECESSORS',
     });
@@ -356,7 +376,7 @@ describe('editing cells', () => {
 
   it('lets the session refuse a link that would close a loop', () => {
     const { session, context } = openPlan();
-    const edit = setPredecessors(context(), 'a', '1.2');
+    const edit = setPredecessors(context(), testId('a'), '1.2');
     expect(edit.ok && session.applyAll(edit.value)).toEqual({
       ok: false,
       error: [{ path: 'dependencies.new1', code: 'DEPENDENCY_CYCLE' }],
@@ -366,20 +386,28 @@ describe('editing cells', () => {
 
   it('gives a task a known tag or none, never to a summary', () => {
     const tagged = project(PLAN.tasks, PLAN.dependencies, {
-      tags: [{ id: 'design', name: 'Design', color: '#2a78d6', representsPersonOrTeam: false }],
+      tags: [
+        { id: testId('design'), name: 'Design', color: '#2a78d6', representsPersonOrTeam: false },
+      ],
     });
     const { session, context } = openPlan(tagged);
-    applied(session, setTag(context(), 'a', 'design'));
-    expect(taskOf(session, 'a')).toMatchObject({ tagId: 'design' });
-    applied(session, setTag(context(), 'a', null));
-    expect(taskOf(session, 'a')).toMatchObject({ tagId: null });
-    expect(setTag(context(), 'a', 'unknown')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
-    expect(setTag(context(), 's', 'design')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    applied(session, setTag(context(), testId('a'), testId('design')));
+    expect(taskOf(session, testId('a'))).toMatchObject({ tagId: testId('design') });
+    applied(session, setTag(context(), testId('a'), null));
+    expect(taskOf(session, testId('a'))).toMatchObject({ tagId: null });
+    expect(setTag(context(), testId('a'), testId('unknown'))).toEqual({
+      ok: false,
+      error: 'NOT_POSSIBLE',
+    });
+    expect(setTag(context(), testId('s'), testId('design'))).toEqual({
+      ok: false,
+      error: 'NOT_POSSIBLE',
+    });
   });
 
   it('replaces a task by its edited version, moving the project start when needed', () => {
     const { session, context } = openPlan();
-    const task = taskOf(session, 'c');
+    const task = taskOf(session, testId('c'));
     if (task?.kind !== 'task') {
       throw new Error('c');
     }
@@ -387,7 +415,7 @@ describe('editing cells', () => {
       session,
       replaceTask(context(), { ...task, name: 'C', startNoEarlierThan: at(2026, 9, 21, 10) }),
     );
-    expect(taskOf(session, 'c')).toMatchObject({ name: 'C' });
+    expect(taskOf(session, testId('c'))).toMatchObject({ name: 'C' });
     expect(session.project().startDate).toBe(at(2026, 9, 21));
     expect(replaceTask(context(), workTask('unknown'))).toEqual({
       ok: false,
@@ -397,11 +425,14 @@ describe('editing cells', () => {
 
   it('turns a work task into a milestone and back', () => {
     const { session, context } = openPlan();
-    applied(session, toggleMilestone(context(), 'c'));
-    expect(taskOf(session, 'c')?.kind).toBe('milestone');
-    applied(session, toggleMilestone(context(), 'c'));
-    expect(taskOf(session, 'c')).toMatchObject({ kind: 'task', segments: [{ durationHours: 7 }] });
-    expect(toggleMilestone(context(), 's')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    applied(session, toggleMilestone(context(), testId('c')));
+    expect(taskOf(session, testId('c'))?.kind).toBe('milestone');
+    applied(session, toggleMilestone(context(), testId('c')));
+    expect(taskOf(session, testId('c'))).toMatchObject({
+      kind: 'task',
+      segments: [{ durationHours: 7 }],
+    });
+    expect(toggleMilestone(context(), testId('s'))).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
   });
 });
 
@@ -421,7 +452,7 @@ const SPLIT_WITH_WAIT = project(
 );
 
 /** Returns a work task of a session, failing the test when it is not one. */
-function workTaskOf(session: SharedSession, id: string): WorkTask {
+function workTaskOf(session: SharedSession, id: TaskId): WorkTask {
   const task = taskOf(session, id);
   if (task?.kind !== 'task') {
     throw new Error(`Missing work task ${id}`);
@@ -434,24 +465,24 @@ describe('moving a later block alone', () => {
     const { session, context } = openPlan(SPLIT_WITH_WAIT);
     applied(
       session,
-      moveBlock(context(), 'd', 1, {
+      moveBlock(context(), testId('d'), 1, {
         start: at(2026, 10, 2, 14),
         previousEnd: at(2026, 9, 28, 17),
       }),
     );
-    expect(workTaskOf(session, 'd').segments[1]).toEqual({
+    expect(workTaskOf(session, testId('d')).segments[1]).toEqual({
       durationHours: 7,
       gapDaysBefore: 4,
       startNoEarlierThan: at(2026, 10, 2, 14),
     });
     applied(
       session,
-      moveBlock(context(), 'd', 1, {
+      moveBlock(context(), testId('d'), 1, {
         start: at(2026, 9, 28, 15),
         previousEnd: at(2026, 9, 28, 17),
       }),
     );
-    expect(workTaskOf(session, 'd').segments[1]).toMatchObject({
+    expect(workTaskOf(session, testId('d')).segments[1]).toMatchObject({
       gapDaysBefore: 0,
       startNoEarlierThan: null,
     });
@@ -465,40 +496,42 @@ describe('moving a later block alone', () => {
       ]),
     ]);
     const { session, context } = openPlan(dated);
-    applied(session, moveStart(context(), 'd', at(2026, 9, 30, 9), at(2026, 9, 28, 9)));
-    expect(workTaskOf(session, 'd')).toMatchObject({
+    applied(session, moveStart(context(), testId('d'), at(2026, 9, 30, 9), at(2026, 9, 28, 9)));
+    expect(workTaskOf(session, testId('d'))).toMatchObject({
       startNoEarlierThan: at(2026, 9, 30, 9),
       segments: [{ startNoEarlierThan: null }, { startNoEarlierThan: at(2026, 10, 7, 13) }],
     });
-    applied(session, moveStart(context(), 'd', at(2026, 10, 1, 9)));
-    expect(workTaskOf(session, 'd').segments[1]?.startNoEarlierThan).toBe(at(2026, 10, 7, 13));
+    applied(session, moveStart(context(), testId('d'), at(2026, 10, 1, 9)));
+    expect(workTaskOf(session, testId('d')).segments[1]?.startNoEarlierThan).toBe(
+      at(2026, 10, 7, 13),
+    );
   });
 
   it('chooses on the timeline between moving a later block, moving the whole task, and refusing what the schedule no longer shows', () => {
     const { session, context } = openPlan(SPLIT_WITH_WAIT);
-    const placement = scheduleOrThrow(session.project()).placements.get('d');
+    const placement = scheduleOrThrow(session.project()).placements.get(testId('d'));
     /** Returns the instant one day later. */
     const later = (from: number) => from + 24;
-    const asked = writtenTask(moveOnTimeline(context(), 'd', 1, placement, later));
+    const asked = writtenTask(moveOnTimeline(context(), testId('d'), 1, placement, later));
     expect(asked).toMatchObject({
       segments: [
         { startNoEarlierThan: null },
         { startNoEarlierThan: (placement?.segments[1]?.start ?? 0) + 24 },
       ],
     });
-    const whole = writtenTask(moveOnTimeline(context(), 'd', null, placement, later));
+    const whole = writtenTask(moveOnTimeline(context(), testId('d'), null, placement, later));
     expect(whole).toMatchObject({ startNoEarlierThan: (placement?.start ?? 0) + 24 });
     const notPossible = { ok: false, error: 'NOT_POSSIBLE' };
-    expect(moveOnTimeline(context(), 'd', 4, placement, later)).toEqual(notPossible);
-    expect(moveOnTimeline(context(), 'd', 1, undefined, later)).toEqual(notPossible);
+    expect(moveOnTimeline(context(), testId('d'), 4, placement, later)).toEqual(notPossible);
+    expect(moveOnTimeline(context(), testId('d'), 1, undefined, later)).toEqual(notPossible);
   });
 
   it('stretches the bar dropped on the timeline, and refuses without its placement or the calendar', () => {
     const { session, context } = openPlan();
-    const placement = scheduleOrThrow(session.project()).placements.get('c');
+    const placement = scheduleOrThrow(session.project()).placements.get(testId('c'));
     const stretched = stretchOnTimeline(
       context(),
-      'c',
+      testId('c'),
       { placement, calendar: CALENDAR },
       (end) => end + 24,
     );
@@ -507,9 +540,14 @@ describe('moving a later block alone', () => {
     /** Returns the instant one day later. */
     const later = (end: number) => end + 24;
     expect(
-      stretchOnTimeline(context(), 'c', { placement: undefined, calendar: CALENDAR }, later),
+      stretchOnTimeline(
+        context(),
+        testId('c'),
+        { placement: undefined, calendar: CALENDAR },
+        later,
+      ),
     ).toEqual(notPossible);
-    expect(stretchOnTimeline(context(), 'c', { placement, calendar: null }, later)).toEqual(
+    expect(stretchOnTimeline(context(), testId('c'), { placement, calendar: null }, later)).toEqual(
       notPossible,
     );
   });
@@ -518,9 +556,15 @@ describe('moving a later block alone', () => {
     const { context } = openPlan(SPLIT_WITH_WAIT);
     const notPossible = { ok: false, error: 'NOT_POSSIBLE' };
     const hour = at(2026, 10, 2, 14);
-    expect(moveBlock(context(), 'd', 0, { start: hour, previousEnd: hour })).toEqual(notPossible);
-    expect(moveBlock(context(), 'd', 2, { start: hour, previousEnd: hour })).toEqual(notPossible);
-    expect(moveBlock(context(), 'a', 1, { start: hour, previousEnd: hour })).toEqual(notPossible);
+    expect(moveBlock(context(), testId('d'), 0, { start: hour, previousEnd: hour })).toEqual(
+      notPossible,
+    );
+    expect(moveBlock(context(), testId('d'), 2, { start: hour, previousEnd: hour })).toEqual(
+      notPossible,
+    );
+    expect(moveBlock(context(), testId('a'), 1, { start: hour, previousEnd: hour })).toEqual(
+      notPossible,
+    );
   });
 });
 
@@ -531,8 +575,11 @@ describe('block edits refused with a reason', () => {
       blockLink('a', 'd', {}),
     ]);
     const { session, context } = openPlan(plan);
-    const task = workTaskOf(session, 'd');
-    expect(toggleMilestone(context(), 'd')).toEqual({ ok: false, error: 'LINKS_WOULD_MERGE' });
+    const task = workTaskOf(session, testId('d'));
+    expect(toggleMilestone(context(), testId('d'))).toEqual({
+      ok: false,
+      error: 'LINKS_WOULD_MERGE',
+    });
     const lastOnly = segmentsOrThrow(
       task.segments.slice(1).map((segment) => ({ ...segment, gapDaysBefore: 0 })),
     );
@@ -543,7 +590,7 @@ describe('block edits refused with a reason', () => {
 
   it('refuses blocks that do not match the task or change the order of its blocks', () => {
     const { session, context } = openPlan(SPLIT_WITH_WAIT);
-    const task = workTaskOf(session, 'd');
+    const task = workTaskOf(session, testId('d'));
     const notPossible = { ok: false, error: 'NOT_POSSIBLE' };
     expect(replaceTask(context(), task, [{ origin: 0, waitsFor: '' }])).toEqual(notPossible);
     expect(
@@ -562,7 +609,7 @@ describe('block edits refused with a reason', () => {
 
   it('keeps what the last block waited for once it is the only block, unless its waits were changed', () => {
     const { session, context } = openPlan(SPLIT_WITH_WAIT);
-    const task = workTaskOf(session, 'd');
+    const task = workTaskOf(session, testId('d'));
     const single = {
       ...task,
       segments: segmentsOrThrow(
@@ -603,21 +650,30 @@ describe('block edits refused with a reason', () => {
 
   it('refuses a gesture on a block a split task does not have, and reads a block of a task that is not split as the whole task', () => {
     const { session, context } = openPlan(SPLIT_WITH_WAIT);
-    expect(linkTasks(context(), { taskId: 'd', block: 5 }, { taskId: 'a', block: null })).toEqual({
+    expect(
+      linkTasks(context(), { taskId: testId('d'), block: 5 }, { taskId: testId('a'), block: null }),
+    ).toEqual({
       ok: false,
       error: 'UNKNOWN_BLOCK',
     });
-    applied(session, linkTasks(context(), { taskId: 'a', block: 3 }, { taskId: 'd', block: 0 }));
+    applied(
+      session,
+      linkTasks(context(), { taskId: testId('a'), block: 3 }, { taskId: testId('d'), block: 0 }),
+    );
     expect(session.project().dependencies).toContainEqual(
-      expect.objectContaining({ id: 'new1', predecessorBlock: null, successorBlock: null }),
+      expect.objectContaining({ id: testId('new1'), predecessorBlock: null, successorBlock: null }),
     );
   });
 
   it('writes a block that the whole task stands for anyway as the whole task', () => {
     const { session, context } = openPlan();
-    applied(session, setPredecessors(context(), 'm', '3#2'));
+    applied(session, setPredecessors(context(), testId('m'), '3#2'));
     expect(session.project().dependencies).toContainEqual(
-      expect.objectContaining({ predecessorId: 'd', predecessorBlock: null, successorId: 'm' }),
+      expect.objectContaining({
+        predecessorId: testId('d'),
+        predecessorBlock: null,
+        successorId: testId('m'),
+      }),
     );
   });
 });
@@ -625,19 +681,36 @@ describe('block edits refused with a reason', () => {
 describe('links to and from blocks', () => {
   it('writes the predecessors of one block, with blocks of other tasks, apart from those of the task', () => {
     const { session, context } = openPlan();
-    applied(session, setPredecessors(context(), 'd', '1.1SS+1h', 1));
-    applied(session, setPredecessors(context(), 'm', '3#1'));
+    applied(session, setPredecessors(context(), testId('d'), '1.1SS+1h', 1));
+    applied(session, setPredecessors(context(), testId('m'), '3#1'));
     const links = session.project().dependencies;
     expect(links).toContainEqual(link('c', 'd'));
     expect(links).toContainEqual(
-      expect.objectContaining({ predecessorId: 'a', successorId: 'd', successorBlock: 1 }),
+      expect.objectContaining({
+        predecessorId: testId('a'),
+        successorId: testId('d'),
+        successorBlock: 1,
+      }),
     );
     expect(links).toContainEqual(
-      expect.objectContaining({ predecessorId: 'd', predecessorBlock: 0, successorId: 'm' }),
+      expect.objectContaining({
+        predecessorId: testId('d'),
+        predecessorBlock: 0,
+        successorId: testId('m'),
+      }),
     );
-    expect(setPredecessors(context(), 'm', '3#3')).toEqual({ ok: false, error: 'UNKNOWN_BLOCK' });
-    expect(setPredecessors(context(), 'm', '2#1')).toEqual({ ok: false, error: 'UNKNOWN_BLOCK' });
-    expect(setPredecessors(context(), 'c', '1.1', 0)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    expect(setPredecessors(context(), testId('m'), '3#3')).toEqual({
+      ok: false,
+      error: 'UNKNOWN_BLOCK',
+    });
+    expect(setPredecessors(context(), testId('m'), '2#1')).toEqual({
+      ok: false,
+      error: 'UNKNOWN_BLOCK',
+    });
+    expect(setPredecessors(context(), testId('c'), '1.1', 0)).toEqual({
+      ok: false,
+      error: 'NOT_POSSIBLE',
+    });
   });
 
   it('moves the links of the blocks that stay when a block is removed, and drops those of the removed block', () => {
@@ -658,7 +731,7 @@ describe('links to and from blocks', () => {
       [blockLink('a', 'd', { to: 1 }), blockLink('d', 'e', { from: 2 })],
     );
     const { session, context } = openPlan(plan);
-    const task = taskOf(session, 'd');
+    const task = taskOf(session, testId('d'));
     if (task?.kind !== 'task') {
       throw new Error('Missing task');
     }
@@ -676,7 +749,11 @@ describe('links to and from blocks', () => {
     expect(links.map((dependency) => dependency.id)).not.toContain('a-d_1');
     expect(links).toEqual([
       { ...blockLink('d', 'e', { from: 2 }), predecessorBlock: 1 },
-      expect.objectContaining({ predecessorId: 'a', successorId: 'd', successorBlock: 1 }),
+      expect.objectContaining({
+        predecessorId: testId('a'),
+        successorId: testId('d'),
+        successorBlock: 1,
+      }),
     ]);
   });
 
@@ -693,10 +770,10 @@ describe('links to and from blocks', () => {
           { sortKey: 'b' },
         ),
       ],
-      [blockLink('a', 'd', { to: 1 }), { ...blockLink('a', 'd', {}), id: 'z' }],
+      [blockLink('a', 'd', { to: 1 }), { ...blockLink('a', 'd', {}), id: testId('z') }],
     );
     const { session, context } = openPlan(plan);
-    const task = taskOf(session, 'd');
+    const task = taskOf(session, testId('d'));
     if (task?.kind !== 'task') {
       throw new Error('Missing task');
     }
@@ -725,7 +802,7 @@ describe('links to and from blocks', () => {
       [blockLink('a', 'd', { to: 1 })],
     );
     const { session, context } = openPlan(plan);
-    applied(session, toggleMilestone(context(), 'd'));
+    applied(session, toggleMilestone(context(), testId('d')));
     expect(session.project().dependencies).toEqual([
       { ...blockLink('a', 'd', { to: 1 }), successorBlock: null },
     ]);
@@ -735,18 +812,24 @@ describe('links to and from blocks', () => {
 describe('dragging on the timeline', () => {
   it('asks a moved task not to start before its new place', () => {
     const { session, context } = openPlan();
-    applied(session, moveStart(context(), 'm', at(2026, 10, 12)));
-    expect(taskOf(session, 'm')).toMatchObject({ startNoEarlierThan: at(2026, 10, 12) });
-    expect(moveStart(context(), 's', 0)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    applied(session, moveStart(context(), testId('m'), at(2026, 10, 12)));
+    expect(taskOf(session, testId('m'))).toMatchObject({ startNoEarlierThan: at(2026, 10, 12) });
+    expect(moveStart(context(), testId('s'), 0)).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
   });
 
   it('stretches the last block to end at an instant, keeping at least a quarter hour', () => {
     const { session, context } = openPlan();
-    applied(session, stretchEnd(context(), 'c', at(2026, 9, 28, 9), at(2026, 9, 29, 17), CALENDAR));
-    expect(taskOf(session, 'c')).toMatchObject({ segments: [{ durationHours: 14 }] });
-    applied(session, stretchEnd(context(), 'c', at(2026, 9, 28, 9), at(2026, 9, 27), CALENDAR));
-    expect(taskOf(session, 'c')).toMatchObject({ segments: [{ durationHours: 0.25 }] });
-    expect(stretchEnd(context(), 'm', 0, 1, CALENDAR)).toEqual({
+    applied(
+      session,
+      stretchEnd(context(), testId('c'), at(2026, 9, 28, 9), at(2026, 9, 29, 17), CALENDAR),
+    );
+    expect(taskOf(session, testId('c'))).toMatchObject({ segments: [{ durationHours: 14 }] });
+    applied(
+      session,
+      stretchEnd(context(), testId('c'), at(2026, 9, 28, 9), at(2026, 9, 27), CALENDAR),
+    );
+    expect(taskOf(session, testId('c'))).toMatchObject({ segments: [{ durationHours: 0.25 }] });
+    expect(stretchEnd(context(), testId('m'), 0, 1, CALENDAR)).toEqual({
       ok: false,
       error: 'NOT_POSSIBLE',
     });
@@ -754,7 +837,9 @@ describe('dragging on the timeline', () => {
 
   it('refuses to stretch a bar to an end the calendar does not cover', () => {
     const { context } = openPlan();
-    expect(stretchEnd(context(), 'c', at(2026, 9, 28, 9), END_PROJECT_HOUR, CALENDAR)).toEqual({
+    expect(
+      stretchEnd(context(), testId('c'), at(2026, 9, 28, 9), END_PROJECT_HOUR, CALENDAR),
+    ).toEqual({
       ok: false,
       error: 'OUT_OF_RANGE',
     });
@@ -762,17 +847,17 @@ describe('dragging on the timeline', () => {
 
   it('links two different tasks from the end of the first to the start of the second', () => {
     const { session, context } = openPlan();
-    applied(session, linkTasks(context(), whole('a'), whole('m')));
+    applied(session, linkTasks(context(), whole(testId('a')), whole(testId('m'))));
     expect(session.project().dependencies).toContainEqual({
-      id: 'new1',
-      predecessorId: 'a',
+      id: testId('new1'),
+      predecessorId: testId('a'),
       predecessorBlock: null,
-      successorId: 'm',
+      successorId: testId('m'),
       successorBlock: null,
       type: 'finishToStart',
       lagHours: 0,
     });
-    expect(linkTasks(context(), whole('a'), whole('a'))).toEqual({
+    expect(linkTasks(context(), whole(testId('a')), whole(testId('a')))).toEqual({
       ok: false,
       error: 'NOT_POSSIBLE',
     });
@@ -780,18 +865,29 @@ describe('dragging on the timeline', () => {
 
   it('links from a block or to a block of a split task, a block another task lacks meaning the whole task', () => {
     const { session, context } = openPlan();
-    applied(session, linkTasks(context(), { taskId: 'd', block: 0 }, { taskId: 'm', block: 1 }));
-    applied(session, linkTasks(context(), whole('a'), { taskId: 'd', block: 1 }));
+    applied(
+      session,
+      linkTasks(context(), { taskId: testId('d'), block: 0 }, { taskId: testId('m'), block: 1 }),
+    );
+    applied(session, linkTasks(context(), whole(testId('a')), { taskId: testId('d'), block: 1 }));
     expect(session.project().dependencies).toContainEqual(
-      expect.objectContaining({ predecessorId: 'd', predecessorBlock: 0, successorBlock: null }),
+      expect.objectContaining({
+        predecessorId: testId('d'),
+        predecessorBlock: 0,
+        successorBlock: null,
+      }),
     );
     expect(session.project().dependencies).toContainEqual(
-      expect.objectContaining({ predecessorId: 'a', successorId: 'd', successorBlock: 1 }),
+      expect.objectContaining({
+        predecessorId: testId('a'),
+        successorId: testId('d'),
+        successorBlock: 1,
+      }),
     );
   });
 });
 
-const REFUSABLE_EDITS: ReadonlySet<string> = new Set(['linkBlock', 'dropBlock']);
+const REFUSABLE_EDITS: ReadonlySet<string> = new Set([testId('linkBlock'), testId('dropBlock')]);
 const EXPECTED_BLOCK_REFUSALS: ReadonlySet<string> = new Set([
   'NOT_POSSIBLE',
   'UNKNOWN_BLOCK',
@@ -803,10 +899,10 @@ const EXPECTED_BLOCK_REFUSALS: ReadonlySet<string> = new Set([
 ]);
 
 /** Builds an edit of the blocks of a task: a link from the first block of the split task to it, or the removal of its first block, or one more block waiting for nothing, every other block keeping what it waits for. */
-function blockEdit(context: EditContext, kind: string, id: string): Edit {
+function blockEdit(context: EditContext, kind: string, id: TaskId): Edit {
   const task = context.project.tasks.find((candidate) => candidate.id === id);
   if (kind === 'linkBlock') {
-    return linkTasks(context, { taskId: 'd', block: 0 }, { taskId: id, block: 1 });
+    return linkTasks(context, { taskId: testId('d'), block: 0 }, { taskId: id, block: 1 });
   }
   if (task?.kind !== 'task') {
     return { ok: false, error: 'NOT_POSSIBLE' };
@@ -862,7 +958,8 @@ describe('any sequence of structural edits', () => {
     fc.assert(
       fc.property(edits, (steps) => {
         const { session, context } = openPlan();
-        for (const [kind, id] of steps) {
+        for (const [kind, text] of steps) {
+          const id = testId(text);
           const current = context();
           const edit: Edit =
             kind === 'insert'
@@ -903,6 +1000,6 @@ describe('any sequence of structural edits', () => {
 
   it('refuses to indent a task that is not in the project', () => {
     const { context } = openPlan();
-    expect(indentTask(context(), 'missing')).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
+    expect(indentTask(context(), testId('missing'))).toEqual({ ok: false, error: 'NOT_POSSIBLE' });
   });
 });

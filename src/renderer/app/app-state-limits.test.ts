@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { project, workTask } from '../../core/testing/project-builder';
+import { project, workTask, testId } from '../../core/testing/project-builder';
 import english from '../locales/en.json';
 import { AppState } from './app-state.svelte';
 import { fakeAppContext, openedProjectOf } from './testing/fake-app-context';
@@ -17,7 +17,7 @@ describe('adding a task to a project at its limit', () => {
       project([workTask('a'), workTask('b')], [], { name: 'Full' }),
     );
     await app.open();
-    app.select('a');
+    app.select(testId('a'));
     const before = app.project;
     app.addTask();
     expect(app.project).toBe(before);

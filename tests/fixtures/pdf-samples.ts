@@ -6,6 +6,7 @@ import {
   splitTask,
   summary,
   workTask,
+  testId,
 } from '../../src/core/testing/project-builder';
 import { createRandom } from './random';
 
@@ -49,11 +50,21 @@ const SHAPES: Readonly<Record<PdfSampleSize, SampleShape>> = {
   },
 };
 const TAGS: readonly Tag[] = [
-  { id: 'design', name: 'Design', color: '#2a78d6', representsPersonOrTeam: false },
-  { id: 'documentation', name: 'Documentation', color: '#2a78d7', representsPersonOrTeam: false },
-  { id: 'development', name: 'Development', color: '#1baf7a', representsPersonOrTeam: false },
-  { id: 'testing', name: 'Testing', color: '#eb6834', representsPersonOrTeam: false },
-  { id: 'deployment', name: 'Deployment', color: '#4a3aa7', representsPersonOrTeam: false },
+  { id: testId('design'), name: 'Design', color: '#2a78d6', representsPersonOrTeam: false },
+  {
+    id: testId('documentation'),
+    name: 'Documentation',
+    color: '#2a78d7',
+    representsPersonOrTeam: false,
+  },
+  {
+    id: testId('development'),
+    name: 'Development',
+    color: '#1baf7a',
+    representsPersonOrTeam: false,
+  },
+  { id: testId('testing'), name: 'Testing', color: '#eb6834', representsPersonOrTeam: false },
+  { id: testId('deployment'), name: 'Deployment', color: '#4a3aa7', representsPersonOrTeam: false },
 ];
 const SPLIT_EVERY = 9;
 const SPREAD = 0.5;

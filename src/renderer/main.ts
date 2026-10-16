@@ -5,6 +5,7 @@ import { loadMessages } from './i18n/messages';
 import { createScheduler } from './schedule/scheduler';
 import { SAND_GRAPHITE } from './theme/sand-graphite';
 import './styles/global.css';
+import { requireIdentifier } from '../core/identifiers';
 
 let app: AppState | null = null;
 
@@ -26,7 +27,7 @@ try {
             }),
           listener,
         ),
-      createId: () => crypto.randomUUID(),
+      createId: () => requireIdentifier(crypto.randomUUID()),
       now: () => new Date(),
       theme: SAND_GRAPHITE,
     },

@@ -25,6 +25,7 @@ import {
   summary,
   workTask,
   TEST_DOCUMENT_ID,
+  testId,
 } from '../testing/project-builder';
 import { crc32 } from './crc32';
 import {
@@ -69,11 +70,18 @@ const SAMPLE: Project = project(
   ],
   [link('a', 'b'), link('b', 'm')],
   {
-    tags: [{ id: 'design', name: 'Design', color: '#336699', representsPersonOrTeam: true }],
+    tags: [
+      { id: testId('design'), name: 'Design', color: '#336699', representsPersonOrTeam: true },
+    ],
     baseline: {
       takenAt: at(2026, 9, 27, 10),
       entries: [
-        { taskId: 'a', start: at(2026, 9, 28, 9), end: at(2026, 9, 28, 17), durationHours: 7 },
+        {
+          taskId: testId('a'),
+          start: at(2026, 9, 28, 9),
+          end: at(2026, 9, 28, 17),
+          durationHours: 7,
+        },
       ],
     },
   },

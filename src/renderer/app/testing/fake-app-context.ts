@@ -3,7 +3,7 @@ import type { Project } from '../../../core/model/project';
 import type { PrintDocument } from '../../../core/print/print-document';
 import { scheduleProject } from '../../../core/scheduling/schedule-project';
 import { createSharedDocument, requireDocumentId } from '../../../core/shared/shared-document';
-import { TEST_DOCUMENT_ID } from '../../../core/testing/project-builder';
+import { TEST_DOCUMENT_ID, testId } from '../../../core/testing/project-builder';
 import type {
   BridgeResult,
   ExchangeKind,
@@ -211,7 +211,7 @@ export function fakeAppContext() {
     createScheduler: create,
     createId: () => {
       nextId += 1;
-      return `id${String(nextId)}`;
+      return testId(`id${String(nextId)}`);
     },
     now: () => FIXED_NOW,
     theme: SAND_GRAPHITE,

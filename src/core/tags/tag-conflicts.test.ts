@@ -10,13 +10,19 @@ import {
   scheduleOrThrow,
   splitTask,
   workTask,
+  testId,
 } from '../testing/project-builder';
 import type { TagConflict } from './tag-conflicts';
 
-const ALICE: Tag = { id: 'alice', name: 'Alice', color: '#2a78d6', representsPersonOrTeam: true };
-const BOB: Tag = { id: 'bob', name: 'Bob', color: '#eb6834', representsPersonOrTeam: true };
+const ALICE: Tag = {
+  id: testId('alice'),
+  name: 'Alice',
+  color: '#2a78d6',
+  representsPersonOrTeam: true,
+};
+const BOB: Tag = { id: testId('bob'), name: 'Bob', color: '#eb6834', representsPersonOrTeam: true };
 const DESIGN: Tag = {
-  id: 'design',
+  id: testId('design'),
   name: 'Design',
   color: '#1baf7a',
   representsPersonOrTeam: false,
@@ -104,7 +110,7 @@ describe('detectTagConflicts', () => {
   it('never reports milestones, which take no time', () => {
     const tasks = [
       tagged('a', 'alice', 7),
-      milestone('m', { tagId: 'alice', startNoEarlierThan: at(2026, 9, 28, 11) }),
+      milestone('m', { tagId: testId('alice'), startNoEarlierThan: at(2026, 9, 28, 11) }),
     ];
     expect(conflictsOf(tasks)).toEqual([]);
   });
@@ -117,7 +123,7 @@ describe('detectTagConflicts', () => {
           [7, 0],
           [7, 14],
         ],
-        { tagId: 'alice' },
+        { tagId: testId('alice') },
       ),
       tagged('b', 'alice', 35, { startNoEarlierThan: at(2026, 9, 29, 9) }),
     ];
@@ -167,18 +173,18 @@ describe('tag structure', () => {
     const result = analyzeProjectStructure({
       tasks: [],
       dependencies: [],
-      tags: [ALICE, { ...BOB, id: 'alice' }],
+      tags: [ALICE, { ...BOB, id: testId('alice') }],
     });
     expect(result).toEqual({
       ok: false,
-      error: [{ code: 'DUPLICATE_TAG_ID', list: 'tags', index: 1, tagId: 'alice' }],
+      error: [{ code: 'DUPLICATE_TAG_ID', list: 'tags', index: 1, tagId: testId('alice') }],
     });
   });
 
   it('rejects too many tags', () => {
     const tags = Array.from({ length: MAX_TAGS + 1 }, (_value, index) => ({
       ...DESIGN,
-      id: `t${String(index)}`,
+      id: testId(`t${String(index)}`),
     }));
     const result = analyzeProjectStructure({ tasks: [], dependencies: [], tags });
     expect(result).toEqual({ ok: false, error: [{ code: 'TOO_MANY_TAGS' }] });

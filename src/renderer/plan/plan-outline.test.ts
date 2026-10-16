@@ -9,6 +9,7 @@ import {
   splitTask,
   summary,
   workTask,
+  testId,
 } from '../../core/testing/project-builder';
 import {
   buildPlanOutline,
@@ -18,14 +19,15 @@ import {
   toggledSummary,
   withAncestorsOpen,
 } from './plan-outline';
+import type { TaskId } from '../../core/model/project';
 
 const TASKS = [
   summary('s', { sortKey: 'a' }),
-  workTask('s1', { parentId: 's', sortKey: 'b' }),
-  workTask('s0', { parentId: 's', sortKey: 'a' }),
+  workTask('s1', { parentId: testId('s'), sortKey: 'b' }),
+  workTask('s0', { parentId: testId('s'), sortKey: 'a' }),
   summary('t', { sortKey: 'b' }),
-  summary('t1', { parentId: 't', sortKey: 'a' }),
-  milestone('t11', { parentId: 't1', sortKey: 'a' }),
+  summary('t1', { parentId: testId('t'), sortKey: 'a' }),
+  milestone('t11', { parentId: testId('t1'), sortKey: 'a' }),
   workTask('u', { sortKey: 'c' }),
 ];
 
@@ -50,16 +52,16 @@ describe('buildPlanOutline', () => {
       false,
       false,
     ]);
-    expect(outline.rowIndexById.get('u')).toBe(6);
+    expect(outline.rowIndexById.get(testId('u'))).toBe(6);
   });
 
   it('hides the descendants of a collapsed summary but keeps their numbers', () => {
-    const outline = buildPlanOutline(TASKS, new Set(['t', 'u']));
+    const outline = buildPlanOutline(TASKS, new Set([testId('t'), testId('u')]));
     expect(outline.rows.map((row) => row.task.id)).toEqual(['s', 's0', 's1', 't', 'u']);
     expect(outline.rows.find((row) => row.task.id === 't')?.collapsed).toBe(true);
     expect(outline.rows.find((row) => row.task.id === 'u')?.collapsed).toBe(false);
-    expect(outline.wbsById.get('t11')).toBe('2.1.1');
-    expect(outline.rowIndexById.has('t11')).toBe(false);
+    expect(outline.wbsById.get(testId('t11'))).toBe('2.1.1');
+    expect(outline.rowIndexById.has(testId('t11'))).toBe(false);
   });
 
   it('numbers tasks exactly as the schedule does, both ways, whatever their order and the summaries collapsed', () => {
@@ -70,7 +72,7 @@ describe('buildPlanOutline', () => {
         fc.subarray(summaries),
         (shuffled, collapsed) => {
           const outline = buildPlanOutline(shuffled, new Set(collapsed));
-          const grouped = new Map<string | null, typeof TASKS>();
+          const grouped = new Map<TaskId | null, typeof TASKS>();
           shuffled.forEach((task) => {
             grouped.set(task.parentId, [...(grouped.get(task.parentId) ?? []), task]);
           });
@@ -96,8 +98,8 @@ describe('predecessorText', () => {
     );
     const outline = buildPlanOutline(plan.tasks, new Set());
     const incoming = groupIncoming(plan.dependencies);
-    expect(predecessorText(incoming.get('c'), outline.wbsById)).toBe('1, 2SS+2h');
-    expect(predecessorText(incoming.get('a'), outline.wbsById)).toBe('');
+    expect(predecessorText(incoming.get(testId('c')), outline.wbsById)).toBe('1, 2SS+2h');
+    expect(predecessorText(incoming.get(testId('a')), outline.wbsById)).toBe('');
   });
 
   it('writes the links to the whole task apart from those to one block, by task then by block', () => {
@@ -121,7 +123,7 @@ describe('predecessorText', () => {
       ],
     );
     const outline = buildPlanOutline(plan.tasks, new Set());
-    const incoming = groupIncoming(plan.dependencies).get('b');
+    const incoming = groupIncoming(plan.dependencies).get(testId('b'));
     expect(predecessorText(incoming, outline.wbsById)).toBe('1SS');
     expect(predecessorText(incoming, outline.wbsById, 1)).toBe('1, 1#1SF, 1#2SS');
     expect(predecessorText(incoming, outline.wbsById, 0)).toBe('');
@@ -130,17 +132,17 @@ describe('predecessorText', () => {
 
 describe('toggledSummary', () => {
   it('closes an open summary and opens a closed one, leaving the others', () => {
-    const closed = toggledSummary(new Set(['a']), 'b');
+    const closed = toggledSummary(new Set([testId('a')]), testId('b'));
     expect([...closed].sort()).toEqual(['a', 'b']);
-    expect([...toggledSummary(closed, 'a')]).toEqual(['b']);
+    expect([...toggledSummary(closed, testId('a'))]).toEqual(['b']);
   });
 });
 
 describe('withAncestorsOpen', () => {
   it('opens every summary above a task, keeping the others and the same set when none hides it', () => {
-    const collapsed = new Set(['t', 't1', 's']);
-    expect([...withAncestorsOpen(collapsed, TASKS, 't11')]).toEqual(['s']);
-    expect(withAncestorsOpen(collapsed, TASKS, 'u')).toBe(collapsed);
-    expect(withAncestorsOpen(collapsed, TASKS, 'gone')).toBe(collapsed);
+    const collapsed = new Set([testId('t'), testId('t1'), testId('s')]);
+    expect([...withAncestorsOpen(collapsed, TASKS, testId('t11'))]).toEqual(['s']);
+    expect(withAncestorsOpen(collapsed, TASKS, testId('u'))).toBe(collapsed);
+    expect(withAncestorsOpen(collapsed, TASKS, testId('gone'))).toBe(collapsed);
   });
 });

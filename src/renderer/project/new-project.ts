@@ -2,6 +2,7 @@ import { DEFAULT_CALENDAR } from '../../core/calendar/default-calendar';
 import type { Project } from '../../core/model/project';
 import { createDefaultTags } from '../../core/tags/tag-palette';
 import { MIN_PROJECT_HOUR, toProjectHour, type ProjectHour } from '../../core/time';
+import type { NewIdentifier } from '../../core/identifiers';
 
 const FIRST_MONTH_OFFSET = 1;
 const MINUTES_PER_QUARTER = 15;
@@ -19,7 +20,11 @@ export function localDayStart(moment: Date): ProjectHour {
 }
 
 /** Builds an empty project starting today, with the default calendar and tags, every advanced option turned off. */
-export function buildNewProject(name: string, moment: Date, createId: () => string): Project {
+export function buildNewProject(
+  name: string,
+  moment: Date,
+  createId: () => NewIdentifier,
+): Project {
   return {
     name,
     startDate: localDayStart(moment),

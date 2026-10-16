@@ -3,7 +3,7 @@ import type { Project, Tag } from '../../core/model/project';
 import { MAX_TAG_NAME_LENGTH, MAX_TAGS } from '../../core/limits';
 import { TAG_PALETTE } from '../../core/tags/tag-palette';
 import type { BridgeResult, OpenedProject } from '../../preload/bridge-contract';
-import { project, workTask } from '../../core/testing/project-builder';
+import { project, workTask, testId } from '../../core/testing/project-builder';
 import { AppState } from '../app/app-state.svelte';
 import { fakeAppContext, openedProjectOf, settle } from '../app/testing/fake-app-context';
 import english from '../locales/en.json';
@@ -13,15 +13,25 @@ import { button, click, nth, press, render, single, update } from './testing/ren
 
 const TEXT = english.settings;
 const DESIGN: Tag = {
-  id: 'design',
+  id: testId('design'),
   name: 'Design',
   color: '#2a78d6',
   representsPersonOrTeam: false,
 };
-const ALICE: Tag = { id: 'alice', name: 'Alice', color: '#4a3aa7', representsPersonOrTeam: true };
-const NEAR: Tag = { id: 'near', name: 'Near', color: '#2a78d7', representsPersonOrTeam: false };
+const ALICE: Tag = {
+  id: testId('alice'),
+  name: 'Alice',
+  color: '#4a3aa7',
+  representsPersonOrTeam: true,
+};
+const NEAR: Tag = {
+  id: testId('near'),
+  name: 'Near',
+  color: '#2a78d7',
+  representsPersonOrTeam: false,
+};
 const PLAN: Project = project(
-  [workTask('a', { tagId: 'design' }), workTask('b', { tagId: 'design' })],
+  [workTask('a', { tagId: testId('design') }), workTask('b', { tagId: testId('design') })],
   [],
   { tags: [DESIGN, ALICE, NEAR] },
 );
@@ -212,7 +222,7 @@ describe('the Tags tab', () => {
   it('adds a tag named at once, and warns about a tag that cannot be told apart', async () => {
     const same = Array.from({ length: 7 }, (_unused, index) => ({
       ...DESIGN,
-      id: `t${String(index)}`,
+      id: testId(`t${String(index)}`),
       name: `Tag ${String(index)}`,
     }));
     const { app, dialog } = await renderTags(project([], [], { tags: same }));
@@ -285,7 +295,7 @@ describe('the Tags tab', () => {
 
   it('tells in the singular when one task uses the tag', async () => {
     const { dialog } = await renderTags(
-      project([workTask('a', { tagId: 'design' })], [], { tags: [DESIGN] }),
+      project([workTask('a', { tagId: testId('design') })], [], { tags: [DESIGN] }),
     );
     click(labelled(dialog, of(TEXT.removeTag, 'Design')));
     update();
@@ -319,7 +329,7 @@ describe('the Tags tab', () => {
 
   it('explains below the list a refusal about a tag that is gone, and keeps undo away from the question', async () => {
     const { app, dialog } = await renderTags();
-    expect(app.editSettings((context) => renameTag(context, 'near', 'Other'))).toBeNull();
+    expect(app.editSettings((context) => renameTag(context, testId('near'), 'Other'))).toBeNull();
     await settle();
     click(labelled(dialog, of(TEXT.removeTag, 'Design')));
     update();
@@ -329,7 +339,7 @@ describe('the Tags tab', () => {
     expect(press(confirm, 'Y', { metaKey: true })).toBe(true);
     await settle();
     expect(app.project).toBe(before);
-    expect(app.editSettings((context) => removeTag(context, 'design'))).toBeNull();
+    expect(app.editSettings((context) => removeTag(context, testId('design')))).toBeNull();
     await settle();
     update();
     click(button(confirm, TEXT.deleteConfirm));
@@ -342,7 +352,7 @@ describe('the Tags tab', () => {
   it('explains below the list why a tag cannot be added', async () => {
     const full = Array.from({ length: MAX_TAGS }, (_unused, index) => ({
       ...DESIGN,
-      id: `t${String(index).padStart(3, '0')}`,
+      id: testId(`t${String(index).padStart(3, '0')}`),
       name: `Tag ${String(index)}`,
     }));
     const { app, dialog } = await renderTags(project([], [], { tags: full }));

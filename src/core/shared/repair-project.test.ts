@@ -9,12 +9,12 @@ import {
 } from '../limits';
 import type { Dependency, Project, Tag, Task } from '../model/project';
 import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
-import { link, milestone, project, summary, workTask } from '../testing/project-builder';
+import { link, milestone, project, summary, workTask, testId } from '../testing/project-builder';
 import { readProject, STORED_VALUE_CODEC } from '../validation/read-project';
 import { repairProject } from './repair-project';
 
 const DESIGN: Tag = {
-  id: 'design',
+  id: testId('design'),
   name: 'Design',
   color: '#336699',
   representsPersonOrTeam: false,
@@ -37,7 +37,7 @@ function isValid(input: Project): boolean {
 describe('repairProject', () => {
   it('leaves a valid project unchanged', () => {
     const valid = project(
-      [summary('s'), workTask('a', { parentId: 's' }), milestone('m')],
+      [summary('s'), workTask('a', { parentId: testId('s') }), milestone('m')],
       [link('a', 'm')],
     );
     expect(repairProject(valid)).toEqual({ ok: true, value: { project: valid, repairs: [] } });
@@ -45,13 +45,13 @@ describe('repairProject', () => {
 
   it('clears the tag of tasks pointing at a deleted tag', () => {
     const result = repair(
-      [workTask('a', { tagId: 'gone' }), workTask('b', { tagId: 'design' })],
+      [workTask('a', { tagId: testId('gone') }), workTask('b', { tagId: testId('design') })],
       [],
       {
         tags: [DESIGN],
       },
     );
-    expect(result.repairs).toEqual([{ code: 'TAG_CLEARED', id: 'a' }]);
+    expect(result.repairs).toEqual([{ code: 'TAG_CLEARED', id: testId('a') }]);
     expect(result.project.tasks.map((task) => task.kind !== 'summary' && task.tagId)).toEqual([
       null,
       'design',
@@ -60,26 +60,26 @@ describe('repairProject', () => {
 
   it('moves to the root the tasks whose parent was deleted or is no longer a summary', () => {
     const result = repair([
-      workTask('a', { parentId: 'gone' }),
+      workTask('a', { parentId: testId('gone') }),
       workTask('b'),
-      workTask('c', { parentId: 'b' }),
+      workTask('c', { parentId: testId('b') }),
     ]);
     expect(result.repairs).toEqual([
-      { code: 'MOVED_TO_ROOT', id: 'a' },
-      { code: 'MOVED_TO_ROOT', id: 'c' },
+      { code: 'MOVED_TO_ROOT', id: testId('a') },
+      { code: 'MOVED_TO_ROOT', id: testId('c') },
     ]);
     expect(isValid(result.project)).toBe(true);
   });
 
   it('breaks a hierarchy loop by moving its task with the smallest identifier to the root', () => {
     const result = repair([
-      summary('q', { parentId: 'p' }),
-      summary('p', { parentId: 'q' }),
-      summary('self', { parentId: 'self' }),
+      summary('q', { parentId: testId('p') }),
+      summary('p', { parentId: testId('q') }),
+      summary('self', { parentId: testId('self') }),
     ]);
     expect(result.repairs).toEqual([
-      { code: 'MOVED_TO_ROOT', id: 'p' },
-      { code: 'MOVED_TO_ROOT', id: 'self' },
+      { code: 'MOVED_TO_ROOT', id: testId('p') },
+      { code: 'MOVED_TO_ROOT', id: testId('self') },
     ]);
     expect(isValid(result.project)).toBe(true);
   });
@@ -92,7 +92,7 @@ describe('repairProject', () => {
     );
     const result = repair(chain);
     expect(result.repairs).toEqual([
-      { code: 'MOVED_TO_ROOT', id: `s${String(MAX_HIERARCHY_DEPTH)}` },
+      { code: 'MOVED_TO_ROOT', id: testId(`s${String(MAX_HIERARCHY_DEPTH)}`) },
     ]);
     expect(isValid(result.project)).toBe(true);
   });
@@ -110,11 +110,11 @@ describe('repairProject', () => {
     const result = repair(
       [workTask('a'), workTask('b')],
       [
-        { ...link('a', 'b'), id: 'z' },
-        { ...link('a', 'b', 'startToStart'), id: 'k' },
+        { ...link('a', 'b'), id: testId('z') },
+        { ...link('a', 'b', 'startToStart'), id: testId('k') },
       ],
     );
-    expect(result.repairs).toEqual([{ code: 'DEPENDENCY_REMOVED', id: 'z' }]);
+    expect(result.repairs).toEqual([{ code: 'DEPENDENCY_REMOVED', id: testId('z') }]);
     expect(result.project.dependencies.map((dependency) => dependency.id)).toEqual(['k']);
   });
 
@@ -131,8 +131,8 @@ describe('repairProject', () => {
       ],
     );
     expect(result.repairs).toEqual([
-      { code: 'DEPENDENCY_REMOVED', id: 'c-a' },
-      { code: 'DEPENDENCY_REMOVED', id: 'e-d' },
+      { code: 'DEPENDENCY_REMOVED', id: testId('c-a') },
+      { code: 'DEPENDENCY_REMOVED', id: testId('e-d') },
     ]);
     expect(isValid(result.project)).toBe(true);
   });
@@ -141,12 +141,12 @@ describe('repairProject', () => {
     const result = repair(
       [workTask('a'), workTask('b'), workTask('c')],
       [
-        { ...link('a', 'b'), id: 'k' },
-        { ...link('b', 'c'), id: 'z' },
-        { ...link('c', 'a'), id: 'm' },
+        { ...link('a', 'b'), id: testId('k') },
+        { ...link('b', 'c'), id: testId('z') },
+        { ...link('c', 'a'), id: testId('m') },
       ],
     );
-    expect(result.repairs).toEqual([{ code: 'DEPENDENCY_REMOVED', id: 'z' }]);
+    expect(result.repairs).toEqual([{ code: 'DEPENDENCY_REMOVED', id: testId('z') }]);
     expect(result.project.dependencies.map((dependency) => dependency.id).sort()).toEqual([
       'k',
       'm',
@@ -160,8 +160,8 @@ describe('repairProject', () => {
       workTask('c', { hoursPerDay: 3, dailyStartHour: 14 }),
     ]);
     expect(result.repairs).toEqual([
-      { code: 'HOURS_PER_DAY_REDUCED', id: 'a' },
-      { code: 'DAILY_START_HOUR_CLEARED', id: 'b' },
+      { code: 'HOURS_PER_DAY_REDUCED', id: testId('a') },
+      { code: 'DAILY_START_HOUR_CLEARED', id: testId('b') },
     ]);
     expect(isValid(result.project)).toBe(true);
   });
@@ -177,13 +177,13 @@ describe('repairProject', () => {
       milestone(`a${String(index).padStart(6, '0')}`),
     );
     const result = repair(
-      [...fillers, summary('z1'), workTask('z2', { parentId: 'z1' })],
+      [...fillers, summary('z1'), workTask('z2', { parentId: testId('z1') })],
       [link('a000000', 'z2')],
     );
     expect(result.repairs).toEqual([
-      { code: 'TASK_REMOVED', id: 'z1' },
-      { code: 'TASK_REMOVED', id: 'z2' },
-      { code: 'DEPENDENCY_REMOVED', id: 'a000000-z2' },
+      { code: 'TASK_REMOVED', id: testId('z1') },
+      { code: 'TASK_REMOVED', id: testId('z2') },
+      { code: 'DEPENDENCY_REMOVED', id: testId('a000000-z2') },
     ]);
     expect(isValid(result.project)).toBe(true);
   });
@@ -191,12 +191,12 @@ describe('repairProject', () => {
   it('keeps the dependencies with the smallest identifiers beyond the limit', () => {
     const dependencies = Array.from({ length: MAX_DEPENDENCIES + 1 }, (_unused, index) => ({
       ...link('a', 'b'),
-      id: `d${String(index).padStart(6, '0')}`,
+      id: testId(`d${String(index).padStart(6, '0')}`),
     }));
     const result = repair([workTask('a'), workTask('b')], dependencies);
     expect(result.repairs[0]).toEqual({
       code: 'DEPENDENCY_REMOVED',
-      id: `d${String(MAX_DEPENDENCIES).padStart(6, '0')}`,
+      id: testId(`d${String(MAX_DEPENDENCIES).padStart(6, '0')}`),
     });
     expect(result.project.dependencies.map((dependency) => dependency.id)).toEqual(['d000000']);
   });
@@ -207,13 +207,13 @@ describe('repairProject', () => {
     );
     const tags = Array.from({ length: MAX_TAGS + 1 }, (_unused, index) => ({
       ...DESIGN,
-      id: `t${String(index).padStart(3, '0')}`,
+      id: testId(`t${String(index).padStart(3, '0')}`),
     }));
     const result = repair(tasks, [], { tags });
     expect(result.repairs).toEqual([
-      { code: 'TASK_REMOVED', id: `m${String(MAX_TASKS).padStart(6, '0')}` },
-      { code: 'TASK_REMOVED', id: `m${String(MAX_TASKS + 1).padStart(6, '0')}` },
-      { code: 'TAG_REMOVED', id: `t${String(MAX_TAGS)}` },
+      { code: 'TASK_REMOVED', id: testId(`m${String(MAX_TASKS).padStart(6, '0')}`) },
+      { code: 'TASK_REMOVED', id: testId(`m${String(MAX_TASKS + 1).padStart(6, '0')}`) },
+      { code: 'TAG_REMOVED', id: testId(`t${String(MAX_TAGS)}`) },
     ]);
     expect(result.project.tasks).toHaveLength(MAX_TASKS);
   });
@@ -270,7 +270,7 @@ const brokenProjectArbitrary = fc
           });
     });
     const dependencies = [...new Map(links.map((item) => [item.id, item])).values()].map(
-      (item) => ({ ...link(item.from, item.to), id: item.id }),
+      (item) => ({ ...link(item.from, item.to), id: testId(item.id) }),
     );
     return project(tasks, dependencies, { tags: [DESIGN] });
   });

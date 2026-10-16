@@ -14,6 +14,7 @@ import { scheduleProject, type Schedule } from '../scheduling/schedule-project';
 import type { ProjectHour } from '../time';
 import { at } from './civil-time';
 import { nonEmptySegments } from '../task-segments';
+import { requireIdentifier, type NewIdentifier } from '../identifiers';
 import { requireDocumentId, type DocumentId } from '../shared/shared-document';
 
 /** Gives any text as a document identifier, to check that a forged one is still refused where it is used. */
@@ -25,11 +26,37 @@ export const TEST_DOCUMENT_ID = requireDocumentId('00000000-0000-4000-8000-00000
 
 export const PROJECT_START = at(2026, 9, 28, 9);
 
+/** The overrides of a task as tests write them, its parent and tag named by plain text checked as identifiers. */
+export type TaskOverrides<T extends Task> = Partial<
+  Omit<T, 'parentId' | 'tagId'> & {
+    readonly parentId: string | null;
+    readonly tagId: string | null;
+  }
+>;
+
+/** Gives a text written by a test as an identifier of a task, a link or a tag, failing the test for an invalid one. */
+export function testId(text: string): NewIdentifier {
+  return requireIdentifier(text);
+}
+
+/** Turns the overrides of a test into those of a task, checking the identifiers they name. */
+function checkedOverrides<T extends Task>(overrides: TaskOverrides<T>): Partial<T> {
+  const { parentId, tagId, ...rest } = overrides;
+  const checked: Record<string, unknown> = { ...rest };
+  if (parentId !== undefined) {
+    checked['parentId'] = parentId === null ? null : testId(parentId);
+  }
+  if (tagId !== undefined) {
+    checked['tagId'] = tagId === null ? null : testId(tagId);
+  }
+  return checked as Partial<T>;
+}
+
 /** Builds a one-block work task of 7 hours with no constraint, then applies overrides. */
-export function workTask(id: string, overrides: Partial<WorkTask> = {}): WorkTask {
+export function workTask(id: string, overrides: TaskOverrides<WorkTask> = {}): WorkTask {
   return {
     kind: 'task',
-    id,
+    id: testId(id),
     name: id,
     parentId: null,
     sortKey: id,
@@ -41,7 +68,7 @@ export function workTask(id: string, overrides: Partial<WorkTask> = {}): WorkTas
     startNoEarlierThan: null,
     mustFinishOn: null,
     deadline: null,
-    ...overrides,
+    ...checkedOverrides(overrides),
   };
 }
 
@@ -53,7 +80,7 @@ export function splitTask(
     gapDaysBefore: number,
     startNoEarlierThan?: ProjectHour,
   ])[],
-  overrides: Partial<WorkTask> = {},
+  overrides: TaskOverrides<WorkTask> = {},
 ): WorkTask {
   const segments = segmentsOrThrow(
     blocks.map(([durationHours, gapDaysBefore, startNoEarlierThan]) => ({
@@ -75,10 +102,10 @@ export function segmentsOrThrow(segments: readonly TaskSegment[]): TaskSegments 
 }
 
 /** Builds a milestone with no constraint, then applies overrides. */
-export function milestone(id: string, overrides: Partial<Milestone> = {}): Milestone {
+export function milestone(id: string, overrides: TaskOverrides<Milestone> = {}): Milestone {
   return {
     kind: 'milestone',
-    id,
+    id: testId(id),
     name: id,
     parentId: null,
     sortKey: id,
@@ -87,13 +114,20 @@ export function milestone(id: string, overrides: Partial<Milestone> = {}): Miles
     startNoEarlierThan: null,
     mustFinishOn: null,
     deadline: null,
-    ...overrides,
+    ...checkedOverrides(overrides),
   };
 }
 
 /** Builds a summary task, then applies overrides. */
-export function summary(id: string, overrides: Partial<SummaryTask> = {}): SummaryTask {
-  return { kind: 'summary', id, name: id, parentId: null, sortKey: id, ...overrides };
+export function summary(id: string, overrides: TaskOverrides<SummaryTask> = {}): SummaryTask {
+  return {
+    kind: 'summary',
+    id: testId(id),
+    name: id,
+    parentId: null,
+    sortKey: id,
+    ...checkedOverrides(overrides),
+  };
 }
 
 /** Builds a dependency identified by its two tasks. */
@@ -104,9 +138,9 @@ export function link(
   lagHours = 0,
 ): Dependency {
   return {
-    id: `${predecessorId}-${successorId}`,
-    predecessorId,
-    successorId,
+    id: testId(`${predecessorId}-${successorId}`),
+    predecessorId: testId(predecessorId),
+    successorId: testId(successorId),
     type,
     lagHours,
     predecessorBlock: null,
@@ -126,7 +160,9 @@ export function blockLink(
   const to = blocks.to ?? null;
   return {
     ...link(predecessorId, successorId, type, lagHours),
-    id: `${predecessorId}${from === null ? '' : `_${String(from)}`}-${successorId}${to === null ? '' : `_${String(to)}`}`,
+    id: testId(
+      `${predecessorId}${from === null ? '' : `_${String(from)}`}-${successorId}${to === null ? '' : `_${String(to)}`}`,
+    ),
     predecessorBlock: from,
     successorBlock: to,
   };

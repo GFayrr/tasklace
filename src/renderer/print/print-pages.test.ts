@@ -18,6 +18,7 @@ import {
   splitTask,
   summary,
   workTask,
+  testId,
 } from '../../core/testing/project-builder';
 import { dayIndexOf } from '../../core/time';
 import { loadMessages } from '../i18n/messages';
@@ -34,19 +35,29 @@ import type { MeasureText } from './print-text';
 const messages = await loadMessages('en');
 const CHARACTER_WIDTH = 5;
 const PROPERTY_PAGE_LIMIT = 6;
-const DESIGN = { id: 'design', name: 'Design', color: '#2A78D6', representsPersonOrTeam: false };
-const NEAR = { id: 'near', name: 'Near', color: '#2A78D7', representsPersonOrTeam: false };
-const UNUSED = { id: 'unused', name: 'Unused', color: '#EB6834', representsPersonOrTeam: false };
+const DESIGN = {
+  id: testId('design'),
+  name: 'Design',
+  color: '#2A78D6',
+  representsPersonOrTeam: false,
+};
+const NEAR = { id: testId('near'), name: 'Near', color: '#2A78D7', representsPersonOrTeam: false };
+const UNUSED = {
+  id: testId('unused'),
+  name: 'Unused',
+  color: '#EB6834',
+  representsPersonOrTeam: false,
+};
 const PLAN: Project = {
   ...project(
     [
       summary('s', { sortKey: 'a', name: 'Research' }),
       workTask('a', {
-        parentId: 's',
+        parentId: testId('s'),
         sortKey: 'a',
         name: 'Survey',
         progressPercent: 50,
-        tagId: 'design',
+        tagId: testId('design'),
       }),
       splitTask(
         'b',
@@ -54,7 +65,7 @@ const PLAN: Project = {
           [7, 0],
           [7, 2],
         ],
-        { parentId: 's', sortKey: 'b', name: 'Interviews', tagId: 'near' },
+        { parentId: testId('s'), sortKey: 'b', name: 'Interviews', tagId: testId('near') },
       ),
       workTask('c', { sortKey: 'b', name: 'Writing' }),
       milestone('m', { sortKey: 'c', name: 'Defense' }),
@@ -184,7 +195,7 @@ describe('buildPrintDocument', () => {
           name: `Level ${String(index)}`,
         }),
       ),
-      workTask('a', { parentId: `s${String(levels - 1)}`, name: 'Deepest task' }),
+      workTask('a', { parentId: testId(`s${String(levels - 1)}`), name: 'Deepest task' }),
     ];
     const orders = printed({ ...project(tasks, []), name: 'Deep' }).document.pages.flatMap((page) =>
       flatten(page),
@@ -363,7 +374,7 @@ describe('buildPrintDocument', () => {
 
   it('writes a legend of 40 tags on every page, in order of name, giving fewer rows to each page', () => {
     const tags = Array.from({ length: 40 }, (_unused, index) => ({
-      id: `g${String(index)}`,
+      id: testId(`g${String(index)}`),
       name: `Tag ${String(39 - index).padStart(2, '0')}`,
       color: '#2A78D6',
       representsPersonOrTeam: false,
@@ -371,7 +382,7 @@ describe('buildPrintDocument', () => {
     const tasks = Array.from({ length: 40 }, (_unused, index) =>
       workTask(`t${String(index)}`, {
         sortKey: `k${String(index).padStart(2, '0')}`,
-        tagId: `g${String(index)}`,
+        tagId: testId(`g${String(index)}`),
       }),
     );
     const plan = printed({ ...project(tasks, [], { tags }), name: 'Tagged' });
@@ -430,7 +441,7 @@ describe('buildPrintDocument', () => {
       calendar: { ...PLAN.calendar, workingTimeRanges: [{ startHour: 17, endHour: 24 }] },
     };
     const monday = dayIndexOf(evening.startDate);
-    expect(scheduleOrThrow(evening).placements.get('a')?.end).toBe((monday + 1) * 24);
+    expect(scheduleOrThrow(evening).placements.get(testId('a'))?.end).toBe((monday + 1) * 24);
     expect(printed(evening).period).toEqual({ start: monday * 24, end: (monday + 1) * 24 });
   });
 

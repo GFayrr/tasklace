@@ -5,7 +5,7 @@ import type { Project } from '../model/project';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { livedState, randomEditsArbitrary } from '../testing/lived-document';
 import { projectArbitrary, richProjectArbitrary } from '../testing/project-arbitrary';
-import { link, project, TEST_DOCUMENT_ID, workTask } from '../testing/project-builder';
+import { link, project, TEST_DOCUMENT_ID, workTask, testId } from '../testing/project-builder';
 import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
 import type { SharedOperation } from './shared-operations';
 import {
@@ -98,7 +98,7 @@ describe('opening a session from a state', () => {
     );
     expectSameDecisions(state, [
       [{ type: 'putDependency', dependency: link('a', 'b') }],
-      [{ type: 'putDependency', dependency: { ...link('b', 'a'), id: 'zz' } }],
+      [{ type: 'putDependency', dependency: { ...link('b', 'a'), id: testId('zz') } }],
     ]);
   });
 

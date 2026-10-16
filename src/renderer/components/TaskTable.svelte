@@ -447,7 +447,7 @@
   {#if editing?.column === 'tag' && editing.anchor !== null}
     <TagPicker
       tags={tagChoices}
-      value={editing.initial === '' ? null : editing.initial}
+      value={tagChoices.find((tag) => tag.id === editing?.initial)?.id ?? null}
       anchor={editing.anchor}
       label={fillMessage(text.editCell, { column: text.tag, name: editingName })}
       noTag={text.noTag}

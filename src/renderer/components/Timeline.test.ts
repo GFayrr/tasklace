@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Project } from '../../core/model/project';
+import type { Project, TaskId } from '../../core/model/project';
 import { at, compileOrThrow } from '../../core/testing/civil-time';
 import {
   milestone,
@@ -7,6 +7,7 @@ import {
   scheduleOrThrow,
   summary,
   workTask,
+  testId,
 } from '../../core/testing/project-builder';
 import { buildPlanOutline } from '../plan/plan-outline';
 import { tagStylesOf } from '../plan/tag-styles';
@@ -27,7 +28,7 @@ import { drawFrames, pointer, refuseDrawingContexts, resize } from './testing/ti
 const PLAN: Project = project(
   [
     summary('s', { sortKey: 'a' }),
-    workTask('a', { parentId: 's' }),
+    workTask('a', { parentId: testId('s') }),
     workTask('b', { sortKey: 'b' }),
     milestone('m', { sortKey: 'c' }),
   ],
@@ -38,7 +39,7 @@ const OUTLINE = buildPlanOutline(PLAN.tasks, new Set());
 const FRAME = timelineFrame(PLAN.startDate, SCHEDULE, at(2026, 9, 28, 12), 4, []);
 
 /** Returns the shape of the row of a work task, failing the test for another kind. */
-function shapeOf(id: string): Extract<RowShape, { kind: 'task' }> {
+function shapeOf(id: TaskId): Extract<RowShape, { kind: 'task' }> {
   const index = OUTLINE.rowIndexById.get(id) ?? -1;
   const row = OUTLINE.rows[index];
   const shape = row === undefined ? null : rowShape(row, index, SCHEDULE, FRAME);
@@ -49,7 +50,7 @@ function shapeOf(id: string): Extract<RowShape, { kind: 'task' }> {
 }
 
 /** Renders the timeline of the sample plan, sized, with recorded callbacks. */
-function renderTimeline(selectedTaskId: string | null = null, scrollTop = 0, plan: Project = PLAN) {
+function renderTimeline(selectedTaskId: TaskId | null = null, scrollTop = 0, plan: Project = PLAN) {
   const calls = {
     scrolled: vi.fn(),
     resized: vi.fn(),
@@ -72,7 +73,7 @@ function renderTimeline(selectedTaskId: string | null = null, scrollTop = 0, pla
     nonWorkingPeriods: [],
     theme: SAND_GRAPHITE,
     tagStyles: tagStylesOf(plan),
-    conflictTaskIds: new Set<string>(),
+    conflictTaskIds: new Set<TaskId>(),
     deadlines: null,
     baseline: null,
     selectedTaskId,
@@ -109,7 +110,7 @@ describe('Timeline', () => {
 
   it('selects the task under the pointer and moves its bar where it is dropped', () => {
     const { scroller, calls } = renderTimeline();
-    const shape = shapeOf('b');
+    const shape = shapeOf(testId('b'));
     const x = shape.start + 4;
     pointer(scroller, 'pointerdown', x, middleOf(shape));
     expect(calls.select).toHaveBeenCalledWith('b');
@@ -125,7 +126,7 @@ describe('Timeline', () => {
 
   it('stretches a bar dragged by its end, and ignores a click that does not move', () => {
     const { scroller, calls } = renderTimeline();
-    const shape = shapeOf('b');
+    const shape = shapeOf(testId('b'));
     pointer(scroller, 'pointerdown', shape.end - 1, middleOf(shape));
     pointer(scroller, 'pointermove', shape.end + 20, middleOf(shape));
     pointer(scroller, 'pointerup', shape.end + 20, middleOf(shape));
@@ -136,9 +137,9 @@ describe('Timeline', () => {
   });
 
   it('links the selected task to the task it is dragged onto from its handle', () => {
-    const { scroller, calls } = renderTimeline('a');
-    const from = shapeOf('a');
-    const to = shapeOf('b');
+    const { scroller, calls } = renderTimeline(testId('a'));
+    const from = shapeOf(testId('a'));
+    const to = shapeOf(testId('b'));
     const handleX = from.end + LINK_HANDLE_GAP;
     pointer(scroller, 'pointerdown', handleX, middleOf(from));
     expect(calls.select).not.toHaveBeenCalled();
@@ -146,14 +147,14 @@ describe('Timeline', () => {
     expect(drawFrames().some((call) => call.name === 'strokeRect')).toBe(true);
     pointer(scroller, 'pointerup', to.start + 5, middleOf(to));
     expect(calls.linked).toHaveBeenCalledWith(
-      { taskId: 'a', block: null },
-      { taskId: 'b', block: null },
+      { taskId: testId('a'), block: null },
+      { taskId: testId('b'), block: null },
     );
   });
 
   it('links nothing when dropped on a summary, on the same task or off the rows, explaining only the summary', () => {
-    const { scroller, calls } = renderTimeline('a');
-    const from = shapeOf('a');
+    const { scroller, calls } = renderTimeline(testId('a'));
+    const from = shapeOf(testId('a'));
     const handleX = from.end + LINK_HANDLE_GAP;
     for (const y of [ROW_HEIGHT / 2, middleOf(from), 50 * ROW_HEIGHT]) {
       pointer(scroller, 'pointerdown', handleX, middleOf(from));
@@ -166,7 +167,7 @@ describe('Timeline', () => {
 
   it('abandons a drag that is canceled, and ignores buttons other than the main one', () => {
     const { scroller, calls } = renderTimeline();
-    const shape = shapeOf('b');
+    const shape = shapeOf(testId('b'));
     pointer(scroller, 'pointerdown', shape.start + 4, middleOf(shape));
     pointer(scroller, 'pointermove', shape.start + 50, middleOf(shape));
     pointer(scroller, 'pointercancel', shape.start + 50, middleOf(shape));
@@ -178,7 +179,7 @@ describe('Timeline', () => {
 
   it('shows what the pointer would drag with the cursor', () => {
     const { scroller } = renderTimeline();
-    const shape = shapeOf('b');
+    const shape = shapeOf(testId('b'));
     pointer(scroller, 'pointermove', shape.start + 4, middleOf(shape));
     expect(scroller.style.cursor).toBe('grab');
     pointer(scroller, 'pointermove', shape.end - 1, middleOf(shape));
@@ -190,7 +191,11 @@ describe('Timeline', () => {
   it('opens the details of the task whose row is double-clicked', () => {
     const { scroller, calls } = renderTimeline();
     scroller.dispatchEvent(
-      new MouseEvent('dblclick', { clientX: 5, clientY: middleOf(shapeOf('b')), bubbles: true }),
+      new MouseEvent('dblclick', {
+        clientX: 5,
+        clientY: middleOf(shapeOf(testId('b'))),
+        bubbles: true,
+      }),
     );
     expect(calls.opened).toHaveBeenCalledWith('b');
     scroller.dispatchEvent(
@@ -226,7 +231,7 @@ describe('Timeline drawing conditions', () => {
 
   it('tells when the patterns of the bars cannot be drawn, the bars staying plain', () => {
     const design = {
-      id: 'design',
+      id: testId('design'),
       name: 'Design',
       color: '#3366AA',
       representsPersonOrTeam: false,
@@ -234,7 +239,7 @@ describe('Timeline drawing conditions', () => {
     const patterned = project(
       [
         ...PLAN.tasks.filter((task) => task.id !== 'b'),
-        workTask('b', { sortKey: 'b', tagId: 'design' }),
+        workTask('b', { sortKey: 'b', tagId: testId('design') }),
       ],
       [],
       {

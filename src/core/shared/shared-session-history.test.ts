@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import * as Y from 'yjs';
 import type { Project } from '../model/project';
-import { link, project, TEST_DOCUMENT_ID, workTask } from '../testing/project-builder';
+import { link, project, TEST_DOCUMENT_ID, workTask, testId } from '../testing/project-builder';
 import { createSharedDocument } from './shared-document';
 import { readSharedProject } from './shared-project';
 import { openSharedSession, type SharedSession, sessionDocument } from './shared-session';
@@ -84,7 +84,7 @@ describe('session history', () => {
     }
     rename(alice, 'Alice');
     sync(alice, bob);
-    expect(bob.apply({ type: 'removeTasks', ids: ['c'] }).ok).toBe(true);
+    expect(bob.apply({ type: 'removeTasks', ids: [testId('c')] }).ok).toBe(true);
     sync(bob, alice);
     alice.history.undo();
     expect(alice.project().name).toBe(BASE.name);
@@ -101,11 +101,14 @@ describe('session history', () => {
     const removed = BASE.dependencies[0];
     expect(removed && alice.apply({ type: 'removeDependency', id: removed.id }).ok).toBe(true);
     sync(alice, bob);
-    const reverse = { ...link('b', 'a'), id: 'z-reverse' };
+    const reverse = { ...link('b', 'a'), id: testId('z-reverse') };
     expect(bob.apply({ type: 'putDependency', dependency: reverse }).ok).toBe(true);
     sync(bob, alice);
     const undone = alice.history.undo();
-    expect(undone).toEqual({ ok: true, value: [{ code: 'DEPENDENCY_REMOVED', id: 'z-reverse' }] });
+    expect(undone).toEqual({
+      ok: true,
+      value: [{ code: 'DEPENDENCY_REMOVED', id: testId('z-reverse') }],
+    });
     expect(alice.project().dependencies.map((dependency) => dependency.id)).toEqual(['a-b']);
     expectConsistent(alice);
     sync(alice, bob);

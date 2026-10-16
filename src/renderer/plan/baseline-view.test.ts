@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { at } from '../../core/testing/civil-time';
-import { summary, workTask } from '../../core/testing/project-builder';
+import { summary, workTask, testId } from '../../core/testing/project-builder';
 import { entriesByTask, unfrozenTasks } from './baseline-view';
 
 describe('entriesByTask', () => {
   it('gives the frozen dates of each task by its identifier', () => {
     const a = {
-      taskId: 'a',
+      taskId: testId('a'),
       start: at(2026, 10, 1, 9),
       end: at(2026, 10, 1, 17),
       durationHours: 7,
     };
     const b = {
-      taskId: 'b',
+      taskId: testId('b'),
       start: at(2026, 10, 2, 9),
       end: at(2026, 10, 2, 17),
       durationHours: 7,
@@ -34,18 +34,18 @@ describe('unfrozenTasks', () => {
     expect(
       unfrozenTasks(
         [
-          { taskId: 'empty', reason: 'NO_DATES' },
-          { taskId: 'a', reason: 'NO_DATES' },
-          { taskId: 'b', reason: 'OUT_OF_PERIOD' },
+          { taskId: testId('empty'), reason: 'NO_DATES' },
+          { taskId: testId('a'), reason: 'NO_DATES' },
+          { taskId: testId('b'), reason: 'OUT_OF_PERIOD' },
         ],
         tasks,
       ),
     ).toEqual([
-      { taskId: 'a', reason: 'NO_DATES' },
-      { taskId: 'b', reason: 'OUT_OF_PERIOD' },
+      { taskId: testId('a'), reason: 'NO_DATES' },
+      { taskId: testId('b'), reason: 'OUT_OF_PERIOD' },
     ]);
-    expect(unfrozenTasks([{ taskId: 'empty', reason: 'OUT_OF_PERIOD' }], tasks)).toEqual([
-      { taskId: 'empty', reason: 'OUT_OF_PERIOD' },
+    expect(unfrozenTasks([{ taskId: testId('empty'), reason: 'OUT_OF_PERIOD' }], tasks)).toEqual([
+      { taskId: testId('empty'), reason: 'OUT_OF_PERIOD' },
     ]);
     expect(unfrozenTasks([], tasks)).toEqual([]);
   });

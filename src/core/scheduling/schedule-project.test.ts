@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TEST_CALENDAR } from '../testing/test-calendar';
-import type { Dependency, Project, Task, WorkTask } from '../model/project';
+import type { Dependency, Project, Task, WorkTask, TaskId } from '../model/project';
 import { at, format } from '../testing/civil-time';
 import {
   PROJECT_START,
@@ -11,6 +11,7 @@ import {
   splitTask,
   summary,
   workTask,
+  testId,
 } from '../testing/project-builder';
 import { scheduleProject, type Schedule } from './schedule-project';
 
@@ -22,7 +23,7 @@ const ALL_OPTIONS = {
 };
 
 /** Formats the start and end of a scheduled task as "start → end". */
-function datesOf(schedule: Schedule, taskId: string): string {
+function datesOf(schedule: Schedule, taskId: TaskId): string {
   const placement = schedule.placements.get(taskId);
   if (placement === undefined) {
     throw new Error(`Task ${taskId} was not scheduled`);
@@ -32,7 +33,7 @@ function datesOf(schedule: Schedule, taskId: string): string {
 
 /** Schedules tasks and dependencies, then formats the dates of one task. */
 function datesAfterScheduling(
-  taskId: string,
+  taskId: TaskId,
   tasks: readonly Task[],
   dependencies: readonly Dependency[] = [],
   overrides: Partial<Project> = {},
@@ -41,7 +42,7 @@ function datesAfterScheduling(
 }
 
 /** Builds a work task of a given duration in hours. */
-function taskOf(id: string, durationHours: number, overrides: Partial<WorkTask> = {}): Task {
+function taskOf(id: TaskId, durationHours: number, overrides: Partial<WorkTask> = {}): Task {
   return workTask(id, {
     segments: [{ durationHours, gapDaysBefore: 0, startNoEarlierThan: null }],
     ...overrides,
@@ -57,20 +58,26 @@ const UNKNOWN_FLOAT = {
 } as const;
 describe('scheduleProject: dates', () => {
   it('starts a task without predecessor at the project start', () => {
-    expect(datesAfterScheduling('a', [taskOf('a', 7)])).toBe('2026-09-28 09:00 → 2026-09-28 17:00');
+    expect(datesAfterScheduling(testId('a'), [taskOf(testId('a'), 7)])).toBe(
+      '2026-09-28 09:00 → 2026-09-28 17:00',
+    );
   });
 
   it('never starts a task before the project start, even with an earlier start date', () => {
-    const task = taskOf('a', 7, { startNoEarlierThan: at(2026, 9, 1, 9) });
-    expect(datesAfterScheduling('a', [task])).toBe('2026-09-28 09:00 → 2026-09-28 17:00');
+    const task = taskOf(testId('a'), 7, { startNoEarlierThan: at(2026, 9, 1, 9) });
+    expect(datesAfterScheduling(testId('a'), [task])).toBe('2026-09-28 09:00 → 2026-09-28 17:00');
   });
 
   it('starts a task at its start date, moved to the next working hour', () => {
     expect(
-      datesAfterScheduling('a', [taskOf('a', 7, { startNoEarlierThan: at(2026, 10, 1, 9) })]),
+      datesAfterScheduling(testId('a'), [
+        taskOf(testId('a'), 7, { startNoEarlierThan: at(2026, 10, 1, 9) }),
+      ]),
     ).toBe('2026-10-01 09:00 → 2026-10-01 17:00');
     expect(
-      datesAfterScheduling('a', [taskOf('a', 1, { startNoEarlierThan: at(2026, 10, 3, 9) })]),
+      datesAfterScheduling(testId('a'), [
+        taskOf(testId('a'), 1, { startNoEarlierThan: at(2026, 10, 3, 9) }),
+      ]),
     ).toBe('2026-10-05 09:00 → 2026-10-05 10:00');
   });
 
@@ -98,39 +105,46 @@ describe('scheduleProject: dates', () => {
       '2026-09-29 09:00 → 2026-09-29 17:00',
     ],
   ])('applies a %s dependency', (_label, dependency, expected) => {
-    expect(datesAfterScheduling('b', [taskOf('a', 7), taskOf('b', 7)], [dependency])).toBe(
-      expected,
-    );
+    expect(
+      datesAfterScheduling(
+        testId('b'),
+        [taskOf(testId('a'), 7), taskOf(testId('b'), 7)],
+        [dependency],
+      ),
+    ).toBe(expected);
   });
 
   it('delays a shorter task to finish with its finish-to-finish predecessor', () => {
     expect(
       datesAfterScheduling(
-        'b',
-        [taskOf('a', 7), taskOf('b', 3)],
+        testId('b'),
+        [taskOf(testId('a'), 7), taskOf(testId('b'), 3)],
         [link('a', 'b', 'finishToFinish')],
       ),
     ).toBe('2026-09-28 14:00 → 2026-09-28 17:00');
   });
 
   it('treats the end of a working day and the start of the next one as the same moment', () => {
-    const tasks = [taskOf('a', 7, { startNoEarlierThan: at(2026, 9, 29, 9) }), taskOf('b', 2)];
-    expect(datesAfterScheduling('b', tasks, [link('a', 'b', 'startToFinish')])).toBe(
+    const tasks = [
+      taskOf(testId('a'), 7, { startNoEarlierThan: at(2026, 9, 29, 9) }),
+      taskOf(testId('b'), 2),
+    ];
+    expect(datesAfterScheduling(testId('b'), tasks, [link('a', 'b', 'startToFinish')])).toBe(
       '2026-09-28 15:00 → 2026-09-28 17:00',
     );
   });
 
   it('waits for the latest of several predecessors', () => {
-    const tasks = [taskOf('a', 7), taskOf('b', 14), taskOf('c', 1)];
-    expect(datesAfterScheduling('c', tasks, [link('a', 'c'), link('b', 'c')])).toBe(
+    const tasks = [taskOf(testId('a'), 7), taskOf(testId('b'), 14), taskOf(testId('c'), 1)];
+    expect(datesAfterScheduling(testId('c'), tasks, [link('a', 'c'), link('b', 'c')])).toBe(
       '2026-09-30 09:00 → 2026-09-30 10:00',
     );
   });
 
   it('places a milestone at the end of its predecessor', () => {
-    expect(datesAfterScheduling('m', [taskOf('a', 7), milestone('m')], [link('a', 'm')])).toBe(
-      '2026-09-28 17:00 → 2026-09-28 17:00',
-    );
+    expect(
+      datesAfterScheduling(testId('m'), [taskOf(testId('a'), 7), milestone('m')], [link('a', 'm')]),
+    ).toBe('2026-09-28 17:00 → 2026-09-28 17:00');
   });
 
   it('makes successors wait for the last block of a split task', () => {
@@ -139,28 +153,35 @@ describe('scheduleProject: dates', () => {
         [7, 0],
         [7, 21],
       ]),
-      taskOf('b', 7),
+      taskOf(testId('b'), 7),
     ];
-    expect(datesAfterScheduling('b', tasks, [link('a', 'b')])).toBe(
+    expect(datesAfterScheduling(testId('b'), tasks, [link('a', 'b')])).toBe(
       '2026-10-20 09:00 → 2026-10-20 17:00',
     );
   });
 
   it('keeps the gap between blocks when the first block is pushed back', () => {
     const tasks = [
-      taskOf('a', 14),
+      taskOf(testId('a'), 14),
       splitTask('b', [
         [7, 0],
         [7, 7],
       ]),
     ];
     const schedule = scheduleOrThrow(project(tasks, [link('a', 'b')]));
-    const segments = schedule.placements.get('b')?.segments.map((segment) => format(segment.start));
+    const segments = schedule.placements
+      .get(testId('b'))
+      ?.segments.map((segment) => format(segment.start));
     expect(segments).toEqual(['2026-09-30 09:00', '2026-10-07 09:00']);
   });
 
   it('produces the same schedule whatever the order of tasks and dependencies', () => {
-    const tasks = [taskOf('a', 7), taskOf('b', 14), taskOf('c', 3), milestone('m')];
+    const tasks = [
+      taskOf(testId('a'), 7),
+      taskOf(testId('b'), 14),
+      taskOf(testId('c'), 3),
+      milestone('m'),
+    ];
     const dependencies = [
       link('a', 'b'),
       link('a', 'c', 'startToStart', 2),
@@ -185,51 +206,54 @@ describe('scheduleProject: advanced date constraints', () => {
 
   it('ignores "must finish on" and deadlines while the option is disabled', () => {
     const schedule = scheduleOrThrow(
-      project([taskOf('a', 7, { mustFinishOn: thursdayEvening, deadline: PROJECT_START })]),
+      project([taskOf(testId('a'), 7, { mustFinishOn: thursdayEvening, deadline: PROJECT_START })]),
     );
-    expect(datesOf(schedule, 'a')).toBe('2026-09-28 09:00 → 2026-09-28 17:00');
+    expect(datesOf(schedule, testId('a'))).toBe('2026-09-28 09:00 → 2026-09-28 17:00');
     expect(schedule.conflicts).toEqual([]);
   });
 
   it('delays a task so that it finishes on its "must finish on" date', () => {
-    const task = taskOf('a', 7, { mustFinishOn: thursdayEvening });
-    expect(datesAfterScheduling('a', [task], [], { options: ALL_OPTIONS })).toBe(
+    const task = taskOf(testId('a'), 7, { mustFinishOn: thursdayEvening });
+    expect(datesAfterScheduling(testId('a'), [task], [], { options: ALL_OPTIONS })).toBe(
       '2026-10-01 09:00 → 2026-10-01 17:00',
     );
   });
 
   it('places a milestone on its "must finish on" date', () => {
     const marker = milestone('m', { mustFinishOn: thursdayEvening });
-    expect(datesAfterScheduling('m', [marker], [], { options: ALL_OPTIONS })).toBe(
+    expect(datesAfterScheduling(testId('m'), [marker], [], { options: ALL_OPTIONS })).toBe(
       '2026-10-01 17:00 → 2026-10-01 17:00',
     );
   });
 
   it('reports a "must finish on" date that dependencies make impossible, without moving the task', () => {
-    const tasks = [taskOf('a', 7), taskOf('b', 7, { mustFinishOn: at(2026, 9, 28, 12) })];
+    const tasks = [
+      taskOf(testId('a'), 7),
+      taskOf(testId('b'), 7, { mustFinishOn: at(2026, 9, 28, 12) }),
+    ];
     const schedule = scheduleOrThrow(project(tasks, [link('a', 'b')], { options: ALL_OPTIONS }));
-    expect(datesOf(schedule, 'b')).toBe('2026-09-29 09:00 → 2026-09-29 17:00');
-    expect(schedule.conflicts).toEqual([{ code: 'MUST_FINISH_ON_NOT_MET', taskId: 'b' }]);
+    expect(datesOf(schedule, testId('b'))).toBe('2026-09-29 09:00 → 2026-09-29 17:00');
+    expect(schedule.conflicts).toEqual([{ code: 'MUST_FINISH_ON_NOT_MET', taskId: testId('b') }]);
   });
 
   it('reports missed deadlines only', () => {
     const tasks = [
-      taskOf('late', 7, { deadline: at(2026, 9, 28, 12) }),
-      taskOf('onTime', 7, { deadline: at(2026, 9, 28, 17) }),
+      taskOf(testId('late'), 7, { deadline: at(2026, 9, 28, 12) }),
+      taskOf(testId('onTime'), 7, { deadline: at(2026, 9, 28, 17) }),
     ];
     const schedule = scheduleOrThrow(project(tasks, [], { options: ALL_OPTIONS }));
-    expect(schedule.conflicts).toEqual([{ code: 'DEADLINE_MISSED', taskId: 'late' }]);
+    expect(schedule.conflicts).toEqual([{ code: 'DEADLINE_MISSED', taskId: testId('late') }]);
   });
 
   it('sorts conflicts by task, then by kind', () => {
     const impossible = { mustFinishOn: PROJECT_START, deadline: PROJECT_START };
-    const tasks = [taskOf('b', 7, impossible), taskOf('a', 7, impossible)];
+    const tasks = [taskOf(testId('b'), 7, impossible), taskOf(testId('a'), 7, impossible)];
     const schedule = scheduleOrThrow(project(tasks, [], { options: ALL_OPTIONS }));
     expect(schedule.conflicts).toEqual([
-      { code: 'DEADLINE_MISSED', taskId: 'a' },
-      { code: 'MUST_FINISH_ON_NOT_MET', taskId: 'a' },
-      { code: 'DEADLINE_MISSED', taskId: 'b' },
-      { code: 'MUST_FINISH_ON_NOT_MET', taskId: 'b' },
+      { code: 'DEADLINE_MISSED', taskId: testId('a') },
+      { code: 'MUST_FINISH_ON_NOT_MET', taskId: testId('a') },
+      { code: 'DEADLINE_MISSED', taskId: testId('b') },
+      { code: 'MUST_FINISH_ON_NOT_MET', taskId: testId('b') },
     ]);
   });
 });
@@ -237,10 +261,10 @@ describe('scheduleProject: advanced date constraints', () => {
 describe('scheduleProject: summaries and numbering', () => {
   const tasks: Task[] = [
     summary('phase', { sortKey: 'a' }),
-    taskOf('design', 7, { parentId: 'phase', sortKey: 'a', progressPercent: 50 }),
-    taskOf('build', 14, { parentId: 'phase', sortKey: 'b' }),
-    summary('sub', { parentId: 'phase', sortKey: 'c' }),
-    milestone('review', { parentId: 'sub', sortKey: 'a', progressPercent: 100 }),
+    taskOf(testId('design'), 7, { parentId: testId('phase'), sortKey: 'a', progressPercent: 50 }),
+    taskOf(testId('build'), 14, { parentId: testId('phase'), sortKey: 'b' }),
+    summary('sub', { parentId: testId('phase'), sortKey: 'c' }),
+    milestone('review', { parentId: testId('sub'), sortKey: 'a', progressPercent: 100 }),
     milestone('launch', { sortKey: 'b' }),
     summary('empty', { sortKey: 'c' }),
   ];
@@ -248,21 +272,21 @@ describe('scheduleProject: summaries and numbering', () => {
   const schedule = scheduleOrThrow(project(tasks, dependencies));
 
   it('spans each summary from its earliest child start to its latest child end', () => {
-    const phase = schedule.summaries.get('phase');
+    const phase = schedule.summaries.get(testId('phase'));
     expect(phase?.start).toBe(at(2026, 9, 28, 9));
     expect(phase?.end).toBe(at(2026, 9, 30, 17));
   });
 
   it('weights summary progress by duration and ignores milestones next to work', () => {
-    expect(schedule.summaries.get('phase')?.progressPercent).toBeCloseTo((7 * 50) / 21);
+    expect(schedule.summaries.get(testId('phase'))?.progressPercent).toBeCloseTo((7 * 50) / 21);
   });
 
   it('averages milestones when a summary holds nothing else', () => {
-    expect(schedule.summaries.get('sub')?.progressPercent).toBe(100);
+    expect(schedule.summaries.get(testId('sub'))?.progressPercent).toBe(100);
   });
 
   it('gives no dates and no progress to an empty summary', () => {
-    expect(schedule.summaries.get('empty')).toEqual({
+    expect(schedule.summaries.get(testId('empty'))).toEqual({
       start: null,
       end: null,
       progressPercent: null,
@@ -283,14 +307,19 @@ describe('scheduleProject: summaries and numbering', () => {
 
   it('breaks sort key ties with task identifiers', () => {
     const tied = scheduleOrThrow(
-      project([taskOf('b', 1, { sortKey: 'x' }), taskOf('a', 1, { sortKey: 'x' })]),
+      project([taskOf(testId('b'), 1, { sortKey: 'x' }), taskOf(testId('a'), 1, { sortKey: 'x' })]),
     );
     expect(Object.fromEntries(tied.wbsNumbers)).toEqual({ a: '1', b: '2' });
   });
 });
 
 describe('scheduleProject: critical path', () => {
-  const tasks = [taskOf('a', 7), taskOf('b', 14), taskOf('c', 7), taskOf('d', 7)];
+  const tasks = [
+    taskOf(testId('a'), 7),
+    taskOf(testId('b'), 14),
+    taskOf(testId('c'), 7),
+    taskOf(testId('d'), 7),
+  ];
   const dependencies = [link('a', 'b'), link('a', 'c'), link('b', 'd'), link('c', 'd')];
 
   it('is not computed while the option is disabled', () => {
@@ -309,47 +338,47 @@ describe('scheduleProject: critical path', () => {
       }),
     );
     /** Returns the total float, free float and critical flag of a task, or nothing for a task without float. */
-    const summaryOf = (id: string): [number | null, number | null, boolean] | undefined => {
+    const summaryOf = (id: TaskId): [number | null, number | null, boolean] | undefined => {
       const taskFloat = schedule.floats?.get(id);
       return (
         taskFloat && [taskFloat.totalFloatHours, taskFloat.freeFloatHours, taskFloat.isCritical]
       );
     };
-    expect(summaryOf('a')).toEqual([0, 0, true]);
-    expect(summaryOf('b')).toEqual([0, 0, true]);
-    expect(summaryOf('c')).toEqual([7, 7, false]);
-    expect(summaryOf('d')).toEqual([0, 0, true]);
-    expect(format(schedule.floats?.get('c')?.lateStart ?? 0)).toBe('2026-09-30 09:00');
+    expect(summaryOf(testId('a'))).toEqual([0, 0, true]);
+    expect(summaryOf(testId('b'))).toEqual([0, 0, true]);
+    expect(summaryOf(testId('c'))).toEqual([7, 7, false]);
+    expect(summaryOf(testId('d'))).toEqual([0, 0, true]);
+    expect(format(schedule.floats?.get(testId('c'))?.lateStart ?? 0)).toBe('2026-09-30 09:00');
   });
 
   it('gives a negative float to tasks that cannot meet a deadline', () => {
-    const late = [...tasks.slice(0, 3), taskOf('d', 7, { deadline: at(2026, 9, 30, 17) })];
+    const late = [...tasks.slice(0, 3), taskOf(testId('d'), 7, { deadline: at(2026, 9, 30, 17) })];
     const schedule = scheduleOrThrow(project(late, dependencies, { options: ALL_OPTIONS }));
-    expect(schedule.floats?.get('d')?.totalFloatHours).toBe(-7);
-    expect(schedule.floats?.get('a')?.isCritical).toBe(true);
-    expect(schedule.conflicts).toEqual([{ code: 'DEADLINE_MISSED', taskId: 'd' }]);
+    expect(schedule.floats?.get(testId('d'))?.totalFloatHours).toBe(-7);
+    expect(schedule.floats?.get(testId('a'))?.isCritical).toBe(true);
+    expect(schedule.conflicts).toEqual([{ code: 'DEADLINE_MISSED', taskId: testId('d') }]);
   });
 
   it('computes floats across start-to-start and finish-to-finish links', () => {
-    const mixed = [taskOf('a', 14), taskOf('b', 7), taskOf('c', 3)];
+    const mixed = [taskOf(testId('a'), 14), taskOf(testId('b'), 7), taskOf(testId('c'), 3)];
     const schedule = scheduleOrThrow(
       project(mixed, [link('a', 'b', 'startToStart'), link('a', 'c', 'finishToFinish')], {
         options: ALL_OPTIONS,
       }),
     );
-    expect(schedule.floats?.get('b')?.totalFloatHours).toBe(7);
-    expect(schedule.floats?.get('c')?.totalFloatHours).toBe(0);
+    expect(schedule.floats?.get(testId('b'))?.totalFloatHours).toBe(7);
+    expect(schedule.floats?.get(testId('c'))?.totalFloatHours).toBe(0);
   });
 
   it('marks as critical a task whose start can slip but whose end cannot', () => {
     const schedule = scheduleOrThrow(
-      project([taskOf('slow', 2, { hoursPerDay: 1 }), taskOf('short', 1)], [], {
+      project([taskOf(testId('slow'), 2, { hoursPerDay: 1 }), taskOf(testId('short'), 1)], [], {
         options: ALL_OPTIONS,
       }),
     );
-    expect(schedule.floats?.get('slow')?.isCritical).toBe(true);
-    expect(schedule.floats?.get('slow')?.totalFloatHours).toBe(0);
-    expect(schedule.floats?.get('short')?.isCritical).toBe(false);
+    expect(schedule.floats?.get(testId('slow'))?.isCritical).toBe(true);
+    expect(schedule.floats?.get(testId('slow'))?.totalFloatHours).toBe(0);
+    expect(schedule.floats?.get(testId('short'))?.isCritical).toBe(false);
   });
 
   it('handles an empty project', () => {
@@ -379,30 +408,36 @@ describe('scheduleProject: failures', () => {
 
   it('reports structural problems', () => {
     const result = scheduleProject(
-      project([taskOf('a', 1), taskOf('b', 1)], [link('a', 'b'), link('b', 'a')]),
+      project([taskOf(testId('a'), 1), taskOf(testId('b'), 1)], [link('a', 'b'), link('b', 'a')]),
     );
     expect(!result.ok && result.error.kind).toBe('structure');
   });
 
   it('reports the task that cannot be placed', () => {
-    const result = scheduleProject(project([taskOf('a', 1, { hoursPerDay: 99 })]));
+    const result = scheduleProject(project([taskOf(testId('a'), 1, { hoursPerDay: 99 })]));
     expect(result).toEqual({
       ok: false,
-      error: { kind: 'task', error: { code: 'INVALID_HOURS_PER_DAY', taskId: 'a' } },
+      error: { kind: 'task', error: { code: 'INVALID_HOURS_PER_DAY', taskId: testId('a') } },
     });
   });
 
   it('reports a task pushed past the horizon by a dependency lag', () => {
-    const tasks = [taskOf('a', 1, { startNoEarlierThan: at(2200, 12, 1, 9) }), taskOf('b', 1)];
+    const tasks = [
+      taskOf(testId('a'), 1, { startNoEarlierThan: at(2200, 12, 1, 9) }),
+      taskOf(testId('b'), 1),
+    ];
     const result = scheduleProject(project(tasks, [link('a', 'b', 'finishToStart', 100_000)]));
     expect(result).toEqual({
       ok: false,
-      error: { kind: 'task', error: { code: 'BEYOND_PLANNING_HORIZON', taskId: 'b' } },
+      error: { kind: 'task', error: { code: 'BEYOND_PLANNING_HORIZON', taskId: testId('b') } },
     });
   });
 
   it('reports a task pulled before the horizon by a dependency lead', () => {
-    const tasks = [taskOf('a', 1, { startNoEarlierThan: at(2020, 1, 6, 9) }), taskOf('b', 1)];
+    const tasks = [
+      taskOf(testId('a'), 1, { startNoEarlierThan: at(2020, 1, 6, 9) }),
+      taskOf(testId('b'), 1),
+    ];
     const result = scheduleProject(
       project(tasks, [link('a', 'b', 'finishToStart', -50)], {
         startDate: at(2020, 1, 1, 9),
@@ -411,24 +446,24 @@ describe('scheduleProject: failures', () => {
     );
     expect(result).toEqual({
       ok: false,
-      error: { kind: 'task', error: { code: 'BEYOND_PLANNING_HORIZON', taskId: 'b' } },
+      error: { kind: 'task', error: { code: 'BEYOND_PLANNING_HORIZON', taskId: testId('b') } },
     });
   });
 
   it('dates a summary from its dated children only, an empty summary after them adding nothing', () => {
     const plan = project([
       summary('outer', { sortKey: 'a' }),
-      workTask('work', { parentId: 'outer', sortKey: 'b' }),
-      summary('empty', { parentId: 'outer', sortKey: 'c' }),
+      workTask('work', { parentId: testId('outer'), sortKey: 'b' }),
+      summary('empty', { parentId: testId('outer'), sortKey: 'c' }),
     ]);
     const schedule = scheduleOrThrow(plan);
-    const work = schedule.placements.get('work');
-    expect(schedule.summaries.get('empty')).toEqual({
+    const work = schedule.placements.get(testId('work'));
+    expect(schedule.summaries.get(testId('empty'))).toEqual({
       start: null,
       end: null,
       progressPercent: null,
     });
-    expect(schedule.summaries.get('outer')).toEqual({
+    expect(schedule.summaries.get(testId('outer'))).toEqual({
       start: work?.start,
       end: work?.end,
       progressPercent: 0,
@@ -450,7 +485,7 @@ describe('scheduleProject: failures', () => {
     /** Returns the floats and critical flags of the two tasks of a plan. */
     const summary = (plan: Project) => {
       const floats = scheduleOrThrow(plan).floats;
-      return ['a', 'b'].map((id) => {
+      return [testId('a'), testId('b')].map((id) => {
         const taskFloat = floats?.get(id);
         return [taskFloat?.totalFloatHours, taskFloat?.freeFloatHours, taskFloat?.isCritical];
       });
@@ -495,10 +530,10 @@ describe('scheduleProject: failures', () => {
       [link('a', 'b'), link('b', 'c', 'startToStart'), link('m', 'c')],
     );
     const floats = scheduleOrThrow(plan).floats;
-    for (const id of ['a', 'b', 'c', 'm', 'part']) {
+    for (const id of [testId('a'), testId('b'), testId('c'), testId('m'), testId('part')]) {
       expect(floats?.get(id)).toEqual(UNKNOWN_FLOAT);
     }
-    expect(floats?.get('free')).toEqual({
+    expect(floats?.get(testId('free'))).toEqual({
       lateStart: 439334,
       lateFinish: 439358,
       totalFloatHours: 200,
@@ -529,7 +564,7 @@ describe('scheduleProject: failures', () => {
         },
       },
     );
-    expect(scheduleOrThrow(plan).floats?.get('split')).toEqual(UNKNOWN_FLOAT);
+    expect(scheduleOrThrow(plan).floats?.get(testId('split'))).toEqual(UNKNOWN_FLOAT);
   });
 
   it('gives an unknown float, critical, to a task that would have to start before the first supported year', () => {
@@ -559,7 +594,7 @@ describe('scheduleProject: failures', () => {
       },
     );
     const floats = scheduleOrThrow(plan).floats;
-    for (const id of ['a', 'split']) {
+    for (const id of [testId('a'), testId('split')]) {
       expect(floats?.get(id)).toEqual(UNKNOWN_FLOAT);
     }
   });

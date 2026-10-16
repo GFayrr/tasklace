@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Project } from '../../core/model/project';
+import type { Project, TaskId } from '../../core/model/project';
 import { at } from '../../core/testing/civil-time';
-import { link, milestone, project, workTask } from '../../core/testing/project-builder';
+import { link, milestone, project, workTask, testId } from '../../core/testing/project-builder';
 import { AppState } from '../app/app-state.svelte';
 import { fakeAppContext, openedProjectOf, settle } from '../app/testing/fake-app-context';
 import { createMomentFormatter } from '../i18n/format';
@@ -164,7 +164,7 @@ describe('the baseline in the Advanced options tab', () => {
   it('explains why the baseline cannot be set while the dates are being computed', async () => {
     const { app, dialog, scheduler } = await renderAdvanced();
     scheduler.automatic = false;
-    expect(app.edit((context) => setDuration(context, 'a', '14'))).toBe(true);
+    expect(app.edit((context) => setDuration(context, testId('a'), '14'))).toBe(true);
     click(button(dialog, TEXT.setBaseline));
     update();
     expect(single(dialog, '.advanced [role="alert"]').textContent).toBe(
@@ -223,7 +223,10 @@ describe('the questions and messages of the baseline', () => {
       click(button(dialog, TEXT.setBaseline));
       update();
       expect(logged.mock.calls).toEqual([
-        ['Tasks could not be frozen in the baseline:', [{ taskId: 'm', reason: 'NO_DATES' }]],
+        [
+          'Tasks could not be frozen in the baseline:',
+          [{ taskId: testId('m'), reason: 'NO_DATES' }],
+        ],
       ]);
     } finally {
       logged.mockRestore();
@@ -239,7 +242,7 @@ describe('the questions and messages of the baseline', () => {
     await settle();
     update();
     scheduler.automatic = false;
-    expect(app.edit((context) => setDuration(context, 'a', '14'))).toBe(true);
+    expect(app.edit((context) => setDuration(context, testId('a'), '14'))).toBe(true);
     click(button(dialog, TEXT.setBaselineAgain));
     update();
     click(button(question(dialog), TEXT.replaceBaselineConfirm));
@@ -257,7 +260,7 @@ describe('the baseline in the table and on the timeline', () => {
     const rendered = await renderAdvanced();
     click(button(rendered.dialog, TEXT.setBaseline));
     await settle();
-    expect(rendered.app.edit((context) => setDuration(context, 'b', '14'))).toBe(true);
+    expect(rendered.app.edit((context) => setDuration(context, testId('b'), '14'))).toBe(true);
     await settle();
     update();
     return rendered;
@@ -299,10 +302,10 @@ describe('the baseline in the table and on the timeline', () => {
       .filter((call) => call.name === 'fillRect' && call.fillStyle === pale && call.args[3] === 3)
       .map((call) => [call.args[0], call.args[1]]);
     /** Returns the top of the row of a task on the timeline. */
-    const rowOf = (id: string) => (app.outline.rowIndexById.get(id) ?? -1) * ROW_HEIGHT;
+    const rowOf = (id: TaskId) => (app.outline.rowIndexById.get(id) ?? -1) * ROW_HEIGHT;
     expect(ghosts).toEqual([
-      [xOf(frame, baseline?.get('a')?.start ?? Number.NaN), rowOf('a') + 2],
-      [xOf(frame, baseline?.get('b')?.start ?? Number.NaN), rowOf('b') + 2],
+      [xOf(frame, baseline?.get(testId('a'))?.start ?? Number.NaN), rowOf(testId('a')) + 2],
+      [xOf(frame, baseline?.get(testId('b'))?.start ?? Number.NaN), rowOf(testId('b')) + 2],
     ]);
     const key = single(document.body, '.status-bar .baseline-key');
     expect([key.textContent.trim(), key.title]).toEqual([
@@ -316,8 +319,13 @@ describe('the baseline in the table and on the timeline', () => {
     const baseline = {
       takenAt: at(2026, 9, 27, 9),
       entries: [
-        { taskId: 'b', start: at(2027, 2, 1, 9), end: far, durationHours: 7 },
-        { taskId: 'gone', start: at(2028, 6, 1, 9), end: at(2028, 6, 1, 17), durationHours: 7 },
+        { taskId: testId('b'), start: at(2027, 2, 1, 9), end: far, durationHours: 7 },
+        {
+          taskId: testId('gone'),
+          start: at(2028, 6, 1, 9),
+          end: at(2028, 6, 1, 17),
+          durationHours: 7,
+        },
       ],
     };
     const shown = await renderAdvanced({ ...PLAN, baseline });
@@ -354,7 +362,12 @@ describe('the baseline in the table and on the timeline', () => {
         baseline: {
           takenAt: at(2026, 9, 27, 9),
           entries: [
-            { taskId: 'a', start: at(2026, 9, 28, 9), end: at(2026, 9, 28, 17), durationHours: 7 },
+            {
+              taskId: testId('a'),
+              start: at(2026, 9, 28, 9),
+              end: at(2026, 9, 28, 17),
+              durationHours: 7,
+            },
           ],
         },
       },

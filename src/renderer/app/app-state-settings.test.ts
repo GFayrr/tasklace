@@ -3,7 +3,7 @@ import { scheduleProject } from '../../core/scheduling/schedule-project';
 import type { Project } from '../../core/model/project';
 import { at } from '../../core/testing/civil-time';
 import { HOURS_PER_DAY } from '../../core/time';
-import { link, project, workTask } from '../../core/testing/project-builder';
+import { link, project, workTask, testId } from '../../core/testing/project-builder';
 import type { BridgeResult, OpenedProject } from '../../preload/bridge-contract';
 import english from '../locales/en.json';
 import { removeTimeRange, setTimeRange, setWorkingWeekday } from '../plan/project-commands';
@@ -123,11 +123,11 @@ describe('renaming the project from its settings', () => {
 describe('changing the calendar', () => {
   it('applies a change that fits every task, and computes the schedule again', async () => {
     const { app } = await openedApp();
-    const before = app.schedule?.placements.get('a')?.start ?? Number.NaN;
+    const before = app.schedule?.placements.get(testId('a'))?.start ?? Number.NaN;
     expect(app.editSettings((context) => setWorkingWeekday(context, 1, false))).toBeNull();
     expect(app.project?.calendar.workingWeekdays).toEqual([2, 3, 4, 5]);
     await settle();
-    expect(app.schedule?.placements.get('a')?.start).toBe(before + HOURS_PER_DAY);
+    expect(app.schedule?.placements.get(testId('a'))?.start).toBe(before + HOURS_PER_DAY);
   });
 
   it('names the task whose hours per day a shorter working day cannot hold, keeping the calendar', async () => {

@@ -3,14 +3,13 @@ import { readProject, STORED_VALUE_CODEC } from '../../core/validation/read-proj
 import { at } from '../../core/testing/civil-time';
 import { MIN_PROJECT_HOUR } from '../../core/time';
 import { buildNewProject, localDayStart, localQuarterOf } from './new-project';
+import { testId } from '../../core/testing/project-builder';
 
 describe('buildNewProject', () => {
   it('builds a valid empty project starting at midnight of the local day, with the default tags', () => {
     let next = 0;
-    const built = buildNewProject(
-      'Plan',
-      new Date(2026, 9, 5, 15, 42),
-      () => `tag-${String(next++)}`,
+    const built = buildNewProject('Plan', new Date(2026, 9, 5, 15, 42), () =>
+      testId(`tag-${String(next++)}`),
     );
     expect(built.startDate).toBe(at(2026, 10, 5, 0));
     expect(built.tags.map((tag) => tag.name)).toEqual([

@@ -16,7 +16,15 @@ import type { Project, Tag, Task } from '../model/project';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { at, dayOf } from '../testing/civil-time';
 import { projectArbitrary } from '../testing/project-arbitrary';
-import { link, milestone, project, splitTask, summary, workTask } from '../testing/project-builder';
+import {
+  link,
+  milestone,
+  project,
+  splitTask,
+  summary,
+  workTask,
+  testId,
+} from '../testing/project-builder';
 import { scheduleProject } from '../scheduling/schedule-project';
 import { END_PROJECT_HOUR, MAX_DAY_INDEX, MIN_DAY_INDEX, MIN_PROJECT_HOUR } from '../time';
 import { readProject, STORED_VALUE_CODEC } from './read-project';
@@ -25,13 +33,13 @@ import type { ValidationIssue } from './validation-issues';
 type Data = Record<string, unknown>;
 
 const DESIGN_TAG: Tag = {
-  id: 'design',
+  id: testId('design'),
   name: 'Design',
   color: '#336699',
   representsPersonOrTeam: false,
 };
 const ALICE_TAG: Tag = {
-  id: 'alice',
+  id: testId('alice'),
   name: 'Alice',
   color: '#aa5500',
   representsPersonOrTeam: true,
@@ -670,16 +678,16 @@ describe('readProject: structure', () => {
     expect(structureIssues(tasks, [link('s', 'b')])).toEqual(
       issue('dependencies[0]', 'SUMMARY_DEPENDENCY'),
     );
-    expect(structureIssues(tasks, [link('a', 'b'), { ...link('a', 'b'), id: 'again' }])).toEqual(
-      issue('dependencies[1]', 'DUPLICATE_DEPENDENCY'),
-    );
+    expect(
+      structureIssues(tasks, [link('a', 'b'), { ...link('a', 'b'), id: testId('again') }]),
+    ).toEqual(issue('dependencies[1]', 'DUPLICATE_DEPENDENCY'));
   });
 
   it('points a duplicated dependency identifier at its repeated occurrence', () => {
     const tasks = [workTask('a'), workTask('b'), workTask('c')];
-    expect(structureIssues(tasks, [link('a', 'b'), { ...link('b', 'c'), id: 'a-b' }])).toEqual(
-      issue('dependencies[1]', 'DUPLICATE_DEPENDENCY_ID'),
-    );
+    expect(
+      structureIssues(tasks, [link('a', 'b'), { ...link('b', 'c'), id: testId('a-b') }]),
+    ).toEqual(issue('dependencies[1]', 'DUPLICATE_DEPENDENCY_ID'));
   });
 
   it('reports every task caught in a dependency cycle', () => {

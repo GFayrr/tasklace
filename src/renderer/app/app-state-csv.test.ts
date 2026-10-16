@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { project, workTask, link } from '../../core/testing/project-builder';
+import { project, workTask, link, testId } from '../../core/testing/project-builder';
 import { exportProjectCsv } from '../../core/exchange/csv/project-csv-export';
 import { scheduleProject } from '../../core/scheduling/schedule-project';
 import { unwrap } from '../../core/testing/arbitraries';
@@ -47,7 +47,7 @@ describe('a CSV export', () => {
     control.openResult = openedProjectOf(PLAN);
     await app.open();
     scheduler.automatic = false;
-    expect(app.edit((edit) => setDuration(edit, 'b', '30'))).toBe(true);
+    expect(app.edit((edit) => setDuration(edit, testId('b'), '30'))).toBe(true);
     await settle();
     const changed = app.project;
     if (changed === null) {

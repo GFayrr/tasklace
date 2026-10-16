@@ -13,6 +13,7 @@ import {
   splitTask,
   summary,
   workTask,
+  testId,
 } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 import { buildPdfSample } from '../fixtures/pdf-samples';
@@ -25,9 +26,14 @@ const HEAVY_PDF_TIMEOUT_MS = 120_000;
 const A3_PORTRAIT = [841.89, 1190.55] as const;
 /** Chromium rounds the height of a page by up to 0.55 point, a fifth of a millimetre, whatever the way its size is given. */
 const PAGE_SIZE_TOLERANCE = 1;
-const DESIGN = { id: 'design', name: 'Design', color: '#2a78d6', representsPersonOrTeam: false };
+const DESIGN = {
+  id: testId('design'),
+  name: 'Design',
+  color: '#2a78d6',
+  representsPersonOrTeam: false,
+};
 const DOCUMENTATION = {
-  id: 'documentation',
+  id: testId('documentation'),
   name: 'Documentation',
   color: '#2a78d7',
   representsPersonOrTeam: false,
@@ -37,10 +43,10 @@ const PLAN: Project = {
     [
       summary('research', { sortKey: 'a', name: 'Research' }),
       workTask('survey', {
-        parentId: 'research',
+        parentId: testId('research'),
         sortKey: 'a',
         name: 'Survey design',
-        tagId: 'design',
+        tagId: testId('design'),
         progressPercent: 60,
       }),
       splitTask(
@@ -49,7 +55,12 @@ const PLAN: Project = {
           [14, 0],
           [9, 2],
         ],
-        { parentId: 'research', sortKey: 'b', name: 'Interviews', tagId: 'documentation' },
+        {
+          parentId: testId('research'),
+          sortKey: 'b',
+          name: 'Interviews',
+          tagId: testId('documentation'),
+        },
       ),
       workTask('writing', {
         sortKey: 'b',

@@ -4,7 +4,7 @@ import type { Project, TaskId } from '../model/project';
 import { instantArbitrary, PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { at } from '../testing/civil-time';
 import { projectArbitrary } from '../testing/project-arbitrary';
-import { link, project, workTask } from '../testing/project-builder';
+import { link, project, workTask, testId } from '../testing/project-builder';
 import { END_PROJECT_HOUR, type ProjectHour } from '../time';
 import { scheduleProject, scheduleWithRequestedStarts, type Schedule } from './schedule-project';
 
@@ -141,10 +141,10 @@ describe('scheduleWithRequestedStarts', () => {
 
   it('fails like the former import when a requested start leaves no room before the last supported hour', () => {
     const late = project([workTask('a')]);
-    const requested = new Map([['a', LAST_PROJECT_HOUR]]);
+    const requested = new Map([[testId('a'), LAST_PROJECT_HOUR]]);
     expect(scheduleWithRequestedStarts(late, requested)).toEqual({
       ok: false,
-      error: { kind: 'task', error: { code: 'BEYOND_PLANNING_HORIZON', taskId: 'a' } },
+      error: { kind: 'task', error: { code: 'BEYOND_PLANNING_HORIZON', taskId: testId('a') } },
     });
     expect(twoPassReference(late, requested)).toBeNull();
   });
@@ -152,12 +152,12 @@ describe('scheduleWithRequestedStarts', () => {
   it('drops the start date of a task its predecessor already pushes past it', () => {
     const chain = project([workTask('a'), workTask('b')], [link('a', 'b')]);
     const requested = new Map([
-      ['a', at(2026, 10, 5, 9)],
-      ['b', at(2026, 10, 1, 9)],
+      [testId('a'), at(2026, 10, 5, 9)],
+      [testId('b'), at(2026, 10, 1, 9)],
     ]);
     const result = unwrap(scheduleWithRequestedStarts(chain, requested));
     expect([...result.keptStarts]).toEqual([['a', at(2026, 10, 5, 9)]]);
-    expect(result.schedule.placements.get('b')?.start).toBe(at(2026, 10, 6, 9));
+    expect(result.schedule.placements.get(testId('b'))?.start).toBe(at(2026, 10, 6, 9));
     expect(twoPassReference(chain, requested)?.kept.size).toBe(2);
   });
 });

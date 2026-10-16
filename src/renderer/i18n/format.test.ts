@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { project, scheduleOrThrow, workTask, link } from '../../core/testing/project-builder';
+import {
+  project,
+  scheduleOrThrow,
+  workTask,
+  link,
+  testId,
+} from '../../core/testing/project-builder';
 import { at } from '../../core/testing/civil-time';
 import type { Weekday } from '../../core/time';
 import {
@@ -22,8 +28,8 @@ describe('projectSpan', () => {
     const plan = project([workTask('a'), workTask('b')], [link('a', 'b')]);
     const schedule = scheduleOrThrow(plan);
     const span = projectSpan(schedule);
-    expect(span?.start).toBe(schedule.placements.get('a')?.start);
-    expect(span?.end).toBe(schedule.placements.get('b')?.end);
+    expect(span?.start).toBe(schedule.placements.get(testId('a'))?.start);
+    expect(span?.end).toBe(schedule.placements.get(testId('b'))?.end);
   });
 
   it('is empty for a schedule without tasks', () => {

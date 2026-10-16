@@ -6,7 +6,7 @@ import type { Dependency, DependencyType, Project, SchedulableTask, Task } from 
 import { fromQuarters, QUARTER_HOUR, QUARTERS_PER_HOUR, toQuarters } from '../time';
 import { calendarArbitrary, instantArbitrary, quarterHoursArbitrary, unwrap } from './arbitraries';
 import { analyzeProjectStructure } from '../scheduling/project-structure';
-import { milestone, project, summary, workTask, segmentsOrThrow } from './project-builder';
+import { milestone, project, summary, workTask, segmentsOrThrow, testId } from './project-builder';
 
 const MAX_TASKS = 20;
 const MAX_BLOCK_HOURS = 30;
@@ -94,9 +94,9 @@ function buildDependencies(
     const from = shape.from % leaves.length;
     const to = shape.to % leaves.length;
     if (from < to) {
-      const predecessorId = `t${String(from).padStart(2, '0')}`;
-      const successorId = `t${String(to).padStart(2, '0')}`;
-      const id = `${predecessorId}-${successorId}`;
+      const predecessorId = testId(`t${String(from).padStart(2, '0')}`);
+      const successorId = testId(`t${String(to).padStart(2, '0')}`);
+      const id = testId(`${predecessorId}-${successorId}`);
       byPair.set(id, {
         id,
         predecessorId,
@@ -206,7 +206,7 @@ function withTaskBetweenBlocks(
   );
   const between: Dependency[] = [
     {
-      id: `between-out-${splitTask.id}`,
+      id: testId(`between-out-${splitTask.id}`),
       predecessorId: splitTask.id,
       predecessorBlock: block,
       successorId: inside.id,
@@ -215,7 +215,7 @@ function withTaskBetweenBlocks(
       lagHours: picks.lags[0],
     },
     {
-      id: `between-in-${splitTask.id}`,
+      id: testId(`between-in-${splitTask.id}`),
       predecessorId: inside.id,
       predecessorBlock: null,
       successorId: splitTask.id,
@@ -229,7 +229,7 @@ function withTaskBetweenBlocks(
 
 const MAX_RICH_TAGS = 6;
 const MAX_BASELINE_OFFSET_QUARTERS = 400;
-const GONE_TASK_ID = 'gone';
+const GONE_TASK_ID = testId('gone');
 
 const baselineShapeArbitrary = fc.option(
   fc.record({
@@ -322,7 +322,7 @@ export const richProjectArbitrary: fc.Arbitrary<GeneratedProject> = projectArbit
       .map((extra) => {
         const calendar = unwrap(compileCalendar(base.calendar));
         const tags = extra.tags.map((tag, index) => ({
-          id: `g${String(index)}`,
+          id: testId(`g${String(index)}`),
           name: tag.name,
           color: tag.color,
           representsPersonOrTeam: tag.person,

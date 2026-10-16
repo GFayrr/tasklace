@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MIN_PROJECT_YEAR } from '../../core/limits';
 import type { Project } from '../../core/model/project';
 import { success } from '../../core/result';
-import { link, project, workTask } from '../../core/testing/project-builder';
+import { link, project, workTask, testId } from '../../core/testing/project-builder';
 import english from '../locales/en.json';
 import { toggleProjectOption } from '../plan/project-commands';
 import { AppState } from './app-state.svelte';
@@ -57,7 +57,7 @@ function noticeTexts(app: AppState): string[] {
 describe('floats that cannot be worked out', () => {
   it('are told once in a lasting message, replaced when their count changes and removed once none is left', async () => {
     const { app } = await openedAppOf(sparse(['a']));
-    expect(app.schedule?.floats?.get('a')?.totalFloatHours).toBeNull();
+    expect(app.schedule?.floats?.get(testId('a'))?.totalFloatHours).toBeNull();
     expect(app.notices.map((notice) => [notice.kind, notice.text, notice.lasting])).toEqual([
       ['warning', NOTICE.one.replace('{count}', '1'), true],
     ]);

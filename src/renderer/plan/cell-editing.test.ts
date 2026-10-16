@@ -7,6 +7,7 @@ import {
   splitTask,
   summary,
   workTask,
+  testId,
 } from '../../core/testing/project-builder';
 import { at, compileOrThrow } from '../../core/testing/civil-time';
 import { TEST_CALENDAR } from '../../core/testing/test-calendar';
@@ -20,11 +21,12 @@ import {
   pickerValue,
   type CellSource,
 } from './cell-editing';
+import type { TaskId } from '../../core/model/project';
 
 const PLAN = project(
   [
     summary('s', { sortKey: 'a' }),
-    workTask('a', { parentId: 's', progressPercent: 30 }),
+    workTask('a', { parentId: testId('s'), progressPercent: 30 }),
     splitTask(
       'b',
       [
@@ -48,7 +50,7 @@ const SOURCE: CellSource = {
 };
 
 /** Finds a task of the sample plan. */
-function taskOf(id: string) {
+function taskOf(id: TaskId) {
   const task = PLAN.tasks.find((candidate) => candidate.id === id);
   if (task === undefined) {
     throw new Error(id);
@@ -58,57 +60,71 @@ function taskOf(id: string) {
 
 describe('editorText', () => {
   it('starts each editor with text that reads back to the same value', () => {
-    expect(editorText(taskOf('b'), 'duration', SOURCE)).toBe('12 h');
-    expect(editorText(taskOf('b'), 'end', SOURCE)).toBe('2026-10-06 15:00');
-    expect(editorText(taskOf('b'), 'start', SOURCE)).toBe('2026-10-05 09:00');
-    expect(editorText(taskOf('a'), 'start', SOURCE)).toBe('2026-09-28 09:00');
-    expect(editorText(taskOf('a'), 'progress', SOURCE)).toBe('30');
-    expect(editorText(taskOf('m'), 'predecessors', SOURCE)).toBe('2SS+3h');
-    expect(editorText(taskOf('m'), 'duration', SOURCE)).toBe('0 h');
-    expect(editorText(taskOf('s'), 'duration', SOURCE)).toBe('s');
+    expect(editorText(taskOf(testId('b')), 'duration', SOURCE)).toBe('12 h');
+    expect(editorText(taskOf(testId('b')), 'end', SOURCE)).toBe('2026-10-06 15:00');
+    expect(editorText(taskOf(testId('b')), 'start', SOURCE)).toBe('2026-10-05 09:00');
+    expect(editorText(taskOf(testId('a')), 'start', SOURCE)).toBe('2026-09-28 09:00');
+    expect(editorText(taskOf(testId('a')), 'progress', SOURCE)).toBe('30');
+    expect(editorText(taskOf(testId('m')), 'predecessors', SOURCE)).toBe('2SS+3h');
+    expect(editorText(taskOf(testId('m')), 'duration', SOURCE)).toBe('0 h');
+    expect(editorText(taskOf(testId('s')), 'duration', SOURCE)).toBe('s');
   });
 
   it('builds the change that the same text asks for, without any difference', () => {
-    const context = { project: PLAN, outline: OUTLINE, createId: () => 'new', dayHours: 7 };
-    const unchanged = [{ type: 'putTask', task: taskOf('m') }];
+    const context = { project: PLAN, outline: OUTLINE, createId: () => testId('new'), dayHours: 7 };
+    const unchanged = [{ type: 'putTask', task: taskOf(testId('m')) }];
     for (const [column, expected] of [
       ['name', unchanged],
       ['duration', []],
       ['progress', unchanged],
       ['predecessors', []],
     ] as const) {
-      const edit = cellEdit(context, 'm', column, editorText(taskOf('m'), column, SOURCE), SOURCE);
+      const edit = cellEdit(
+        context,
+        testId('m'),
+        column,
+        editorText(taskOf(testId('m')), column, SOURCE),
+        SOURCE,
+      );
       expect(edit).toEqual({ ok: true, value: expected });
     }
     for (const column of ['start', 'end', 'duration'] as const) {
-      const edit = cellEdit(context, 'b', column, editorText(taskOf('b'), column, SOURCE), SOURCE);
-      expect(edit.ok && edit.value).toEqual([{ type: 'putTask', task: taskOf('b') }]);
+      const edit = cellEdit(
+        context,
+        testId('b'),
+        column,
+        editorText(taskOf(testId('b')), column, SOURCE),
+        SOURCE,
+      );
+      expect(edit.ok && edit.value).toEqual([{ type: 'putTask', task: taskOf(testId('b')) }]);
     }
     const noSchedule = { ...SOURCE, schedule: null, current: { ok: true, value: null } } as const;
-    expect(cellEdit(context, 'b', 'end', 'x', noSchedule)).toEqual({
+    expect(cellEdit(context, testId('b'), 'end', 'x', noSchedule)).toEqual({
       ok: false,
       error: 'NOT_POSSIBLE',
     });
   });
 
   it('refuses a typed start or end while the schedule shown is older than the latest change, telling why', () => {
-    const context = { project: PLAN, outline: OUTLINE, createId: () => 'new', dayHours: 7 };
+    const context = { project: PLAN, outline: OUTLINE, createId: () => testId('new'), dayHours: 7 };
     for (const error of ['SCHEDULE_PENDING', 'SCHEDULE_STOPPED'] as const) {
       const waiting: CellSource = { ...SOURCE, current: { ok: false, error } };
       for (const column of ['start', 'end'] as const) {
-        expect(cellEdit(context, 'b', column, '2026-10-01 10:00', waiting)).toEqual({
+        expect(cellEdit(context, testId('b'), column, '2026-10-01 10:00', waiting)).toEqual({
           ok: false,
           error,
         });
       }
-      expect(cellEdit(context, 'b', 'name', 'Renamed', waiting).ok).toBe(true);
+      expect(cellEdit(context, testId('b'), 'name', 'Renamed', waiting).ok).toBe(true);
     }
   });
 });
 
 describe('tags and dates in cells', () => {
-  const tagged = project([workTask('t', { tagId: 'design' }), workTask('u')], [], {
-    tags: [{ id: 'design', name: 'Design', color: '#3366AA', representsPersonOrTeam: false }],
+  const tagged = project([workTask('t', { tagId: testId('design') }), workTask('u')], [], {
+    tags: [
+      { id: testId('design'), name: 'Design', color: '#3366AA', representsPersonOrTeam: false },
+    ],
   });
   const source: CellSource = {
     ...SOURCE,
@@ -120,7 +136,7 @@ describe('tags and dates in cells', () => {
   const context = {
     project: tagged,
     outline: buildPlanOutline(tagged.tasks, new Set()),
-    createId: () => 'new',
+    createId: () => testId('new'),
     dayHours: 7,
   };
 
@@ -143,29 +159,31 @@ describe('tags and dates in cells', () => {
   });
 
   it('sets a tag, or removes it with an empty choice', () => {
-    expect(cellEdit(context, 'u', 'tag', 'design', source)).toMatchObject({
+    expect(cellEdit(context, testId('u'), 'tag', 'design', source)).toMatchObject({
       ok: true,
-      value: [{ type: 'putTask', task: { id: 'u', tagId: 'design' } }],
+      value: [{ type: 'putTask', task: { id: testId('u'), tagId: testId('design') } }],
     });
-    expect(cellEdit(context, 't', 'tag', '', source)).toMatchObject({
+    expect(cellEdit(context, testId('t'), 'tag', '', source)).toMatchObject({
       ok: true,
-      value: [{ type: 'putTask', task: { id: 't', tagId: null } }],
+      value: [{ type: 'putTask', task: { id: testId('t'), tagId: null } }],
     });
   });
 
   it('sets a typed start without a schedule, its later blocks keeping their dates', () => {
-    expect(cellEdit(context, 'u', 'start', '2026-10-01 10:00', source)).toMatchObject({
+    expect(cellEdit(context, testId('u'), 'start', '2026-10-01 10:00', source)).toMatchObject({
       ok: true,
-      value: [{ type: 'putTask', task: { id: 'u', startNoEarlierThan: at(2026, 10, 1, 10) } }],
+      value: [
+        { type: 'putTask', task: { id: testId('u'), startNoEarlierThan: at(2026, 10, 1, 10) } },
+      ],
     });
   });
 });
 
 describe('editable columns', () => {
   it('lets only the name of a summary be edited', () => {
-    expect(isEditable(taskOf('s'), 'name')).toBe(true);
-    expect(isEditable(taskOf('s'), 'duration')).toBe(false);
-    expect(isEditable(taskOf('m'), 'start')).toBe(true);
+    expect(isEditable(taskOf(testId('s')), 'name')).toBe(true);
+    expect(isEditable(taskOf(testId('s')), 'duration')).toBe(false);
+    expect(isEditable(taskOf(testId('m')), 'start')).toBe(true);
   });
 
   it('moves between editable columns, staying at the edges', () => {
@@ -209,11 +227,11 @@ describe('typing the start of a split task', () => {
     const context = {
       project: dated,
       outline: buildPlanOutline(dated.tasks, new Set()),
-      createId: () => 'new',
+      createId: () => testId('new'),
       dayHours: 7,
     };
     const source: CellSource = { ...SOURCE, schedule, current: { ok: true, value: schedule } };
-    const edit = cellEdit(context, 'd', 'start', '2026-09-30 09:00', source);
+    const edit = cellEdit(context, testId('d'), 'start', '2026-09-30 09:00', source);
     const operation = edit.ok
       ? edit.value.find((candidate) => candidate.type === 'putTask')
       : undefined;
