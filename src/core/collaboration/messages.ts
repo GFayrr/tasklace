@@ -127,7 +127,7 @@ function readJsonMessage(
 }
 
 /** Decodes UTF-8 JSON, or returns undefined when the bytes are not UTF-8 text or the text is not JSON. */
-function parsedJson(content: Uint8Array): unknown {
+export function parsedJson(content: Uint8Array): unknown {
   try {
     return JSON.parse(DECODER.decode(content)) as unknown;
   } catch (error) {
