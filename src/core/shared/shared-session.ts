@@ -62,9 +62,12 @@ import {
 } from './shared-project';
 import { isIdentifier, type NewIdentifier } from '../identifiers';
 
+export type UpdateSource = 'local' | 'remote';
+
 export interface SharedSession {
   readonly documentId: DocumentId;
   readonly onChange: (listener: () => void) => () => void;
+  readonly onUpdate: (listener: (update: Uint8Array, source: UpdateSource) => void) => () => void;
   readonly encodeState: (stateVector?: Uint8Array) => Uint8Array;
   readonly encodeStateVector: () => Uint8Array;
   readonly openingRepairs: readonly SharedRepair[];
@@ -209,6 +212,16 @@ function validatedSession(
       document.on('update', changed);
       return () => {
         document.off('update', changed);
+      };
+    },
+    onUpdate: (listener) => {
+      /** Gives the listener the bytes of each change, a merged update with its repairs coming from the network and any other change from this copy. */
+      const updated = (update: Uint8Array, origin: unknown): void => {
+        listener(update, origin === REMOTE_ORIGIN ? 'remote' : 'local');
+      };
+      document.on('update', updated);
+      return () => {
+        document.off('update', updated);
       };
     },
     encodeState: (stateVector) => Y.encodeStateAsUpdate(document, stateVector),
