@@ -269,8 +269,11 @@ describe('the shared plan through the bridge', () => {
       { kind: 'codeChanged', code: 'K7Q4MZ' },
       { kind: 'nearbyPlans', plans: [plan] },
       { kind: 'connected' },
+      { kind: 'reconnecting' },
+      { kind: 'offline' },
       { kind: 'hostMessage', message: Uint8Array.of(2) },
       { kind: 'ended', reason: 'WRONG_CODE' },
+      { kind: 'ended', reason: 'REMOVED' },
     ];
     const invalid = [
       null,

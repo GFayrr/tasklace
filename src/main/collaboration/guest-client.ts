@@ -2,10 +2,17 @@ import type { IncomingMessage } from 'node:http';
 import { isIP } from 'node:net';
 import { WebSocket, type RawData } from 'ws';
 import { MAX_SEALED_FRAME_BYTES } from '../../core/collaboration/secure/channel';
-import type { Introduction } from '../../core/collaboration/secure/link';
+import type { Introduction, JoinSecret } from '../../core/collaboration/secure/link';
 import { isPort } from '../../core/collaboration/ports';
 import { MAX_HANDSHAKE_MILLISECONDS } from '../../core/limits';
-import { bytesOf, CODE_REPLACED_CLOSE, WRONG_CODE_CLOSE } from './host-server';
+import {
+  bytesOf,
+  CODE_REPLACED_CLOSE,
+  IDENTITY_TAKEN_CLOSE,
+  REMOVED_CLOSE,
+  WRONG_CODE_CLOSE,
+  WRONG_KEY_CLOSE,
+} from './host-server';
 import { isPrivateAddress } from './private-addresses';
 import {
   connectToHost,
@@ -14,18 +21,20 @@ import {
   type StartTimer,
 } from './secure-connection';
 
-export type GuestEnd = ConnectionEnd | 'CODE_REPLACED' | 'UNREACHABLE' | 'NOT_PRIVATE';
+export type GuestEnd =
+  ConnectionEnd | 'CODE_REPLACED' | 'IDENTITY_TAKEN' | 'REMOVED' | 'UNREACHABLE' | 'NOT_PRIVATE';
 
 export interface GuestOptions {
   readonly address: string;
   readonly port: number;
-  readonly code: string;
+  readonly secret: JoinSecret;
   readonly introduction: Introduction;
   readonly startTimer: StartTimer;
   readonly randomBytes: (count: number) => Uint8Array;
   readonly events: {
     readonly opened: () => void;
     readonly message: (message: Uint8Array) => void;
+    readonly planKey: (key: Uint8Array) => void;
     readonly ended: (reason: GuestEnd) => void;
   };
 }
@@ -42,6 +51,9 @@ const ZONE_SEPARATOR = '%';
 const REFUSED_CODES: ReadonlyMap<number, GuestEnd> = new Map([
   [WRONG_CODE_CLOSE, 'WRONG_CODE'],
   [CODE_REPLACED_CLOSE, 'CODE_REPLACED'],
+  [WRONG_KEY_CLOSE, 'WRONG_KEY'],
+  [IDENTITY_TAKEN_CLOSE, 'IDENTITY_TAKEN'],
+  [REMOVED_CLOSE, 'REMOVED'],
 ]);
 
 /** Tells whether an address typed by a person or found on the network can name a host: an IP address, or a host name of letters, digits, hyphens and dots. */
@@ -62,7 +74,7 @@ export function socketUrlOf(address: string, port: number): string {
   return `ws://${host}:${String(port)}`;
 }
 
-/** Joins the host of a shared plan, refusing it unless it answers from a private address, then opens the secure connection with the code. */
+/** Joins the host of a shared plan, refusing it unless it answers from a private address, then opens the secure connection with the join code or the key of the plan. */
 export function connectAsGuest(options: GuestOptions): GuestClient {
   if (!isHostAddress(options.address) || !isPort(options.port)) {
     throw new RangeError(`Not a host address: ${options.address}:${String(options.port)}`);
@@ -74,7 +86,7 @@ export function connectAsGuest(options: GuestOptions): GuestClient {
   });
   let endReason: GuestEnd | null = null;
   const connection = connectToHost({
-    code: options.code,
+    secret: options.secret,
     introduction: options.introduction,
     startTimer: options.startTimer,
     randomBytes: options.randomBytes,
@@ -88,6 +100,7 @@ export function connectAsGuest(options: GuestOptions): GuestClient {
     },
     events: {
       message: options.events.message,
+      planKey: options.events.planKey,
       ended: (reason) => {
         options.events.ended(endReason ?? reason);
       },

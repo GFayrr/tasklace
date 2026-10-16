@@ -23,7 +23,14 @@
   );
   const collaboration = $derived(app.collaboration);
   const mode = $derived(collaboration.mode);
-  const isLost = $derived(mode.kind === 'guest' && !mode.connected);
+  const away = $derived(
+    mode.kind === 'guest' && mode.connection !== 'connected' ? mode.connection : null,
+  );
+  const awayTexts = $derived({
+    reconnecting: text.collaboration.reconnectingShort,
+    offline: text.collaboration.offlineShort,
+    lost: text.collaboration.connectionLost,
+  });
   const names = $derived(
     new Intl.ListFormat(app.locale, { type: 'unit', style: 'short' }).format(
       collaboration.participants.map((person) =>
@@ -98,8 +105,8 @@
       >
     </span>
   {/if}
-  {#if isLost}
-    <span class="badge lost"><Icon name="alert" />{text.collaboration.connectionLost}</span>
+  {#if away !== null}
+    <span class={['badge', away]}><Icon name="alert" />{awayTexts[away]}</span>
   {:else if mode.kind === 'hosting' || mode.kind === 'guest'}
     <div class="people" role="group" aria-label={text.collaboration.peopleLabel}>
       <PeopleFaces
@@ -307,9 +314,14 @@
     height: 14px;
   }
 
-  .badge.lost {
+  .badge.lost,
+  .badge.reconnecting {
     color: var(--color-warning);
     border-color: currentColor;
+  }
+
+  .badge.offline {
+    color: var(--color-text-secondary);
   }
   .zoom {
     flex-shrink: 0;

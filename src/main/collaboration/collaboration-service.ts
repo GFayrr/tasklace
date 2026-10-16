@@ -5,6 +5,7 @@ import { ipcMain } from 'electron';
 import { isParticipantId, requireParticipantId } from '../../core/collaboration/participants';
 import { isPort } from '../../core/collaboration/ports';
 import { readJoinCode } from '../../core/collaboration/secure/join-code';
+import { drawRejoinToken } from '../../core/collaboration/secure/link';
 import {
   MAX_COLLABORATION_MESSAGE_BYTES,
   MAX_PARTICIPANT_NAME_LENGTH,
@@ -35,7 +36,8 @@ import {
   storeCollaborationSettings,
 } from './collaboration-settings';
 import { announcePlan, findPlans, type Mdns } from './discovery';
-import { connectAsGuest, isHostAddress, type GuestClient } from './guest-client';
+import { connectAsGuest, isHostAddress } from './guest-client';
+import { startGuestSession, type GuestSession } from './guest-session';
 import { startHostServer, type HostServer, type Peer } from './host-server';
 import { isPrivateAddress } from './private-addresses';
 import type { StartTimer } from './secure-connection';
@@ -57,7 +59,7 @@ export type WindowSharing =
       readonly peers: Map<number, Peer>;
       readonly stopAnnouncing: () => Promise<void>;
     }
-  | { readonly kind: 'guest'; readonly client: GuestClient };
+  | { readonly kind: 'guest'; readonly client: GuestSession };
 
 const SETTINGS_STORE = 'collaboration-settings.json';
 const INSTANCE_BYTES = 4;
@@ -200,7 +202,7 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
       console.error('The page asked to drop a guest that is not connected.');
       return failure({ code: 'TASK_FAILED' });
     }
-    known.close();
+    known.remove();
     return success(null);
   });
   ipcMain.on(
@@ -303,6 +305,7 @@ async function share(
   const peers = new Map<number, Peer>();
   const started = await startHostServer({
     port: settings.value.port,
+    planKey: null,
     startTimer: context.startTimer,
     randomBytes: systemRandomBytes,
     events: {
@@ -362,9 +365,9 @@ function instanceName(): string {
 export function startGuest(
   sharings: Map<WebContents, WindowSharing>,
   sender: WebContents,
-  connect: (ended: () => void) => GuestClient,
+  connect: (ended: () => void) => GuestSession,
 ): void {
-  const connection: { client: GuestClient | null; hasEnded: boolean } = {
+  const connection: { client: GuestSession | null; hasEnded: boolean } = {
     client: null,
     hasEnded: false,
   };
@@ -380,35 +383,28 @@ export function startGuest(
   }
 }
 
-/** Joins a host for a window, passing to the page when the connection opens, what the host sends and why it ended, then telling the window ended. */
+/** Joins a host for a window with a token of its own, passing to the page when the connection opens or is lost, what the host sends and why it ended for good, then telling the window ended. */
 function joinHost(
   sender: WebContents,
   request: JoinRequest,
   startTimer: StartTimer,
   windowEnded: () => void,
-): GuestClient {
-  return connectAsGuest({
+): GuestSession {
+  return startGuestSession({
     address: request.address,
     port: request.port,
     code: request.code,
     introduction: {
       participantId: requireParticipantId(request.participantId),
       name: request.name,
+      token: drawRejoinToken(systemRandomBytes),
     },
     startTimer,
-    randomBytes: systemRandomBytes,
-    events: {
-      opened: () => {
-        tell(sender, { kind: 'connected' });
-      },
-      message: (message) => {
-        tell(sender, { kind: 'hostMessage', message });
-      },
-      ended: (reason) => {
-        windowEnded();
-        tell(sender, { kind: 'ended', reason });
-      },
+    connect: (options) => connectAsGuest({ ...options, randomBytes: systemRandomBytes }),
+    tell: (event) => {
+      tell(sender, event);
     },
+    ended: windowEnded,
   });
 }
 

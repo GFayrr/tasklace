@@ -1,11 +1,12 @@
 import { compareStrings } from '../compare-strings';
-import { MAX_JOIN_RANK, MAX_PARTICIPANTS } from '../limits';
+import { MAX_DEPARTED_PARTICIPANTS, MAX_JOIN_RANK, MAX_PARTICIPANTS } from '../limits';
 import type { TaskId } from '../model/project';
 import { failure, success, type Result } from '../result';
 import { PARTICIPANT_COLOR_COUNT, type Participant, type ParticipantId } from './participants';
 
 export interface Roster {
   readonly participants: readonly Participant[];
+  readonly departed: readonly Participant[];
   readonly nextRank: number;
 }
 
@@ -17,11 +18,12 @@ export function startRoster(hostId: ParticipantId, name: string): Roster {
     participants: [
       { id: hostId, name, color: 0, canEdit: true, isHost: true, rank: 0, selectedTaskId: null },
     ],
+    departed: [],
     nextRank: 1,
   };
 }
 
-/** Adds a participant who just joined, in read only, with the first color nobody uses, refusing a full list, an identifier already in it, or a list whose ranks are spent. */
+/** Adds a participant who just joined, in read only with a new rank and the first color nobody uses, or with the rank, right and color it had when it comes back, refusing a full list, an identifier already in it, or a list whose ranks are spent. */
 export function joinRoster(
   roster: Roster,
   id: ParticipantId,
@@ -33,6 +35,10 @@ export function joinRoster(
   if (roster.participants.some((participant) => participant.id === id)) {
     return failure('ALREADY_IN');
   }
+  const back = roster.departed.find((participant) => participant.id === id);
+  if (back !== undefined) {
+    return success(rejoined(roster, back, name));
+  }
   const participant: Participant = {
     id,
     name,
@@ -43,9 +49,21 @@ export function joinRoster(
     selectedTaskId: null,
   };
   return success({
+    ...roster,
     participants: [...roster.participants, participant],
     nextRank: roster.nextRank + 1,
   });
+}
+
+/** Brings back a participant who left, with its rank and right, and its color unless another participant took it meanwhile. */
+function rejoined(roster: Roster, back: Participant, name: string): Roster {
+  const isColorTaken = roster.participants.some((participant) => participant.color === back.color);
+  const color = isColorTaken ? firstFreeColor(roster.participants) : back.color;
+  return {
+    ...roster,
+    participants: [...roster.participants, { ...back, name, color }],
+    departed: roster.departed.filter((participant) => participant.id !== back.id),
+  };
 }
 
 /** Returns the first color of the palette no participant uses, or the color of the rank when every color is taken. */
@@ -83,11 +101,17 @@ export function updatePresence(
   return target === undefined ? roster : replaceParticipant(roster, { ...target, ...presence });
 }
 
-/** Removes a participant who left, the host leaving being handled by electing the next one. */
+/** Removes a participant who left, keeping its rank, right and color for when it comes back, the latest departures only, the host leaving being handled by electing the next one. */
 export function leaveRoster(roster: Roster, id: ParticipantId): Roster {
+  const leaving = roster.participants.find((participant) => participant.id === id);
+  if (leaving === undefined) {
+    return roster;
+  }
+  const departed = [...roster.departed, { ...leaving, selectedTaskId: null }];
   return {
     ...roster,
     participants: roster.participants.filter((participant) => participant.id !== id),
+    departed: departed.slice(-MAX_DEPARTED_PARTICIPANTS),
   };
 }
 

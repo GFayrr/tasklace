@@ -196,6 +196,26 @@ describe('the chip of the connection', () => {
     ]);
   });
 
+  it('says that it reconnects, keeping the changes, then that it is offline, with the people hidden', async () => {
+    const { root, control } = await renderJoined();
+    control.collaboration.listener?.({ kind: 'reconnecting' });
+    update();
+    expect([
+      textsOf(root, '.status-bar .badge.reconnecting'),
+      root.querySelector('.people'),
+    ]).toEqual([[TEXT.reconnectingShort], null]);
+    click(button(root, TEXT.reconnecting));
+    expect(textsOf(root, '[role="menuitem"]')).toEqual([
+      'Leave the shared plan Tasklace keeps trying to reach Camille. Your changes are kept on this computer.',
+    ]);
+    control.collaboration.listener?.({ kind: 'offline' });
+    update();
+    expect([
+      textsOf(root, '.status-bar .badge.offline'),
+      textsOf(single(root, 'header.toolbar'), '.label'),
+    ]).toEqual([[TEXT.offlineShort], [TEXT.offline]]);
+  });
+
   it('says when the connection to the host is lost, the plan staying open', async () => {
     const { root, app, control } = await renderJoined();
     control.collaboration.listener?.({ kind: 'ended', reason: 'BROKEN' });

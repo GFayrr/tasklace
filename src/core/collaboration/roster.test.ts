@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { MAX_JOIN_RANK, MAX_PARTICIPANTS } from '../limits';
+import { MAX_DEPARTED_PARTICIPANTS, MAX_JOIN_RANK, MAX_PARTICIPANTS } from '../limits';
 import { failure } from '../result';
 import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { testId } from '../testing/project-builder';
@@ -59,6 +59,7 @@ describe('the participants of a shared plan', () => {
           selectedTaskId: null,
         },
       ],
+      departed: [],
       nextRank: 3,
     });
   });
@@ -77,6 +78,46 @@ describe('the participants of a shared plan', () => {
       ['Noah', 2, 2],
       ['Inès', 1, 3],
     ]);
+  });
+
+  it('brings back a participant who left with its rank, right and color, or the first free color once taken', () => {
+    const lea = unwrap(setRight(threePeople(), LEA, true));
+    const left = leaveRoster(lea, LEA);
+    expect(left.departed.map((participant) => participant.id)).toEqual([LEA]);
+    const back = unwrap(joinRoster(left, LEA, 'Léa M.'));
+    /** Lists the name, color, rank and right of each participant. */
+    const view = (roster: Roster) =>
+      roster.participants.map((participant) => [
+        participant.name,
+        participant.color,
+        participant.rank,
+        participant.canEdit,
+      ]);
+    expect([view(back), back.departed, back.nextRank]).toEqual([
+      [
+        ['Camille', 0, 0, true],
+        ['Noah', 2, 2, false],
+        ['Léa M.', 1, 1, true],
+      ],
+      [],
+      3,
+    ]);
+    const taken = unwrap(joinRoster(left, requireParticipantId('ines'), 'Inès'));
+    const backAfter = unwrap(joinRoster(taken, LEA, 'Léa'));
+    expect(view(backAfter).at(-1)).toEqual(['Léa', 3, 1, true]);
+  });
+
+  it('keeps only the latest departures, and leaves the list as it is for someone not in it', () => {
+    let roster = startRoster(HOST, 'Camille');
+    for (let index = 0; index <= MAX_DEPARTED_PARTICIPANTS; index += 1) {
+      const id = requireParticipantId(`p${String(index)}`);
+      roster = leaveRoster(unwrap(joinRoster(roster, id, 'Someone')), id);
+    }
+    expect([roster.departed.length, roster.departed[0]?.id]).toEqual([
+      MAX_DEPARTED_PARTICIPANTS,
+      'p1',
+    ]);
+    expect(leaveRoster(roster, LEA)).toBe(roster);
   });
 
   it('shares the colors once every color is taken', () => {
@@ -176,7 +217,11 @@ describe('the participants of a shared plan', () => {
               rank: 0,
               selectedTaskId: null,
             };
-            const roster: Roster = { participants: [host, ...participants], nextRank: 4 };
+            const roster: Roster = {
+              participants: [host, ...participants],
+              departed: [],
+              nextRank: 4,
+            };
             const reversed: Roster = {
               ...roster,
               participants: [...roster.participants].reverse(),

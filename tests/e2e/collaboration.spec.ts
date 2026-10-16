@@ -123,7 +123,7 @@ test('joins a plan shared by another instance with its code, in read only, after
   );
 });
 
-test('shows where each person is, shares the changes once the host lets a guest edit, and tells the guest when the host stops', async () => {
+test('shows where each person is, shares the changes once the host lets a guest edit, and tells the guest it reconnects when the host stops', async () => {
   const host = await launch();
   const { code, port } = await shareNewPlan(host.page);
   const shareWindow = host.page.getByRole('dialog', { name: 'Share “Untitled project”' });
@@ -163,7 +163,7 @@ test('shows where each person is, shares the changes once the host lets a guest 
     .getByRole('dialog', { name: 'Share “Ours”' })
     .getByRole('button', { name: 'Stop sharing' })
     .click();
-  await expect(guest.page.locator('.status-bar .badge.lost')).toHaveText('Connection lost');
+  await expect(guest.page.locator('.status-bar .badge.reconnecting')).toHaveText('Reconnecting…');
   await expect(guest.page.getByRole('textbox', { name: 'Project name' })).toHaveValue('Ours');
-  await picture(guest.page, 'connection-lost');
+  await picture(guest.page, 'reconnecting');
 });

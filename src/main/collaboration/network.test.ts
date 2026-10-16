@@ -4,8 +4,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { requireParticipantId } from '../../core/collaboration/participants';
 import { WRONG_CODES_BEFORE_NEW_CODE } from '../../core/collaboration/secure/join-code';
-import type { Introduction } from '../../core/collaboration/secure/link';
-import { MAX_OPEN_HANDSHAKES } from '../../core/limits';
+import type { Introduction, JoinSecret } from '../../core/collaboration/secure/link';
+import {
+  MAX_DEPARTED_PARTICIPANTS,
+  MAX_OPEN_HANDSHAKES,
+  MAX_PARTICIPANTS,
+} from '../../core/limits';
 import { success } from '../../core/result';
 import { systemRandomBytes } from './aes-gcm';
 import { connectAsGuest, isHostAddress, socketUrlOf, type GuestEnd } from './guest-client';
@@ -13,7 +17,12 @@ import { bytesOf, startHostServer, type HostServer, type Peer } from './host-ser
 import { MAX_SEALED_FRAME_BYTES } from '../../core/collaboration/secure/channel';
 import type { ConnectionEnd, StartTimer } from './secure-connection';
 
-const LEA: Introduction = { participantId: requireParticipantId('lea'), name: 'Léa' };
+const LEA: Introduction = {
+  participantId: requireParticipantId('lea'),
+  name: 'Léa',
+  token: 'ab'.repeat(32),
+};
+const PLAN_KEY = new Uint8Array(32).fill(7);
 const LOOPBACK = '127.0.0.1';
 /** Starts no timer, the tests waiting for events instead. */
 const noTimer: StartTimer = () => () => undefined;
@@ -45,13 +54,14 @@ async function until(condition: () => boolean): Promise<void> {
 }
 
 /** Starts a host on a free port, recording everything it tells. */
-async function host(port?: number) {
+async function host(port?: number, planKey: Uint8Array | null = null) {
   const joined: [Peer, Introduction][] = [];
   const messages: [number, Uint8Array][] = [];
   const left: [number, ConnectionEnd][] = [];
   const codes: string[] = [];
   const started = await startHostServer({
     port: port ?? (await freePort()),
+    planKey,
     startTimer: noTimer,
     randomBytes: systemRandomBytes,
     events: {
@@ -68,16 +78,17 @@ async function host(port?: number) {
   return { server: started.value, joined, messages, left, codes };
 }
 
-/** Joins a host on the loopback address, recording what the guest is told. */
-function guest(port: number, code: string) {
+/** Joins a host on the loopback address with a code or another secret, recording what the guest is told. */
+function guest(port: number, secret: string | JoinSecret, introduction: Introduction = LEA) {
   const messages: Uint8Array[] = [];
   const ends: GuestEnd[] = [];
+  const keys: Uint8Array[] = [];
   let isOpen = false;
   const client = connectAsGuest({
     address: LOOPBACK,
     port,
-    code,
-    introduction: LEA,
+    secret: typeof secret === 'string' ? { kind: 'code', code: secret } : secret,
+    introduction,
     startTimer: noTimer,
     randomBytes: systemRandomBytes,
     events: {
@@ -85,10 +96,11 @@ function guest(port: number, code: string) {
         isOpen = true;
       },
       message: (message) => messages.push(message),
+      planKey: (key) => keys.push(key),
       ended: (reason) => ends.push(reason),
     },
   });
-  return { client, messages, ends, isOpen: () => isOpen };
+  return { client, messages, ends, keys, isOpen: () => isOpen };
 }
 
 describe('a shared plan over the network', () => {
@@ -129,6 +141,97 @@ describe('a shared plan over the network', () => {
     const late = guest(shared.server.port, first);
     await until(() => late.ends.length === 1);
     expect(late.ends).toEqual(['WRONG_CODE']);
+  });
+
+  it('gives each guest the key of the plan, which lets it come back once the code changed, a wrong key not counting as a wrong code', async () => {
+    const shared = await host(undefined, PLAN_KEY);
+    const lea = guest(shared.server.port, shared.server.code());
+    await until(() => lea.keys.length === 1);
+    expect(lea.keys).toEqual([Buffer.from(PLAN_KEY)]);
+    lea.client.close();
+    await until(() => shared.left.length === 1);
+    const first = shared.server.code();
+    for (let attempt = 0; attempt < WRONG_CODES_BEFORE_NEW_CODE; attempt += 1) {
+      const wrong = guest(shared.server.port, first === 'AAAAAA' ? 'BBBBBB' : 'AAAAAA');
+      await until(() => wrong.ends.length === 1);
+    }
+    expect(shared.codes).toHaveLength(1);
+    const back = guest(shared.server.port, { kind: 'key', key: PLAN_KEY });
+    await until(() => back.isOpen() && shared.joined.length === 2);
+    const stranger = guest(
+      shared.server.port,
+      { kind: 'key', key: new Uint8Array(32) },
+      { ...LEA, participantId: requireParticipantId('noah') },
+    );
+    await until(() => stranger.ends.length === 1);
+    expect([stranger.ends, shared.codes]).toEqual([['WRONG_KEY'], [shared.server.code()]]);
+  });
+
+  it('turns away a guest with the identifier of another person, and lets the same person come back', async () => {
+    const shared = await host();
+    const lea = guest(shared.server.port, shared.server.code());
+    await until(() => lea.isOpen());
+    lea.client.close();
+    await until(() => shared.left.length === 1);
+    const impostor = guest(shared.server.port, shared.server.code(), {
+      ...LEA,
+      token: 'cd'.repeat(32),
+    });
+    await until(() => impostor.ends.length === 1);
+    expect([impostor.ends, shared.joined.length]).toEqual([['IDENTITY_TAKEN'], 1]);
+    const back = guest(shared.server.port, shared.server.code());
+    await until(() => back.isOpen() && shared.joined.length === 2);
+    expect(shared.joined.map(([, introduction]) => introduction.name)).toEqual(['Léa', 'Léa']);
+  });
+
+  it('gives the guests still in a new key when the host removes one, whose key, code and identifier then open nothing', async () => {
+    const shared = await host(undefined, PLAN_KEY);
+    const noahIntroduction = {
+      ...LEA,
+      participantId: requireParticipantId('noah'),
+      token: 'cd'.repeat(32),
+    };
+    const lea = guest(shared.server.port, shared.server.code());
+    const noah = guest(shared.server.port, shared.server.code(), noahIntroduction);
+    await until(() => lea.keys.length === 1 && noah.keys.length === 1);
+    const leaPeer = shared.joined.find(([, introduction]) => introduction.name === 'Léa')?.[0];
+    leaPeer?.remove();
+    await until(() => lea.ends.length === 1 && noah.keys.length === 2);
+    const newKey = noah.keys[1] ?? new Uint8Array();
+    expect([lea.ends, Buffer.from(newKey).equals(Buffer.from(PLAN_KEY))]).toEqual([
+      ['REMOVED'],
+      false,
+    ]);
+    const withOldKey = guest(shared.server.port, { kind: 'key', key: PLAN_KEY });
+    const withCode = guest(shared.server.port, shared.server.code());
+    await until(() => withOldKey.ends.length === 1 && withCode.ends.length === 1);
+    expect([withOldKey.ends, withCode.ends]).toEqual([['WRONG_KEY'], ['IDENTITY_TAKEN']]);
+    noah.client.close();
+    const noahBack = guest(shared.server.port, { kind: 'key', key: newKey }, noahIntroduction);
+    await until(() => noahBack.isOpen());
+  });
+
+  it('refuses any new identifier once it remembers as many tokens as it may, never forgetting one', async () => {
+    const shared = await host();
+    for (let index = 0; index < MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS; index += 1) {
+      const someone = guest(shared.server.port, shared.server.code(), {
+        ...LEA,
+        participantId: requireParticipantId(`p${String(index)}`),
+      });
+      await until(() => shared.joined.length === index + 1);
+      someone.client.close();
+    }
+    const late = guest(shared.server.port, shared.server.code());
+    await until(() => late.ends.length === 1);
+    const first = guest(shared.server.port, shared.server.code(), {
+      ...LEA,
+      participantId: requireParticipantId('p0'),
+    });
+    await until(
+      () =>
+        first.isOpen() && shared.joined.length === MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS + 1,
+    );
+    expect(late.ends).toEqual(['IDENTITY_TAKEN']);
   });
 
   it('listens on the next port when the chosen one is taken', async () => {
@@ -243,11 +346,16 @@ describe('host addresses', () => {
       connectAsGuest({
         address: 'a b',
         port: 1,
-        code: 'AAAAAA',
+        secret: { kind: 'code', code: 'AAAAAA' },
         introduction: LEA,
         startTimer: noTimer,
         randomBytes: systemRandomBytes,
-        events: { opened: () => undefined, message: () => undefined, ended: () => undefined },
+        events: {
+          opened: () => undefined,
+          message: () => undefined,
+          planKey: () => undefined,
+          ended: () => undefined,
+        },
       }),
     ).toThrow('Not a host address: a b:1');
   });

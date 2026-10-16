@@ -40,6 +40,8 @@ const EVENT_CHECKS: Readonly<Record<CollaborationEvent['kind'], (value: unknown)
     return Array.isArray(plans) && plans.every(isNearbyPlan);
   },
   connected: () => true,
+  reconnecting: () => true,
+  offline: () => true,
   hostMessage: (value) => field(value, 'message') instanceof Uint8Array,
   ended: (value) => GUEST_END_VALUES.includes(field(value, 'reason')),
 };
@@ -51,6 +53,8 @@ const EVENT_KINDS: readonly CollaborationEvent['kind'][] = [
   'codeChanged',
   'nearbyPlans',
   'connected',
+  'reconnecting',
+  'offline',
   'hostMessage',
   'ended',
 ];

@@ -30,12 +30,12 @@ const sameBytes: Compressor = {
 describe('the limits of the encrypted channel', () => {
   it('refuses to seal past its last frame number, and breaks when a frame comes past it', () => {
     const channel = openSecureChannel(KEYS, clearAead, sameBytes);
-    expect(channel.seal(Uint8Array.of(1)).ok).toBe(true);
-    expect(channel.seal(Uint8Array.of(2)).ok).toBe(true);
-    expect(channel.seal(Uint8Array.of(3))).toEqual(failure('WORN_OUT'));
+    expect(channel.seal(Uint8Array.of(1), 'plan').ok).toBe(true);
+    expect(channel.seal(Uint8Array.of(2), 'plan').ok).toBe(true);
+    expect(channel.seal(Uint8Array.of(3), 'plan')).toEqual(failure('WORN_OUT'));
     expect([1, 2, 3].map((byte) => channel.open(Uint8Array.of(1, byte)))).toEqual([
-      success(Uint8Array.of(1)),
-      success(Uint8Array.of(2)),
+      success({ kind: 'plan', message: Uint8Array.of(1) }),
+      success({ kind: 'plan', message: Uint8Array.of(2) }),
       failure('WORN_OUT'),
     ]);
   });

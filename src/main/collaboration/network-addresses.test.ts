@@ -36,6 +36,7 @@ async function joinWith(answers: boolean[]): Promise<{ ends: GuestEnd[]; joined:
   let joined = 0;
   const started = await startHostServer({
     port: await freePort(),
+    planKey: null,
     startTimer: () => () => undefined,
     randomBytes: systemRandomBytes,
     events: {
@@ -56,13 +57,18 @@ async function joinWith(answers: boolean[]): Promise<{ ends: GuestEnd[]; joined:
   connectAsGuest({
     address: LOOPBACK,
     port: started.value.port,
-    code: started.value.code(),
-    introduction: { participantId: requireParticipantId('lea'), name: 'Léa' },
+    secret: { kind: 'code', code: started.value.code() },
+    introduction: {
+      participantId: requireParticipantId('lea'),
+      name: 'Léa',
+      token: 'ab'.repeat(32),
+    },
     startTimer: () => () => undefined,
     randomBytes: systemRandomBytes,
     events: {
       opened: () => undefined,
       message: () => undefined,
+      planKey: () => undefined,
       ended: (reason) => ends.push(reason),
     },
   });

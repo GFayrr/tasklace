@@ -1,6 +1,8 @@
 import {
   openSecureChannel,
   type ChannelBreak,
+  type ChannelKind,
+  type ChannelMessage,
   type SealRefusal,
   type SecureChannel,
 } from '../../core/collaboration/secure/channel';
@@ -10,8 +12,11 @@ import {
   encodeIntroduction,
   readIntroduction,
   startHostLink,
+  type HostSecrets,
   type Introduction,
+  type JoinSecret,
   type LinkRefusal,
+  PLAN_KEY_BYTES,
 } from '../../core/collaboration/secure/link';
 import { zlibCompressor } from '../zlib-compressor';
 import { MAX_HANDSHAKE_MILLISECONDS } from '../../core/limits';
@@ -31,11 +36,13 @@ export type ConnectionEnd =
 export interface ConnectionEvents {
   readonly message: (bytes: Uint8Array) => void;
   readonly ended: (reason: ConnectionEnd) => void;
+  readonly planKey: ((key: Uint8Array) => void) | null;
 }
 
 export interface SecureConnection {
   readonly receive: (bytes: Uint8Array) => void;
   readonly send: (message: Uint8Array) => Result<null, SealRefusal | 'NOT_OPEN'>;
+  readonly sendPlanKey: (key: Uint8Array) => Result<null, SealRefusal | 'NOT_OPEN'>;
   readonly wireClosed: () => void;
   readonly close: () => void;
 }
@@ -45,7 +52,6 @@ interface Common {
   readonly startTimer: StartTimer;
   readonly events: ConnectionEvents;
   readonly randomBytes: (count: number) => Uint8Array;
-  readonly code: string;
 }
 
 type Step = (bytes: Uint8Array) => void;
@@ -80,11 +86,11 @@ function connectionCore(common: Common) {
     opened: () => {
       stopTimer();
     },
-    send: (message: Uint8Array): Result<null, SealRefusal | 'NOT_OPEN'> => {
+    seal: (message: Uint8Array, kind: ChannelKind): Result<null, SealRefusal | 'NOT_OPEN'> => {
       if (channel === null) {
         return failure('NOT_OPEN');
       }
-      const frames = channel.seal(message);
+      const frames = channel.seal(message, kind);
       if (!frames.ok) {
         return frames;
       }
@@ -94,7 +100,7 @@ function connectionCore(common: Common) {
       return success(null);
     },
     /** Opens one frame of the channel, ending the connection when the channel breaks, and gives the message it completes, if any. */
-    openFrame: (open: SecureChannel, bytes: Uint8Array): Uint8Array | null => {
+    openFrame: (open: SecureChannel, bytes: Uint8Array): ChannelMessage | null => {
       const opened = open.open(bytes);
       if (!opened.ok) {
         end(opened.error);
@@ -105,7 +111,7 @@ function connectionCore(common: Common) {
   };
 }
 
-/** Gives each complete message of the open channel to the events of the connection. */
+/** Gives each complete message of the open channel to the events of the connection: a message of the plan, or a key of the plan of the right length where the connection expects one, anything else ending it. */
 function openStepOf(
   core: ReturnType<typeof connectionCore>,
   channel: SecureChannel,
@@ -113,8 +119,15 @@ function openStepOf(
 ): Step {
   return (bytes) => {
     const message = core.openFrame(channel, bytes);
-    if (message !== null) {
-      events.message(message);
+    if (message === null) {
+      return;
+    }
+    if (message.kind === 'plan') {
+      events.message(message.message);
+    } else if (events.planKey !== null && message.message.length === PLAN_KEY_BYTES) {
+      events.planKey(message.message);
+    } else {
+      core.end('MALFORMED');
     }
   };
 }
@@ -130,7 +143,8 @@ function connectionOf(
         current()(bytes);
       }
     },
-    send: core.send,
+    send: (message) => core.seal(message, 'plan'),
+    sendPlanKey: (key) => core.seal(key, 'planKey'),
     wireClosed: () => {
       core.end('WIRE_CLOSED');
     },
@@ -140,12 +154,15 @@ function connectionOf(
   };
 }
 
-/** Accepts a guest on the side of the host: sends the hello, checks the proof of the code, then waits for the introduction before telling who joined, a wrong code being told apart so that the host can count it. */
+/** Accepts a guest on the side of the host: sends the hello, checks the proof of the code or of the key of the plan, then waits for the introduction before telling who joined, a wrong code being told apart so that the host can count it. */
 export function acceptGuest(
-  common: Common & { readonly joined: (introduction: Introduction) => void },
+  common: Common & {
+    readonly secrets: HostSecrets;
+    readonly joined: (introduction: Introduction) => void;
+  },
 ): SecureConnection {
   const core = connectionCore(common);
-  const link = startHostLink(common.code, common.randomBytes);
+  const link = startHostLink(common.secrets, common.randomBytes);
   /** Reads the introduction of the guest, the first message of the channel. */
   const introductionStepOf =
     (channel: SecureChannel): Step =>
@@ -154,7 +171,7 @@ export function acceptGuest(
       if (message === null) {
         return;
       }
-      const introduction = readIntroduction(message);
+      const introduction = message.kind === 'plan' ? readIntroduction(message.message) : null;
       if (introduction === null) {
         core.end('INVALID_INTRODUCTION');
         return;
@@ -178,14 +195,18 @@ export function acceptGuest(
   return connectionOf(core, () => step);
 }
 
-/** Joins a host on the side of a guest: answers its hello, checks its proof, then introduces the guest on the open channel. */
+/** Joins a host on the side of a guest with the join code or the key of the plan: answers its hello, checks its proof, then introduces the guest on the open channel. */
 export function connectToHost(
-  common: Common & { readonly introduction: Introduction; readonly opened: () => void },
+  common: Common & {
+    readonly secret: JoinSecret;
+    readonly introduction: Introduction;
+    readonly opened: () => void;
+  },
 ): SecureConnection {
   const core = connectionCore(common);
   /** Answers the hello of the host with the share and the proof of the guest. */
   const helloStep: Step = (bytes) => {
-    const guest = answerHostLink(bytes, common.code, common.randomBytes);
+    const guest = answerHostLink(bytes, common.secret, common.randomBytes);
     if (!guest.ok) {
       core.end(guest.error);
       return;
@@ -199,7 +220,7 @@ export function connectToHost(
       const channel = core.open(keys.value);
       step = openStepOf(core, channel, common.events);
       core.opened();
-      const introduced = core.send(encodeIntroduction(common.introduction));
+      const introduced = core.seal(encodeIntroduction(common.introduction), 'plan');
       if (!introduced.ok) {
         core.end(introduced.error === 'NOT_OPEN' ? 'BROKEN' : introduced.error);
         return;

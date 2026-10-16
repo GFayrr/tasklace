@@ -47,6 +47,7 @@ function start(port: number, outcomes: (string | Error | null)[]) {
   listening.calls = [];
   return startHostServer({
     port,
+    planKey: null,
     startTimer: () => () => undefined,
     randomBytes: systemRandomBytes,
     events: {

@@ -6,8 +6,17 @@ import {
   generateJoinCode,
   WRONG_CODES_BEFORE_NEW_CODE,
 } from '../../core/collaboration/secure/join-code';
-import type { Introduction } from '../../core/collaboration/secure/link';
-import { MAX_OPEN_HANDSHAKES, MAX_PARTICIPANTS, MAX_PORT_ATTEMPTS } from '../../core/limits';
+import {
+  PLAN_KEY_BYTES,
+  type HostSecrets,
+  type Introduction,
+} from '../../core/collaboration/secure/link';
+import {
+  MAX_DEPARTED_PARTICIPANTS,
+  MAX_OPEN_HANDSHAKES,
+  MAX_PARTICIPANTS,
+  MAX_PORT_ATTEMPTS,
+} from '../../core/limits';
 import { LAST_PORT } from '../../core/collaboration/ports';
 import { failure, success, type Result } from '../../core/result';
 import { isPrivateAddress } from './private-addresses';
@@ -21,7 +30,7 @@ import {
 export interface Peer {
   readonly number: number;
   readonly send: (message: Uint8Array) => ReturnType<SecureConnection['send']>;
-  readonly close: () => void;
+  readonly remove: () => void;
 }
 
 export interface HostServerEvents {
@@ -41,6 +50,7 @@ export type ListenFailure = 'NO_FREE_PORT' | 'LISTEN_FAILED';
 
 interface ServerOptions {
   readonly port: number;
+  readonly planKey: Uint8Array | null;
   readonly events: HostServerEvents;
   readonly startTimer: StartTimer;
   readonly randomBytes: (count: number) => Uint8Array;
@@ -54,7 +64,11 @@ const UPGRADE_REQUIRED = 426;
 const NORMAL_CLOSE = 1_000;
 export const WRONG_CODE_CLOSE = 4_001;
 export const CODE_REPLACED_CLOSE = 4_002;
+export const WRONG_KEY_CLOSE = 4_003;
+export const IDENTITY_TAKEN_CLOSE = 4_004;
+export const REMOVED_CLOSE = 4_005;
 const MAX_CONNECTIONS = MAX_PARTICIPANTS + MAX_OPEN_HANDSHAKES;
+const MAX_KNOWN_TOKENS = MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS;
 
 /** Starts the server of a shared plan on the chosen port or the next free one, on every private network, IPv4 and IPv6, accepting only guests from a private address who prove they know the code. */
 export async function startHostServer(
@@ -124,12 +138,16 @@ function listenOn(http: Server, port: number, host: string): Promise<string | nu
   });
 }
 
-/** Keeps the code and counts the guests: those still opening their connection, and the wrong codes that make the host draw a new one. */
+/** Keeps the code and the key of the plan and counts the guests: those still opening their connection, the wrong codes that make the host draw a new one, the token each identifier first came with and the identifiers removed. */
 function guestCounter(options: ServerOptions) {
   let code = generateJoinCode(options.randomBytes);
+  let planKey = options.planKey ?? options.randomBytes(PLAN_KEY_BYTES);
   let wrongCodes = 0;
   let opening = 0;
   let nextNumber = 1;
+  const tokens = new Map<string, string>();
+  const removed = new Set<string>();
+  const admitted = new Map<SecureConnection, string>();
   /** Counts a wrong code, drawing a new code once too many were typed, and tells whether it did. */
   const countWrongCode = (): boolean => {
     wrongCodes += 1;
@@ -140,6 +158,42 @@ function guestCounter(options: ServerOptions) {
     code = generateJoinCode(options.randomBytes);
     options.events.codeChanged(code);
     return true;
+  };
+  /** Tells whether a guest may come in as the person who first came with its identifier, refusing an identifier removed by the host and, once the tokens remembered reach their limit, any new identifier, so that no token is ever forgotten. */
+  const isSamePerson = (introduction: Introduction): boolean => {
+    if (removed.has(introduction.participantId)) {
+      return false;
+    }
+    const known = tokens.get(introduction.participantId);
+    if (known !== undefined) {
+      return known === introduction.token;
+    }
+    if (tokens.size >= MAX_KNOWN_TOKENS) {
+      return false;
+    }
+    tokens.set(introduction.participantId, introduction.token);
+    return true;
+  };
+  /** Gives an admitted guest the key of the plan, closing a connection that cannot carry it. */
+  const givePlanKey = (connection: SecureConnection): void => {
+    const sent = connection.sendPlanKey(planKey);
+    if (!sent.ok) {
+      console.warn(`The key of the shared plan could not be sent: ${sent.error}.`);
+      connection.close();
+    }
+  };
+  /** Removes a guest for good: its identifier is refused from now on and a new key of the plan goes to the guests still in, so that the key it holds no longer opens a connection. */
+  const removeGuest = (connection: SecureConnection): void => {
+    const id = admitted.get(connection);
+    admitted.delete(connection);
+    if (id === undefined) {
+      return;
+    }
+    removed.add(id);
+    planKey = options.randomBytes(PLAN_KEY_BYTES);
+    admitted.forEach((_id, other) => {
+      givePlanKey(other);
+    });
   };
   return {
     code: () => code,
@@ -157,9 +211,21 @@ function guestCounter(options: ServerOptions) {
           opening -= 1;
         }
       };
-      attachGuest(socket, nextNumber, code, options, {
-        joined: doneOpening,
-        ended: doneOpening,
+      attachGuest(socket, nextNumber, { code, planKey }, options, {
+        joined: (connection, introduction) => {
+          doneOpening();
+          if (!isSamePerson(introduction)) {
+            return false;
+          }
+          admitted.set(connection, introduction.participantId);
+          givePlanKey(connection);
+          return true;
+        },
+        ended: (connection) => {
+          doneOpening();
+          admitted.delete(connection);
+        },
+        removed: removeGuest,
         wrongCode: countWrongCode,
       });
       nextNumber += 1;
@@ -167,21 +233,23 @@ function guestCounter(options: ServerOptions) {
   };
 }
 
-/** Runs the secure connection of one guest over its socket and tells the host who joined, what it sent and when it left. */
+/** Runs the secure connection of one guest over its socket and tells the host who joined, what it sent and when it left, a guest claiming the identifier of another person being turned away. */
 function attachGuest(
   socket: WebSocket,
   number: number,
-  code: string,
+  secrets: HostSecrets,
   options: ServerOptions,
   counting: {
-    readonly joined: () => void;
-    readonly ended: () => void;
+    readonly joined: (connection: SecureConnection, introduction: Introduction) => boolean;
+    readonly ended: (connection: SecureConnection) => void;
+    readonly removed: (connection: SecureConnection) => void;
     readonly wrongCode: () => boolean;
   },
 ): void {
   let hasJoined = false;
+  let refusal: number | null = null;
   const connection: SecureConnection = acceptGuest({
-    code,
+    secrets,
     startTimer: options.startTimer,
     randomBytes: options.randomBytes,
     wire: {
@@ -189,27 +257,40 @@ function attachGuest(
         socket.send(bytes);
       },
       close: (reason) => {
-        socket.close(closeCodeOf(reason, counting.wrongCode));
+        socket.close(refusal ?? closeCodeOf(reason, counting.wrongCode));
       },
     },
     events: {
       message: (message) => {
         options.events.message(peer, message);
       },
+      planKey: null,
       ended: (reason) => {
-        counting.ended();
+        counting.ended(connection);
         if (hasJoined) {
           options.events.left(peer, reason);
         }
       },
     },
     joined: (introduction) => {
+      if (!counting.joined(connection, introduction)) {
+        refusal = IDENTITY_TAKEN_CLOSE;
+        connection.close();
+        return;
+      }
       hasJoined = true;
-      counting.joined();
       options.events.joined(peer, introduction);
     },
   });
-  const peer: Peer = { number, send: connection.send, close: connection.close };
+  const peer: Peer = {
+    number,
+    send: connection.send,
+    remove: () => {
+      counting.removed(connection);
+      refusal = REMOVED_CLOSE;
+      connection.close();
+    },
+  };
   socket.on('message', (data: RawData, isBinary: boolean) => {
     if (!isBinary) {
       connection.close();
@@ -225,8 +306,11 @@ function attachGuest(
   });
 }
 
-/** Gives the close code that tells a guest why the host ended its connection: a wrong code, counted, or the last wrong code before a new one was drawn. */
+/** Gives the close code that tells a guest why the host ended its connection: a wrong code, counted, the last wrong code before a new one was drawn, or a key of the plan the host does not hold. */
 function closeCodeOf(reason: ConnectionEnd, countWrongCode: () => boolean): number {
+  if (reason === 'WRONG_KEY') {
+    return WRONG_KEY_CLOSE;
+  }
   if (reason !== 'WRONG_CODE') {
     return NORMAL_CLOSE;
   }

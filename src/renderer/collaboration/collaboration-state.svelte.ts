@@ -60,11 +60,15 @@ export type CollaborationMode =
   | { readonly kind: 'idle' }
   | { readonly kind: 'hosting'; readonly sharing: Sharing }
   | { readonly kind: 'joining' }
-  | { readonly kind: 'guest'; readonly connected: boolean };
+  | { readonly kind: 'guest'; readonly connection: GuestConnection };
+
+export type GuestConnection = 'connected' | 'reconnecting' | 'offline' | 'lost';
 
 export type CollaborationFailure = FileFailure | { readonly code: 'NO_NAME' | 'NO_PROJECT' };
 
 export const EMPTY_STATE_VECTOR = Uint8Array.of(0);
+
+const NOBODY_PLACED: ReadonlyMap<TaskId, readonly Participant[]> = new Map();
 
 interface Hosting {
   readonly host: Host;
@@ -81,7 +85,11 @@ export class CollaborationState {
   #settings = $state.raw<CollaborationSettings | null>(null);
   #nearby = $state.raw<readonly NearbyPlan[]>([]);
   #lastEnd = $state.raw<GuestEndReason | null>(null);
-  readonly #presence = $derived.by(() => presenceOf(this.#participants, this.#me));
+  readonly #presence = $derived.by(() =>
+    this.#mode.kind === 'guest' && this.#mode.connection !== 'connected'
+      ? NOBODY_PLACED
+      : presenceOf(this.#participants, this.#me),
+  );
   readonly #context: CollaborationContext;
   #hosting: Hosting | null = null;
   #guest: Guest | null = null;
@@ -142,7 +150,7 @@ export class CollaborationState {
     );
   }
 
-  /** Returns the other people in the shared plan by the task each one selected, in the order of the list, for the rows that show where they are. */
+  /** Returns the other people in the shared plan by the task each one selected, in the order of the list, or nobody while the connection to the host is lost, since where they are is then unknown. */
   get presence(): ReadonlyMap<TaskId, readonly Participant[]> {
     return this.#presence;
   }
@@ -313,7 +321,7 @@ export class CollaborationState {
       },
     });
     this.#guest = guest;
-    this.#mode = { kind: 'guest', connected: true };
+    this.#mode = { kind: 'guest', connection: 'connected' };
     if (this.#waitingRoster !== null) {
       guest.receive(this.#waitingRoster);
       this.#waitingRoster = null;
@@ -354,10 +362,11 @@ export class CollaborationState {
         this.#nearby = event.plans;
         return;
       case 'connected':
-        this.#context.bridge.sendToCollaboration(
-          'host',
-          encodeMessage({ kind: 'stateVector', vector: EMPTY_STATE_VECTOR }),
-        );
+        this.#connected();
+        return;
+      case 'reconnecting':
+      case 'offline':
+        this.#connectionLost(event.kind);
         return;
       case 'hostMessage':
         this.#fromHost(event.message);
@@ -367,15 +376,44 @@ export class CollaborationState {
     }
   }
 
-  /** Adds a guest who proved it knows the code, known by its connection before the host sends it the people in the plan, and drops it when it claims an identifier already in the plan or the plan is full. */
+  /** Follows a connection to the host that opened: a first one asks for the whole plan with an empty state vector, one that came back brings the guest of the plan back in step. */
+  #connected(): void {
+    const guest = this.#guest;
+    if (guest === null) {
+      this.#context.bridge.sendToCollaboration(
+        'host',
+        encodeMessage({ kind: 'stateVector', vector: EMPTY_STATE_VECTOR }),
+      );
+      return;
+    }
+    guest.connected();
+    this.#mode = { kind: 'guest', connection: 'connected' };
+    this.#queuePresence();
+  }
+
+  /** Follows a connection to the host lost while the main process tries to come back, the plan staying open and its changes kept here meanwhile. */
+  #connectionLost(connection: 'reconnecting' | 'offline'): void {
+    const guest = this.#guest;
+    if (guest === null) {
+      return;
+    }
+    guest.disconnected();
+    this.#mode = { kind: 'guest', connection };
+  }
+
+  /** Adds a guest who proved it knows the code, known by its connection before the host sends it the people in the plan, a person coming back on a new connection replacing its old one, and drops a guest the plan cannot take. */
   #peerJoined(peer: number, participantId: string, name: string): void {
     const hosting = this.#hosting;
     if (hosting === null) {
       return;
     }
-    if (!isParticipantId(participantId) || hosting.participantsByPeer.has(participantId)) {
-      this.#turnAway(peer, isParticipantId(participantId) ? 'ALREADY_IN' : 'INVALID_IDENTIFIER');
+    if (!isParticipantId(participantId)) {
+      this.#turnAway(peer, 'INVALID_IDENTIFIER');
       return;
+    }
+    const previous = hosting.participantsByPeer.get(participantId);
+    if (previous !== undefined) {
+      this.#replaceConnection(hosting, previous, participantId);
     }
     hosting.peers.set(peer, participantId);
     hosting.participantsByPeer.set(participantId, peer);
@@ -388,6 +426,14 @@ export class CollaborationState {
     }
     hosting.joinedAt.set(participantId, this.#context.now());
     this.#participants = hosting.host.roster().participants;
+  }
+
+  /** Forgets the old connection of a person who came back on a new one, the main process having checked it is the same person, and closes it. */
+  #replaceConnection(hosting: Hosting, previous: number, id: ParticipantId): void {
+    hosting.peers.delete(previous);
+    hosting.participantsByPeer.delete(id);
+    hosting.host.disconnect(id);
+    void this.#context.bridge.dropPeer(previous);
   }
 
   /** Drops a guest the host refused, telling why in the log. */
@@ -475,7 +521,7 @@ export class CollaborationState {
     guest.disconnected();
     guest.stop();
     this.#guest = null;
-    this.#mode = { kind: 'guest', connected: false };
+    this.#mode = { kind: 'guest', connection: 'lost' };
   }
 
   /** Handles what the host or the guest tells: repairs, refusals, the list of people and changes kept here. */

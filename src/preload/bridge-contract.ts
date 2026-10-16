@@ -130,6 +130,9 @@ export const GUEST_ENDS = [
   'INVALID_SHARE',
   'WRONG_CODE',
   'CODE_REPLACED',
+  'WRONG_KEY',
+  'IDENTITY_TAKEN',
+  'REMOVED',
   'TAMPERED',
   'TOO_LARGE',
   'INVALID_CONTENT',
@@ -158,6 +161,8 @@ export type CollaborationEvent =
   | { readonly kind: 'nearbyPlans'; readonly plans: readonly NearbyPlan[] }
   | { readonly kind: 'connected' }
   | { readonly kind: 'hostMessage'; readonly message: Uint8Array }
+  | { readonly kind: 'reconnecting' }
+  | { readonly kind: 'offline' }
   | { readonly kind: 'ended'; readonly reason: GuestEndReason };
 
 export type CollaborationTarget = number | 'host';

@@ -72,7 +72,7 @@ describe('a plan joined in read only', () => {
     expect([app.project?.name, app.hasFile, app.collaboration.mode]).toEqual([
       PLAN.name,
       false,
-      { kind: 'guest', connected: true },
+      { kind: 'guest', connection: 'connected' },
     ]);
   });
 
@@ -264,7 +264,7 @@ describe('the windows of a shared plan', () => {
     await settle();
     expect([app.collaborationWindow, app.collaboration.mode]).toEqual([
       null,
-      { kind: 'guest', connected: true },
+      { kind: 'guest', connection: 'connected' },
     ]);
     expect(fake.control.collaboration.requests.at(-1)).toEqual(['findPlans', false]);
   });

@@ -255,6 +255,6 @@ describe('joining a shared plan', () => {
       await settle();
       expect(app.collaborationWindow).toBeNull();
     }
-    expect(app.collaboration.mode).toEqual({ kind: 'guest', connected: true });
+    expect(app.collaboration.mode).toEqual({ kind: 'guest', connection: 'connected' });
   });
 });

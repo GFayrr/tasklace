@@ -671,6 +671,11 @@
     "peopleLabel": "People in the shared plan",
     "hostName": "{name} (host)",
     "moreFaces": "+{count}",
-    "canLetYouEdit": "{host} can let you edit."
+    "canLetYouEdit": "{host} can let you edit.",
+    "reconnecting": "Reconnecting… your changes are kept",
+    "reconnectingShort": "Reconnecting…",
+    "offline": "Offline · changes are shared when the plan is shared again",
+    "offlineShort": "Offline",
+    "reconnectingDetail": "Tasklace keeps trying to reach {host}. Your changes are kept on this computer."
   }
 }

@@ -255,7 +255,7 @@ describe('the collaboration service', () => {
     await until(() => host.events.length === 3 && guest.events.length === 3);
     expect([host.events[2], guest.events[2]]).toEqual([
       { kind: 'peerLeft', peer: 1 },
-      { kind: 'ended', reason: 'WIRE_CLOSED' },
+      { kind: 'ended', reason: 'REMOVED' },
     ]);
     expect(await invoke(host, IPC_CHANNELS.stopCollaboration)).toEqual(success(null));
     expect(await invoke(guest, IPC_CHANNELS.stopCollaboration)).toEqual(success(null));
