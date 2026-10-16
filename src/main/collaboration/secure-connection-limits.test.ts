@@ -38,6 +38,7 @@ describe('a secure connection whose channel cannot seal', () => {
         participantId: requireParticipantId('lea'),
         name: 'Léa',
         token: 'ab'.repeat(32),
+        endpoint: { addresses: [], port: 47_313 },
       },
       opened,
     });

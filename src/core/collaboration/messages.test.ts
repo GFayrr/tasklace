@@ -26,13 +26,22 @@ function participant(id: ParticipantId, overrides: Partial<Participant> = {}): P
     isHost: false,
     rank: 0,
     selectedTaskId: null,
+    endpoint: null,
+    tokenDigest: null,
     ...overrides,
   };
 }
 
 const ROSTER: readonly Participant[] = [
   participant(HOST, { name: 'Camille', canEdit: true, isHost: true }),
-  participant(GUEST, { name: 'Léa', color: 1, rank: 1, selectedTaskId: testId('t1') }),
+  participant(GUEST, {
+    name: 'Léa',
+    color: 1,
+    rank: 1,
+    selectedTaskId: testId('t1'),
+    endpoint: { addresses: ['192.168.1.24', 'fe80::1%eth0'], port: 47_313 },
+    tokenDigest: null,
+  }),
 ];
 
 /** Builds the bytes of a message from its kind code and the JSON of its content. */

@@ -1,10 +1,12 @@
+import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { MAX_INTRODUCTION_BYTES, MAX_PARTICIPANT_NAME_LENGTH } from '../../limits';
 import { failure, success, type Result } from '../../result';
 import { createIssueList } from '../../validation/validation-issues';
 import { childField, readIdentifier, readRecord, readText } from '../../validation/value-readers';
 import { parsedJson } from '../messages';
-import { isParticipantId, type ParticipantId } from '../participants';
+import { readEndpoint } from '../endpoint';
+import { isParticipantId, type Endpoint, type ParticipantId } from '../participants';
 import { SESSION_ID_BYTES, SHARE_BYTES, startHandshake, type SessionKeys } from './cpace';
 
 export type LinkRefusal =
@@ -35,6 +37,7 @@ export interface Introduction {
   readonly participantId: ParticipantId;
   readonly name: string;
   readonly token: string;
+  readonly endpoint: Endpoint;
 }
 
 export const LINK_VERSION = 1;
@@ -49,7 +52,7 @@ const KEY_MODE = 1;
 const KEY_PASSWORD_PREFIX = 'key:';
 const CODE_SHARE_OFFSET = 1 + SESSION_ID_BYTES;
 const KEY_SHARE_OFFSET = CODE_SHARE_OFFSET + SHARE_BYTES;
-const INTRODUCTION_KEYS = ['participantId', 'name', 'token'];
+const INTRODUCTION_KEYS = ['participantId', 'name', 'token', 'endpoint'];
 const HEX_DIGITS_PER_BYTE = 2;
 const TOKEN_PATTERN = new RegExp(`^[0-9a-f]{${String(REJOIN_TOKEN_BYTES * HEX_DIGITS_PER_BYTE)}}$`);
 const ENCODER = new TextEncoder();
@@ -135,12 +138,17 @@ export function drawRejoinToken(randomBytes: (count: number) => Uint8Array): str
   return bytesToHex(randomBytes(REJOIN_TOKEN_BYTES));
 }
 
-/** Writes the first message a guest sends once the channel is open: who it is, the name it shows and the token that proves it is the same person when it comes back. */
+/** Gives the digest of the token of a guest, which the list of people carries so that a host taking over knows who may come back under an identifier, without the token itself. */
+export function tokenDigestOf(token: string): string {
+  return bytesToHex(sha256(ENCODER.encode(token)));
+}
+
+/** Writes the first message a guest sends once the channel is open: who it is, the name it shows, the token that proves it is the same person when it comes back and where it could host the plan. */
 export function encodeIntroduction(introduction: Introduction): Uint8Array {
   return ENCODER.encode(JSON.stringify(introduction));
 }
 
-/** Reads the first message of a guest from untrusted bytes, refusing anything but a short record of an identifier of a participant, a well-formed name and a token of hexadecimal digits. */
+/** Reads the first message of a guest from untrusted bytes, refusing anything but a short record of an identifier of a participant, a well-formed name, a token of hexadecimal digits and an endpoint. */
 export function readIntroduction(bytes: Uint8Array): Introduction | null {
   if (bytes.length > MAX_INTRODUCTION_BYTES) {
     return null;
@@ -154,11 +162,16 @@ export function readIntroduction(bytes: Uint8Array): Introduction | null {
   const participantId = readIdentifier(childField(record, 'participantId', ''), issues);
   const name = readText(childField(record, 'name', ''), issues, MAX_PARTICIPANT_NAME_LENGTH);
   const token = record['token'];
-  const isToken = typeof token === 'string' && TOKEN_PATTERN.test(token);
-  return isParticipantId(participantId) &&
-    name !== undefined &&
-    isToken &&
-    issues.issues.length === 0
-    ? { participantId, name, token }
-    : null;
+  const endpoint = readEndpoint(childField(record, 'endpoint', ''), issues);
+  if (
+    !isParticipantId(participantId) ||
+    name === undefined ||
+    typeof token !== 'string' ||
+    !TOKEN_PATTERN.test(token) ||
+    endpoint === undefined ||
+    issues.issues.length > 0
+  ) {
+    return null;
+  }
+  return { participantId, name, token, endpoint };
 }

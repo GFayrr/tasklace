@@ -11,6 +11,7 @@ const INTRODUCTION = {
   participantId: requireParticipantId('lea'),
   name: 'Léa',
   token: 'ab'.repeat(32),
+  endpoint: { addresses: [], port: 47_313 },
 };
 
 /** Builds a session on fake connections and timers the test drives by hand. */
@@ -27,7 +28,7 @@ function session() {
   const started = startGuestSession({
     address: '127.0.0.1',
     port: 47_313,
-    code: 'K7Q4MZ',
+    secret: { kind: 'code', code: 'K7Q4MZ' },
     introduction: INTRODUCTION,
     startTimer: (milliseconds, onEnd) => {
       const timer = { milliseconds, onEnd, stopped: false };

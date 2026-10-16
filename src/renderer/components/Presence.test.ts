@@ -25,6 +25,8 @@ const HOST: Participant = {
   isHost: true,
   rank: 0,
   selectedTaskId: testId('a'),
+  endpoint: null,
+  tokenDigest: null,
 };
 const GUESTS = ['Léa', 'Noah', 'Inès', 'Omar', 'Zoé', 'Yann'];
 
@@ -51,6 +53,8 @@ async function renderHosting(guestCount: number) {
       peer: index + 1,
       participantId: `guest${String(index)}`,
       name,
+      endpoint: { addresses: [], port: 47_313 },
+      tokenDigest: 'd'.repeat(64),
     });
   });
   collaboration.listener?.({
@@ -86,6 +90,8 @@ async function renderJoined(canEdit = false) {
     rank: 1,
     color: 1,
     selectedTaskId: null,
+    endpoint: null,
+    tokenDigest: null,
   };
   collaboration.listener?.({ kind: 'connected' });
   collaboration.listener?.({

@@ -13,12 +13,15 @@ import {
   type NearbyPlan,
 } from './discovery';
 
+const SHARING = 'a'.repeat(32);
+const TXT = { v: '1', plan: 'Thesis', host: 'Camille', share: SHARING, rank: '0' };
+
 const SERVICE: AnnouncedService = {
   name: 'Tasklace 1a2b',
   fqdn: 'Tasklace 1a2b._tasklace._tcp.local',
   port: 47_313,
   addresses: ['192.168.1.20', '8.8.8.8', 'fe80::1'],
-  txt: { v: ANNOUNCE_VERSION, plan: 'Thesis', host: 'Camille' },
+  txt: { v: ANNOUNCE_VERSION, plan: 'Thesis', host: 'Camille', share: SHARING, rank: '0' },
 };
 
 /** Builds a fake mDNS that records what is published and lets the test announce services. */
@@ -69,20 +72,22 @@ describe('announcing a shared plan', () => {
     expect(mdns.find({ type: SERVICE_TYPE })).toBe(browser);
   });
 
-  it('publishes the names and the port, never the code, and stops when asked', async () => {
+  it('publishes the names, the sharing, the rank and the port, never the code nor the key, and stops when asked', async () => {
     const fake = fakeMdns();
     const stop = announcePlan(fake.mdns, {
       instance: '1a2b',
       port: 47_313,
       planName: 'Thesis',
       hostName: 'Camille',
+      sharingId: SHARING,
+      rank: 3,
     });
     expect(fake.published).toEqual([
       {
         name: 'Tasklace 1a2b',
         type: SERVICE_TYPE,
         port: 47_313,
-        txt: { v: '1', plan: 'Thesis', host: 'Camille' },
+        txt: { ...TXT, rank: '3' },
       },
     ]);
     await stop();
@@ -91,7 +96,14 @@ describe('announcing a shared plan', () => {
 
   it('shortens a long name by whole characters to fit an announcement', () => {
     const fake = fakeMdns();
-    announcePlan(fake.mdns, { instance: 'x', port: 1, planName: 'é'.repeat(150), hostName: 'A' });
+    announcePlan(fake.mdns, {
+      instance: 'x',
+      port: 1,
+      planName: 'é'.repeat(150),
+      hostName: 'A',
+      sharingId: SHARING,
+      rank: 0,
+    });
     const txt = (fake.published[0] as { txt: { plan: string } }).txt;
     expect(txt.plan).toBe('é'.repeat(MAX_TXT_VALUE_BYTES / 2));
   });
@@ -102,7 +114,7 @@ describe('finding shared plans nearby', () => {
     const fake = fakeMdns();
     const lists: (readonly NearbyPlan[])[] = [];
     const stop = findPlans(fake.mdns, (plans) => lists.push(plans));
-    const other = { ...SERVICE, fqdn: 'other', txt: { v: '1', plan: 'Budget', host: 'Noah' } };
+    const other = { ...SERVICE, fqdn: 'other', txt: { ...TXT, plan: 'Budget', host: 'Noah' } };
     fake.up(SERVICE);
     fake.up(other);
     fake.up({ ...SERVICE, fqdn: 'bad', port: 0 });
@@ -111,8 +123,11 @@ describe('finding shared plans nearby', () => {
     stop();
     const thesis = {
       key: SERVICE.fqdn,
+      instance: SERVICE.name,
       planName: 'Thesis',
       hostName: 'Camille',
+      sharingId: SHARING,
+      rank: 0,
       addresses: ['192.168.1.20', 'fe80::1'],
       port: 47_313,
     };
@@ -126,18 +141,20 @@ describe('finding shared plans nearby', () => {
     const lists: (readonly NearbyPlan[])[] = [];
     findPlans(fake.mdns, (plans) => lists.push(plans));
     fake.up(SERVICE);
-    fake.up({ ...SERVICE, fqdn: 'b', txt: { v: '1', plan: 'Thesis', host: 'Ana' } });
+    fake.up({ ...SERVICE, fqdn: 'b', txt: { ...TXT, host: 'Ana' } });
     expect(lists.at(-1)?.map((plan) => plan.hostName)).toEqual(['Ana', 'Camille']);
   });
 
   it.each([
     ['no text record', { ...SERVICE, txt: undefined }],
-    ['another version', { ...SERVICE, txt: { v: '2', plan: 'Thesis', host: 'Camille' } }],
-    ['no plan name', { ...SERVICE, txt: { v: '1', host: 'Camille' } }],
-    [
-      'a host name with a control character',
-      { ...SERVICE, txt: { v: '1', plan: 'Thesis', host: 'Ca\nmille' } },
-    ],
+    ['another version', { ...SERVICE, txt: { ...TXT, v: '2' } }],
+    ['no plan name', { ...SERVICE, txt: { ...TXT, plan: undefined } }],
+    ['no sharing', { ...SERVICE, txt: { ...TXT, share: undefined } }],
+    ['a sharing of another form', { ...SERVICE, txt: { ...TXT, share: 'A'.repeat(32) } }],
+    ['no rank', { ...SERVICE, txt: { ...TXT, rank: undefined } }],
+    ['a rank that is no number', { ...SERVICE, txt: { ...TXT, rank: '01' } }],
+    ['a rank too high', { ...SERVICE, txt: { ...TXT, rank: '9999999999' } }],
+    ['a host name with a control character', { ...SERVICE, txt: { ...TXT, host: 'Ca\nmille' } }],
     ['no private address', { ...SERVICE, addresses: ['8.8.8.8'] }],
     ['no addresses', { ...SERVICE, addresses: undefined }],
     ['an address that is not text', { ...SERVICE, addresses: [7] as unknown as string[] }],

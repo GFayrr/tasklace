@@ -8,6 +8,7 @@ import {
 } from '../../core/collaboration/secure/join-code';
 import {
   PLAN_KEY_BYTES,
+  tokenDigestOf,
   type HostSecrets,
   type Introduction,
 } from '../../core/collaboration/secure/link';
@@ -38,11 +39,13 @@ export interface HostServerEvents {
   readonly message: (peer: Peer, message: Uint8Array) => void;
   readonly left: (peer: Peer, reason: ConnectionEnd) => void;
   readonly codeChanged: (code: string) => void;
+  readonly planKeyChanged: (planKey: Uint8Array) => void;
 }
 
 export interface HostServer {
   readonly port: number;
   readonly code: () => string;
+  readonly planKey: () => Uint8Array;
   readonly close: () => Promise<void>;
 }
 
@@ -51,6 +54,7 @@ export type ListenFailure = 'NO_FREE_PORT' | 'LISTEN_FAILED';
 interface ServerOptions {
   readonly port: number;
   readonly planKey: Uint8Array | null;
+  readonly knownTokens: ReadonlyMap<string, string>;
   readonly events: HostServerEvents;
   readonly startTimer: StartTimer;
   readonly randomBytes: (count: number) => Uint8Array;
@@ -67,6 +71,8 @@ export const CODE_REPLACED_CLOSE = 4_002;
 export const WRONG_KEY_CLOSE = 4_003;
 export const IDENTITY_TAKEN_CLOSE = 4_004;
 export const REMOVED_CLOSE = 4_005;
+export const HOST_LEFT_CLOSE = 4_006;
+export const CLOSE_GRACE_MILLISECONDS = 1_024;
 const MAX_CONNECTIONS = MAX_PARTICIPANTS + MAX_OPEN_HANDSHAKES;
 const MAX_KNOWN_TOKENS = MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS;
 
@@ -98,7 +104,8 @@ export async function startHostServer(
   return success({
     port: listened.value,
     code: guests.code,
-    close: () => closeServer(sockets, http),
+    planKey: guests.planKey,
+    close: () => closeServer(sockets, http, options.startTimer),
   });
 }
 
@@ -138,14 +145,14 @@ function listenOn(http: Server, port: number, host: string): Promise<string | nu
   });
 }
 
-/** Keeps the code and the key of the plan and counts the guests: those still opening their connection, the wrong codes that make the host draw a new one, the token each identifier first came with and the identifiers removed. */
+/** Keeps the code and the key of the plan and counts the guests: those opening their connection, the wrong codes that draw a new code, the token digest of each identifier, known from a previous host or first seen, and the identifiers removed. */
 function guestCounter(options: ServerOptions) {
   let code = generateJoinCode(options.randomBytes);
   let planKey = options.planKey ?? options.randomBytes(PLAN_KEY_BYTES);
   let wrongCodes = 0;
   let opening = 0;
   let nextNumber = 1;
-  const tokens = new Map<string, string>();
+  const tokens = new Map<string, string>(options.knownTokens);
   const removed = new Set<string>();
   const admitted = new Map<SecureConnection, string>();
   /** Counts a wrong code, drawing a new code once too many were typed, and tells whether it did. */
@@ -164,14 +171,15 @@ function guestCounter(options: ServerOptions) {
     if (removed.has(introduction.participantId)) {
       return false;
     }
+    const digest = tokenDigestOf(introduction.token);
     const known = tokens.get(introduction.participantId);
     if (known !== undefined) {
-      return known === introduction.token;
+      return known === digest;
     }
     if (tokens.size >= MAX_KNOWN_TOKENS) {
       return false;
     }
-    tokens.set(introduction.participantId, introduction.token);
+    tokens.set(introduction.participantId, digest);
     return true;
   };
   /** Gives an admitted guest the key of the plan, closing a connection that cannot carry it. */
@@ -191,12 +199,14 @@ function guestCounter(options: ServerOptions) {
     }
     removed.add(id);
     planKey = options.randomBytes(PLAN_KEY_BYTES);
+    options.events.planKeyChanged(planKey);
     admitted.forEach((_id, other) => {
       givePlanKey(other);
     });
   };
   return {
     code: () => code,
+    planKey: () => planKey,
     accept: (socket: WebSocket, connections: number): void => {
       if (opening >= MAX_OPEN_HANDSHAKES || connections > MAX_CONNECTIONS) {
         socket.terminate();
@@ -325,12 +335,28 @@ export function bytesOf(data: RawData): Uint8Array {
   return data instanceof ArrayBuffer ? new Uint8Array(data) : data;
 }
 
-/** Stops the server: closes every connection, then stops listening. */
-function closeServer(sockets: WebSocketServer, http: Server): Promise<void> {
-  for (const socket of sockets.clients) {
-    socket.terminate();
-  }
-  return new Promise((resolve) => {
+/** Stops the server: tells every guest the host left so that one of them takes over, gives the guests a moment to read it, then ends what remains and stops listening. */
+async function closeServer(
+  sockets: WebSocketServer,
+  http: Server,
+  startTimer: StartTimer,
+): Promise<void> {
+  const leaving = [...sockets.clients].map(
+    (socket) =>
+      new Promise<void>((resolve) => {
+        const stop = startTimer(CLOSE_GRACE_MILLISECONDS, () => {
+          socket.terminate();
+          resolve();
+        });
+        socket.once('close', () => {
+          stop();
+          resolve();
+        });
+        socket.close(HOST_LEFT_CLOSE);
+      }),
+  );
+  await Promise.all(leaving);
+  await new Promise<void>((resolve) => {
     sockets.close(() => {
       http.close(() => {
         resolve();

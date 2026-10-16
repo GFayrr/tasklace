@@ -32,6 +32,8 @@ function network(): Network {
   const events: Network['events'] = [];
   const host = createHost({
     session: hostSession,
+    roster: null,
+    tokenDigest: null,
     hostId: HOST,
     name: 'Camille',
     send: (outgoing) => toGuests.push(outgoing),
@@ -67,7 +69,7 @@ function deliverAll(net: Network): void {
 
 /** Connects a guest to the host the way the transport does once it is authenticated. */
 function join(net: Network, id: ParticipantId, name: string): void {
-  expect(net.host.connect(id, name)).toEqual(success(null));
+  expect(net.host.connect(id, name, null, null)).toEqual(success(null));
   net.guests.get(id)?.guest.connected();
   deliverAll(net);
 }
@@ -245,7 +247,7 @@ describe('a host and its guests', () => {
   it('refuses a newcomer already in the list, and a right for an unknown participant', () => {
     const net = network();
     join(net, LEA, 'Léa');
-    expect(net.host.connect(LEA, 'Léa again')).toEqual(failure('ALREADY_IN'));
+    expect(net.host.connect(LEA, 'Léa again', null, null)).toEqual(failure('ALREADY_IN'));
     expect(net.host.setRight(requireParticipantId('stranger'), true)).toEqual(
       failure('UNKNOWN_PARTICIPANT'),
     );

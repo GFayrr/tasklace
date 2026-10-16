@@ -20,6 +20,7 @@ import {
 const PLAN_KEY = Uint8Array.from({ length: PLAN_KEY_BYTES }, (_unused, index) => index);
 const SECRETS = { code: 'K7Q4MZ', planKey: PLAN_KEY };
 const TOKEN = 'ab'.repeat(32);
+const ENDPOINT = { addresses: ['192.168.1.24'], port: 47_313 };
 
 /** Gives the secret of a guest who types a code. */
 function code(typed: string): JoinSecret {
@@ -48,7 +49,7 @@ function guestOf(hello: Uint8Array, secret: JoinSecret): GuestLink {
 /** Writes an introduction with some fields changed, as a forged guest would. */
 function introductionBytes(changes: Record<string, unknown>): Uint8Array {
   return new TextEncoder().encode(
-    JSON.stringify({ participantId: 'a', name: 'A', token: TOKEN, ...changes }),
+    JSON.stringify({ participantId: 'a', name: 'A', token: TOKEN, endpoint: ENDPOINT, ...changes }),
   );
 }
 
@@ -123,6 +124,7 @@ describe('the opening of a connection', () => {
       participantId: requireParticipantId('lea-1'),
       name: 'Léa',
       token: TOKEN,
+      endpoint: ENDPOINT,
     };
     expect(readIntroduction(encodeIntroduction(introduction))).toEqual(introduction);
   });
@@ -137,6 +139,16 @@ describe('the opening of a connection', () => {
     ['a short token', introductionBytes({ token: 'ab' })],
     ['a token in capitals', introductionBytes({ token: 'AB'.repeat(32) })],
     ['a token that is no text', introductionBytes({ token: 7 })],
+    ['no endpoint', introductionBytes({ endpoint: undefined })],
+    ['an endpoint without its port', introductionBytes({ endpoint: { addresses: [] } })],
+    ['a port out of range', introductionBytes({ endpoint: { addresses: [], port: 0 } })],
+    [
+      'too many addresses',
+      introductionBytes({ endpoint: { addresses: ['a', 'b', 'c', 'd', 'e'], port: 1 } }),
+    ],
+    ['an address with a space', introductionBytes({ endpoint: { addresses: ['a b'], port: 1 } })],
+    ['an address that is no text', introductionBytes({ endpoint: { addresses: [7], port: 1 } })],
+    ['addresses that are no list', introductionBytes({ endpoint: { addresses: 'a', port: 1 } })],
     ['too many bytes', new Uint8Array(MAX_INTRODUCTION_BYTES + 1).fill(32)],
   ])('refuses an introduction with %s', (_label, bytes) => {
     expect(readIntroduction(bytes)).toBeNull();

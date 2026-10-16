@@ -15,6 +15,8 @@ const HOST: Participant = {
   isHost: true,
   rank: 0,
   selectedTaskId: null,
+  endpoint: null,
+  tokenDigest: null,
 };
 const TARGET = { address: '192.168.1.24', port: 47_313, code: 'K7Q4MZ' };
 
@@ -209,7 +211,7 @@ describe('the windows of a shared plan', () => {
     ]);
     opened.control.collaboration.shareResult = {
       ok: true,
-      value: { code: 'K7Q4MZ', port: 47_313, addresses: [] },
+      value: { code: 'K7Q4MZ', port: 47_313, addresses: [], tokenDigest: 'd'.repeat(64) },
     };
     await opened.app.startSharing();
     expect([opened.app.shareFailure, opened.app.collaboration.mode.kind]).toEqual([
@@ -282,5 +284,35 @@ describe('the windows of a shared plan', () => {
     expect(opened.control.collaboration.requests.filter(([name]) => name === 'findPlans')).toEqual(
       [],
     );
+  });
+});
+
+describe('a host that changes', () => {
+  it('tells the person who now hosts the plan that the host left', async () => {
+    const { app, control } = await joinedApp();
+    control.collaboration.listener?.({ kind: 'hostLeft' });
+    await settle();
+    control.collaboration.listener?.({
+      kind: 'becameHost',
+      sharing: { code: 'N3WC0D', port: 47_313, addresses: [], tokenDigest: 'd'.repeat(64) },
+    });
+    expect(noticeTexts(app)).toEqual([
+      'Camille left. You now host the plan; the others join you on their own.',
+    ]);
+  });
+
+  it('tells a guest who hosts the plan now', async () => {
+    const { app, control } = await joinedApp();
+    control.collaboration.listener?.({ kind: 'hostLeft' });
+    await settle();
+    const me = app.collaboration.me ?? HOST.id;
+    const noah: Participant = { ...HOST, id: requireParticipantId('noah'), name: 'Noah', rank: 2 };
+    const lea: Participant = { ...HOST, id: me, name: 'Léa', isHost: false, rank: 1, color: 1 };
+    control.collaboration.listener?.({ kind: 'connected' });
+    control.collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'participants', you: me, participants: [noah, lea] }),
+    });
+    expect(noticeTexts(app)).toEqual(['Camille left. Noah now hosts the plan; you are still in.']);
   });
 });

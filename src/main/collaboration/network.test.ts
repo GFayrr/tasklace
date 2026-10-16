@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { requireParticipantId } from '../../core/collaboration/participants';
 import { WRONG_CODES_BEFORE_NEW_CODE } from '../../core/collaboration/secure/join-code';
-import type { Introduction, JoinSecret } from '../../core/collaboration/secure/link';
+import {
+  tokenDigestOf,
+  type Introduction,
+  type JoinSecret,
+} from '../../core/collaboration/secure/link';
 import {
   MAX_DEPARTED_PARTICIPANTS,
   MAX_OPEN_HANDSHAKES,
@@ -21,9 +25,11 @@ const LEA: Introduction = {
   participantId: requireParticipantId('lea'),
   name: 'Léa',
   token: 'ab'.repeat(32),
+  endpoint: { addresses: [], port: 47_313 },
 };
 const PLAN_KEY = new Uint8Array(32).fill(7);
 const LOOPBACK = '127.0.0.1';
+const MANY_CONNECTIONS_TIMEOUT_MS = 60_000;
 /** Starts no timer, the tests waiting for events instead. */
 const noTimer: StartTimer = () => () => undefined;
 const servers: HostServer[] = [];
@@ -54,7 +60,11 @@ async function until(condition: () => boolean): Promise<void> {
 }
 
 /** Starts a host on a free port, recording everything it tells. */
-async function host(port?: number, planKey: Uint8Array | null = null) {
+async function host(
+  port?: number,
+  planKey: Uint8Array | null = null,
+  knownTokens: ReadonlyMap<string, string> = new Map(),
+) {
   const joined: [Peer, Introduction][] = [];
   const messages: [number, Uint8Array][] = [];
   const left: [number, ConnectionEnd][] = [];
@@ -62,6 +72,7 @@ async function host(port?: number, planKey: Uint8Array | null = null) {
   const started = await startHostServer({
     port: port ?? (await freePort()),
     planKey,
+    knownTokens,
     startTimer: noTimer,
     randomBytes: systemRandomBytes,
     events: {
@@ -69,6 +80,7 @@ async function host(port?: number, planKey: Uint8Array | null = null) {
       message: (peer, message) => messages.push([peer.number, message]),
       left: (peer, reason) => left.push([peer.number, reason]),
       codeChanged: (code) => codes.push(code),
+      planKeyChanged: () => undefined,
     },
   });
   if (!started.ok) {
@@ -211,27 +223,51 @@ describe('a shared plan over the network', () => {
     await until(() => noahBack.isOpen());
   });
 
-  it('refuses any new identifier once it remembers as many tokens as it may, never forgetting one', async () => {
-    const shared = await host();
-    for (let index = 0; index < MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS; index += 1) {
-      const someone = guest(shared.server.port, shared.server.code(), {
+  it(
+    'refuses any new identifier once it remembers as many tokens as it may, never forgetting one',
+    { timeout: MANY_CONNECTIONS_TIMEOUT_MS },
+    async () => {
+      const shared = await host();
+      for (let index = 0; index < MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS; index += 1) {
+        const someone = guest(shared.server.port, shared.server.code(), {
+          ...LEA,
+          participantId: requireParticipantId(`p${String(index)}`),
+        });
+        await until(() => shared.joined.length === index + 1);
+        someone.client.close();
+      }
+      const late = guest(shared.server.port, shared.server.code());
+      await until(() => late.ends.length === 1);
+      const first = guest(shared.server.port, shared.server.code(), {
         ...LEA,
-        participantId: requireParticipantId(`p${String(index)}`),
+        participantId: requireParticipantId('p0'),
       });
-      await until(() => shared.joined.length === index + 1);
-      someone.client.close();
-    }
-    const late = guest(shared.server.port, shared.server.code());
-    await until(() => late.ends.length === 1);
-    const first = guest(shared.server.port, shared.server.code(), {
-      ...LEA,
-      participantId: requireParticipantId('p0'),
-    });
-    await until(
-      () =>
-        first.isOpen() && shared.joined.length === MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS + 1,
+      await until(
+        () =>
+          first.isOpen() &&
+          shared.joined.length === MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS + 1,
+      );
+      expect(late.ends).toEqual(['IDENTITY_TAKEN']);
+    },
+  );
+
+  it('turns away anyone claiming the identifier of a person whose digest it knows from the previous host, and lets that person in', async () => {
+    const shared = await host(
+      undefined,
+      null,
+      new Map([[LEA.participantId, tokenDigestOf(LEA.token)]]),
     );
-    expect(late.ends).toEqual(['IDENTITY_TAKEN']);
+    const impostor = guest(shared.server.port, shared.server.code(), {
+      ...LEA,
+      token: 'cd'.repeat(32),
+    });
+    await until(() => impostor.ends.length === 1);
+    const lea = guest(shared.server.port, shared.server.code());
+    await until(() => lea.isOpen() && shared.joined.length === 1);
+    expect([impostor.ends, shared.joined.map(([, introduction]) => introduction.token)]).toEqual([
+      ['IDENTITY_TAKEN'],
+      [LEA.token],
+    ]);
   });
 
   it('listens on the next port when the chosen one is taken', async () => {

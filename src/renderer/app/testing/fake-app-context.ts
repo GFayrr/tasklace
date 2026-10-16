@@ -64,6 +64,7 @@ export interface FakeCollaboration {
   findPlansResult: BridgeResult<null>;
   openSharedResult: BridgeResult<OpenedProject>;
   copyResult: BridgeResult<null>;
+  findNextHostResult: BridgeResult<null>;
   listener: ((event: CollaborationEvent) => void) | null;
   readonly requests: (readonly [string, ...unknown[]])[];
   readonly sent: (readonly [CollaborationTarget, Uint8Array])[];
@@ -121,13 +122,19 @@ export function fakeBridge(): {
       saveSettingsResult: { ok: true, value: null },
       shareResult: {
         ok: true,
-        value: { code: 'K7Q4MZ', port: 47_313, addresses: ['192.168.1.24'] },
+        value: {
+          code: 'K7Q4MZ',
+          port: 47_313,
+          addresses: ['192.168.1.24'],
+          tokenDigest: 'd'.repeat(64),
+        },
       },
       joinResult: { ok: true, value: null },
       stopResult: { ok: true, value: null },
       findPlansResult: { ok: true, value: null },
       openSharedResult: { ok: false, error: { code: 'TASK_FAILED' } },
       copyResult: { ok: true, value: null },
+      findNextHostResult: { ok: true, value: null },
       listener: null,
       requests: [],
       sent: [],
@@ -205,6 +212,11 @@ export function fakeBridge(): {
     findPlans: (searching) => asked(['findPlans', searching], collaboration.findPlansResult),
     dropPeer: (peer) => asked(['dropPeer', peer], { ok: true, value: null }),
     copyJoinCode: () => asked(['copyCode'], collaboration.copyResult),
+    findNextHost: (queue, planName, hostName, knownTokens) =>
+      asked(
+        ['findNextHost', queue, planName, hostName, knownTokens],
+        collaboration.findNextHostResult,
+      ),
     sendToCollaboration: (to, message) => {
       collaboration.sent.push([to, message]);
     },

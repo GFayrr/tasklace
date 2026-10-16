@@ -15,6 +15,13 @@ export interface Participant {
   readonly isHost: boolean;
   readonly rank: number;
   readonly selectedTaskId: TaskId | null;
+  readonly endpoint: Endpoint | null;
+  readonly tokenDigest: string | null;
+}
+
+export interface Endpoint {
+  readonly addresses: readonly string[];
+  readonly port: number;
 }
 
 /** Tells whether a value can identify a participant of a shared plan, with the same characters as the identifiers of a project. */

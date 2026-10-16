@@ -61,6 +61,8 @@ describe('a shared plan over an unreliable network', () => {
           const hostSession = sessionOn(origin, 1);
           const host = createHost({
             session: hostSession,
+            roster: null,
+            tokenDigest: null,
             hostId: HOST,
             name: 'Camille',
             send: ({ to, message }) => queue.push({ toHost: false, to, message }),
@@ -98,7 +100,7 @@ describe('a shared plan over an unreliable network', () => {
             }
           };
           ids.forEach((id, index) => {
-            expect(host.connect(id, `Guest ${String(index)}`).ok).toBe(true);
+            expect(host.connect(id, `Guest ${String(index)}`, null, null).ok).toBe(true);
             guests.get(id)?.guest.connected();
           });
           EDITORS.forEach((id) => {

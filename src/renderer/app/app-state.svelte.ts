@@ -269,6 +269,9 @@ export class AppState {
       repaired: (repairs) => {
         this.#notifyRepairs(repairs);
       },
+      hostChanged: (left, next) => {
+        this.#tellHostChanged(left, next);
+      },
       selectedTaskId: () => this.#selectedTaskId,
     });
     this.#scheduler = context.createScheduler({
@@ -847,6 +850,18 @@ export class AppState {
     if (this.collaboration.mode.kind === 'joining') {
       void this.collaboration.stop();
     }
+  }
+
+  /** Tells the person that the host of the shared plan left and who hosts it now, this person or another. */
+  #tellHostChanged(left: string | null, next: string | null): void {
+    const text = this.messages.collaboration;
+    const leaving = left ?? text.theHost;
+    this.#notify(
+      'info',
+      next === null
+        ? fillMessage(text.youHostNow, { left: leaving })
+        : fillMessage(text.hostChanged, { left: leaving, next }),
+    );
   }
 
   /** Reads the settings of this computer about shared plans unless read already, telling a failure to read them. */

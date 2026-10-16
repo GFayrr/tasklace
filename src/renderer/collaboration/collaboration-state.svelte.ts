@@ -7,6 +7,7 @@ import {
 import {
   isParticipantId,
   requireParticipantId,
+  type Endpoint,
   type Participant,
   type ParticipantId,
 } from '../../core/collaboration/participants';
@@ -17,6 +18,8 @@ import {
   type Host,
   type SyncEvent,
 } from '../../core/collaboration/sync';
+import { takeOverRoster, type Roster } from '../../core/collaboration/roster';
+import { successionQueue } from '../../core/collaboration/succession';
 import type { TaskId } from '../../core/model/project';
 import type { Result } from '../../core/result';
 import type { SharedRepair } from '../../core/shared/shared-project';
@@ -42,6 +45,7 @@ export type CollaborationBridge = Pick<
   | 'findPlans'
   | 'dropPeer'
   | 'copyJoinCode'
+  | 'findNextHost'
   | 'sendToCollaboration'
   | 'onCollaborationEvent'
 >;
@@ -53,6 +57,7 @@ export interface CollaborationContext {
   readonly session: () => SharedSession | null;
   readonly openShared: (state: Uint8Array) => Promise<boolean>;
   readonly repaired: (repairs: readonly SharedRepair[]) => void;
+  readonly hostChanged: (left: string | null, next: string | null) => void;
   readonly selectedTaskId: () => TaskId | null;
 }
 
@@ -96,6 +101,7 @@ export class CollaborationState {
   #waitingRoster: CollaborationMessage | null = null;
   #openingShared = false;
   #presenceQueued = false;
+  #hostThatLeft: string | null = null;
 
   /** Starts following the events of the main process about the shared plan. */
   constructor(context: CollaborationContext) {
@@ -211,16 +217,30 @@ export class CollaborationState {
     if (name === null) {
       return { ok: false, error: { code: 'NO_NAME' } };
     }
-    const shared = await this.#context.bridge.sharePlan(session.project().name, name);
+    const hostId = requireParticipantId(this.#context.createId());
+    const shared = await this.#context.bridge.sharePlan(session.project().name, name, hostId);
     if (!shared.ok) {
       return shared;
     }
-    const hostId = requireParticipantId(this.#context.createId());
+    this.#startHost(session, { hostId, name, roster: null }, shared.value);
+    return shared;
+  }
+
+  /** Hosts the shared plan of the open session, from a new list or one taken over from a host that left, linking the host to the messages the main process carries. */
+  #startHost(
+    session: SharedSession,
+    start: {
+      readonly hostId: ParticipantId;
+      readonly name: string;
+      readonly roster: Roster | null;
+    },
+    sharing: Sharing,
+  ): void {
     const hosting: Hosting = {
       host: createHost({
         session,
-        hostId,
-        name,
+        ...start,
+        tokenDigest: sharing.tokenDigest,
         send: ({ to, message }) => {
           const peer = this.#hosting?.participantsByPeer.get(to);
           if (peer !== undefined) {
@@ -236,11 +256,10 @@ export class CollaborationState {
       joinedAt: new SvelteMap(),
     };
     this.#hosting = hosting;
-    this.#me = hostId;
+    this.#me = start.hostId;
     this.#participants = hosting.host.roster().participants;
-    this.#mode = { kind: 'hosting', sharing: shared.value };
+    this.#mode = { kind: 'hosting', sharing };
     this.#queuePresence();
-    return shared;
   }
 
   /** Joins a shared plan with its code under the name of this person, which must be set first, the plan opening once the host sent it. */
@@ -311,6 +330,18 @@ export class CollaborationState {
       return;
     }
     this.#openingShared = false;
+    const guest = this.#startGuest(session);
+    this.#mode = { kind: 'guest', connection: 'connected' };
+    if (this.#waitingRoster !== null) {
+      guest.receive(this.#waitingRoster);
+      this.#waitingRoster = null;
+    }
+    guest.connected();
+    this.#queuePresence();
+  }
+
+  /** Follows the shared plan of the open session as a guest, linking it to the messages the main process carries. */
+  #startGuest(session: SharedSession): Guest {
     const guest = createGuest({
       session,
       send: (message) => {
@@ -321,13 +352,7 @@ export class CollaborationState {
       },
     });
     this.#guest = guest;
-    this.#mode = { kind: 'guest', connection: 'connected' };
-    if (this.#waitingRoster !== null) {
-      guest.receive(this.#waitingRoster);
-      this.#waitingRoster = null;
-    }
-    guest.connected();
-    this.#queuePresence();
+    return guest;
   }
 
   /** Forgets everything of the shared plan, without telling the main process. */
@@ -338,6 +363,7 @@ export class CollaborationState {
     this.#guest = null;
     this.#waitingRoster = null;
     this.#openingShared = false;
+    this.#hostThatLeft = null;
     this.#participants = [];
     this.#me = null;
     this.#mode = { kind: 'idle' };
@@ -347,7 +373,10 @@ export class CollaborationState {
   #receive(event: CollaborationEvent): void {
     switch (event.kind) {
       case 'peerJoined':
-        this.#peerJoined(event.peer, event.participantId, event.name);
+        this.#peerJoined(event.peer, event.participantId, event.name, {
+          endpoint: event.endpoint,
+          tokenDigest: event.tokenDigest,
+        });
         return;
       case 'peerMessage':
         this.#fromPeer(event.peer, event.message);
@@ -365,8 +394,18 @@ export class CollaborationState {
         this.#connected();
         return;
       case 'reconnecting':
-      case 'offline':
         this.#connectionLost(event.kind);
+        return;
+      case 'offline':
+      case 'hostLeft':
+        this.#connectionLost(event.kind === 'offline' ? 'offline' : 'reconnecting');
+        void this.#findNextHost();
+        return;
+      case 'becameHost':
+        this.#becameHost(event.sharing);
+        return;
+      case 'yielded':
+        this.#yielded();
         return;
       case 'hostMessage':
         this.#fromHost(event.message);
@@ -401,8 +440,71 @@ export class CollaborationState {
     this.#mode = { kind: 'guest', connection };
   }
 
+  /** Asks the main process to look for the next host of the plan joined, giving it the people last known from the oldest to the newest, and remembers which host left. */
+  async #findNextHost(): Promise<void> {
+    const session = this.#context.session();
+    const name = this.#settings?.name ?? null;
+    if (this.#guest === null || session === null || name === null || this.#hostThatLeft !== null) {
+      return;
+    }
+    this.#hostThatLeft = this.hostName;
+    const queue = successionQueue(this.#participants).map((participant) => ({
+      participantId: participant.id,
+      rank: participant.rank,
+      endpoint: participant.endpoint,
+    }));
+    const knownTokens = this.#participants.flatMap((participant) =>
+      participant.tokenDigest === null
+        ? []
+        : [{ participantId: participant.id, tokenDigest: participant.tokenDigest }],
+    );
+    const asked = await this.#context.bridge.findNextHost(
+      queue,
+      session.project().name,
+      name,
+      knownTokens,
+    );
+    if (!asked.ok) {
+      console.error('The next host of the shared plan could not be looked for:', asked.error);
+    }
+  }
+
+  /** Hosts the plan joined once its host left and this person's turn came, with the people last known, everyone else coming back with the rank and right they had. */
+  #becameHost(sharing: Sharing): void {
+    const session = this.#context.session();
+    const me = this.#me;
+    const name = this.#settings?.name ?? null;
+    const roster = me === null ? null : takeOverRoster(rosterOf(this.#participants), me);
+    if (session === null || me === null || name === null || roster === null) {
+      console.error('The page cannot host the plan it was told to host.');
+      return;
+    }
+    this.#guest?.stop();
+    this.#guest = null;
+    this.#startHost(session, { hostId: me, name, roster }, sharing);
+    this.#context.hostChanged(this.#hostThatLeft, null);
+    this.#hostThatLeft = null;
+  }
+
+  /** Gives way to an older host of the same plan: stops hosting and follows the plan as a guest until the main process joins that host. */
+  #yielded(): void {
+    const session = this.#context.session();
+    if (this.#hosting === null || session === null) {
+      return;
+    }
+    this.#hosting.host.stop();
+    this.#hosting = null;
+    this.#startGuest(session).disconnected();
+    this.#mode = { kind: 'guest', connection: 'reconnecting' };
+  }
+
   /** Adds a guest who proved it knows the code, known by its connection before the host sends it the people in the plan, a person coming back on a new connection replacing its old one, and drops a guest the plan cannot take. */
-  #peerJoined(peer: number, participantId: string, name: string): void {
+  #peerJoined(
+    peer: number,
+    participantId: string,
+    name: string,
+    known: { readonly endpoint: Endpoint; readonly tokenDigest: string },
+  ): void {
     const hosting = this.#hosting;
     if (hosting === null) {
       return;
@@ -417,7 +519,7 @@ export class CollaborationState {
     }
     hosting.peers.set(peer, participantId);
     hosting.participantsByPeer.set(participantId, peer);
-    const joined = hosting.host.connect(participantId, name);
+    const joined = hosting.host.connect(participantId, name, known.endpoint, known.tokenDigest);
     if (!joined.ok) {
       hosting.peers.delete(peer);
       hosting.participantsByPeer.delete(participantId);
@@ -538,10 +640,21 @@ export class CollaborationState {
       case 'roster':
         this.#me = event.you;
         this.#participants = event.participants;
+        this.#tellNewHost(event.participants);
         return;
       case 'unsharedChanges':
         console.warn('Changes made in read only stay on this computer.');
     }
+  }
+
+  /** Tells the person the plan has a new host once the first list of people from it arrives after the host left. */
+  #tellNewHost(participants: readonly Participant[]): void {
+    const host = participants.find((participant) => participant.isHost);
+    if (this.#hostThatLeft === null || this.#mode.kind !== 'guest' || host === undefined) {
+      return;
+    }
+    this.#context.hostChanged(this.#hostThatLeft, host.name);
+    this.#hostThatLeft = null;
   }
 
   /** Sends the presence of this person once for all the selections of a moment. */
@@ -580,4 +693,10 @@ function presenceOf(
   return new Map(
     [...grouped].map(([task, entries]) => [task, entries.map((entry) => entry.participant)]),
   );
+}
+
+/** Builds the list a guest knows of a plan, without the departures only the host knew, the next rank following the highest one known. */
+function rosterOf(participants: readonly Participant[]): Roster {
+  const highest = Math.max(0, ...participants.map((participant) => participant.rank));
+  return { participants, departed: [], nextRank: highest + 1 };
 }

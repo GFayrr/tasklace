@@ -145,7 +145,7 @@ describe('sharing the open plan', () => {
     const { root, control } = await renderApp({ name: 'Camille', firewallNoticeSeen: true });
     control.collaboration.shareResult = {
       ok: true,
-      value: { code: 'K7Q4MZ', port: 47_314, addresses: [] },
+      value: { code: 'K7Q4MZ', port: 47_314, addresses: [], tokenDigest: 'd'.repeat(64) },
     };
     await clickAndSettle(button(root, TEXT.share));
     expect(textsOf(shareWindow(root), '.code-part .message, .code-part .hint')).toEqual([
@@ -162,12 +162,18 @@ describe('sharing the open plan', () => {
       peer: 1,
       participantId: 'lea',
       name: 'Léa',
+      endpoint: { addresses: [], port: 47_313 },
+      tokenDigest: 'd'.repeat(64),
     });
     update();
     const dialog = shareWindow(root);
     expect(textsOf(dialog, '.person')).toEqual([
       'CA Camille You · host Can edit',
       'LÉ Léa Joined at 10:00 AM Read only Can edit',
+    ]);
+    expect(textsOf(dialog, '.people .hint')).toEqual([
+      TEXT.newcomers,
+      'If you leave, Léa, who has been here the longest, becomes the host and keeps these choices.',
     ]);
     expect(single(dialog, '[role="radiogroup"]').getAttribute('aria-label')).toBe(
       'What Léa may do',
@@ -193,6 +199,8 @@ describe('sharing the open plan', () => {
       peer: 1,
       participantId: 'lea',
       name: 'Léa',
+      endpoint: { addresses: [], port: 47_313 },
+      tokenDigest: 'd'.repeat(64),
     });
     update();
     const dialog = shareWindow(root);

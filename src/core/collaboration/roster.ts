@@ -2,7 +2,12 @@ import { compareStrings } from '../compare-strings';
 import { MAX_DEPARTED_PARTICIPANTS, MAX_JOIN_RANK, MAX_PARTICIPANTS } from '../limits';
 import type { TaskId } from '../model/project';
 import { failure, success, type Result } from '../result';
-import { PARTICIPANT_COLOR_COUNT, type Participant, type ParticipantId } from './participants';
+import {
+  PARTICIPANT_COLOR_COUNT,
+  type Endpoint,
+  type Participant,
+  type ParticipantId,
+} from './participants';
 
 export interface Roster {
   readonly participants: readonly Participant[];
@@ -10,13 +15,32 @@ export interface Roster {
   readonly nextRank: number;
 }
 
+export interface RankedId {
+  readonly id: string;
+  readonly rank: number;
+}
+
 export type RosterRefusal = 'ROSTER_FULL' | 'ALREADY_IN' | 'UNKNOWN_PARTICIPANT' | 'HOST_RIGHT';
 
 /** Starts the list of participants of a shared plan with its host, who can always edit. */
-export function startRoster(hostId: ParticipantId, name: string): Roster {
+export function startRoster(
+  hostId: ParticipantId,
+  name: string,
+  tokenDigest: string | null,
+): Roster {
   return {
     participants: [
-      { id: hostId, name, color: 0, canEdit: true, isHost: true, rank: 0, selectedTaskId: null },
+      {
+        id: hostId,
+        name,
+        color: 0,
+        canEdit: true,
+        isHost: true,
+        rank: 0,
+        selectedTaskId: null,
+        endpoint: null,
+        tokenDigest,
+      },
     ],
     departed: [],
     nextRank: 1,
@@ -28,6 +52,8 @@ export function joinRoster(
   roster: Roster,
   id: ParticipantId,
   name: string,
+  endpoint: Endpoint | null,
+  tokenDigest: string | null,
 ): Result<Roster, RosterRefusal> {
   if (roster.participants.length >= MAX_PARTICIPANTS || roster.nextRank > MAX_JOIN_RANK) {
     return failure('ROSTER_FULL');
@@ -37,7 +63,7 @@ export function joinRoster(
   }
   const back = roster.departed.find((participant) => participant.id === id);
   if (back !== undefined) {
-    return success(rejoined(roster, back, name));
+    return success(rejoined(roster, back, { name, endpoint, tokenDigest }));
   }
   const participant: Participant = {
     id,
@@ -47,6 +73,8 @@ export function joinRoster(
     isHost: false,
     rank: roster.nextRank,
     selectedTaskId: null,
+    endpoint,
+    tokenDigest,
   };
   return success({
     ...roster,
@@ -56,12 +84,16 @@ export function joinRoster(
 }
 
 /** Brings back a participant who left, with its rank and right, and its color unless another participant took it meanwhile. */
-function rejoined(roster: Roster, back: Participant, name: string): Roster {
+function rejoined(
+  roster: Roster,
+  back: Participant,
+  now: Pick<Participant, 'name' | 'endpoint' | 'tokenDigest'>,
+): Roster {
   const isColorTaken = roster.participants.some((participant) => participant.color === back.color);
   const color = isColorTaken ? firstFreeColor(roster.participants) : back.color;
   return {
     ...roster,
-    participants: [...roster.participants, { ...back, name, color }],
+    participants: [...roster.participants, { ...back, ...now, color }],
     departed: roster.departed.filter((participant) => participant.id !== back.id),
   };
 }
@@ -136,8 +168,24 @@ export function electHost(roster: Roster): Roster | null {
   );
 }
 
+/** Takes over the list of a host that left on the side of the participant who now hosts: it becomes the host with the right to edit, and everyone else, the old host included, waits among the departures to come back with its rank, right and color. */
+export function takeOverRoster(previous: Roster, id: ParticipantId): Roster | null {
+  const next = previous.participants.find((participant) => participant.id === id);
+  if (next === undefined) {
+    return null;
+  }
+  const others = previous.participants
+    .filter((participant) => participant.id !== id)
+    .map((participant) => ({ ...participant, isHost: false, selectedTaskId: null }));
+  return {
+    participants: [{ ...next, isHost: true, canEdit: true, selectedTaskId: null }],
+    departed: [...previous.departed, ...others].slice(-MAX_DEPARTED_PARTICIPANTS),
+    nextRank: previous.nextRank,
+  };
+}
+
 /** Tells whether a participant joined before another, the identifier deciding between equal ranks so that every copy chooses the same one. */
-function isOlder(participant: Participant, other: Participant): boolean {
+export function isOlder(participant: RankedId, other: RankedId): boolean {
   return (
     participant.rank < other.rank ||
     (participant.rank === other.rank && compareStrings(participant.id, other.id) < 0)

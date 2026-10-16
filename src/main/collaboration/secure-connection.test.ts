@@ -23,6 +23,7 @@ const INTRODUCTION = {
   participantId: requireParticipantId('lea-1'),
   name: 'Léa',
   token: 'ab'.repeat(32),
+  endpoint: { addresses: [], port: 47_313 },
 };
 const PLAN_KEY = Uint8Array.from({ length: PLAN_KEY_BYTES }, (_unused, index) => index);
 const CODE: JoinSecret = { kind: 'code', code: 'K7Q4MZ' };

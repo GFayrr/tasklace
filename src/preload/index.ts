@@ -64,13 +64,16 @@ const bridge: TasklaceBridge = {
   collaborationSettings: () => request(IPC_CHANNELS.collaborationSettings),
   saveCollaborationSettings: (settings) =>
     request(IPC_CHANNELS.saveCollaborationSettings, settings),
-  sharePlan: (planName, hostName) => request(IPC_CHANNELS.sharePlan, planName, hostName),
+  sharePlan: (planName, hostName, participantId) =>
+    request(IPC_CHANNELS.sharePlan, planName, hostName, participantId),
   stopCollaboration: () => request(IPC_CHANNELS.stopCollaboration),
   joinPlan: (joining) => request(IPC_CHANNELS.joinPlan, joining),
   openSharedPlan: (state) => request(IPC_CHANNELS.openSharedPlan, state),
   findPlans: (searching) => request(IPC_CHANNELS.findPlans, searching),
   dropPeer: (peer) => request(IPC_CHANNELS.dropPeer, peer),
   copyJoinCode: () => request(IPC_CHANNELS.copyJoinCode),
+  findNextHost: (queue, planName, hostName, knownTokens) =>
+    request(IPC_CHANNELS.findNextHost, queue, planName, hostName, knownTokens),
   sendToCollaboration: (to, message) => {
     ipcRenderer.send(IPC_CHANNELS.collaborationSend, to, message);
   },

@@ -34,6 +34,8 @@ vi.mock('electron', () => ({
   },
 }));
 
+const ENDPOINT = { addresses: ['192.168.1.24'], port: 47_313 };
+
 const FORMAT = {
   listSeparator: ';',
   dateOrder: 'dayMonthYear',
@@ -215,23 +217,36 @@ describe('the shared plan through the bridge', () => {
     };
     await bridge.collaborationSettings();
     await bridge.saveCollaborationSettings(settings);
-    await bridge.sharePlan('Thesis', 'Camille');
+    await bridge.sharePlan('Thesis', 'Camille', 'camille');
     await bridge.stopCollaboration();
     await bridge.joinPlan(joining);
     await bridge.openSharedPlan(Uint8Array.of(1));
     await bridge.findPlans(true);
     await bridge.dropPeer(2);
     await bridge.copyJoinCode();
+    await bridge.findNextHost(
+      [{ participantId: 'lea', rank: 1, endpoint: null }],
+      'Thesis',
+      'Léa',
+      [],
+    );
     expect(electron.invoke.mock.calls).toEqual([
       [IPC_CHANNELS.collaborationSettings],
       [IPC_CHANNELS.saveCollaborationSettings, settings],
-      [IPC_CHANNELS.sharePlan, 'Thesis', 'Camille'],
+      [IPC_CHANNELS.sharePlan, 'Thesis', 'Camille', 'camille'],
       [IPC_CHANNELS.stopCollaboration],
       [IPC_CHANNELS.joinPlan, joining],
       [IPC_CHANNELS.openSharedPlan, Uint8Array.of(1)],
       [IPC_CHANNELS.findPlans, true],
       [IPC_CHANNELS.dropPeer, 2],
       [IPC_CHANNELS.copyJoinCode],
+      [
+        IPC_CHANNELS.findNextHost,
+        [{ participantId: 'lea', rank: 1, endpoint: null }],
+        'Thesis',
+        'Léa',
+        [],
+      ],
     ]);
   });
 
@@ -263,13 +278,31 @@ describe('the shared plan through the bridge', () => {
       port: 1,
     };
     const valid = [
-      { kind: 'peerJoined', peer: 1, participantId: 'lea', name: 'Léa' },
+      {
+        kind: 'peerJoined',
+        peer: 1,
+        participantId: 'lea',
+        name: 'Léa',
+        endpoint: ENDPOINT,
+        tokenDigest: 'd'.repeat(64),
+      },
       { kind: 'peerMessage', peer: 1, message: Uint8Array.of(1) },
       { kind: 'peerLeft', peer: 1 },
       { kind: 'codeChanged', code: 'K7Q4MZ' },
       { kind: 'nearbyPlans', plans: [plan] },
       { kind: 'connected' },
       { kind: 'reconnecting' },
+      { kind: 'hostLeft' },
+      { kind: 'yielded' },
+      {
+        kind: 'becameHost',
+        sharing: {
+          code: 'K7Q4MZ',
+          port: 47_313,
+          addresses: ['10.0.0.1'],
+          tokenDigest: 'd'.repeat(64),
+        },
+      },
       { kind: 'offline' },
       { kind: 'hostMessage', message: Uint8Array.of(2) },
       { kind: 'ended', reason: 'WRONG_CODE' },
@@ -279,12 +312,32 @@ describe('the shared plan through the bridge', () => {
       null,
       { kind: 'unknown' },
       { kind: 'constructor' },
-      { kind: 'peerJoined', peer: 1.5, participantId: 'lea', name: 'Léa' },
+      {
+        kind: 'peerJoined',
+        peer: 1.5,
+        participantId: 'lea',
+        name: 'Léa',
+        endpoint: ENDPOINT,
+        tokenDigest: 'd'.repeat(64),
+      },
+      {
+        kind: 'peerJoined',
+        peer: 1,
+        participantId: 'lea',
+        name: 'Léa',
+        endpoint: { port: 1 },
+        tokenDigest: 'd'.repeat(64),
+      },
       { kind: 'peerMessage', peer: 1, message: [1] },
       { kind: 'codeChanged', code: 1 },
       { kind: 'nearbyPlans', plans: [{ ...plan, addresses: [1] }] },
       { kind: 'nearbyPlans', plans: 'none' },
       { kind: 'ended', reason: 'SOMETHING' },
+      {
+        kind: 'becameHost',
+        sharing: { code: 'K7Q4MZ', port: 47_313, addresses: [1], tokenDigest: 'd'.repeat(64) },
+      },
+      { kind: 'becameHost', sharing: null },
     ];
     [...valid, ...invalid].forEach(emit);
     expect(received).toEqual(valid);

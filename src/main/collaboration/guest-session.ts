@@ -8,7 +8,7 @@ import type { StartTimer } from './secure-connection';
 export interface GuestSessionOptions {
   readonly address: string;
   readonly port: number;
-  readonly code: string;
+  readonly secret: JoinSecret;
   readonly introduction: Introduction;
   readonly startTimer: StartTimer;
   readonly connect: (options: Omit<GuestOptions, 'randomBytes'>) => GuestClient;
@@ -18,6 +18,7 @@ export interface GuestSessionOptions {
 
 export interface GuestSession {
   readonly send: GuestClient['send'];
+  readonly planKey: () => Uint8Array | null;
   readonly close: () => void;
 }
 
@@ -34,10 +35,10 @@ const FINAL_ENDS = [
   'INVALID_INTRODUCTION',
 ] as const satisfies readonly GuestEnd[];
 
-/** Keeps a window joined to a host: joins with the code, keeps the key of the plan, and comes back with it after a lost connection, waiting longer each time and telling the page, until a refusal or the page ends it. */
+/** Keeps a window joined to a host: joins with the code or the key, keeps the key of the plan, comes back with it after a lost connection, waiting longer each time and telling the page, until a refusal, the host leaving or the page ends it. */
 export function startGuestSession(options: GuestSessionOptions): GuestSession {
   let client: GuestClient | null = null;
-  let planKey: Uint8Array | null = null;
+  let planKey: Uint8Array | null = options.secret.kind === 'key' ? options.secret.key : null;
   let hasOpened = false;
   let isStopped = false;
   let attempts = 0;
@@ -50,12 +51,12 @@ export function startGuestSession(options: GuestSessionOptions): GuestSession {
     stopRetry = null;
     stopOffline = null;
   };
-  /** Ends the session for good, telling the page why. */
+  /** Ends the session for good, telling the page why before the window forgets it. */
   const endForGood = (reason: GuestEnd): void => {
     isStopped = true;
     stopTimers();
-    options.ended();
     options.tell({ kind: 'ended', reason });
+    options.ended();
   };
   /** Waits before trying again, telling the page the first time the connection is lost and again once nobody answered for a while. */
   const retryLater = (key: Uint8Array): void => {
@@ -70,6 +71,12 @@ export function startGuestSession(options: GuestSessionOptions): GuestSession {
       attempts += 1;
       connect({ kind: 'key', key });
     });
+  };
+  /** Stops trying the host that left and tells the page, which then looks for the next host. */
+  const hostLeft = (): void => {
+    isStopped = true;
+    stopTimers();
+    options.tell({ kind: 'hostLeft' });
   };
   /** Connects to the host with a secret, following what the connection tells. */
   const connect = (secret: JoinSecret): void => {
@@ -100,15 +107,20 @@ export function startGuestSession(options: GuestSessionOptions): GuestSession {
             endForGood(reason);
             return;
           }
+          if (reason === 'HOST_LEFT') {
+            hostLeft();
+            return;
+          }
           retryLater(planKey);
         },
       },
     });
     client = current;
   };
-  connect({ kind: 'code', code: options.code });
+  connect(options.secret);
   return {
     send: (message) => (client === null ? { ok: false, error: 'NOT_OPEN' } : client.send(message)),
+    planKey: () => planKey,
     close: () => {
       isStopped = true;
       stopTimers();

@@ -21,12 +21,14 @@ describe('an update kept back for being incomplete', () => {
     const events: SyncEvent[] = [];
     const host = createHost({
       session: sessionOn(origin, 1),
+      roster: null,
+      tokenDigest: null,
       hostId: requireParticipantId('host'),
       name: 'Camille',
       send: () => undefined,
       report: (event) => events.push(event),
     });
-    expect(host.connect(lea, 'Léa').ok).toBe(true);
+    expect(host.connect(lea, 'Léa', null, null).ok).toBe(true);
     expect(host.setRight(lea, true).ok).toBe(true);
     const guest = sessionOn(origin, 2);
     const task = guest.project().tasks[0];

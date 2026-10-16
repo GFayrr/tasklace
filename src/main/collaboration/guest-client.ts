@@ -10,6 +10,7 @@ import {
   CODE_REPLACED_CLOSE,
   IDENTITY_TAKEN_CLOSE,
   REMOVED_CLOSE,
+  HOST_LEFT_CLOSE,
   WRONG_CODE_CLOSE,
   WRONG_KEY_CLOSE,
 } from './host-server';
@@ -22,7 +23,13 @@ import {
 } from './secure-connection';
 
 export type GuestEnd =
-  ConnectionEnd | 'CODE_REPLACED' | 'IDENTITY_TAKEN' | 'REMOVED' | 'UNREACHABLE' | 'NOT_PRIVATE';
+  | ConnectionEnd
+  | 'CODE_REPLACED'
+  | 'IDENTITY_TAKEN'
+  | 'REMOVED'
+  | 'HOST_LEFT'
+  | 'UNREACHABLE'
+  | 'NOT_PRIVATE';
 
 export interface GuestOptions {
   readonly address: string;
@@ -54,6 +61,7 @@ const REFUSED_CODES: ReadonlyMap<number, GuestEnd> = new Map([
   [WRONG_KEY_CLOSE, 'WRONG_KEY'],
   [IDENTITY_TAKEN_CLOSE, 'IDENTITY_TAKEN'],
   [REMOVED_CLOSE, 'REMOVED'],
+  [HOST_LEFT_CLOSE, 'HOST_LEFT'],
 ]);
 
 /** Tells whether an address typed by a person or found on the network can name a host: an IP address, or a host name of letters, digits, hyphens and dots. */

@@ -676,6 +676,9 @@
     "reconnectingShort": "Reconnecting…",
     "offline": "Offline · changes are shared when the plan is shared again",
     "offlineShort": "Offline",
-    "reconnectingDetail": "Tasklace keeps trying to reach {host}. Your changes are kept on this computer."
+    "reconnectingDetail": "Tasklace keeps trying to reach {host}. Your changes are kept on this computer.",
+    "hostChanged": "{left} left. {next} now hosts the plan; you are still in.",
+    "youHostNow": "{left} left. You now host the plan; the others join you on their own.",
+    "successor": "If you leave, {name}, who has been here the longest, becomes the host and keeps these choices."
   }
 }
