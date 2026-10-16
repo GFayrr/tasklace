@@ -193,6 +193,12 @@ async function adoptProject(
   return success(null);
 }
 
+/** Offers a window the shared plan it joined, whose state the worker checked, as a project without file, giving what the page opens. */
+export function offerSharedProject(sender: WebContents, loaded: LoadedProject): OpenedProject {
+  offerProject(sender, null, loaded.documentId);
+  return { state: loaded.state, documentId: loaded.documentId, fileName: '', warnings: [] };
+}
+
 /** Lets the user choose a project file, then opens it. */
 async function chooseAndOpen(
   services: ProjectFileServices,

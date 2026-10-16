@@ -483,3 +483,37 @@ describe('the state an opening sends', () => {
     }
   });
 });
+
+describe('reading the state of a shared plan', () => {
+  it('gives back a copy of the state owning its buffer, with its document identifier', async () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const padded = new Uint8Array(state.length + 4);
+    padded.set(state, 2);
+    const view = padded.subarray(2, 2 + state.length);
+    const read = await runFileTask({ kind: 'readSharedState', state: view });
+    expect(read).toEqual({
+      ok: true,
+      value: { kind: 'loaded', state, documentId: TEST_DOCUMENT_ID, warnings: [] },
+    });
+    expect(read.ok && read.value.kind === 'loaded' && read.value.state.buffer.byteLength).toBe(
+      state.length,
+    );
+    expect(isResultOf({ kind: 'readSharedState', state }, read)).toBe(true);
+  });
+
+  it('refuses and logs a state that cannot be decoded, keeping the inner error for the log only', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const read = await runFileTask({
+      kind: 'readSharedState',
+      state: Uint8Array.of(255, 255, 255, 1),
+    });
+    expect(read).toEqual({ ok: false, error: { code: 'INVALID_CONTENT' } });
+    expect(warnings.mock.calls).toEqual([
+      ['The shared plan received could not be opened: INVALID_CONTENT.'],
+    ]);
+    expect(errors.mock.calls.map((call): unknown => call[0])).toEqual([
+      'The content of the project file could not be decoded:',
+    ]);
+  });
+});

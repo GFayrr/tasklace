@@ -37,6 +37,7 @@ export type ProjectBridge = Pick<
   | 'saveHeldPdf'
   | 'exportLighterPdf'
   | 'discardHeldPdf'
+  | 'openSharedPlan'
 >;
 
 export type ActionFailure =
@@ -81,6 +82,7 @@ export interface ProjectFiles {
   readonly open: () => Promise<ActionResult<OpenedSession>>;
   readonly openRecent: (index: number) => Promise<ActionResult<OpenedSession>>;
   readonly importFile: (kind: ExchangeKind) => Promise<ActionResult<OpenedSession>>;
+  readonly openShared: (state: Uint8Array) => Promise<ActionResult<OpenedSession>>;
   readonly save: () => Promise<ActionResult<SavedProject>>;
   readonly saveAs: () => Promise<ActionResult<SavedProject>>;
   readonly exportFile: (
@@ -264,6 +266,7 @@ export function createProjectFiles(
     open: () => exclusive(() => load(bridge.openProject, true)),
     openRecent: (index) => exclusive(() => load(() => bridge.openRecentProject(index), true)),
     importFile: (kind) => exclusive(() => load(() => bridge.importProject(kind), false)),
+    openShared: (state) => exclusive(() => load(() => bridge.openSharedPlan(state), false)),
     save: () =>
       exclusive(() => (current?.hasFile === true ? trackSave(bridge.saveProject) : saveAs())),
     saveAs: () => exclusive(saveAs),

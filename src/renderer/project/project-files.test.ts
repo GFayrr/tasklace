@@ -73,6 +73,7 @@ function fakeBridge(
     },
     openRecentProject: () => Promise.resolve(openResult),
     importProject: () => Promise.resolve(openResult),
+    openSharedPlan: () => Promise.resolve(openResult),
     adoptProject: (documentId) => {
       adopted.push(documentId);
       events.push('adopt');

@@ -12,6 +12,7 @@ import {
 import {
   checkStateToSave,
   encodeTasklaceState,
+  readSharedState,
   readTasklaceDocument,
   type FileError,
 } from '../core/file/tasklace-file';
@@ -28,6 +29,7 @@ import { zlibCompressor } from './zlib-compressor';
 
 export type FileTask =
   | { readonly kind: 'openProject'; readonly path: string }
+  | { readonly kind: 'readSharedState'; readonly state: Uint8Array }
   | {
       readonly kind: 'importJson';
       readonly path: string;
@@ -79,6 +81,7 @@ export interface DirectPdf {
 export type FileTaskResult = Result<LoadedProject | SavedFiles | DirectPdf, FileFailure>;
 interface TaskOutcomes {
   readonly openProject: LoadedProject;
+  readonly readSharedState: LoadedProject;
   readonly importJson: LoadedProject;
   readonly importCsv: LoadedProject;
   readonly saveProject: SavedFiles;
@@ -89,6 +92,7 @@ export type ResultOfTask<T extends FileTask> = Result<TaskOutcomes[T['kind']], F
 
 const OUTCOME_KINDS = {
   openProject: 'loaded',
+  readSharedState: 'loaded',
   importJson: 'loaded',
   importCsv: 'loaded',
   saveProject: 'saved',
@@ -113,6 +117,8 @@ export async function runFileTask(task: FileTask): Promise<FileTaskResult> {
   switch (task.kind) {
     case 'openProject':
       return openProject(task.path);
+    case 'readSharedState':
+      return sharedState(task.state);
     case 'importJson':
       return importText(task.path, MAX_JSON_FILE_BYTES, (text) =>
         importJsonText(text, task.documentId, task.naming),
@@ -151,6 +157,21 @@ function lighterPdfRefusal(error: unknown): 'TOO_LARGE' | 'MISSING_CHARACTERS' |
     return 'TOO_LARGE';
   }
   return error instanceof MissingCharacter ? 'MISSING_CHARACTERS' : null;
+}
+
+/** Checks completely the state of a shared plan received on joining it, as the content of a file, a state refused being logged with its code. */
+function sharedState(state: Uint8Array): FileTaskResult {
+  const read = readSharedState(state);
+  if (!read.ok) {
+    console.warn(`The shared plan received could not be opened: ${read.error.code}.`);
+    return failure(withoutReason(read.error));
+  }
+  return success({
+    kind: 'loaded',
+    state: ownBytes(read.value.state),
+    documentId: read.value.documentId,
+    warnings: [],
+  });
 }
 
 /** Reads a .tasklace file and checks it completely, giving back its Yjs state and document identifier, a file refused being logged with its code. */

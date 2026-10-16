@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAX_PORT_ATTEMPTS } from '../../core/limits';
 import { failure } from '../../core/result';
 import { systemRandomBytes } from './aes-gcm';
-import { LAST_PORT, startHostServer } from './host-server';
+import { LAST_PORT } from '../../core/collaboration/ports';
+import { startHostServer } from './host-server';
 
 const listening = vi.hoisted(() => ({
   outcomes: [] as (string | Error | null)[],

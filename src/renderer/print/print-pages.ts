@@ -571,6 +571,7 @@ function printScene(
     deadlines: null,
     baseline: null,
     selectedTaskId: null,
+    presence: new Map(),
     today: null,
     showFloatLines: false,
     preview: null,

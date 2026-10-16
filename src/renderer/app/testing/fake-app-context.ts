@@ -6,11 +6,15 @@ import { createSharedDocument, requireDocumentId } from '../../../core/shared/sh
 import { TEST_DOCUMENT_ID, testId } from '../../../core/testing/project-builder';
 import type {
   BridgeResult,
+  CollaborationEvent,
+  CollaborationSettings,
+  CollaborationTarget,
   ExchangeKind,
   ExportedFile,
   OpenedProject,
   RecentProject,
   SavedProject,
+  Sharing,
   TasklaceBridge,
   PdfExport,
 } from '../../../preload/bridge-contract';
@@ -48,6 +52,21 @@ export interface FakeBridgeControl {
   readonly imports: ExchangeKind[];
   readonly exports: { readonly kind: ExchangeKind; readonly text: string; readonly name: string }[];
   readonly pdfExports: { readonly document: PrintDocument; readonly name: string }[];
+  readonly collaboration: FakeCollaboration;
+}
+
+export interface FakeCollaboration {
+  settingsResult: BridgeResult<CollaborationSettings>;
+  saveSettingsResult: BridgeResult<null>;
+  shareResult: BridgeResult<Sharing>;
+  joinResult: BridgeResult<null>;
+  stopResult: BridgeResult<null>;
+  findPlansResult: BridgeResult<null>;
+  openSharedResult: BridgeResult<OpenedProject>;
+  copyResult: BridgeResult<null>;
+  listener: ((event: CollaborationEvent) => void) | null;
+  readonly requests: (readonly [string, ...unknown[]])[];
+  readonly sent: (readonly [CollaborationTarget, Uint8Array])[];
 }
 
 export interface ManualScheduler {
@@ -97,6 +116,28 @@ export function fakeBridge(): {
     imports: [],
     exports: [],
     pdfExports: [],
+    collaboration: {
+      settingsResult: { ok: true, value: { name: null, port: 47_313, firewallNoticeSeen: false } },
+      saveSettingsResult: { ok: true, value: null },
+      shareResult: {
+        ok: true,
+        value: { code: 'K7Q4MZ', port: 47_313, addresses: ['192.168.1.24'] },
+      },
+      joinResult: { ok: true, value: null },
+      stopResult: { ok: true, value: null },
+      findPlansResult: { ok: true, value: null },
+      openSharedResult: { ok: false, error: { code: 'TASK_FAILED' } },
+      copyResult: { ok: true, value: null },
+      listener: null,
+      requests: [],
+      sent: [],
+    },
+  };
+  const { collaboration } = control;
+  /** Records a collaboration request and answers it with a value. */
+  const asked = <T>(request: readonly [string, ...unknown[]], value: T): Promise<T> => {
+    collaboration.requests.push(request);
+    return Promise.resolve(value);
   };
   /** Records a call of the bridge and answers it with a value. */
   const called = <T>(name: string, value: T): Promise<T> => {
@@ -153,6 +194,23 @@ export function fakeBridge(): {
     saveHeldPdf: () => called('saveHeldPdf', control.heldPdfResult),
     exportLighterPdf: () => called('exportLighterPdf', control.heldPdfResult),
     discardHeldPdf: () => called('discardHeldPdf', control.discardResult),
+    collaborationSettings: () => asked(['settings'], collaboration.settingsResult),
+    saveCollaborationSettings: (settings) =>
+      asked(['saveSettings', settings], collaboration.saveSettingsResult),
+    sharePlan: (planName, hostName) =>
+      asked(['share', planName, hostName], collaboration.shareResult),
+    stopCollaboration: () => asked(['stop'], collaboration.stopResult),
+    joinPlan: (joining) => asked(['join', joining], collaboration.joinResult),
+    openSharedPlan: (state) => asked(['openShared', state], collaboration.openSharedResult),
+    findPlans: (searching) => asked(['findPlans', searching], collaboration.findPlansResult),
+    dropPeer: (peer) => asked(['dropPeer', peer], { ok: true, value: null }),
+    copyJoinCode: () => asked(['copyCode'], collaboration.copyResult),
+    sendToCollaboration: (to, message) => {
+      collaboration.sent.push([to, message]);
+    },
+    onCollaborationEvent: (listener) => {
+      collaboration.listener = listener;
+    },
     onFlushRequested: () => undefined,
     reportStartFailure: () => undefined,
   };

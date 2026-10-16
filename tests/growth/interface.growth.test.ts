@@ -129,6 +129,7 @@ describe('growth of drawing the timeline', () => {
       deadlines: null,
       baseline: null,
       selectedTaskId: null,
+      presence: new Map(),
       today: project.startDate,
       showFloatLines: true,
       preview: null,

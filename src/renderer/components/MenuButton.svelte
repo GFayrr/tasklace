@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import Icon from './Icon.svelte';
 
   export interface MenuItem {
@@ -8,7 +9,14 @@
     readonly select: () => void;
   }
 
-  let { label, items }: { label: string; items: readonly MenuItem[] } = $props();
+  interface Props {
+    readonly label: string;
+    readonly items: readonly MenuItem[];
+    readonly trigger?: Snippet;
+    readonly alignEnd?: boolean;
+  }
+
+  let { label, items, trigger, alignEnd = false }: Props = $props();
   let open = $state(false);
   let root: HTMLDivElement | undefined = $state();
 
@@ -38,16 +46,21 @@
 <div class="menu" bind:this={root}>
   <button
     type="button"
-    class="button"
+    class={trigger === undefined ? 'button' : 'trigger'}
     aria-haspopup="menu"
     aria-expanded={open}
+    aria-label={trigger === undefined ? undefined : label}
     onclick={() => (open = !open)}
   >
-    <span>{label}</span>
-    <Icon name="chevron" />
+    {#if trigger === undefined}
+      <span>{label}</span>
+      <Icon name="chevron" />
+    {:else}
+      {@render trigger()}
+    {/if}
   </button>
   {#if open}
-    <ul class="items" role="menu" aria-label={label}>
+    <ul class={['items', { end: alignEnd }]} role="menu" aria-label={label}>
       {#each items as item (item.key)}
         <li role="none">
           <button
@@ -109,6 +122,19 @@
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
+  }
+
+  .items.end {
+    left: auto;
+    right: 0;
+  }
+
+  .trigger {
+    padding: 0;
+    color: inherit;
+    background: none;
+    border: 0;
+    cursor: pointer;
   }
 
   .item {

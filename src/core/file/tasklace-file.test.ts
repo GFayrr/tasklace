@@ -33,6 +33,7 @@ import {
   encodeTasklaceFile,
   encodeTasklaceState,
   HEADER_BYTES,
+  readSharedState,
   readTasklaceDocument,
   readTasklaceFile,
   type Compressor,
@@ -553,6 +554,30 @@ describe('checking a state before saving it', () => {
     document.getMap('project').set('name', '');
     expect(checkStateToSave(Y.encodeStateAsUpdate(document), TEST_DOCUMENT_ID)).toEqual(
       failure({ code: 'INVALID_STATE', issues: [{ path: 'name', code: 'EMPTY_TEXT' }] }),
+    );
+  });
+});
+
+describe('reading a state received from a shared plan', () => {
+  it('gives back the state and its document identifier when it holds a valid project', () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    expect(readSharedState(state)).toEqual(success({ state, documentId: TEST_DOCUMENT_ID }));
+  });
+
+  it('refuses an empty state, one above the limit and one that cannot be decoded', () => {
+    expect(readSharedState(new Uint8Array())).toEqual(failure({ code: 'INVALID_CONTENT' }));
+    expect(readSharedState({ length: MAX_UNCOMPRESSED_BYTES + 1 } as Uint8Array)).toEqual(
+      failure({ code: 'TOO_LARGE' }),
+    );
+    const broken = readSharedState(Uint8Array.from([255, 255, 255, 1]));
+    expect(broken.ok ? null : broken.error.code).toBe('INVALID_CONTENT');
+  });
+
+  it('refuses a state holding an invalid project, with its problems', () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    document.getMap('project').set('name', '');
+    expect(readSharedState(Y.encodeStateAsUpdate(document))).toEqual(
+      failure({ code: 'INVALID_PROJECT', issues: [{ path: 'name', code: 'EMPTY_TEXT' }] }),
     );
   });
 });

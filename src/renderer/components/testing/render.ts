@@ -4,11 +4,17 @@ import { afterEach } from 'vitest';
 const mounted: (() => void)[] = [];
 
 afterEach(() => {
+  unmountAll();
+  document.body.replaceChildren();
+});
+
+/** Removes every component mounted so far, as when the page closes them. */
+export function unmountAll(): void {
   for (const remove of mounted.splice(0)) {
     remove();
   }
-  document.body.replaceChildren();
-});
+  flushSync();
+}
 
 /** Mounts a component in the page with its properties, and removes it after the test. */
 export function render<Props extends Record<string, unknown>>(

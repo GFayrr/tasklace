@@ -2,7 +2,7 @@ import type { Bonjour } from 'bonjour-service';
 import { MAX_PARTICIPANT_NAME_LENGTH, MAX_PROJECT_NAME_LENGTH } from '../../core/limits';
 import { createIssueList } from '../../core/validation/validation-issues';
 import { readText } from '../../core/validation/value-readers';
-import { isPort } from './guest-client';
+import { isPort } from '../../core/collaboration/ports';
 import { isPrivateAddress } from './private-addresses';
 
 export interface AnnouncedService {

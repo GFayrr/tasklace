@@ -8,7 +8,7 @@ import type { Introduction } from '../../core/collaboration/secure/link';
 import { MAX_OPEN_HANDSHAKES } from '../../core/limits';
 import { success } from '../../core/result';
 import { systemRandomBytes } from './aes-gcm';
-import { connectAsGuest, isHostAddress, isPort, socketUrlOf, type GuestEnd } from './guest-client';
+import { connectAsGuest, isHostAddress, socketUrlOf, type GuestEnd } from './guest-client';
 import { bytesOf, startHostServer, type HostServer, type Peer } from './host-server';
 import { MAX_SEALED_FRAME_BYTES } from '../../core/collaboration/secure/channel';
 import type { ConnectionEnd, StartTimer } from './secure-connection';
@@ -111,19 +111,24 @@ describe('a shared plan over the network', () => {
     expect([shared.left, lea.ends]).toEqual([[[1, 'WIRE_CLOSED']], ['CLOSED']]);
   });
 
-  it('tells a guest its code is wrong, and draws a new code after five wrong ones', async () => {
+  it('tells a guest its code is wrong, and the guest whose wrong code was the last one that its code was replaced', async () => {
     const shared = await host();
     const first = shared.server.code();
-    const guests = Array.from({ length: WRONG_CODES_BEFORE_NEW_CODE }, () =>
-      guest(shared.server.port, first === 'AAAAAA' ? 'BBBBBB' : 'AAAAAA'),
-    );
-    await until(() => guests.every((wrong) => wrong.ends.length === 1));
-    expect(guests.map((wrong) => wrong.ends)).toEqual(guests.map(() => ['WRONG_CODE']));
+    const ends: unknown[] = [];
+    for (let attempt = 0; attempt < WRONG_CODES_BEFORE_NEW_CODE; attempt += 1) {
+      const wrong = guest(shared.server.port, first === 'AAAAAA' ? 'BBBBBB' : 'AAAAAA');
+      await until(() => wrong.ends.length === 1);
+      ends.push(...wrong.ends);
+    }
+    expect(ends).toEqual(['WRONG_CODE', 'WRONG_CODE', 'WRONG_CODE', 'WRONG_CODE', 'CODE_REPLACED']);
     expect([shared.codes.length, shared.codes[0] === shared.server.code(), shared.joined]).toEqual([
       1,
       true,
       [],
     ]);
+    const late = guest(shared.server.port, first);
+    await until(() => late.ends.length === 1);
+    expect(late.ends).toEqual(['WRONG_CODE']);
   });
 
   it('listens on the next port when the chosen one is taken', async () => {
@@ -224,17 +229,6 @@ describe('host addresses', () => {
         'x'.repeat(254),
       ].map(isHostAddress),
     ).toEqual([true, true, true, true, false, false, false, false, false]);
-  });
-
-  it('accepts the ports from 1 to 65535', () => {
-    expect([0, 1, 47_313, 65_535, 65_536, 1.5].map(isPort)).toEqual([
-      false,
-      true,
-      true,
-      true,
-      false,
-      false,
-    ]);
   });
 
   it('writes an IPv6 address in brackets with its zone escaped', () => {

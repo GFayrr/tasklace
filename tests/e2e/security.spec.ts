@@ -104,29 +104,53 @@ test('exposes only the listed bridge functions, which check what they receive', 
           () => 'answered',
           () => 'refused',
         ),
+      wrongJoin: await api
+        .joinPlan({
+          address: 'not an address',
+          port: wrongPosition,
+          code: '0',
+          participantId: 'a b',
+          name: '',
+        })
+        .then(
+          () => 'answered',
+          () => 'refused',
+        ),
     };
   }, -1);
   expect(bridge).toEqual({
     keys: [
       'adoptProject',
+      'collaborationSettings',
+      'copyJoinCode',
       'discardHeldPdf',
+      'dropPeer',
       'exportLighterPdf',
       'exportPdf',
       'exportProject',
+      'findPlans',
       'importProject',
+      'joinPlan',
       'newProject',
+      'onCollaborationEvent',
       'onFlushRequested',
       'openProject',
       'openRecentProject',
+      'openSharedPlan',
       'recentProjects',
       'regionalFormat',
       'reportStartFailure',
+      'saveCollaborationSettings',
       'saveHeldPdf',
       'saveProject',
       'saveProjectAs',
+      'sendToCollaboration',
+      'sharePlan',
+      'stopCollaboration',
     ],
     wrongType: 'refused',
     wrongName: 'refused',
+    wrongJoin: 'refused',
   });
 });
 
