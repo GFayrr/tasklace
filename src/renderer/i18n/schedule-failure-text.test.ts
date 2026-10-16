@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import english from '../locales/en.json';
 import { scheduleFailureText } from './schedule-failure-text';
+import { testId } from '../../core/testing/project-builder';
 
 const NAMES = new Map([['a', 'Write report']]);
 
@@ -43,10 +44,15 @@ describe('scheduleFailureText', () => {
         {
           kind: 'structure',
           errors: [
-            { code: 'HIERARCHY_CYCLE', list: 'tasks', index: 0, taskId: 'a' },
-            { code: 'DUPLICATE_TASK_ID', list: 'tasks', index: 3, taskId: 'gone' },
-            { code: 'SELF_DEPENDENCY', list: 'dependencies', index: 1, dependencyId: 'a-a' },
-            { code: 'DUPLICATE_TAG_ID', list: 'tags', index: 2, tagId: 't' },
+            { code: 'HIERARCHY_CYCLE', list: 'tasks', index: 0, taskId: testId('a') },
+            { code: 'DUPLICATE_TASK_ID', list: 'tasks', index: 3, taskId: testId('gone') },
+            {
+              code: 'SELF_DEPENDENCY',
+              list: 'dependencies',
+              index: 1,
+              dependencyId: testId('a-a'),
+            },
+            { code: 'DUPLICATE_TAG_ID', list: 'tags', index: 2, tagId: testId('t') },
             { code: 'TOO_MANY_TASKS' },
           ],
         },
@@ -67,7 +73,7 @@ describe('scheduleFailureText', () => {
   it('names the task that cannot be placed, by its identifier when it has no name, and says why', () => {
     const failure = {
       kind: 'task',
-      error: { code: 'BEYOND_PLANNING_HORIZON', taskId: 'a' },
+      error: { code: 'BEYOND_PLANNING_HORIZON', taskId: testId('a') },
     } as const;
     expect(scheduleFailureText(english, failure, nameOf)).toEqual({
       text: english.scheduleFailures.task.replace('{name}', 'Write report'),

@@ -104,7 +104,7 @@ export function cellEdit(
     case 'predecessors':
       return setPredecessors(context, id, text);
     case 'tag':
-      return setTag(context, id, text === '' ? null : text);
+      return setTagByText(context, id, text);
   }
 }
 
@@ -127,6 +127,15 @@ function endEdit(context: EditContext, id: TaskId, text: string, source: CellSou
     lastBlockStart: lastBlock.start,
     calendar: source.calendar,
   });
+}
+
+/** Sets the tag a cell names by its identifier, an empty cell meaning no tag and an identifier of no tag of the project being refused. */
+function setTagByText(context: EditContext, id: TaskId, text: string): Edit {
+  if (text === '') {
+    return setTag(context, id, null);
+  }
+  const tag = context.project.tags.find((candidate) => candidate.id === text);
+  return tag === undefined ? failure('NOT_POSSIBLE') : setTag(context, id, tag.id);
 }
 
 /** Writes an instant as the value of a date and time picker. */

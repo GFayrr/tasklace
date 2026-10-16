@@ -4,7 +4,7 @@ import type { Project } from '../../core/model/project';
 import { createSharedDocument } from '../../core/shared/shared-document';
 import { openSharedSession } from '../../core/shared/shared-session';
 import { at, dayOf as day } from '../../core/testing/civil-time';
-import { project, TEST_DOCUMENT_ID, workTask } from '../../core/testing/project-builder';
+import { project, TEST_DOCUMENT_ID, workTask, testId } from '../../core/testing/project-builder';
 import { SATURDAY, SUNDAY, MONDAY } from '../../core/time';
 import { buildPlanOutline } from './plan-outline';
 import {
@@ -34,7 +34,7 @@ function contextOf(change: Partial<WorkingCalendar> = {}): EditContext {
   return {
     project: plan,
     outline: buildPlanOutline(plan.tasks, new Set()),
-    createId: () => 'new',
+    createId: () => testId('new'),
     dayHours: 7,
   };
 }
@@ -271,7 +271,12 @@ describe('setBaseline and clearBaseline', () => {
     const baseline = {
       takenAt: at(2026, 10, 6, 10),
       entries: [
-        { taskId: 'a', start: at(2026, 10, 12, 8), end: at(2026, 10, 12, 17), durationHours: 9 },
+        {
+          taskId: testId('a'),
+          start: at(2026, 10, 12, 8),
+          end: at(2026, 10, 12, 17),
+          durationHours: 9,
+        },
       ],
     };
     expect(setBaseline(baseline)).toEqual({

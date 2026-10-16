@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Project } from '../../core/model/project';
+import type { Project, TaskId } from '../../core/model/project';
 import { at } from '../../core/testing/civil-time';
 import { scheduleProject } from '../../core/scheduling/schedule-project';
-import { project, workTask } from '../../core/testing/project-builder';
+import { project, workTask, testId } from '../../core/testing/project-builder';
 import type { BridgeResult, OpenedProject } from '../../preload/bridge-contract';
 import { AppState } from '../app/app-state.svelte';
 import english from '../locales/en.json';
@@ -75,7 +75,7 @@ describe('App', () => {
   it('commits the cell being edited before a file shortcut, so that the save holds the typed value', async () => {
     const { app, root, control } = await renderApp(true);
     const grid = single(root, '[role="grid"]');
-    app.select('a');
+    app.select(testId('a'));
     update();
     press(grid, 'Enter');
     await settle();
@@ -119,7 +119,7 @@ describe('App', () => {
 
   it('leaves the shortcuts alone while a dialog is open', async () => {
     const { app, control } = await renderApp(true);
-    app.openDetails('a');
+    app.openDetails(testId('a'));
     update();
     press(window, 'o', { ctrlKey: true });
     app.closeDetails();
@@ -165,7 +165,7 @@ describe('Workspace', () => {
   function shapeIn(
     app: AppState,
     frame: TimelineFrame,
-    id: string,
+    id: TaskId,
   ): Extract<RowShape, { kind: 'task' }> {
     const index = app.outline.rowIndexById.get(id) ?? -1;
     const row = app.outline.rows[index];
@@ -242,7 +242,7 @@ describe('Workspace', () => {
   it('shows the project from two days before its start, and moves a dragged bar by whole days', async () => {
     const { app, scroller, frame, scrollLeft } = await renderSized();
     expect(scroller.scrollLeft).toBe(scrollLeft);
-    const shape = shapeIn(app, frame, 'b');
+    const shape = shapeIn(app, frame, testId('b'));
     const middle = shape.row * ROW_HEIGHT + ROW_HEIGHT / 2;
     const x = shape.start + 4 - scrollLeft;
     pointer(scroller, 'pointerdown', x, middle);
@@ -256,7 +256,7 @@ describe('Workspace', () => {
 
   it('stretches a bar to change its duration, and links a task dragged from its handle', async () => {
     const { app, scroller, frame, scrollLeft } = await renderSized();
-    const shape = shapeIn(app, frame, 'a');
+    const shape = shapeIn(app, frame, testId('a'));
     const middle = shape.row * ROW_HEIGHT + ROW_HEIGHT / 2;
     pointer(scroller, 'pointerdown', shape.end - 1 - scrollLeft, middle);
     pointer(scroller, 'pointermove', shape.end + 24 * pixelsPerHour('day') - scrollLeft, middle);
@@ -265,20 +265,22 @@ describe('Workspace', () => {
     expect(app.project?.tasks.find((task) => task.id === 'a')).toMatchObject({
       segments: [{ durationHours: 14 }],
     });
-    const stretched = shapeIn(app, frame, 'a');
-    const target = shapeIn(app, frame, 'b');
+    const stretched = shapeIn(app, frame, testId('a'));
+    const target = shapeIn(app, frame, testId('b'));
     const handleX = stretched.end + LINK_HANDLE_GAP - scrollLeft;
     const targetMiddle = target.row * ROW_HEIGHT + ROW_HEIGHT / 2;
     pointer(scroller, 'pointerdown', handleX, middle);
     pointer(scroller, 'pointermove', target.start + 5 - scrollLeft, targetMiddle);
     pointer(scroller, 'pointerup', target.start + 5 - scrollLeft, targetMiddle);
     await settle();
-    expect(app.project?.dependencies).toMatchObject([{ predecessorId: 'a', successorId: 'b' }]);
+    expect(app.project?.dependencies).toMatchObject([
+      { predecessorId: testId('a'), successorId: testId('b') },
+    ]);
   });
 
   it('refuses to move or stretch a bar while the dates shown are older than the latest change, then accepts once they are updated', async () => {
     const { app, scroller, frame, scrollLeft, scheduler } = await renderSized();
-    const shape = shapeIn(app, frame, 'b');
+    const shape = shapeIn(app, frame, testId('b'));
     const before = app.project?.tasks.find((task) => task.id === 'b');
     scheduler.automatic = false;
     expect(app.rename('Renamed')).toBe(true);
@@ -324,7 +326,7 @@ describe('Workspace', () => {
     const { app, root, scroller } = await renderSized();
     resize(scroller, 800, ROW_HEIGHT);
     const grid = single(root, '[role="grid"]');
-    app.select('a');
+    app.select(testId('a'));
     update();
     press(grid, 'ArrowDown');
     expect(scroller.scrollTop).toBe(ROW_HEIGHT);

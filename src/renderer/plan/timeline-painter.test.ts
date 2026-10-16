@@ -5,6 +5,7 @@ import { paleColor } from './tag-styles';
 import { nonWorkingIntervals, previewSpan, splitAtDaysOff, visibleRows } from './timeline-painter';
 import type { RowShape } from './timeline-geometry';
 import { ROW_HEIGHT } from './timeline-geometry';
+import { testId } from '../../core/testing/project-builder';
 
 const CALENDAR = compileOrThrow(TEST_CALENDAR);
 
@@ -84,7 +85,7 @@ describe('splitAtDaysOff', () => {
 describe('previewSpan', () => {
   const shape: Extract<RowShape, { kind: 'task' }> = {
     kind: 'task',
-    taskId: 't',
+    taskId: testId('t'),
     row: 0,
     segments: [
       { x: 100, width: 40, filled: 0 },

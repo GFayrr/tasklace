@@ -8,6 +8,7 @@ import type { Project, Task } from '../../src/core/model/project';
 import { scheduleProject } from '../../src/core/scheduling/schedule-project';
 import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../../src/core/testing/arbitraries';
 import { buildLargeProject } from './large-project';
+import { testId } from '../../src/core/testing/project-builder';
 
 const FRENCH: RegionalFormat = {
   listSeparator: ';',
@@ -89,13 +90,14 @@ function constrainedProject(): Project {
   const placements = unwrap(scheduleProject(base)).placements;
   const phases = Array.from({ length: PHASE_COUNT }, (_unused, index): Task => ({
     kind: 'summary',
-    id: `phase-${String(index)}`,
+    id: testId(`phase-${String(index)}`),
     name: `Phase ${String(index)}`,
     parentId: null,
     sortKey: `z${String(index)}`,
   }));
   const tasks = base.tasks.map((task, index): Task => {
-    const parentId = index % IN_PHASE_EVERY === 0 ? `phase-${String(index % PHASE_COUNT)}` : null;
+    const parentId =
+      index % IN_PHASE_EVERY === 0 ? testId(`phase-${String(index % PHASE_COUNT)}`) : null;
     const start = placements.get(task.id)?.start;
     if (task.kind === 'summary' || start === undefined || index % START_DATE_EVERY !== 0) {
       return { ...task, parentId };

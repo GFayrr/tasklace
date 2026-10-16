@@ -18,10 +18,11 @@ import {
   type RowShape,
   type TimelineFrame,
 } from './timeline-geometry';
+import { testId } from '../../core/testing/project-builder';
 
 const TASK: RowShape = {
   kind: 'task',
-  taskId: 't',
+  taskId: testId('t'),
   row: 2,
   segments: [{ x: 100, width: 80, filled: 0 }],
   start: 100,
@@ -29,7 +30,7 @@ const TASK: RowShape = {
 };
 const SPLIT: RowShape = {
   kind: 'task',
-  taskId: 't',
+  taskId: testId('t'),
   row: 2,
   segments: [
     { x: 100, width: 40, filled: 0 },
@@ -38,8 +39,8 @@ const SPLIT: RowShape = {
   start: 100,
   end: 260,
 };
-const MILESTONE: RowShape = { kind: 'milestone', taskId: 'm', row: 3, x: 300 };
-const SUMMARY: RowShape = { kind: 'summary', taskId: 's', row: 0, start: 0, end: 400 };
+const MILESTONE: RowShape = { kind: 'milestone', taskId: testId('m'), row: 3, x: 300 };
+const SUMMARY: RowShape = { kind: 'summary', taskId: testId('s'), row: 0, start: 0, end: 400 };
 const MIDDLE = 2 * ROW_HEIGHT + ROW_HEIGHT / 2;
 const FRAME: TimelineFrame = { origin: at(2026, 10, 1), end: at(2026, 12, 1), pixelsPerHour: 2 };
 
@@ -54,7 +55,7 @@ describe('gestureAt', () => {
   it('links from the handle of the selected task only', () => {
     const handle = linkHandleCenter(TASK, null);
     expect(handle).toEqual({ x: 180 + LINK_HANDLE_GAP, y: MIDDLE });
-    expect(gestureAt(TASK, handle.x, handle.y, 't')?.kind).toBe('link');
+    expect(gestureAt(TASK, handle.x, handle.y, testId('t'))?.kind).toBe('link');
     expect(gestureAt(TASK, handle.x, handle.y, null)).toBeNull();
   });
 
@@ -63,8 +64,8 @@ describe('gestureAt', () => {
       [0, 140],
       [null, 260 + LINK_HANDLE_GAP],
     ]);
-    expect(gestureAt(SPLIT, 140, MIDDLE, 't')).toMatchObject({ kind: 'link', block: 0 });
-    expect(gestureAt(SPLIT, 260 + LINK_HANDLE_GAP, MIDDLE, 't')).toMatchObject({
+    expect(gestureAt(SPLIT, 140, MIDDLE, testId('t'))).toMatchObject({ kind: 'link', block: 0 });
+    expect(gestureAt(SPLIT, 260 + LINK_HANDLE_GAP, MIDDLE, testId('t'))).toMatchObject({
       kind: 'link',
       block: null,
     });

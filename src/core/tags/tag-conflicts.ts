@@ -6,6 +6,7 @@ import { MAX_TASKS } from '../limits';
 import type { Tag, TagId, Task, TaskId } from '../model/project';
 import { computePlacementSlots, worksFullDays, type Placement } from '../scheduling/task-placement';
 import { fromQuarters, toQuarters, type ProjectHour } from '../time';
+import { valueAt } from '../table-value';
 
 export interface TagConflict {
   readonly tagId: TagId;
@@ -224,7 +225,7 @@ function finishGroup(group: ConflictGroup, taskIds: readonly TaskId[]): Omit<Tag
     start: group.start,
     end: group.pendingEnd ?? group.start,
     taskIds: [...group.taskIndices]
-      .map((taskIndex) => taskIds[taskIndex] ?? '')
+      .map((taskIndex) => valueAt(taskIds, taskIndex))
       .sort(compareStrings),
   };
 }

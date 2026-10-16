@@ -8,6 +8,7 @@ import {
   splitTask,
   summary,
   workTask,
+  testId,
 } from '../../core/testing/project-builder';
 import {
   draftFromTask,
@@ -267,27 +268,29 @@ describe('date constraints in the details panel', () => {
 describe('taskBasis', () => {
   it('changes when the task or one of its links changes, and only then', () => {
     const plan = project([SPLIT, workTask('w'), workTask('x')], [link('w', 's')]);
-    const basis = taskBasis(plan, 's');
-    expect(taskBasis({ ...plan, dependencies: [...plan.dependencies].reverse() }, 's')).toBe(basis);
-    expect(taskBasis({ ...plan, dependencies: [...plan.dependencies, link('w', 'x')] }, 's')).toBe(
-      basis,
-    );
+    const basis = taskBasis(plan, testId('s'));
+    expect(
+      taskBasis({ ...plan, dependencies: [...plan.dependencies].reverse() }, testId('s')),
+    ).toBe(basis);
+    expect(
+      taskBasis({ ...plan, dependencies: [...plan.dependencies, link('w', 'x')] }, testId('s')),
+    ).toBe(basis);
     expect(
       taskBasis(
         { ...plan, dependencies: [...plan.dependencies, blockLink('x', 's', { to: 1 })] },
-        's',
+        testId('s'),
       ),
     ).not.toBe(basis);
     expect(
       taskBasis(
         { ...plan, tasks: plan.tasks.map((task) => ({ ...task, name: `${task.name}!` })) },
-        's',
+        testId('s'),
       ),
     ).not.toBe(basis);
     const constrained = { ...plan.options, dateConstraintsEnabled: true };
-    expect(taskBasis({ ...plan, options: constrained }, 's')).not.toBe(basis);
+    expect(taskBasis({ ...plan, options: constrained }, testId('s'))).not.toBe(basis);
     expect(
-      taskBasis({ ...plan, options: { ...plan.options, criticalPathEnabled: true } }, 's'),
+      taskBasis({ ...plan, options: { ...plan.options, criticalPathEnabled: true } }, testId('s')),
     ).toBe(basis);
   });
 });

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { project, workTask } from '../../core/testing/project-builder';
+import { project, workTask, testId } from '../../core/testing/project-builder';
 import english from '../locales/en.json';
 import { draftFromTask } from '../plan/task-details';
 import { AppState } from './app-state.svelte';
@@ -84,8 +84,8 @@ describe('changes to a project whose calendar cannot be compiled', () => {
     if (task === undefined) {
       throw new Error('The plan has no task.');
     }
-    app.openDetails('a');
-    const draft = draftFromTask(task, () => '', app.detailsBasis('a'));
+    app.openDetails(testId('a'));
+    const draft = draftFromTask(task, () => '', app.detailsBasis(testId('a')));
     let added = draft;
     expect(logged(() => (added = app.withAddedBlock(draft)))).toEqual([[LOG]]);
     expect(added).toBe(draft);

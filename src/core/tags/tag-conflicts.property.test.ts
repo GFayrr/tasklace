@@ -13,13 +13,14 @@ import {
   scheduleOrThrow,
   workTask,
   segmentsOrThrow,
+  testId,
 } from '../testing/project-builder';
 import type { ProjectHour } from '../time';
 
 const TAGS: Tag[] = [
-  { id: 'alice', name: 'Alice', color: '#2a78d6', representsPersonOrTeam: true },
-  { id: 'bob', name: 'Bob', color: '#eb6834', representsPersonOrTeam: true },
-  { id: 'design', name: 'Design', color: '#1baf7a', representsPersonOrTeam: false },
+  { id: testId('alice'), name: 'Alice', color: '#2a78d6', representsPersonOrTeam: true },
+  { id: testId('bob'), name: 'Bob', color: '#eb6834', representsPersonOrTeam: true },
+  { id: testId('design'), name: 'Design', color: '#1baf7a', representsPersonOrTeam: false },
 ];
 const PERSON_TAG_IDS = ['alice', 'bob'];
 const TAG_CHOICES = ['alice', 'bob', 'design', 'deleted', null] as const;

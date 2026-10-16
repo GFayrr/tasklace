@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Project } from '../../core/model/project';
 import type { AppContext } from '../app/app-state.svelte';
 import { at } from '../../core/testing/civil-time';
-import { link, project, workTask } from '../../core/testing/project-builder';
+import { link, project, workTask, testId } from '../../core/testing/project-builder';
 import {
   OPENED_DOCUMENT_ID,
   openedAppOf,
@@ -354,13 +354,13 @@ describe('the export to PDF', () => {
 
   it('draws the patterns of close tags in the preview, reporting once that this computer cannot draw them', async () => {
     const tags = [
-      { id: 'design', name: 'Design', color: '#2A78D6', representsPersonOrTeam: false },
-      { id: 'near', name: 'Near', color: '#2A78D7', representsPersonOrTeam: false },
+      { id: testId('design'), name: 'Design', color: '#2A78D6', representsPersonOrTeam: false },
+      { id: testId('near'), name: 'Near', color: '#2A78D7', representsPersonOrTeam: false },
     ];
     const tagged = project(
       [
-        workTask('a', { name: 'Survey', sortKey: 'a', tagId: 'design' }),
-        workTask('b', { name: 'Writing', sortKey: 'b', tagId: 'near' }),
+        workTask('a', { name: 'Survey', sortKey: 'a', tagId: testId('design') }),
+        workTask('b', { name: 'Writing', sortKey: 'b', tagId: testId('near') }),
       ],
       [],
       { name: 'Thesis', startDate: at(2026, 9, 28, 9), tags },

@@ -8,7 +8,7 @@ import {
   MAX_TAGS,
   MAX_TASKS,
 } from '../../limits';
-import type { Dependency, Project, Task } from '../../model/project';
+import type { Dependency, Project, Task, TaskId } from '../../model/project';
 import { shortestLink } from '../../scheduling/block-links';
 import { scheduleProject, type Schedule } from '../../scheduling/schedule-project';
 import { TAG_PALETTE } from '../../tags/tag-palette';
@@ -24,6 +24,7 @@ import {
   splitTask,
   summary,
   workTask,
+  testId,
 } from '../../testing/project-builder';
 import type { ValidationIssue } from '../../validation/validation-issues';
 import { keepAllColumns, parseCsv } from './csv-text';
@@ -45,19 +46,28 @@ const AMERICAN: RegionalFormat = {
 };
 const FALLBACK_START = at(2026, 9, 28, 9);
 const HEADER = 'WBS;Name;Start;End;Duration (h);Progress (%);Predecessors;Tag;Blocks';
-const DESIGN = { id: 'design', name: 'Design', color: '#336699', representsPersonOrTeam: true };
+const DESIGN = {
+  id: testId('design'),
+  name: 'Design',
+  color: '#336699',
+  representsPersonOrTeam: true,
+};
 
 const SAMPLE = project(
   [
     summary('phase', { name: '=Phase' }),
-    workTask('write', { parentId: 'phase', name: 'Écrire; "le plan"', tagId: 'design' }),
+    workTask('write', {
+      parentId: testId('phase'),
+      name: 'Écrire; "le plan"',
+      tagId: testId('design'),
+    }),
     splitTask(
       'split',
       [
         [4, 0],
         [3, 2],
       ],
-      { parentId: 'phase', progressPercent: 40 },
+      { parentId: testId('phase'), progressPercent: 40 },
     ),
     milestone('done', { progressPercent: 100 }),
     workTask('late', { startNoEarlierThan: at(2026, 10, 5, 13) }),
@@ -154,7 +164,7 @@ const namedProjectArbitrary = fc
     const tags = tagNames
       .filter((name) => name !== '')
       .map((name, index) => ({
-        id: `tag${String(index)}`,
+        id: testId(`tag${String(index)}`),
         name,
         color: '#336699',
         representsPersonOrTeam: false,
@@ -173,7 +183,7 @@ const namedProjectArbitrary = fc
 /** Describes a scheduled project by WBS number, independently of its identifiers. */
 function describeByWbs(input: Project, schedule: Schedule) {
   /** Returns the WBS number of a task, or null for no task. */
-  const wbs = (id: string | null) => (id === null ? null : (schedule.wbsNumbers.get(id) ?? '?'));
+  const wbs = (id: TaskId | null) => (id === null ? null : (schedule.wbsNumbers.get(id) ?? '?'));
   /** Returns the name of a tag, or null for no tag. */
   const tagName = (id: string | null) => input.tags.find((tag) => tag.id === id)?.name ?? null;
   const tasks = input.tasks.map((task) => ({
@@ -237,7 +247,7 @@ describe('exportProjectCsv', () => {
   });
 
   it('leaves the tag cell empty for a tag the project does not define', () => {
-    const lost = project([workTask('a', { tagId: 'missing' })]);
+    const lost = project([workTask('a', { tagId: testId('missing') })]);
     expect(unwrap(exportProjectCsv(lost, scheduleOrThrow(lost), FRENCH))).toContain(
       '1;a;28/09/2026 09:00;28/09/2026 17:00;7;0;;;\r\n',
     );
@@ -267,7 +277,7 @@ describe('importProjectCsv round trip', () => {
     );
     expect(rebuilt.name).toBe('Imported');
     expect(rebuilt.tags).toEqual([
-      { id: 'tag-1', name: 'Design', color: TAG_PALETTE[0], representsPersonOrTeam: false },
+      { id: testId('tag-1'), name: 'Design', color: TAG_PALETTE[0], representsPersonOrTeam: false },
     ]);
   });
 
@@ -349,9 +359,9 @@ describe('importProjectCsv reading a table written by hand', () => {
     const { project: rebuilt } = importLines(';A;;;7;;;;', ';B;;;7;;1;;');
     expect(rebuilt.dependencies).toEqual([
       {
-        id: 'dependency-1',
-        predecessorId: 'task-1',
-        successorId: 'task-2',
+        id: testId('dependency-1'),
+        predecessorId: testId('task-1'),
+        successorId: testId('task-2'),
         type: 'finishToStart',
         lagHours: 0,
         predecessorBlock: null,
@@ -434,24 +444,24 @@ describe('importProjectCsv with links to and from blocks', () => {
       ),
     ).toEqual([
       {
-        predecessorId: 'task-1',
-        successorId: 'task-2',
+        predecessorId: testId('task-1'),
+        successorId: testId('task-2'),
         predecessorBlock: null,
         successorBlock: 1,
         type: 'finishToStart',
         lagHours: 0,
       },
       {
-        predecessorId: 'task-3',
-        successorId: 'task-2',
+        predecessorId: testId('task-3'),
+        successorId: testId('task-2'),
         predecessorBlock: null,
         successorBlock: 1,
         type: 'startToStart',
         lagHours: 1,
       },
       {
-        predecessorId: 'task-2',
-        successorId: 'task-3',
+        predecessorId: testId('task-2'),
+        successorId: testId('task-3'),
         predecessorBlock: 0,
         successorBlock: null,
         type: 'finishToStart',
@@ -532,7 +542,7 @@ describe('importProjectCsv with links to and from blocks', () => {
       '3;test;;;4;;2#2',
     );
     expect(rebuilt.dependencies).toEqual([
-      expect.objectContaining({ predecessorId: 'task-2', predecessorBlock: null }),
+      expect.objectContaining({ predecessorId: testId('task-2'), predecessorBlock: null }),
     ]);
   });
 
@@ -545,8 +555,8 @@ describe('importProjectCsv with links to and from blocks', () => {
     expect(issuesAt('1;design;;;3;;;;3h after 2', '2;test;;;4')).toEqual([]);
     expect(importLines('1;design;;;3;;;;3h after 2', '2;test;;;4').project.dependencies).toEqual([
       expect.objectContaining({
-        predecessorId: 'task-2',
-        successorId: 'task-1',
+        predecessorId: testId('task-2'),
+        successorId: testId('task-1'),
         successorBlock: null,
       }),
     ]);
@@ -596,8 +606,8 @@ describe('importProjectCsv with links to and from blocks', () => {
 describe('importProjectCsv choices made for the user', () => {
   it('orders siblings by their WBS numbers rather than by row', () => {
     const imported = importLines('2;B;;;7', '1;A;;;7');
-    expect(imported.schedule.wbsNumbers.get('task-2')).toBe('1');
-    expect(imported.schedule.wbsNumbers.get('task-1')).toBe('2');
+    expect(imported.schedule.wbsNumbers.get(testId('task-2'))).toBe('1');
+    expect(imported.schedule.wbsNumbers.get(testId('task-1'))).toBe('2');
   });
 
   it.each([
@@ -635,7 +645,7 @@ describe('importProjectCsv choices made for the user', () => {
     const imported = importLines('1;A;28/09/2026;;7', '2;B;05/10/2026;05/10/2026;7');
     expect(imported.warnings).toEqual([]);
     expect(imported.project.tasks[1]).toMatchObject({ startNoEarlierThan: at(2026, 10, 5, 0) });
-    expect(imported.schedule.placements.get('task-2')?.start).toBe(at(2026, 10, 5, 8));
+    expect(imported.schedule.placements.get(testId('task-2'))?.start).toBe(at(2026, 10, 5, 8));
   });
 
   it('warns about the start of a summary that has no dated task below it', () => {

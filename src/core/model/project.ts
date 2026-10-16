@@ -1,9 +1,13 @@
 import type { ProjectHour } from '../time';
 import type { WorkingCalendar } from './calendar';
 
-export type TaskId = string;
-export type DependencyId = string;
-export type TagId = string;
+declare const TASK_ID: unique symbol;
+declare const DEPENDENCY_ID: unique symbol;
+declare const TAG_ID: unique symbol;
+
+export type TaskId = string & { readonly [TASK_ID]: true };
+export type DependencyId = string & { readonly [DEPENDENCY_ID]: true };
+export type TagId = string & { readonly [TAG_ID]: true };
 
 export interface TaskSegment {
   readonly durationHours: number;

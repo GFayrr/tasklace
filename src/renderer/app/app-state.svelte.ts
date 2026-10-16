@@ -87,6 +87,7 @@ import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
 import type { Theme } from '../theme/theme';
 import { SettingsPanel } from './settings-panel.svelte';
 import type { Command } from './shortcuts';
+import type { NewIdentifier } from '../../core/identifiers';
 
 export type NoticeKind = 'error' | 'warning' | 'info';
 
@@ -167,7 +168,7 @@ export interface AppContext {
   readonly messages: Messages;
   readonly locale: string;
   readonly createScheduler: (listener: ScheduleListener) => Scheduler;
-  readonly createId: () => string;
+  readonly createId: () => NewIdentifier;
   readonly now: () => Date;
   readonly theme: Theme;
 }

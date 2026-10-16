@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { link, milestone, project, TEST_DOCUMENT_ID, workTask } from '../testing/project-builder';
+import {
+  link,
+  milestone,
+  project,
+  TEST_DOCUMENT_ID,
+  workTask,
+  testId,
+} from '../testing/project-builder';
 import * as Y from 'yjs';
-import type { Project, Tag } from '../model/project';
+import type { Project, Tag, TagId } from '../model/project';
 import { createSharedDocument } from './shared-document';
 import type { SharedOperation } from './shared-operations';
 import { mergeSharedUpdate } from './shared-project';
@@ -67,9 +74,9 @@ describe('a session at the limits of a project', () => {
     ],
     [
       'tags added by two participants beyond the limit',
-      project([workTask('a')], [], { tags: [tagOf('t1')] }),
-      { type: 'putTag', tag: tagOf('t2') },
-      { type: 'putTag', tag: tagOf('t3') },
+      project([workTask('a')], [], { tags: [tagOf(testId('t1'))] }),
+      { type: 'putTag', tag: tagOf(testId('t2')) },
+      { type: 'putTag', tag: tagOf(testId('t3')) },
       ['TAG_REMOVED'],
     ],
   ])(
@@ -91,6 +98,6 @@ describe('a session at the limits of a project', () => {
 });
 
 /** Builds a category tag with an identifier. */
-function tagOf(id: string): Tag {
+function tagOf(id: TagId): Tag {
   return { id, name: id, color: '#336699', representsPersonOrTeam: false };
 }

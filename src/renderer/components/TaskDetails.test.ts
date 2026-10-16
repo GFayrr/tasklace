@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { Project } from '../../core/model/project';
+import type { Project, TaskId } from '../../core/model/project';
 import {
   milestone,
   project,
   splitTask,
   summary,
   workTask,
+  testId,
 } from '../../core/testing/project-builder';
 import { AppState } from '../app/app-state.svelte';
 import { fakeAppContext, openedProjectOf, settle } from '../app/testing/fake-app-context';
@@ -15,18 +16,23 @@ import TaskDetails from './TaskDetails.svelte';
 import { button, click, dialogIn, render, single, update } from './testing/render';
 
 const TEXT = english.details;
-const DESIGN = { id: 'design', name: 'Design', color: '#3366AA', representsPersonOrTeam: false };
+const DESIGN = {
+  id: testId('design'),
+  name: 'Design',
+  color: '#3366AA',
+  representsPersonOrTeam: false,
+};
 const PLAN: Project = project(
   [
     summary('s', { sortKey: 'a', name: 'Study' }),
-    workTask('a', { parentId: 's', name: 'Read' }),
+    workTask('a', { parentId: testId('s'), name: 'Read' }),
     splitTask(
       'b',
       [
         [7, 0],
         [7, 1],
       ],
-      { sortKey: 'b', name: 'Write', tagId: 'design' },
+      { sortKey: 'b', name: 'Write', tagId: testId('design') },
     ),
     milestone('m', { sortKey: 'c', name: 'Hand in' }),
   ],
@@ -53,7 +59,7 @@ async function renderDetails() {
 }
 
 /** Opens the panel of a task and applies the updates. */
-function openFor(app: AppState, id: string): void {
+function openFor(app: AppState, id: TaskId): void {
   app.openDetails(id);
   update();
 }
@@ -90,7 +96,7 @@ describe('TaskDetails', () => {
     const { app, root } = await renderDetails();
     const dialog = dialogIn(root);
     expect(dialog.open).toBe(false);
-    openFor(app, 'a');
+    openFor(app, testId('a'));
     expect(dialog.open).toBe(true);
     expect(field(root, TEXT.name).value).toBe('Read');
     expect(field(root, TEXT.progress).value).toBe('0');
@@ -104,7 +110,7 @@ describe('TaskDetails', () => {
 
   it('applies the changes of the panel to its task and closes', async () => {
     const { app, root } = await renderDetails();
-    openFor(app, 'a');
+    openFor(app, testId('a'));
     type(field(root, TEXT.name), 'Read again');
     type(field(root, TEXT.progress), '40');
     submit(root);
@@ -118,7 +124,7 @@ describe('TaskDetails', () => {
 
   it('keeps the panel open with the reason of a refusal', async () => {
     const { app, root } = await renderDetails();
-    openFor(app, 'a');
+    openFor(app, testId('a'));
     type(field(root, TEXT.progress), 'half');
     submit(root);
     expect(single(root, '[role="alert"]').textContent).toBe(english.editErrors.INVALID_PROGRESS);
@@ -130,11 +136,15 @@ describe('TaskDetails', () => {
     const app = new AppState(fake.context);
     fake.control.openResult = openedProjectOf({
       ...PLAN,
-      tags: [{ ...DESIGN, id: 'z', name: 'Zeta' }, DESIGN, { ...DESIGN, id: 'b', name: 'beta' }],
+      tags: [
+        { ...DESIGN, id: testId('z'), name: 'Zeta' },
+        DESIGN,
+        { ...DESIGN, id: testId('b'), name: 'beta' },
+      ],
     });
     await app.open();
     const root = render(TaskDetails, { app, project: currentProject(app) });
-    openFor(app, 'a');
+    openFor(app, testId('a'));
     const options = [...field(root, TEXT.tag).querySelectorAll('option')];
     expect(options.map((option) => option.textContent.trim())).toEqual([
       TEXT.noTag,
@@ -146,7 +156,7 @@ describe('TaskDetails', () => {
 
   it('asks for a daily start only for a task working part of the day', async () => {
     const { app, root } = await renderDetails();
-    openFor(app, 'a');
+    openFor(app, testId('a'));
     expect(() => field(root, TEXT.dailyStart)).toThrow();
     type(field(root, TEXT.hoursPerDay), '4');
     expect(field(root, TEXT.dailyStart).value).toBe('');
@@ -160,11 +170,11 @@ describe('TaskDetails', () => {
 
   it('adds and removes blocks, with their gap, start and waits once there are several', async () => {
     const { app, root } = await renderDetails();
-    openFor(app, 'b');
+    openFor(app, testId('b'));
     expect(field(root, TEXT.tag).value).toBe('design');
     expect(field(root, TEXT.blockGap.replace('{previous}', '1')).value).toBe('1');
     expect(field(root, TEXT.blockWaitsFor.replace('{number}', '2')).value).toBe(
-      app.blockWaitText('b', 1),
+      app.blockWaitText(testId('b'), 1),
     );
     click(button(root, TEXT.addBlock));
     expect(field(root, TEXT.blockDuration.replace('{number}', '3')).value).toBe('7 h');
@@ -175,24 +185,24 @@ describe('TaskDetails', () => {
 
   it('shows the meaning of a milestone, and only the name of a summary', async () => {
     const { app, root } = await renderDetails();
-    openFor(app, 'm');
+    openFor(app, testId('m'));
     expect(single(root, '.hint').textContent).toBe(TEXT.milestoneHint);
     expect(root.querySelector('fieldset')).toBeNull();
     click(button(root, TEXT.cancel));
-    openFor(app, 's');
+    openFor(app, testId('s'));
     expect(root.querySelectorAll('input')).toHaveLength(1);
   });
 
   it('closes when its task disappears, and when the dialog is closed with Escape', async () => {
     const { app, root } = await renderDetails();
-    openFor(app, 'a');
-    expect(app.edit((context) => deleteTasks(context, ['a']))).toBe(true);
+    openFor(app, testId('a'));
+    expect(app.edit((context) => deleteTasks(context, [testId('a')]))).toBe(true);
     await settle();
     update();
     expect([dialogIn(root).open, app.detailsTaskId]).toEqual([false, null]);
     app.undo();
     await settle();
-    openFor(app, 'a');
+    openFor(app, testId('a'));
     const dialog = dialogIn(root);
     dialog.dispatchEvent(new Event('close'));
     update();
@@ -205,7 +215,7 @@ describe('TaskDetails', () => {
 
   it('closes the panel as soon as Escape cancels the dialog, so that a shortcut pressed next is not held back', async () => {
     const { app, root } = await renderDetails();
-    openFor(app, 'a');
+    openFor(app, testId('a'));
     dialogIn(root).dispatchEvent(new Event('cancel', { cancelable: true }));
     expect(app.detailsTaskId).toBeNull();
   });
@@ -214,7 +224,7 @@ describe('TaskDetails', () => {
 describe('TaskDetails fields of work tasks and blocks', () => {
   it('applies the start, hours per day, daily start and the fields of each block', async () => {
     const { app, root } = await renderDetails();
-    openFor(app, 'b');
+    openFor(app, testId('b'));
     type(field(root, TEXT.start), '2026-09-29T09:00');
     type(field(root, TEXT.hoursPerDay), '4');
     type(field(root, TEXT.dailyStart), '13:00');
@@ -233,7 +243,7 @@ describe('TaskDetails fields of work tasks and blocks', () => {
       segments: [{ durationHours: 6 }, { gapDaysBefore: 2 }],
     });
     expect(app.project?.dependencies).toMatchObject([
-      { predecessorId: 'a', successorId: 'b', successorBlock: 1 },
+      { predecessorId: testId('a'), successorId: testId('b'), successorBlock: 1 },
     ]);
   });
 });

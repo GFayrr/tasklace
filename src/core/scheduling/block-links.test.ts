@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { compileCalendar } from '../calendar/compile-calendar';
 import { lastWorkingHourEnd, shiftWorkingHours } from '../calendar/working-time';
-import type { Dependency, DependencyType, Project, WorkTask } from '../model/project';
+import type { Dependency, DependencyType, Project, WorkTask, TaskId } from '../model/project';
 import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { at } from '../testing/civil-time';
 import { projectArbitrary } from '../testing/project-arbitrary';
@@ -14,6 +14,7 @@ import {
   scheduleOrThrow,
   splitTask,
   workTask,
+  testId,
 } from '../testing/project-builder';
 import { blockPairKey, blockResumption, shortestLink } from './block-links';
 import { analyzeProjectStructure } from './project-structure';
@@ -28,7 +29,7 @@ const DEVELOPMENT = splitTask('dev', [
 const TEST = workTask('test');
 
 /** Returns the blocks of a task in a schedule. */
-function blocksOf(schedule: Schedule, id: string): readonly ScheduledSegment[] {
+function blocksOf(schedule: Schedule, id: TaskId): readonly ScheduledSegment[] {
   return schedule.placements.get(id)?.segments ?? [];
 }
 
@@ -39,7 +40,7 @@ describe('start dates of later blocks', () => {
       [3, 0, at(2026, 10, 1, 14)],
       [3, 0],
     ]);
-    const blocks = blocksOf(scheduleOrThrow(project([dated])), 'dev');
+    const blocks = blocksOf(scheduleOrThrow(project([dated])), testId('dev'));
     expect(blocks.map((block) => block.start)).toEqual([
       at(2026, 9, 28, 9),
       at(2026, 10, 1, 14),
@@ -52,7 +53,7 @@ describe('start dates of later blocks', () => {
       [7, 0],
       [3, 0, at(2026, 9, 27, 9)],
     ]);
-    const blocks = blocksOf(scheduleOrThrow(project([dated])), 'dev');
+    const blocks = blocksOf(scheduleOrThrow(project([dated])), testId('dev'));
     expect(blocks[1]?.start).toBe(at(2026, 9, 29, 9));
   });
 });
@@ -76,12 +77,12 @@ describe('start dates of later blocks with links and floats', () => {
           [blockLink('long', 'dev', { to: 1 })],
         ),
       ),
-      'dev',
+      testId('dev'),
     );
     expect(later[1]?.start).toBe(at(2026, 10, 2, 9));
     const earlier = blocksOf(
       scheduleOrThrow(project([dated, workTask('short')], [blockLink('short', 'dev', { to: 1 })])),
-      'dev',
+      testId('dev'),
     );
     expect(earlier[1]?.start).toBe(at(2026, 10, 1, 14));
   });
@@ -90,7 +91,7 @@ describe('start dates of later blocks with links and floats', () => {
     const schedule = scheduleOrThrow(
       project([dated, workTask('test')], [blockLink('dev', 'test', { from: 1 }, 'startToStart')]),
     );
-    expect(schedule.placements.get('test')?.start).toBe(at(2026, 10, 1, 14));
+    expect(schedule.placements.get(testId('test'))?.start).toBe(at(2026, 10, 1, 14));
   });
 
   it('counts the float of a block held by its date only up to that date', () => {
@@ -104,8 +105,14 @@ describe('start dates of later blocks with links and floats', () => {
         },
       }),
     );
-    expect(schedule.floats?.get('dev')).toMatchObject({ totalFloatHours: 0, isCritical: true });
-    expect(schedule.floats?.get('test')).toMatchObject({ totalFloatHours: 0, isCritical: true });
+    expect(schedule.floats?.get(testId('dev'))).toMatchObject({
+      totalFloatHours: 0,
+      isCritical: true,
+    });
+    expect(schedule.floats?.get(testId('test'))).toMatchObject({
+      totalFloatHours: 0,
+      isCritical: true,
+    });
   });
 });
 
@@ -156,7 +163,7 @@ describe('duplicate links', () => {
       const from = tasks[shape.from.task] ?? TEST;
       const to = tasks[shape.to.task] ?? TEST;
       return {
-        id,
+        id: testId(id),
         predecessorId: from.id,
         predecessorBlock: blockIn(from, shape.from.block),
         successorId: to.id,
@@ -187,11 +194,11 @@ describe('links to and from blocks', () => {
       [blockLink('dev', 'test', { from: 0 }), blockLink('test', 'dev', { to: 1 })],
     );
     const schedule = scheduleOrThrow(plan);
-    expect(blocksOf(schedule, 'dev')).toEqual([
+    expect(blocksOf(schedule, testId('dev'))).toEqual([
       { start: at(2026, 9, 28, 9), end: at(2026, 9, 28, 17) },
       { start: at(2026, 9, 30, 9), end: at(2026, 9, 30, 17) },
     ]);
-    expect(schedule.placements.get('test')).toMatchObject({
+    expect(schedule.placements.get(testId('test'))).toMatchObject({
       start: at(2026, 9, 29, 9),
       end: at(2026, 9, 29, 17),
     });
@@ -210,7 +217,7 @@ describe('links to and from blocks', () => {
       ],
       [blockLink('dev', 'test', { from: 0 }), blockLink('test', 'dev', { to: 1 })],
     );
-    expect(blocksOf(scheduleOrThrow(plan), 'dev')[1]?.start).toBe(at(2026, 10, 1, 9));
+    expect(blocksOf(scheduleOrThrow(plan), testId('dev'))[1]?.start).toBe(at(2026, 10, 1, 9));
   });
 
   it('lets a task wait for the start of a block, and a lag move it', () => {
@@ -222,13 +229,13 @@ describe('links to and from blocks', () => {
         blockLink('dev', 'review', { from: 1 }, 'startToStart', 2),
       ],
     );
-    expect(scheduleOrThrow(plan).placements.get('review')?.start).toBe(at(2026, 9, 30, 11));
+    expect(scheduleOrThrow(plan).placements.get(testId('review'))?.start).toBe(at(2026, 9, 30, 11));
   });
 
   it('makes only the last block of a split task wait for a finish-to-finish link, the pause growing', () => {
     const late = workTask('late', { startNoEarlierThan: at(2026, 10, 5, 9) });
     const plan = project([late, DEVELOPMENT], [link('late', 'dev', 'finishToFinish')]);
-    const blocks = blocksOf(scheduleOrThrow(plan), 'dev');
+    const blocks = blocksOf(scheduleOrThrow(plan), testId('dev'));
     expect(blocks[0]?.start).toBe(at(2026, 9, 28, 9));
     expect(blocks[1]?.end).toBe(at(2026, 10, 5, 17));
   });
@@ -247,8 +254,8 @@ describe('links to and from blocks', () => {
       },
     );
     const floats = scheduleOrThrow(plan).floats;
-    expect(floats?.get('dev')?.isCritical).toBe(true);
-    expect(floats?.get('test')?.isCritical).toBe(true);
+    expect(floats?.get(testId('dev'))?.isCritical).toBe(true);
+    expect(floats?.get(testId('test'))?.isCritical).toBe(true);
   });
 
   it('gives exact late dates and floats when a task runs between two blocks kept days apart', () => {
@@ -269,21 +276,21 @@ describe('links to and from blocks', () => {
       },
     );
     const floats = scheduleOrThrow(plan).floats;
-    expect(floats?.get('dev')).toEqual({
+    expect(floats?.get(testId('dev'))).toEqual({
       lateStart: at(2026, 9, 28, 9),
       lateFinish: at(2026, 10, 1, 17),
       totalFloatHours: 0,
       freeFloatHours: 0,
       isCritical: true,
     });
-    expect(floats?.get('test')).toEqual({
+    expect(floats?.get(testId('test'))).toEqual({
       lateStart: at(2026, 9, 30, 9),
       lateFinish: at(2026, 9, 30, 17),
       totalFloatHours: 7,
       freeFloatHours: 7,
       isCritical: false,
     });
-    expect(floats?.get('side')).toMatchObject({ totalFloatHours: 21, freeFloatHours: 21 });
+    expect(floats?.get(testId('side'))).toMatchObject({ totalFloatHours: 21, freeFloatHours: 21 });
   });
 
   it('refuses a loop through the blocks of a task', () => {
@@ -327,7 +334,7 @@ describe('links to and from blocks', () => {
       [DEVELOPMENT, TEST],
       [
         blockLink('dev', 'test', { from: 0 }),
-        { ...blockLink('dev', 'test', { from: 0 }), id: 'again' },
+        { ...blockLink('dev', 'test', { from: 0 }), id: testId('again') },
       ],
     );
     const structure = analyzeProjectStructure(repeated);
@@ -346,7 +353,7 @@ describe('links to and from blocks', () => {
         [3, 0],
       ]),
     ]);
-    expect(blocksOf(scheduleOrThrow(plan), 'dev')).toEqual([
+    expect(blocksOf(scheduleOrThrow(plan), testId('dev'))).toEqual([
       { start: at(2026, 9, 28, 9), end: at(2026, 9, 28, 11) },
       { start: at(2026, 9, 28, 11), end: at(2026, 9, 28, 15) },
     ]);
@@ -376,7 +383,7 @@ function withBlockLinks(
       }
       const block = blockPick % blockTask.segments.length;
       const type = TYPES[typePick % TYPES.length] ?? 'finishToStart';
-      const base = { id: `block-link-${String(index)}`, type, lagHours: 0 };
+      const base = { id: testId(`block-link-${String(index)}`), type, lagHours: 0 };
       return direction % 2 === 0
         ? [
             {
@@ -413,7 +420,7 @@ describe('scheduling properties with block links', { timeout: PROPERTY_TEST_TIME
         fc.pre(result.ok);
         const calendar = unwrap(compileCalendar(input.calendar));
         /** Returns the start or end of the block a link names on a task, or of the task itself. */
-        const spanOf = (id: string, block: number | null, side: 'start' | 'end') => {
+        const spanOf = (id: TaskId, block: number | null, side: 'start' | 'end') => {
           const placement = result.value.placements.get(id);
           const blocks = placement?.segments ?? [];
           const chosenBlock =

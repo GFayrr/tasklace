@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import { compileCalendar } from '../calendar/compile-calendar';
 import { compareStrings } from '../compare-strings';
 import { MAX_DEPENDENCIES, MAX_TAGS, MAX_TASKS } from '../limits';
-import type { Dependency, Project, Tag, Task, TaskId } from '../model/project';
+import type { Dependency, DependencyId, Project, Tag, TagId, Task, TaskId } from '../model/project';
 import { failure, success, type Result } from '../result';
 import { readProject, STORED_VALUE_CODEC } from '../validation/read-project';
 import type { ValidationIssue, ValidationIssues } from '../validation/validation-issues';
@@ -60,6 +60,7 @@ import {
   type SharedRepair,
   type SharedRepairCode,
 } from './shared-project';
+import { isIdentifier, type NewIdentifier } from '../identifiers';
 
 export interface SharedSession {
   readonly documentId: DocumentId;
@@ -103,8 +104,8 @@ interface ChangedItems {
   readonly tags: readonly Tag[];
   readonly rounded: ReadonlySet<TaskId>;
   readonly deletedTasks: readonly TaskId[];
-  readonly deletedDependencies: readonly string[];
-  readonly deletedTags: readonly string[];
+  readonly deletedDependencies: readonly DependencyId[];
+  readonly deletedTags: readonly TagId[];
 }
 
 interface FastMerge {
@@ -631,8 +632,9 @@ function readChangedItems(
   const rounded = new Set<TaskId>();
   const visible = tasks.present.map(viewTaskFields).map((entry) => {
     const round = roundedProgress(entry);
-    if (round !== null) {
-      rounded.add(String(round['id']));
+    const roundedId = round?.['id'];
+    if (isIdentifier(roundedId)) {
+      rounded.add(roundedId);
     }
     return round ?? entry;
   });
@@ -655,20 +657,20 @@ function readChangedItems(
   });
 }
 
-/** Separates the changed entries of a root that still exist from those that were deleted. */
+/** Separates the changed entries of a root that still exist from those that were deleted, a deleted key that is no identifier naming nothing the project held. */
 function splitDeleted(
   shadow: Y.Doc,
   root: EntryRoot,
   ids: ReadonlySet<string>,
-): { readonly present: unknown[]; readonly deleted: string[] } {
+): { readonly present: unknown[]; readonly deleted: NewIdentifier[] } {
   const present: unknown[] = [];
-  const deleted: string[] = [];
+  const deleted: NewIdentifier[] = [];
   for (const id of ids) {
     const entry = readEntry(shadow, root, id);
-    if (entry === undefined) {
-      deleted.push(id);
-    } else {
+    if (entry !== undefined) {
       present.push(entry);
+    } else if (isIdentifier(id)) {
+      deleted.push(id);
     }
   }
   return { present, deleted };

@@ -13,6 +13,7 @@ import {
   summary,
   TEST_DOCUMENT_ID,
   workTask,
+  testId,
 } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 import { buildLargeProject } from '../fixtures/large-project';
@@ -23,18 +24,23 @@ const DISPLAYED_FRAME_INTERVAL_LIMIT_MS = 1_000 / 30;
 
 const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
 const DESIGN: Tag = {
-  id: 'design',
+  id: testId('design'),
   name: 'Design',
   color: '#2a78d6',
   representsPersonOrTeam: false,
 };
 const BUILD: Tag = {
-  id: 'build',
+  id: testId('build'),
   name: 'Development',
   color: '#eb6834',
   representsPersonOrTeam: false,
 };
-const ALEX: Tag = { id: 'alex', name: 'Alex', color: '#1baf7a', representsPersonOrTeam: true };
+const ALEX: Tag = {
+  id: testId('alex'),
+  name: 'Alex',
+  color: '#1baf7a',
+  representsPersonOrTeam: true,
+};
 const SAMPLE: Project = {
   ...project(
     [
