@@ -359,16 +359,60 @@ describe('sharing a plan from the page', () => {
     ]);
   });
 
-  it('keeps the plan open when the connection ends, telling why', async () => {
+  it('keeps the plan open and joined but offline when the connection ends, telling why and sending nothing more', async () => {
     const { guest } = await sharedPair();
-    emit(guest.collaboration, { kind: 'ended', reason: 'WRONG_CODE' });
+    emit(guest.collaboration, { kind: 'ended', reason: 'BROKEN' });
     expect([
       guest.state.mode,
       guest.state.lastEnd,
-      guest.state.participants,
+      guest.state.participants.map((participant) => participant.name),
       guest.state.me,
-    ]).toEqual([{ kind: 'idle' }, 'WRONG_CODE', [], null]);
+      guest.state.isReadOnly,
+      guest.state.hostName,
+    ]).toEqual([
+      { kind: 'guest', connected: false },
+      'BROKEN',
+      ['Camille', 'Léa'],
+      LEA,
+      true,
+      'Camille',
+    ]);
     expect(guest.session()).not.toBeNull();
+    guest.select('a');
+    rename(guest.session(), 'a', 'Offline');
+    await settle();
+    expect(guest.collaboration.sent).toEqual([]);
+    await guest.state.stop();
+    expect([guest.state.mode, guest.collaboration.requests.at(-1)]).toEqual([
+      { kind: 'idle' },
+      ['stop'],
+    ]);
+  });
+
+  it('ends an attempt to join when the connection ends before the plan opens', async () => {
+    const guest = side(null, ['lea']);
+    await named(guest.state, 'Léa');
+    await guest.state.join({ address: '192.168.1.24', port: 47_313, code: 'K7Q4MZ' });
+    emit(guest.collaboration, { kind: 'ended', reason: 'WRONG_CODE' });
+    expect([guest.state.mode, guest.state.lastEnd, guest.state.me]).toEqual([
+      { kind: 'idle' },
+      'WRONG_CODE',
+      null,
+    ]);
+  });
+
+  it('places the other people on the task each one selected, never this page', async () => {
+    const { host, guest, relay } = await sharedPair();
+    guest.select('a');
+    host.select('a');
+    await relay();
+    /** Lists the names of the people placed on each task. */
+    const names = (state: CollaborationState) =>
+      [...state.presence].map(([task, people]) => [task, people.map((person) => person.name)]);
+    expect([names(host.state), names(guest.state)]).toEqual([
+      [['a', ['Léa']]],
+      [['a', ['Camille']]],
+    ]);
   });
 
   it('stops sharing when another project is opened, and when asked', async () => {

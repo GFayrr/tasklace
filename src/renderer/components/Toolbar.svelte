@@ -8,6 +8,7 @@
     readonly label: string;
     readonly run: () => void;
   }
+  import ConnectionChip from './ConnectionChip.svelte';
   import MenuButton, { type MenuItem } from './MenuButton.svelte';
 
   let { app }: { app: AppState } = $props();
@@ -207,13 +208,7 @@
   <button type="button" class="button" class:primary={!app.hasFile} onclick={() => app.save()}>
     {text.toolbar.save}
   </button>
-  {#if app.collaboration.mode.kind === 'idle' || app.collaboration.mode.kind === 'hosting'}
-    <button type="button" class="button" onclick={() => app.openShare()}>
-      {app.collaboration.mode.kind === 'hosting'
-        ? text.collaboration.shared
-        : text.collaboration.share}
-    </button>
-  {/if}
+  <ConnectionChip {app} />
 </header>
 
 <style>

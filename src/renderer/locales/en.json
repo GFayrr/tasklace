@@ -662,6 +662,15 @@
     "codeReplaced": "This code is no longer valid: too many wrong tries. Ask {host} for the new one.",
     "unreachable": "Tasklace could not reach {host} at this address. Check the address and the port, and that you are on the same network.",
     "notPrivate": "This address is not on a private network, so Tasklace does not join it.",
-    "connectionEnded": "The connection to {host} ended before the plan opened. Try again."
+    "connectionEnded": "The connection to {host} ended before the plan opened. Try again.",
+    "connected": "Shared, connected",
+    "connectionLost": "Connection lost",
+    "connectionLostDetail": "The connection to {host} ended. The plan stays open on this computer.",
+    "sharedBy": "Shared by {host}",
+    "leave": "Leave the shared plan",
+    "peopleLabel": "People in the shared plan",
+    "hostName": "{name} (host)",
+    "moreFaces": "+{count}",
+    "canLetYouEdit": "{host} can let you edit."
   }
 }

@@ -96,6 +96,7 @@ function sceneOf(overrides: Partial<TimelineScene> = {}): TimelineScene {
     deadlines: null,
     baseline: null,
     selectedTaskId: null,
+    presence: new Map(),
     today: at(2026, 9, 30, 12),
     showFloatLines: true,
     preview: null,
@@ -166,6 +167,29 @@ describe('paintTimelineBody', () => {
     const calls = paintBody({ selectedTaskId: testId('b') });
     expect(filledAt(calls, row * ROW_HEIGHT, THEME.selection)).toBe(true);
     expect(callsOf(calls, 'arc')).toHaveLength(linkHandles(shapeOf(testId('b'))).length);
+  });
+
+  it('draws a faint band with thin edges across the visible rows another person is on, and none for a row out of view', () => {
+    const row = OUTLINE.rowIndexById.get(testId('b')) ?? -1;
+    const presence = new Map([
+      [testId('b'), '#1F5FA8'],
+      [testId('gone'), '#8A3A8F'],
+    ]);
+    const band = callsOf(paintBody({ presence }), 'fillRect')
+      .filter((call) => call.fillStyle === '#edf2f8' || call.fillStyle === '#84a7cf')
+      .map((call) => [call.fillStyle, ...call.args]);
+    const top = row * ROW_HEIGHT;
+    expect(band).toEqual([
+      ['#edf2f8', 0, top, VIEWPORT.width, ROW_HEIGHT - 1],
+      ['#84a7cf', 0, top, VIEWPORT.width, 1],
+      ['#84a7cf', 0, top + ROW_HEIGHT - 2, VIEWPORT.width, 1],
+    ]);
+    const below = { ...VIEWPORT, top: (row + 1) * ROW_HEIGHT };
+    expect(
+      callsOf(paintBody({ presence }, below), 'fillRect').filter(
+        (call) => call.fillStyle === '#edf2f8',
+      ),
+    ).toEqual([]);
   });
 
   it('draws no handle for a selected summary, and no selection for a task out of the plan', () => {

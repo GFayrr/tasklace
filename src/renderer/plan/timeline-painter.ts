@@ -86,6 +86,7 @@ export interface TimelineScene {
   readonly deadlines: DeadlineMarks | null;
   readonly baseline: ReadonlyMap<TaskId, BaselineEntry> | null;
   readonly selectedTaskId: TaskId | null;
+  readonly presence: ReadonlyMap<TaskId, string>;
   readonly today: ProjectHour | null;
   readonly showFloatLines: boolean;
   readonly preview: DragPreview | null;
@@ -141,6 +142,9 @@ const DEADLINE_HEAD_WIDTH = 10;
 const DEADLINE_HEAD_HEIGHT = 6;
 const PREVIEW_DASH = [4, 3];
 const HALF_PIXEL = 0.5;
+const PRESENCE_BAND_WHITE_SHARE = 0.92;
+const PRESENCE_EDGE_WHITE_SHARE = 0.45;
+const PRESENCE_EDGE_HEIGHT = 1;
 const DAY_OFF_HEIGHT = 6;
 const SPLIT_GAP_DASH = [2, 3];
 const BLOCK_TARGET_MARGIN = 3;
@@ -228,6 +232,7 @@ export function paintTimelineBody(
   paintNonWorking(context, scene, viewport);
   const range = visibleRows(viewport, scene.rows.length);
   paintRowLines(context, scene, viewport, range);
+  paintPresence(context, scene, viewport, range);
   const shapes = visibleShapes(scene, range);
   paintSelection(context, scene, viewport);
   paintArrows(context, scene, range);
@@ -329,6 +334,33 @@ function paintRowLines(
     context.lineTo(viewport.left + viewport.width, y);
   }
   context.stroke();
+}
+
+/** Draws a faint band in the color of a person across each visible row another person is on, with a thin edge above and below. */
+function paintPresence(
+  context: TimelineBodyContext,
+  scene: TimelineScene,
+  viewport: Viewport,
+  range: RowRange,
+): void {
+  for (let row = range.first; row <= range.last; row += 1) {
+    const color = scene.presence.get(valueAt(scene.rows, row).task.id);
+    if (color === undefined) {
+      continue;
+    }
+    const top = row * ROW_HEIGHT;
+    const height = ROW_HEIGHT - 1;
+    context.fillStyle = paleColor(color, PRESENCE_BAND_WHITE_SHARE);
+    context.fillRect(viewport.left, top, viewport.width, height);
+    context.fillStyle = paleColor(color, PRESENCE_EDGE_WHITE_SHARE);
+    context.fillRect(viewport.left, top, viewport.width, PRESENCE_EDGE_HEIGHT);
+    context.fillRect(
+      viewport.left,
+      top + height - PRESENCE_EDGE_HEIGHT,
+      viewport.width,
+      PRESENCE_EDGE_HEIGHT,
+    );
+  }
 }
 
 /** Highlights the row of the selected task. */

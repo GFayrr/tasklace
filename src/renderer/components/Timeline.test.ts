@@ -22,8 +22,14 @@ import {
 } from '../plan/timeline-geometry';
 import { SAND_GRAPHITE } from '../theme/sand-graphite';
 import Timeline from './Timeline.svelte';
-import { render, single, update } from './testing/render';
-import { drawFrames, pointer, refuseDrawingContexts, resize } from './testing/timeline-environment';
+import { render, single, unmountAll, update } from './testing/render';
+import {
+  drawFrames,
+  pointer,
+  refuseDrawingContexts,
+  reportSize,
+  resize,
+} from './testing/timeline-environment';
 
 const PLAN: Project = project(
   [
@@ -77,6 +83,7 @@ function renderTimeline(selectedTaskId: TaskId | null = null, scrollTop = 0, pla
     deadlines: null,
     baseline: null,
     selectedTaskId,
+    presence: new Map<TaskId, string>(),
     today: at(2026, 9, 28, 12),
     showFloatLines: true,
   };
@@ -106,6 +113,26 @@ describe('Timeline', () => {
     expect(drawing.filter((call) => call.name === 'roundRect')).toHaveLength(4);
     expect(drawing.some((call) => call.name === 'fillText')).toBe(true);
     expect(drawFrames()).toEqual([]);
+  });
+
+  it('reads its size once at the next frame however many sizes the browser reports, so that it never changes the layout while sizes are reported', () => {
+    const { scroller, calls } = renderTimeline();
+    calls.resized.mockClear();
+    reportSize(scroller, 700, 200);
+    reportSize(scroller, 640, 240);
+    expect(calls.resized).not.toHaveBeenCalled();
+    drawFrames();
+    expect(calls.resized.mock.calls).toEqual([[640, 240]]);
+  });
+
+  it('reads no size once removed before the next frame', () => {
+    const { root, scroller, calls } = renderTimeline();
+    calls.resized.mockClear();
+    reportSize(scroller, 700, 200);
+    root.remove();
+    unmountAll();
+    drawFrames();
+    expect(calls.resized).not.toHaveBeenCalled();
   });
 
   it('selects the task under the pointer and moves its bar where it is dropped', () => {

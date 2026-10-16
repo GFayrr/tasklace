@@ -81,6 +81,7 @@ export class CollaborationState {
   #settings = $state.raw<CollaborationSettings | null>(null);
   #nearby = $state.raw<readonly NearbyPlan[]>([]);
   #lastEnd = $state.raw<GuestEndReason | null>(null);
+  readonly #presence = $derived.by(() => presenceOf(this.#participants, this.#me));
   readonly #context: CollaborationContext;
   #hosting: Hosting | null = null;
   #guest: Guest | null = null;
@@ -139,6 +140,11 @@ export class CollaborationState {
     return !this.#participants.some(
       (participant) => participant.id === this.#me && participant.canEdit,
     );
+  }
+
+  /** Returns the other people in the shared plan by the task each one selected, in the order of the list, for the rows that show where they are. */
+  get presence(): ReadonlyMap<TaskId, readonly Participant[]> {
+    return this.#presence;
   }
 
   /** Returns the name of the host of the plan this page joined, or null. */
@@ -458,11 +464,18 @@ export class CollaborationState {
     }
   }
 
-  /** Tells that the connection to the host ended, keeping the plan open as it is. */
+  /** Tells that the connection to the host ended, keeping the plan open as it is: a plan already opened stays joined but offline, with the people last known, and an attempt to join ends. */
   #ended(reason: GuestEndReason): void {
     this.#lastEnd = reason;
-    this.#guest?.disconnected();
-    this.#forget();
+    const guest = this.#guest;
+    if (guest === null) {
+      this.#forget();
+      return;
+    }
+    guest.disconnected();
+    guest.stop();
+    this.#guest = null;
+    this.#mode = { kind: 'guest', connected: false };
   }
 
   /** Handles what the host or the guest tells: repairs, refusals, the list of people and changes kept here. */
@@ -505,4 +518,20 @@ export class CollaborationState {
       }
     });
   }
+}
+
+/** Groups the people other than this page by the task each one selected, in the order of the list. */
+function presenceOf(
+  participants: readonly Participant[],
+  me: ParticipantId | null,
+): ReadonlyMap<TaskId, readonly Participant[]> {
+  const placed = participants.flatMap((participant) =>
+    participant.id === me || participant.selectedTaskId === null
+      ? []
+      : [{ participant, task: participant.selectedTaskId }],
+  );
+  const grouped = Map.groupBy(placed, (entry) => entry.task);
+  return new Map(
+    [...grouped].map(([task, entries]) => [task, entries.map((entry) => entry.participant)]),
+  );
 }

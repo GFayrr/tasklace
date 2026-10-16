@@ -15,7 +15,9 @@
     | 'trash'
     | 'calendar'
     | 'sliders'
-    | 'gear';
+    | 'gear'
+    | 'share'
+    | 'eye';
 
   let { name }: { name: IconName } = $props();
 </script>
@@ -64,6 +66,14 @@
     <circle cx="12" cy="12" r="3" /><path
       d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"
     />
+  {:else if name === 'share'}
+    <circle cx="8.25" cy="9" r="3.3" /><path
+      d="M2.7 19.8c.75-3.3 3-5.1 5.55-5.1s4.8 1.8 5.55 5.1"
+    /><path d="M17.25 6.75v7.5M13.5 10.5h7.5" />
+  {:else if name === 'eye'}
+    <path
+      d="M2.25 12s3.6-6.75 9.75-6.75S21.75 12 21.75 12 18.15 18.75 12 18.75 2.25 12 2.25 12Z"
+    /><circle cx="12" cy="12" r="2.7" />
   {:else if name === 'close'}
     <path d="M18 6 6 18M6 6l12 12" />
   {:else}

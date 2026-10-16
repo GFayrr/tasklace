@@ -18,6 +18,8 @@ const BACKGROUND = 'rgb(247, 246, 243)';
 const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
 const TOOLBAR_WIDTH = 1_280;
 const ONE_TOOLBAR_LINE_LIMIT = 80;
+const RESIZED_WIDTHS = [1_280, 1_440, 1_100, 1_600, 1_280];
+const RESIZED_HEIGHT = 800;
 
 let folder: string;
 let userData: string;
@@ -221,6 +223,18 @@ test('lets messages fade away on their own, but keeps them while the pointer res
     }
   });
   await expect(alert).toBeHidden();
+});
+
+test('follows the size of the window without telling of an error', async () => {
+  await page.getByRole('button', { name: /New project/ }).click();
+  await expect(page.locator('.timeline canvas').first()).toBeVisible();
+  for (const width of RESIZED_WIDTHS) {
+    await page.setViewportSize({ width, height: RESIZED_HEIGHT });
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+  }
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
 test('changes the calendar in the project settings, each change applied at once and undone after', async () => {

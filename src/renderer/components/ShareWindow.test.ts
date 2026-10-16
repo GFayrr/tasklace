@@ -106,7 +106,9 @@ describe('sharing the open plan', () => {
       'hosting',
       ['CA Camille You · host Can edit'],
     ]);
-    expect(button(root, TEXT.shared).textContent.trim()).toBe(TEXT.shared);
+    expect(button(root, TEXT.connected).textContent.replace(/\s+/g, ' ').trim()).toBe(
+      `${TEXT.shared} CA`,
+    );
   });
 
   it('logs a word about the network it could not keep as seen, and shares all the same', async () => {
@@ -247,7 +249,7 @@ describe('sharing the open plan', () => {
     const { root, app, control } = await renderSharing();
     await clickAndSettle(button(shareWindow(root), TEXT.done));
     expect([app.collaborationWindow, app.collaboration.mode.kind]).toEqual([null, 'hosting']);
-    await clickAndSettle(button(root, TEXT.shared));
+    await clickAndSettle(button(root, TEXT.connected));
     await clickAndSettle(button(shareWindow(root), TEXT.stopSharing));
     expect([app.collaborationWindow, app.collaboration.mode.kind]).toEqual([null, 'idle']);
     expect(control.collaboration.requests.at(-1)).toEqual(['stop']);

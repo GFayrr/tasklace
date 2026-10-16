@@ -3,11 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { closeDiscarding, launchApplication } from './application';
+import { addTask, taskRow } from './table';
 
 const LOOPBACK = '127.0.0.1';
 const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
 const CODE_PATTERN = /^[A-HJ-NP-Z2-9]{6}$/;
 const PORT_PATTERN = /port (\d+)/;
+const TOOLBAR_WIDTH = 1_280;
+const ONE_TOOLBAR_LINE_LIMIT = 80;
 
 interface Instance {
   readonly application: ElectronApplication;
@@ -76,7 +79,7 @@ test('shares a plan with a code copied for the others, sharing at once the next 
   await expect(dialog.locator('.code')).toHaveText(CODE_PATTERN);
   await expect(page.getByRole('dialog', { name: /may ask about the network/ })).toBeHidden();
   await dialog.getByRole('button', { name: 'Done' }).click();
-  await expect(page.getByRole('button', { name: 'Shared', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Shared, connected' })).toBeVisible();
 });
 
 test('joins a plan shared by another instance with its code, in read only, after a wrong code', async () => {
@@ -115,4 +118,52 @@ test('joins a plan shared by another instance with its code, in read only, after
   await expect(guest.page.getByRole('textbox', { name: 'Project name' })).toHaveValue(
     'Untitled project',
   );
+  await expect(guest.page.locator('.status-bar .read-only')).toHaveText(
+    /Read only\s*Camille can let you edit\./,
+  );
+});
+
+test('shows where each person is, shares the changes once the host lets a guest edit, and tells the guest when the host stops', async () => {
+  const host = await launch();
+  const { code, port } = await shareNewPlan(host.page);
+  const shareWindow = host.page.getByRole('dialog', { name: 'Share “Untitled project”' });
+  await shareWindow.getByRole('button', { name: 'Done' }).click();
+  await addTask(host.page, 'Survey');
+  const guest = await launch();
+  await guest.page.getByRole('button', { name: /^Join…/ }).click();
+  const dialog = guest.page.getByRole('dialog', { name: 'Join a shared plan' });
+  await dialog.getByLabel('Your name, shown to the others').fill('Léa');
+  await dialog.getByText('Join by address').click();
+  await dialog.getByLabel('Address of the host').fill(LOOPBACK);
+  await dialog.getByLabel('Port').fill(port);
+  await dialog.getByLabel('Code').fill(code);
+  await dialog.getByRole('button', { name: 'Join', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(taskRow(guest.page, 'Survey')).toHaveCount(1);
+  await taskRow(guest.page, 'Survey').locator('.wbs').click();
+  await expect(taskRow(host.page, 'Survey').locator('.presence')).toHaveText('LÉ');
+  await taskRow(host.page, 'Survey').locator('.wbs').click();
+  await expect(taskRow(guest.page, 'Survey').locator('.presence')).toHaveText('CA');
+  await expect(host.page.locator('.status-bar .names')).toHaveText('Camille (host), Léa');
+  await host.page.setViewportSize({ width: TOOLBAR_WIDTH, height: 800 });
+  const toolbar = await host.page.locator('header.toolbar').boundingBox();
+  expect(toolbar?.height).toBeLessThan(ONE_TOOLBAR_LINE_LIMIT);
+  await picture(host.page, 'presence-host');
+  await picture(guest.page, 'presence-guest');
+  await host.page.getByRole('button', { name: 'Shared, connected' }).click();
+  await shareWindow
+    .getByRole('radiogroup', { name: 'What Léa may do' })
+    .getByText('Can edit')
+    .click();
+  await expect(guest.page.locator('.status-bar .read-only')).toHaveCount(0);
+  await guest.page.getByRole('textbox', { name: 'Project name' }).fill('Ours');
+  await guest.page.getByRole('textbox', { name: 'Project name' }).press('Enter');
+  await expect(host.page.getByRole('textbox', { name: 'Project name' })).toHaveValue('Ours');
+  await host.page
+    .getByRole('dialog', { name: 'Share “Ours”' })
+    .getByRole('button', { name: 'Stop sharing' })
+    .click();
+  await expect(guest.page.locator('.status-bar .badge.lost')).toHaveText('Connection lost');
+  await expect(guest.page.getByRole('textbox', { name: 'Project name' })).toHaveValue('Ours');
+  await picture(guest.page, 'connection-lost');
 });
