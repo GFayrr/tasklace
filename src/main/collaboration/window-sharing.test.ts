@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requireParticipantId } from '../../core/collaboration/participants';
+import { sharingIdOf } from '../../core/collaboration/succession';
 import { MAX_PORT_ATTEMPTS } from '../../core/limits';
 import type { Introduction } from '../../core/collaboration/secure/link';
 import type { CollaborationEvent } from '../../preload/bridge-contract';
@@ -393,6 +394,36 @@ describe('a shared plan whose host changes', () => {
       0,
     ]);
     expect([lea.window.state().kind, lea.kinds()]).toEqual(['searching', ['connected']]);
+  });
+
+  it('keeps hosting when an announcement of the same plan with an older rank comes from someone without the key', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const network = sharedNetwork();
+    const camille = windowOn(network, 'camille');
+    const [hostPort, nobody] = [await freePort(), await freePort()];
+    const hosted = await camille.window.host(NAMES, identity('camille', hostPort), hostPort);
+    if (!hosted.ok) {
+      throw new Error(hosted.error);
+    }
+    const state = camille.window.state();
+    const planKey = state.kind === 'hosting' ? state.hosting.server.planKey() : new Uint8Array();
+    const forger = network.view(() => 'a');
+    forger.publish({
+      name: 'Tasklace aaaa',
+      type: 'tasklace',
+      port: nobody,
+      txt: { v: '1', plan: 'Thesis', host: 'Mallory', share: sharingIdOf(planKey), rank: '0' },
+    });
+    await until(() => warnings.mock.calls.length === 1);
+    expect([camille.window.state().kind, camille.kinds(), warnings.mock.calls]).toEqual([
+      'hosting',
+      [],
+      [
+        [
+          `The connection to the shared plan failed: connect ECONNREFUSED 127.0.0.1:${String(nobody)}`,
+        ],
+      ],
+    ]);
   });
 
   it('refuses to look for the next host without a key of the plan', () => {

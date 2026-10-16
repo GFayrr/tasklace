@@ -27,7 +27,7 @@ export interface Hosting {
   readonly stop: () => Promise<void>;
 }
 
-/** Hosts a shared plan: starts the server, passes to the page what happens to its guests, announces the plan with the identifier of its key and its rank, again when the key changes, and tells once of an older host of the same plan. */
+/** Hosts a shared plan: starts the server, passes to the page what happens to its guests, announces the plan with the identifier of its key and its rank, again when the key changes, and tells of each older host of the same plan heard. */
 export async function startHosting(
   options: HostingOptions,
 ): Promise<Result<Hosting, ListenFailure>> {
@@ -107,22 +107,23 @@ function announceSafely(
   }
 }
 
-/** Listens for another host of the same plan, telling once of an older one so that this host gives way, a network that refuses mDNS being only logged. */
+/** Listens for another host of the same plan, telling once of each older one heard so that this host may give way, a network that refuses mDNS being only logged. */
 function watchOlderHosts(options: HostingOptions, server: HostServer): () => void {
   const me = { id: serviceNameOf(options.instance), rank: options.rank };
-  let isTold = false;
+  const told = new Set<string>();
   try {
     return findPlans(options.mdns(), (plans) => {
       const sharingId = sharingIdOf(server.planKey());
-      const older = plans.find(
+      const older = plans.filter(
         (plan) =>
           plan.sharingId === sharingId &&
           plan.instance !== me.id &&
+          !told.has(plan.key) &&
           shouldYield(me, { id: plan.instance, rank: plan.rank }),
       );
-      if (older !== undefined && !isTold) {
-        isTold = true;
-        options.olderHost(older, server.planKey());
+      for (const plan of older) {
+        told.add(plan.key);
+        options.olderHost(plan, server.planKey());
       }
     });
   } catch (error) {

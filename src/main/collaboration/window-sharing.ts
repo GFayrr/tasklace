@@ -88,7 +88,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       mdns: context.mdns,
       tell: context.tell,
       olderHost: (older, planKey) => {
-        void giveWay(older, planKey);
+        giveWay(older, planKey);
       },
     });
   /** Describes the plan a window hosts for the page, with the digest of the token of its host. */
@@ -103,6 +103,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
     target: { readonly address: string; readonly port: number; readonly secret: JoinSecret },
     identity: Introduction,
     tell: (session: GuestSession, event: CollaborationEvent) => void,
+    ended: (session: GuestSession) => void = forgetEnded,
   ): GuestSession => {
     const session: GuestSession = startGuestSession({
       ...target,
@@ -113,14 +114,18 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
         tell(session, event);
       },
       ended: () => {
-        if (state.kind === 'searching') {
-          state.attempts.delete(session);
-        } else if (state.kind === 'guest' && state.session === session) {
-          state = { kind: 'idle' };
-        }
+        ended(session);
       },
     });
     return session;
+  };
+  /** Forgets a connection that ended for good: an attempt of the search, or the one the window follows. */
+  const forgetEnded = (session: GuestSession): void => {
+    if (state.kind === 'searching') {
+      state.attempts.delete(session);
+    } else if (state.kind === 'guest' && state.session === session) {
+      state = { kind: 'idle' };
+    }
   };
   /** Passes to the page what the session the window follows tells, and nothing of another. */
   const tellIfFollowed = (session: GuestSession, event: CollaborationEvent): void => {
@@ -146,7 +151,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
     state = { kind: 'guest', session, identity: state.identity };
     context.tell(event);
   };
-  /** Starts a search for the next host with a key, the given queue of candidates and, when this window may host, the names it announces, giving how to try a host found otherwise. */
+  /** Starts a search for the next host with a key, the given queue of candidates, and the names and port this window announces if its turn comes. */
   const search = (
     planKey: Uint8Array,
     identity: Introduction,
@@ -155,8 +160,8 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       readonly names: PlanNames;
       readonly port: number;
       readonly knownTokens: ReadonlyMap<string, string>;
-    } | null,
-  ): ((addresses: readonly string[], port: number) => void) => {
+    },
+  ): void => {
     const attempts = new Set<GuestSession>();
     /** Tries to join a host at a few addresses with the key, each one valid. */
     const attempt = (addresses: readonly string[], port: number): void => {
@@ -167,7 +172,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       }
     };
     /** Hosts the plan with the key on this window's turn, giving it up when another connection was taken meanwhile. */
-    const hostHere = async (place: NonNullable<typeof hosting>, rank: number): Promise<boolean> => {
+    const hostHere = async (place: typeof hosting, rank: number): Promise<boolean> => {
       const hosted = await startHostingAs(place.names, {
         port: place.port,
         planKey,
@@ -198,21 +203,48 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       startTimer: context.startTimer,
       watchHosts: (heard) => watchSafely(context, heard),
       attempt,
-      host: hosting === null || me === undefined ? null : () => hostHere(hosting, me.rank),
+      host: me === undefined ? null : () => hostHere(hosting, me.rank),
     });
     state = { kind: 'searching', succession, attempts, identity, planKey };
-    return attempt;
   };
-  /** Stops hosting for an older host of the same plan, which the guests of this window then find too, and joins it with the key. */
-  const giveWay = async (older: NearbyPlan, planKey: Uint8Array): Promise<void> => {
+  /** Tries to join an older host of the same plan with the key while still hosting, and gives way only once that host proved it holds the key, since anyone nearby can forge an announcement, the guests of this window then finding the older host too. */
+  const giveWay = (older: NearbyPlan, planKey: Uint8Array): void => {
     if (state.kind !== 'hosting') {
       return;
     }
     const { hosting, identity } = state;
-    const attempt = search(planKey, identity, [], null);
-    context.tell({ kind: 'yielded' });
-    attempt(older.addresses, older.port);
-    await hosting.stop();
+    const probes = new Set<GuestSession>();
+    /** Follows the window into the older host once a probe connects, and passes on what the followed connection tells. */
+    const tellProbe = (session: GuestSession, event: CollaborationEvent): void => {
+      if (event.kind !== 'connected' || state.kind !== 'hosting' || state.hosting !== hosting) {
+        tellIfFollowed(session, event);
+        return;
+      }
+      probes.delete(session);
+      probes.forEach((other) => {
+        other.close();
+      });
+      state = { kind: 'guest', session, identity };
+      context.tell({ kind: 'yielded' });
+      context.tell(event);
+      hosting.stop().catch((error: unknown) => {
+        console.error('The plan given way could not stop being hosted here:', error);
+      });
+    };
+    const port = older.port;
+    for (const address of older.addresses.filter((each) => isHostAddress(each) && isPort(port))) {
+      probes.add(
+        joinWith(
+          { address, port, secret: { kind: 'key', key: planKey } },
+          identity,
+          tellProbe,
+          (session) => {
+            probes.delete(session);
+            forgetEnded(session);
+          },
+        ),
+      );
+    }
   };
 
   /** Stops whatever the window does now. */
