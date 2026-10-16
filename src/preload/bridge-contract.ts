@@ -32,6 +32,7 @@ export const IPC_CHANNELS = {
   openSharedPlan: 'collaboration:open-shared',
   findPlans: 'collaboration:find-plans',
   dropPeer: 'collaboration:drop-peer',
+  copyJoinCode: 'collaboration:copy-join-code',
   collaborationSend: 'collaboration:send',
   collaborationEvent: 'collaboration:event',
 } as const;
@@ -56,6 +57,7 @@ export type FileFailureCode =
   | 'NO_FREE_PORT'
   | 'LISTEN_FAILED'
   | 'ALREADY_SHARING'
+  | 'INVALID_ADDRESS'
   | 'TASK_FAILED';
 
 export const ISSUE_FAILURE_CODES = ['INVALID_PROJECT', 'INVALID_IMPORT', 'INVALID_STATE'] as const;
@@ -127,6 +129,7 @@ export const GUEST_ENDS = [
   'UNSUPPORTED_VERSION',
   'INVALID_SHARE',
   'WRONG_CODE',
+  'CODE_REPLACED',
   'TAMPERED',
   'TOO_LARGE',
   'INVALID_CONTENT',
@@ -194,6 +197,7 @@ export interface TasklaceBridge {
   readonly openSharedPlan: (state: Uint8Array) => Promise<BridgeResult<OpenedProject>>;
   readonly findPlans: (searching: boolean) => Promise<BridgeResult<null>>;
   readonly dropPeer: (peer: number) => Promise<BridgeResult<null>>;
+  readonly copyJoinCode: () => Promise<BridgeResult<null>>;
   readonly sendToCollaboration: (to: CollaborationTarget, message: Uint8Array) => void;
   readonly onCollaborationEvent: (listener: (event: CollaborationEvent) => void) => void;
   readonly onFlushRequested: (flush: () => Promise<boolean>) => void;
@@ -223,6 +227,7 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.openSharedPlan]: BridgeResult<OpenedProject>;
   readonly [IPC_CHANNELS.findPlans]: BridgeResult<null>;
   readonly [IPC_CHANNELS.dropPeer]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.copyJoinCode]: BridgeResult<null>;
 }
 
 export interface ChannelArguments {
@@ -252,6 +257,7 @@ export interface ChannelArguments {
   readonly [IPC_CHANNELS.openSharedPlan]: readonly [state: Uint8Array];
   readonly [IPC_CHANNELS.findPlans]: readonly [searching: boolean];
   readonly [IPC_CHANNELS.dropPeer]: readonly [peer: number];
+  readonly [IPC_CHANNELS.copyJoinCode]: readonly [];
 }
 
 export type InvokeChannel = keyof ChannelAnswers & keyof ChannelArguments;

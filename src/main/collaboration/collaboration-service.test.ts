@@ -2,14 +2,19 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ipcMain as electronIpcMain } from 'electron';
+import { ipcMain as electronIpcMain, type WebContents } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { success } from '../../core/result';
 import { TEST_DOCUMENT_ID } from '../../core/testing/project-builder';
 import { IPC_CHANNELS, type CollaborationEvent } from '../../preload/bridge-contract';
 import type { FileTask } from '../file-tasks';
 import type { FakeIpcMain } from '../testing/fake-electron';
-import { privateAddressesOf, registerCollaborationHandlers } from './collaboration-service';
+import {
+  privateAddressesOf,
+  registerCollaborationHandlers,
+  startGuest,
+  type WindowSharing,
+} from './collaboration-service';
 import type { AnnouncedService, Mdns } from './discovery';
 
 vi.mock('electron', async () => {
@@ -95,6 +100,8 @@ async function until(condition: () => boolean): Promise<void> {
 let folder = '';
 let mdnsFake = fakeMdns();
 let tasks: FileTask[] = [];
+let copied: string[] = [];
+let uncopyable = '';
 let forget: (sender: never) => void = () => undefined;
 const trusted = vi.fn();
 
@@ -107,6 +114,8 @@ beforeEach(async () => {
   folder = await mkdtemp(join(tmpdir(), 'tasklace-service-'));
   mdnsFake = fakeMdns();
   tasks = [];
+  copied = [];
+  uncopyable = '';
   trusted.mockClear();
   const registered = registerCollaborationHandlers({
     assertTrusted: trusted,
@@ -129,6 +138,13 @@ beforeEach(async () => {
       },
     }),
     addresses: () => ['192.168.1.24'],
+    copyText: (text) => {
+      if (text === uncopyable) {
+        return Promise.reject(new Error('Clipboard unavailable'));
+      }
+      copied.push(text);
+      return Promise.resolve();
+    },
   });
   forget = registered.forgetWindow;
 });
@@ -275,6 +291,55 @@ describe('the collaboration service', () => {
     await until(() => mdnsFake.record.destroyed === 1);
   });
 
+  it('copies the code of the plan a window shares, and refuses a window that shares nothing', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const idle = new FakePage();
+    expect(await invoke(idle, IPC_CHANNELS.copyJoinCode)).toEqual({
+      ok: false,
+      error: { code: 'TASK_FAILED' },
+    });
+    const host = new FakePage();
+    const shared = (await shareFrom(host)) as { ok: true; value: { code: string } };
+    expect(await invoke(host, IPC_CHANNELS.copyJoinCode)).toEqual(success(null));
+    uncopyable = shared.value.code;
+    expect(await invoke(host, IPC_CHANNELS.copyJoinCode)).toEqual({
+      ok: false,
+      error: { code: 'TASK_FAILED' },
+    });
+    expect([copied, errors.mock.calls]).toEqual([
+      [shared.value.code],
+      [
+        ['A page asked to copy a join code without sharing a plan.'],
+        ['The join code could not be copied:', new Error('Clipboard unavailable')],
+      ],
+    ]);
+    forget(host as never);
+    await until(() => mdnsFake.record.destroyed === 1);
+  });
+
+  it('lets a window join again once its connection ended, as after a wrong code', async () => {
+    const host = new FakePage();
+    const guest = new FakePage();
+    const shared = (await shareFrom(host)) as { ok: true; value: { code: string; port: number } };
+    const request = {
+      address: LOOPBACK,
+      port: shared.value.port,
+      code: shared.value.code === 'AAAAAA' ? 'BBBBBB' : 'AAAAAA',
+      participantId: 'lea',
+      name: 'Léa',
+    };
+    expect(await invoke(guest, IPC_CHANNELS.joinPlan, request)).toEqual(success(null));
+    await until(() => guest.events.length === 1);
+    expect(
+      await invoke(guest, IPC_CHANNELS.joinPlan, { ...request, code: shared.value.code }),
+    ).toEqual(success(null));
+    await until(() => guest.events.length === 2);
+    expect(guest.events).toEqual([{ kind: 'ended', reason: 'WRONG_CODE' }, { kind: 'connected' }]);
+    forget(host as never);
+    forget(guest as never);
+    await until(() => mdnsFake.record.destroyed === 1);
+  });
+
   it('refuses names and requests that are not valid', async () => {
     const page = new FakePage();
     await expect(invoke(page, IPC_CHANNELS.sharePlan, '', 'Camille')).rejects.toThrow(
@@ -286,8 +351,8 @@ describe('the collaboration service', () => {
     const valid = { address: LOOPBACK, port: 1, code: 'K7Q4MZ', participantId: 'lea', name: 'Léa' };
     for (const request of [
       null,
-      { ...valid, address: 'a b' },
-      { ...valid, port: 0 },
+      { ...valid, address: 7 },
+      { ...valid, port: '1' },
       { ...valid, code: 'K7Q4M' },
       { ...valid, code: 7 },
       { ...valid, participantId: 'a b' },
@@ -296,6 +361,23 @@ describe('the collaboration service', () => {
       await expect(invoke(page, IPC_CHANNELS.joinPlan, request)).rejects.toThrow('Request refused');
     }
     await expect(invoke(page, IPC_CHANNELS.findPlans, 'yes')).rejects.toThrow('Request refused');
+  });
+
+  it('tells a page that the address or the port typed cannot name a host, without joining', async () => {
+    const page = new FakePage();
+    const valid = { address: LOOPBACK, port: 1, code: 'K7Q4MZ', participantId: 'lea', name: 'Léa' };
+    for (const request of [
+      { ...valid, address: 'a b' },
+      { ...valid, port: 0 },
+      { ...valid, port: 65_536 },
+      { ...valid, port: 1.5 },
+    ]) {
+      expect(await invoke(page, IPC_CHANNELS.joinPlan, request)).toEqual({
+        ok: false,
+        error: { code: 'INVALID_ADDRESS' },
+      });
+    }
+    expect(await invoke(page, IPC_CHANNELS.stopCollaboration)).toEqual(success(null));
   });
 
   it('opens the shared plan of a window that joined one only, checking it in the worker', async () => {
@@ -400,6 +482,31 @@ describe('the collaboration service', () => {
       ['The shared plan could not be announced on the network:', failure],
     ]);
     expect(await invoke(page, IPC_CHANNELS.stopCollaboration)).toEqual(success(null));
+  });
+});
+
+describe('the connection of a window to a host', () => {
+  /** Builds a fake connection to a host. */
+  const fakeClient = () => ({ send: () => success(null), close: () => undefined });
+
+  it('forgets a window whose connection ended at once, and keeps a newer connection when an older one ends late', () => {
+    const sharings = new Map<WebContents, WindowSharing>();
+    const page = new FakePage() as unknown as WebContents;
+    startGuest(sharings, page, (ended) => {
+      ended();
+      return fakeClient();
+    });
+    expect(sharings.size).toBe(0);
+    let endOlder = (): void => undefined;
+    startGuest(sharings, page, (ended) => {
+      endOlder = ended;
+      return fakeClient();
+    });
+    sharings.delete(page);
+    const newer = fakeClient();
+    startGuest(sharings, page, () => newer);
+    endOlder();
+    expect(sharings.get(page)).toEqual({ kind: 'guest', client: newer });
   });
 });
 

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Worker } from 'node:worker_threads';
 import { Bonjour } from 'bonjour-service';
-import { app, BrowserWindow, dialog, protocol, session } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, protocol, session } from 'electron';
 import {
   APP_ENTRY_URL,
   APP_SCHEME,
@@ -100,6 +100,7 @@ function start(): void {
     userDataFolder: app.getPath('userData'),
     runTask: (task) => runInFileWorker(createFileWorker, task),
     createMdns,
+    copyText: (text) => clipboard.writeText(text),
   });
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath);

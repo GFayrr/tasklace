@@ -70,6 +70,7 @@ const bridge: TasklaceBridge = {
   openSharedPlan: (state) => request(IPC_CHANNELS.openSharedPlan, state),
   findPlans: (searching) => request(IPC_CHANNELS.findPlans, searching),
   dropPeer: (peer) => request(IPC_CHANNELS.dropPeer, peer),
+  copyJoinCode: () => request(IPC_CHANNELS.copyJoinCode),
   sendToCollaboration: (to, message) => {
     ipcRenderer.send(IPC_CHANNELS.collaborationSend, to, message);
   },

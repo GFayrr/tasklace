@@ -10,8 +10,8 @@ export interface ContrastIssue extends ContrastPair {
   readonly ratio: number;
 }
 
-const TEXT_MINIMUM_RATIO = 4.5;
-const INTERFACE_MINIMUM_RATIO = 3;
+export const TEXT_MINIMUM_RATIO = 4.5;
+export const INTERFACE_MINIMUM_RATIO = 3;
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const HEX_RADIX = 16;
 const CHANNEL_MAXIMUM = 255;

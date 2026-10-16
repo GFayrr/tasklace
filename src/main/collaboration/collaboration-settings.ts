@@ -1,11 +1,10 @@
+import { DEFAULT_COLLABORATION_PORT, isPort } from '../../core/collaboration/ports';
 import { MAX_PARTICIPANT_NAME_LENGTH } from '../../core/limits';
 import { createIssueList } from '../../core/validation/validation-issues';
 import { readText } from '../../core/validation/value-readers';
 import type { CollaborationSettings } from '../../preload/bridge-contract';
 import { writeFileSafely } from '../safe-write';
 import { parseStoredJson, readStoredText, setDamagedFileAside } from '../stored-files';
-import { isPort } from './guest-client';
-import { DEFAULT_COLLABORATION_PORT } from './host-server';
 
 export const DEFAULT_COLLABORATION_SETTINGS: CollaborationSettings = {
   name: null,

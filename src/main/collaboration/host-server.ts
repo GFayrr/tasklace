@@ -8,6 +8,7 @@ import {
 } from '../../core/collaboration/secure/join-code';
 import type { Introduction } from '../../core/collaboration/secure/link';
 import { MAX_OPEN_HANDSHAKES, MAX_PARTICIPANTS, MAX_PORT_ATTEMPTS } from '../../core/limits';
+import { LAST_PORT } from '../../core/collaboration/ports';
 import { failure, success, type Result } from '../../core/result';
 import { isPrivateAddress } from './private-addresses';
 import {
@@ -16,9 +17,6 @@ import {
   type SecureConnection,
   type StartTimer,
 } from './secure-connection';
-
-export const DEFAULT_COLLABORATION_PORT = 47_313;
-export const LAST_PORT = 65_535;
 
 export interface Peer {
   readonly number: number;
@@ -55,6 +53,7 @@ const NO_IPV6 = 'EAFNOSUPPORT';
 const UPGRADE_REQUIRED = 426;
 const NORMAL_CLOSE = 1_000;
 export const WRONG_CODE_CLOSE = 4_001;
+export const CODE_REPLACED_CLOSE = 4_002;
 const MAX_CONNECTIONS = MAX_PARTICIPANTS + MAX_OPEN_HANDSHAKES;
 
 /** Starts the server of a shared plan on the chosen port or the next free one, on every private network, IPv4 and IPv6, accepting only guests from a private address who prove they know the code. */
@@ -131,14 +130,16 @@ function guestCounter(options: ServerOptions) {
   let wrongCodes = 0;
   let opening = 0;
   let nextNumber = 1;
-  /** Counts a wrong code, drawing a new code once too many were typed. */
-  const countWrongCode = (): void => {
+  /** Counts a wrong code, drawing a new code once too many were typed, and tells whether it did. */
+  const countWrongCode = (): boolean => {
     wrongCodes += 1;
-    if (wrongCodes >= WRONG_CODES_BEFORE_NEW_CODE) {
-      wrongCodes = 0;
-      code = generateJoinCode(options.randomBytes);
-      options.events.codeChanged(code);
+    if (wrongCodes < WRONG_CODES_BEFORE_NEW_CODE) {
+      return false;
     }
+    wrongCodes = 0;
+    code = generateJoinCode(options.randomBytes);
+    options.events.codeChanged(code);
+    return true;
   };
   return {
     code: () => code,
@@ -158,12 +159,8 @@ function guestCounter(options: ServerOptions) {
       };
       attachGuest(socket, nextNumber, code, options, {
         joined: doneOpening,
-        ended: (reason) => {
-          doneOpening();
-          if (reason === 'WRONG_CODE') {
-            countWrongCode();
-          }
-        },
+        ended: doneOpening,
+        wrongCode: countWrongCode,
       });
       nextNumber += 1;
     },
@@ -176,7 +173,11 @@ function attachGuest(
   number: number,
   code: string,
   options: ServerOptions,
-  counting: { readonly joined: () => void; readonly ended: (reason: ConnectionEnd) => void },
+  counting: {
+    readonly joined: () => void;
+    readonly ended: () => void;
+    readonly wrongCode: () => boolean;
+  },
 ): void {
   let hasJoined = false;
   const connection: SecureConnection = acceptGuest({
@@ -188,7 +189,7 @@ function attachGuest(
         socket.send(bytes);
       },
       close: (reason) => {
-        socket.close(reason === 'WRONG_CODE' ? WRONG_CODE_CLOSE : NORMAL_CLOSE);
+        socket.close(closeCodeOf(reason, counting.wrongCode));
       },
     },
     events: {
@@ -196,7 +197,7 @@ function attachGuest(
         options.events.message(peer, message);
       },
       ended: (reason) => {
-        counting.ended(reason);
+        counting.ended();
         if (hasJoined) {
           options.events.left(peer, reason);
         }
@@ -222,6 +223,14 @@ function attachGuest(
   socket.on('error', (error) => {
     console.warn(`A connection to the shared plan failed: ${error.message}`);
   });
+}
+
+/** Gives the close code that tells a guest why the host ended its connection: a wrong code, counted, or the last wrong code before a new one was drawn. */
+function closeCodeOf(reason: ConnectionEnd, countWrongCode: () => boolean): number {
+  if (reason !== 'WRONG_CODE') {
+    return NORMAL_CLOSE;
+  }
+  return countWrongCode() ? CODE_REPLACED_CLOSE : WRONG_CODE_CLOSE;
 }
 
 /** Gives the bytes of a message received by ws, which may come as one buffer, several or an array buffer. */

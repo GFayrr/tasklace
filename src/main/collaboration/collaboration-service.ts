@@ -3,6 +3,7 @@ import { join as joinPath } from 'node:path';
 import type { IpcMainEvent, WebContents } from 'electron';
 import { ipcMain } from 'electron';
 import { isParticipantId, requireParticipantId } from '../../core/collaboration/participants';
+import { isPort } from '../../core/collaboration/ports';
 import { readJoinCode } from '../../core/collaboration/secure/join-code';
 import {
   MAX_COLLABORATION_MESSAGE_BYTES,
@@ -34,7 +35,7 @@ import {
   storeCollaborationSettings,
 } from './collaboration-settings';
 import { announcePlan, findPlans, type Mdns } from './discovery';
-import { connectAsGuest, isHostAddress, isPort, type GuestClient } from './guest-client';
+import { connectAsGuest, isHostAddress, type GuestClient } from './guest-client';
 import { startHostServer, type HostServer, type Peer } from './host-server';
 import { isPrivateAddress } from './private-addresses';
 import type { StartTimer } from './secure-connection';
@@ -44,11 +45,12 @@ export interface CollaborationServices {
   readonly userDataFolder: string;
   readonly runTask: <T extends FileTask>(task: T) => Promise<ResultOfTask<T>>;
   readonly createMdns: () => { readonly mdns: Mdns; readonly destroy: () => void };
+  readonly copyText: (text: string) => Promise<void>;
   readonly addresses?: () => readonly string[];
   readonly startTimer?: StartTimer;
 }
 
-type WindowSharing =
+export type WindowSharing =
   | {
       readonly kind: 'hosting';
       readonly server: HostServer;
@@ -146,13 +148,29 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
   });
   handle(IPC_CHANNELS.joinPlan, (event, value) => {
     const request = readJoinRequest(value) ?? refuseMessage();
+    if (!isHostAddress(request.address) || !isPort(request.port)) {
+      return failure({ code: 'INVALID_ADDRESS' });
+    }
     if (sharings.has(event.sender)) {
       return failure({ code: 'ALREADY_SHARING' });
     }
-    sharings.set(event.sender, {
-      kind: 'guest',
-      client: joinHost(event.sender, request, startTimer),
-    });
+    startGuest(sharings, event.sender, (ended) =>
+      joinHost(event.sender, request, startTimer, ended),
+    );
+    return success(null);
+  });
+  handle(IPC_CHANNELS.copyJoinCode, async (event) => {
+    const sharing = sharings.get(event.sender);
+    if (sharing?.kind !== 'hosting') {
+      console.error('A page asked to copy a join code without sharing a plan.');
+      return failure({ code: 'TASK_FAILED' });
+    }
+    try {
+      await services.copyText(sharing.server.code());
+    } catch (error) {
+      console.error('The join code could not be copied:', error);
+      return failure({ code: 'TASK_FAILED' });
+    }
     return success(null);
   });
   handle(IPC_CHANNELS.openSharedPlan, (event, value) =>
@@ -242,7 +260,7 @@ function readSharingNames(
   return plan === undefined || host === undefined ? null : { planName: plan, hostName: host };
 }
 
-/** Reads what a page asks to join: a host address and port, a join code as typed, a participant identifier and a name, or null. */
+/** Reads what a page asks to join: a host address and port as typed, checked later since a person may mistype them, a join code, a participant identifier and a name, or null. */
 function readJoinRequest(value: unknown): JoinRequest | null {
   if (typeof value !== 'object' || value === null) {
     return null;
@@ -261,9 +279,7 @@ function readJoinRequest(value: unknown): JoinRequest | null {
   );
   const valid =
     typeof address === 'string' &&
-    isHostAddress(address) &&
     typeof port === 'number' &&
-    isPort(port) &&
     code !== null &&
     isParticipantId(participantId) &&
     name !== undefined;
@@ -342,8 +358,35 @@ function instanceName(): string {
     .join('');
 }
 
-/** Joins a host for a window, passing to the page when the connection opens, what the host sends and why it ended. */
-function joinHost(sender: WebContents, request: JoinRequest, startTimer: StartTimer): GuestClient {
+/** Keeps the connection of a window to a host until it ends, so that the window can join again, a late end of an older connection leaving a newer one in place. */
+export function startGuest(
+  sharings: Map<WebContents, WindowSharing>,
+  sender: WebContents,
+  connect: (ended: () => void) => GuestClient,
+): void {
+  const connection: { client: GuestClient | null; hasEnded: boolean } = {
+    client: null,
+    hasEnded: false,
+  };
+  connection.client = connect(() => {
+    connection.hasEnded = true;
+    const current = sharings.get(sender);
+    if (current?.kind === 'guest' && current.client === connection.client) {
+      sharings.delete(sender);
+    }
+  });
+  if (!connection.hasEnded) {
+    sharings.set(sender, { kind: 'guest', client: connection.client });
+  }
+}
+
+/** Joins a host for a window, passing to the page when the connection opens, what the host sends and why it ended, then telling the window ended. */
+function joinHost(
+  sender: WebContents,
+  request: JoinRequest,
+  startTimer: StartTimer,
+  windowEnded: () => void,
+): GuestClient {
   return connectAsGuest({
     address: request.address,
     port: request.port,
@@ -362,6 +405,7 @@ function joinHost(sender: WebContents, request: JoinRequest, startTimer: StartTi
         tell(sender, { kind: 'hostMessage', message });
       },
       ended: (reason) => {
+        windowEnded();
         tell(sender, { kind: 'ended', reason });
       },
     },

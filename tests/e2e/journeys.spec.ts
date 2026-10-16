@@ -141,11 +141,23 @@ test('lists the recent projects latest first, opens one and explains a recent fi
   const open = page.getByRole('button', { name: 'Open', exact: true });
   const items = page.getByRole('menuitem');
   await open.click();
-  await expect(items).toHaveText(['Open a file…', /^Gamma/, /^Beta/, /^Alpha/]);
+  await expect(items).toHaveText([
+    'Open a file…',
+    'Join a shared plan…',
+    /^Gamma/,
+    /^Beta/,
+    /^Alpha/,
+  ]);
   await items.filter({ hasText: 'Alpha' }).click();
   await expect(projectName()).toHaveValue('Alpha');
   await open.click();
-  await expect(items).toHaveText(['Open a file…', /^Alpha/, /^Gamma/, /^Beta/]);
+  await expect(items).toHaveText([
+    'Open a file…',
+    'Join a shared plan…',
+    /^Alpha/,
+    /^Gamma/,
+    /^Beta/,
+  ]);
 
   await rm(beta);
   await items.filter({ hasText: 'Beta' }).click();

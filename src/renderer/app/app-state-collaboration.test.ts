@@ -145,3 +145,142 @@ describe('joining from the application', () => {
     ]);
   });
 });
+
+describe('the windows of a shared plan', () => {
+  /** Gives the settings of this computer that the fake main process will read. */
+  const withSettings = (
+    fake: ReturnType<typeof fakeAppContext>,
+    name: string | null,
+    firewallNoticeSeen: boolean,
+  ): void => {
+    fake.control.collaboration.settingsResult = {
+      ok: true,
+      value: { name, port: 47_313, firewallNoticeSeen },
+    };
+  };
+
+  it('opens no share window without a project', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    await app.openShare();
+    expect([app.collaborationWindow, fake.control.collaboration.requests]).toEqual([null, []]);
+  });
+
+  it('opens the share window without sharing until a name is given and the word about the network seen', async () => {
+    for (const [name, seen] of [
+      [null, true],
+      ['Camille', false],
+    ] as const) {
+      const opened = await openedAppOf(PLAN);
+      withSettings(opened, name, seen);
+      await opened.app.openShare();
+      expect([opened.app.collaborationWindow, opened.app.collaboration.mode]).toEqual([
+        'share',
+        { kind: 'idle' },
+      ]);
+      expect(opened.control.collaboration.requests).toEqual([['settings']]);
+    }
+  });
+
+  it('shares at once from a computer that already gave a name and saw the word about the network, reading the settings once', async () => {
+    const opened = await openedAppOf(PLAN);
+    withSettings(opened, 'Camille', true);
+    await opened.app.openShare();
+    expect([opened.app.collaborationWindow, opened.app.collaboration.mode.kind]).toEqual([
+      'share',
+      'hosting',
+    ]);
+    opened.app.closeCollaborationWindow();
+    await opened.app.openShare();
+    expect(opened.control.collaboration.requests).toEqual([
+      ['settings'],
+      ['share', PLAN.name, 'Camille'],
+    ]);
+  });
+
+  it('keeps why the plan could not be shared until it is shared', async () => {
+    const opened = await openedAppOf(PLAN);
+    withSettings(opened, 'Camille', true);
+    opened.control.collaboration.shareResult = { ok: false, error: { code: 'NO_FREE_PORT' } };
+    await opened.app.openShare();
+    expect([opened.app.shareFailure, opened.app.collaboration.mode]).toEqual([
+      { code: 'NO_FREE_PORT' },
+      { kind: 'idle' },
+    ]);
+    opened.control.collaboration.shareResult = {
+      ok: true,
+      value: { code: 'K7Q4MZ', port: 47_313, addresses: [] },
+    };
+    await opened.app.startSharing();
+    expect([opened.app.shareFailure, opened.app.collaboration.mode.kind]).toEqual([
+      null,
+      'hosting',
+    ]);
+  });
+
+  it('tells that the settings of this computer could not be read, opening no window', async () => {
+    const opened = await openedAppOf(PLAN);
+    opened.control.collaboration.settingsResult = { ok: false, error: { code: 'READ_FAILED' } };
+    await opened.app.openShare();
+    await opened.app.openJoin();
+    expect([opened.app.collaborationWindow, noticeTexts(opened.app)]).toEqual([
+      null,
+      [english.fileErrors.READ_FAILED],
+    ]);
+  });
+
+  it('looks for plans nearby while the join window is open, and leaves a plan still being joined when it closes', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    withSettings(fake, 'Léa', true);
+    await app.openJoin();
+    expect(app.collaborationWindow).toBe('join');
+    expect(await app.join(TARGET)).toEqual({ ok: true, value: null });
+    app.closeCollaborationWindow();
+    await settle();
+    expect([app.collaborationWindow, app.collaboration.mode]).toEqual([null, { kind: 'idle' }]);
+    expect(fake.control.collaboration.requests.map(([name, value]) => [name, value])).toEqual([
+      ['settings', undefined],
+      ['findPlans', true],
+      ['join', { ...TARGET, participantId: 'id1', name: 'Léa' }],
+      ['findPlans', false],
+      ['stop', undefined],
+    ]);
+  });
+
+  it('closes the join window once the plan joined opens, no longer looking for plans nearby', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    withSettings(fake, 'Léa', true);
+    fake.control.collaboration.openSharedResult = openedProjectOf(PLAN, { fileName: '' });
+    await app.openJoin();
+    await app.join(TARGET);
+    fake.control.collaboration.listener?.({ kind: 'connected' });
+    fake.control.collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'update', update: Uint8Array.of(0, 0) }),
+    });
+    await settle();
+    await settle();
+    expect([app.collaborationWindow, app.collaboration.mode]).toEqual([
+      null,
+      { kind: 'guest', connected: true },
+    ]);
+    expect(fake.control.collaboration.requests.at(-1)).toEqual(['findPlans', false]);
+  });
+
+  it('closes the share window when another project opens, which stops sharing', async () => {
+    const opened = await openedAppOf(PLAN);
+    withSettings(opened, 'Camille', true);
+    await opened.app.openShare();
+    await opened.app.open();
+    await settle();
+    expect([opened.app.collaborationWindow, opened.app.collaboration.mode]).toEqual([
+      null,
+      { kind: 'idle' },
+    ]);
+    expect(opened.control.collaboration.requests.filter(([name]) => name === 'findPlans')).toEqual(
+      [],
+    );
+  });
+});

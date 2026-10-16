@@ -92,6 +92,15 @@ describe('Welcome', () => {
     expect(control.imports).toEqual(['csv', 'json']);
   });
 
+  it('opens the window that joins a shared plan', async () => {
+    const { context } = fakeAppContext();
+    const app = new AppState(context);
+    const root = render(Welcome, { app });
+    click(nth(root, '.action', 3));
+    await settle();
+    expect(app.collaborationWindow).toBe('join');
+  });
+
   it('lists the recent projects with their folder, and opens one', async () => {
     const { context, control } = fakeAppContext();
     const app = new AppState(context);

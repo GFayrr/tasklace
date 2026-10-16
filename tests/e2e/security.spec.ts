@@ -122,6 +122,7 @@ test('exposes only the listed bridge functions, which check what they receive', 
     keys: [
       'adoptProject',
       'collaborationSettings',
+      'copyJoinCode',
       'discardHeldPdf',
       'dropPeer',
       'exportLighterPdf',

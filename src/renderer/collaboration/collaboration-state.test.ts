@@ -18,6 +18,7 @@ import { CollaborationState, EMPTY_STATE_VECTOR } from './collaboration-state.sv
 
 const LEA = requireParticipantId('lea');
 const HOST_ID = requireParticipantId('camille');
+const JOINED_AT = new Date('2026-10-16T10:42:00');
 
 /** Waits for the microtasks and promises queued so far. */
 async function settle(): Promise<void> {
@@ -44,6 +45,7 @@ function side(session: SharedSession | null, ids: readonly string[]) {
       }
       return testId(next);
     },
+    now: () => JOINED_AT,
     session: () => current,
     openShared: (bytes) => {
       opened.push(bytes);
@@ -283,10 +285,37 @@ describe('sharing a plan from the page', () => {
 
   it('removes a guest who left, ignoring guests it does not know', async () => {
     const { host } = await sharedPair();
+    expect([host.state.joinedAt(LEA), host.state.joinedAt(HOST_ID)]).toEqual([JOINED_AT, null]);
     emit(host.collaboration, { kind: 'peerLeft', peer: 9 });
     emit(host.collaboration, { kind: 'peerMessage', peer: 9, message: Uint8Array.of(1) });
     emit(host.collaboration, { kind: 'peerLeft', peer: 1 });
     expect(host.state.participants.map((participant) => participant.name)).toEqual(['Camille']);
+    expect(host.state.joinedAt(LEA)).toBeNull();
+  });
+
+  it('tells the others a new name and keeps it, and keeps the old one when it cannot be kept', async () => {
+    const { host, guest, relay } = await sharedPair();
+    expect(await guest.state.rename('Léa M.')).toEqual({ ok: true, value: null });
+    await relay();
+    host.collaboration.saveSettingsResult = { ok: false, error: { code: 'WRITE_FAILED' } };
+    expect(await host.state.rename('Cam')).toEqual({ ok: false, error: { code: 'WRITE_FAILED' } });
+    await settle();
+    expect([
+      host.state.participants.map((participant) => participant.name),
+      host.state.settings?.name,
+      host.collaboration.sent,
+    ]).toEqual([['Camille', 'Léa M.'], 'Camille', []]);
+  });
+
+  it('copies the code of the plan through the main process, telling whether it could', async () => {
+    const { host } = await sharedPair();
+    expect(await host.state.copyCode()).toBe(true);
+    host.collaboration.copyResult = { ok: false, error: { code: 'TASK_FAILED' } };
+    expect(await host.state.copyCode()).toBe(false);
+    expect(host.collaboration.requests.filter(([kind]) => kind === 'copyCode')).toEqual([
+      ['copyCode'],
+      ['copyCode'],
+    ]);
   });
 
   it('shows the new code drawn after too many wrong ones, only while hosting', async () => {

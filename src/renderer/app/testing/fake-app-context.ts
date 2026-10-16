@@ -63,6 +63,7 @@ export interface FakeCollaboration {
   stopResult: BridgeResult<null>;
   findPlansResult: BridgeResult<null>;
   openSharedResult: BridgeResult<OpenedProject>;
+  copyResult: BridgeResult<null>;
   listener: ((event: CollaborationEvent) => void) | null;
   readonly requests: (readonly [string, ...unknown[]])[];
   readonly sent: (readonly [CollaborationTarget, Uint8Array])[];
@@ -126,6 +127,7 @@ export function fakeBridge(): {
       stopResult: { ok: true, value: null },
       findPlansResult: { ok: true, value: null },
       openSharedResult: { ok: false, error: { code: 'TASK_FAILED' } },
+      copyResult: { ok: true, value: null },
       listener: null,
       requests: [],
       sent: [],
@@ -202,6 +204,7 @@ export function fakeBridge(): {
     openSharedPlan: (state) => asked(['openShared', state], collaboration.openSharedResult),
     findPlans: (searching) => asked(['findPlans', searching], collaboration.findPlansResult),
     dropPeer: (peer) => asked(['dropPeer', peer], { ok: true, value: null }),
+    copyJoinCode: () => asked(['copyCode'], collaboration.copyResult),
     sendToCollaboration: (to, message) => {
       collaboration.sent.push([to, message]);
     },

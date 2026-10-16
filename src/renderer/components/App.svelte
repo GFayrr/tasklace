@@ -10,6 +10,8 @@
   import ProjectSettings from './ProjectSettings.svelte';
   import TaskDetails from './TaskDetails.svelte';
   import Toolbar from './Toolbar.svelte';
+  import JoinWindow from './JoinWindow.svelte';
+  import ShareWindow from './ShareWindow.svelte';
   import Welcome from './Welcome.svelte';
   import Workspace from './Workspace.svelte';
 
@@ -17,7 +19,7 @@
 
   const SETTINGS_COMMANDS: readonly Command[] = ['undo', 'redo'];
 
-  /** Runs the action of a keyboard shortcut, leaving undo and redo to a field being edited and committing it first for other actions, and none while a file action runs or a dialog or the export to PDF is open, the settings allowing undo and redo only. */
+  /** Runs the action of a keyboard shortcut, leaving undo and redo to a field being edited and committing it first for other actions, and none while a file action runs or a window is open, the settings allowing undo and redo only. */
   function handleKey(event: KeyboardEvent): void {
     const target = event.target;
     const isEditingText =
@@ -32,6 +34,7 @@
       app.report !== null ||
       app.detailsTaskId !== null ||
       app.pdfExport !== null ||
+      app.collaborationWindow !== null ||
       (app.settings.isOpen && !SETTINGS_COMMANDS.includes(command))
     ) {
       return;
@@ -60,7 +63,9 @@
   <TaskDetails {app} project={app.project} />
   <ProjectSettings {app} project={app.project} />
   <PdfExport {app} project={app.project} />
+  <ShareWindow {app} project={app.project} />
 {/if}
+<JoinWindow {app} />
 <Notices {app} />
 <ClosePrompt {app} />
 <ReportDialog {app} />

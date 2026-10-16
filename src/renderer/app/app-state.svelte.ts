@@ -99,6 +99,8 @@ export type CloseChoice = 'save' | 'discard' | 'cancel';
 
 export type DrawingPart = 'timeline' | 'patterns';
 
+export type CollaborationWindow = 'share' | 'join';
+
 type CloseQuestion =
   { readonly reason: 'unsaved' } | { readonly reason: 'saveFailed'; readonly detail: string };
 
@@ -204,6 +206,8 @@ export class AppState {
   readonly collaboration: CollaborationState;
   #closePrompt = $state.raw<ClosePrompt | null>(null);
   #pdfExport = $state.raw<PdfExportOpening | null>(null);
+  #collaborationWindow = $state<CollaborationWindow | null>(null);
+  #shareFailure = $state.raw<CollaborationFailure | null>(null);
   #fileActionRunning = $state(false);
   #report = $state.raw<Report | null>(null);
   #lastQuestion: Promise<unknown> = Promise.resolve();
@@ -259,6 +263,7 @@ export class AppState {
     this.collaboration = new CollaborationState({
       bridge: context.bridge,
       createId: context.createId,
+      now: context.now,
       session: () => this.#session,
       openShared: async (state) => (await this.#load(this.#files.openShared(state))) !== null,
       repaired: (repairs) => {
@@ -791,6 +796,69 @@ export class AppState {
     this.#discardHeldPdf();
   }
 
+  /** Returns the window of the shared plan that is open, sharing or joining, or null. */
+  get collaborationWindow(): CollaborationWindow | null {
+    return this.#collaborationWindow;
+  }
+
+  /** Returns why the open plan could not be shared the latest time, or null. */
+  get shareFailure(): CollaborationFailure | null {
+    return this.#shareFailure;
+  }
+
+  /** Opens the window that shares the open project, sharing it at once when this person already gave a name and saw the word about the network. */
+  async openShare(): Promise<void> {
+    if (this.project === null || !(await this.#settingsRead())) {
+      return;
+    }
+    this.#shareFailure = null;
+    this.#collaborationWindow = 'share';
+    const settings = this.collaboration.settings;
+    const ready = settings?.name !== null && settings?.firewallNoticeSeen === true;
+    if (this.collaboration.mode.kind === 'idle' && ready) {
+      await this.startSharing();
+    }
+  }
+
+  /** Shares the open project, keeping why it could not be shared for the window. */
+  async startSharing(): Promise<void> {
+    this.#shareFailure = null;
+    const shared = await this.collaboration.share();
+    this.#shareFailure = shared.ok ? null : shared.error;
+  }
+
+  /** Opens the window that joins a shared plan and starts looking for the plans shared nearby. */
+  async openJoin(): Promise<void> {
+    if (!(await this.#settingsRead())) {
+      return;
+    }
+    this.#collaborationWindow = 'join';
+    await this.collaboration.findPlans(true);
+  }
+
+  /** Closes the window of the shared plan, leaving a plan still being joined and no longer looking for plans nearby. */
+  closeCollaborationWindow(): void {
+    const closed = this.#collaborationWindow;
+    this.#collaborationWindow = null;
+    if (closed !== 'join') {
+      return;
+    }
+    void this.collaboration.findPlans(false);
+    if (this.collaboration.mode.kind === 'joining') {
+      void this.collaboration.stop();
+    }
+  }
+
+  /** Reads the settings of this computer about shared plans unless read already, telling a failure to read them. */
+  async #settingsRead(): Promise<boolean> {
+    if (this.collaboration.settings !== null) {
+      return true;
+    }
+    const read = await this.collaboration.loadSettings();
+    this.#showResult(read);
+    return read.ok;
+  }
+
   /** Asks the main process to forget the PDF it kept back for this window, logging a failure since nothing else waits for it. */
   #discardHeldPdf(): void {
     this.#files.discardHeldPdf().then(
@@ -1188,6 +1256,7 @@ export class AppState {
     this.#openedCount += 1;
     this.#stopFollowing = session.onChange(this.#queueRefresh);
     this.collaboration.attached(session);
+    this.closeCollaborationWindow();
     this.#refresh();
   }
 

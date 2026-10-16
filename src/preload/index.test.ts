@@ -221,6 +221,7 @@ describe('the shared plan through the bridge', () => {
     await bridge.openSharedPlan(Uint8Array.of(1));
     await bridge.findPlans(true);
     await bridge.dropPeer(2);
+    await bridge.copyJoinCode();
     expect(electron.invoke.mock.calls).toEqual([
       [IPC_CHANNELS.collaborationSettings],
       [IPC_CHANNELS.saveCollaborationSettings, settings],
@@ -230,6 +231,7 @@ describe('the shared plan through the bridge', () => {
       [IPC_CHANNELS.openSharedPlan, Uint8Array.of(1)],
       [IPC_CHANNELS.findPlans, true],
       [IPC_CHANNELS.dropPeer, 2],
+      [IPC_CHANNELS.copyJoinCode],
     ]);
   });
 

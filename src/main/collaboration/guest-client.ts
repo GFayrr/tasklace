@@ -3,8 +3,9 @@ import { isIP } from 'node:net';
 import { WebSocket, type RawData } from 'ws';
 import { MAX_SEALED_FRAME_BYTES } from '../../core/collaboration/secure/channel';
 import type { Introduction } from '../../core/collaboration/secure/link';
+import { isPort } from '../../core/collaboration/ports';
 import { MAX_HANDSHAKE_MILLISECONDS } from '../../core/limits';
-import { bytesOf, LAST_PORT, WRONG_CODE_CLOSE } from './host-server';
+import { bytesOf, CODE_REPLACED_CLOSE, WRONG_CODE_CLOSE } from './host-server';
 import { isPrivateAddress } from './private-addresses';
 import {
   connectToHost,
@@ -13,7 +14,7 @@ import {
   type StartTimer,
 } from './secure-connection';
 
-export type GuestEnd = ConnectionEnd | 'UNREACHABLE' | 'NOT_PRIVATE';
+export type GuestEnd = ConnectionEnd | 'CODE_REPLACED' | 'UNREACHABLE' | 'NOT_PRIVATE';
 
 export interface GuestOptions {
   readonly address: string;
@@ -38,6 +39,10 @@ const HOST_NAME_PATTERN =
   /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?$/i;
 const IPV6 = 6;
 const ZONE_SEPARATOR = '%';
+const REFUSED_CODES: ReadonlyMap<number, GuestEnd> = new Map([
+  [WRONG_CODE_CLOSE, 'WRONG_CODE'],
+  [CODE_REPLACED_CLOSE, 'CODE_REPLACED'],
+]);
 
 /** Tells whether an address typed by a person or found on the network can name a host: an IP address, or a host name of letters, digits, hyphens and dots. */
 export function isHostAddress(address: string): boolean {
@@ -48,11 +53,6 @@ export function isHostAddress(address: string): boolean {
 function withoutZone(address: string): string {
   const at = address.indexOf(ZONE_SEPARATOR);
   return at === -1 ? address : address.slice(0, at);
-}
-
-/** Tells whether a number is a port a host can listen on. */
-export function isPort(port: number): boolean {
-  return Number.isInteger(port) && port >= 1 && port <= LAST_PORT;
 }
 
 /** Builds the address of the WebSocket of a host, an IPv6 address in brackets with its zone escaped. */
@@ -116,8 +116,9 @@ export function connectAsGuest(options: GuestOptions): GuestClient {
     endWith('UNREACHABLE');
   });
   socket.on('close', (code: number) => {
-    if (code === WRONG_CODE_CLOSE) {
-      endWith('WRONG_CODE');
+    const refused = REFUSED_CODES.get(code);
+    if (refused !== undefined) {
+      endWith(refused);
       return;
     }
     connection.wireClosed();

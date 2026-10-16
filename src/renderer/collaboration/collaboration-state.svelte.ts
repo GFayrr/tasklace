@@ -41,6 +41,7 @@ export type CollaborationBridge = Pick<
   | 'joinPlan'
   | 'findPlans'
   | 'dropPeer'
+  | 'copyJoinCode'
   | 'sendToCollaboration'
   | 'onCollaborationEvent'
 >;
@@ -48,6 +49,7 @@ export type CollaborationBridge = Pick<
 export interface CollaborationContext {
   readonly bridge: CollaborationBridge;
   readonly createId: () => string;
+  readonly now: () => Date;
   readonly session: () => SharedSession | null;
   readonly openShared: (state: Uint8Array) => Promise<boolean>;
   readonly repaired: (repairs: readonly SharedRepair[]) => void;
@@ -68,6 +70,7 @@ interface Hosting {
   readonly host: Host;
   readonly peers: Map<number, ParticipantId>;
   readonly participantsByPeer: Map<ParticipantId, number>;
+  readonly joinedAt: Map<ParticipantId, Date>;
 }
 
 /** Holds what the page shares or joined: the mode, the people in the plan and the plans nearby, linking the host or guest of the shared plan to the open session and the messages the main process carries, so that the interface only reads it and calls its actions. */
@@ -123,6 +126,11 @@ export class CollaborationState {
     return this.#lastEnd;
   }
 
+  /** Returns when a guest of the plan this page shares joined it, or null for the host and outside a shared plan. */
+  joinedAt(id: ParticipantId): Date | null {
+    return this.#hosting?.joinedAt.get(id) ?? null;
+  }
+
   /** Tells whether this page joined a plan in which it may not edit, so that its changes are refused while it is there. */
   get isReadOnly(): boolean {
     if (this.#mode.kind !== 'guest' && this.#mode.kind !== 'joining') {
@@ -165,6 +173,20 @@ export class CollaborationState {
     return saved;
   }
 
+  /** Changes the name of this person on this computer and tells it to the others in the shared plan. */
+  async rename(name: string): Promise<BridgeResult<null>> {
+    const saved = await this.saveSettings({ name });
+    if (saved.ok) {
+      this.#queuePresence();
+    }
+    return saved;
+  }
+
+  /** Copies the code of the plan this page shares, giving whether it was copied. */
+  async copyCode(): Promise<boolean> {
+    return (await this.#context.bridge.copyJoinCode()).ok;
+  }
+
   /** Shares the open plan under the name of this person, which must be set first, and starts hosting it. */
   async share(): Promise<Result<Sharing, CollaborationFailure>> {
     const session = this.#context.session();
@@ -197,6 +219,7 @@ export class CollaborationState {
       }),
       peers: new SvelteMap(),
       participantsByPeer: new SvelteMap(),
+      joinedAt: new SvelteMap(),
     };
     this.#hosting = hosting;
     this.#me = hostId;
@@ -357,6 +380,7 @@ export class CollaborationState {
       this.#turnAway(peer, joined.error);
       return;
     }
+    hosting.joinedAt.set(participantId, this.#context.now());
     this.#participants = hosting.host.roster().participants;
   }
 
@@ -391,6 +415,7 @@ export class CollaborationState {
     }
     hosting.peers.delete(peer);
     hosting.participantsByPeer.delete(id);
+    hosting.joinedAt.delete(id);
     hosting.host.disconnect(id);
     this.#participants = hosting.host.roster().participants;
   }
