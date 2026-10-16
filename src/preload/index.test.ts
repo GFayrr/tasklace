@@ -12,8 +12,8 @@ const PRINTED: PrintDocument = {
 
 const electron = vi.hoisted(() => ({
   exposed: new Map<string, unknown>(),
-  listeners: new Map<string, () => void>(),
-  sent: [] as [string, unknown][],
+  listeners: new Map<string, (event?: unknown, value?: unknown) => void>(),
+  sent: [] as unknown[][],
   invoke: vi.fn<(channel: string, ...values: unknown[]) => Promise<unknown>>(),
 }));
 
@@ -25,11 +25,11 @@ vi.mock('electron', () => ({
   },
   ipcRenderer: {
     invoke: (channel: string, ...values: unknown[]) => electron.invoke(channel, ...values),
-    on: (channel: string, listener: () => void) => {
+    on: (channel: string, listener: (event?: unknown, value?: unknown) => void) => {
       electron.listeners.set(channel, listener);
     },
-    send: (channel: string, value: unknown) => {
-      electron.sent.push([channel, value]);
+    send: (channel: string, ...values: unknown[]) => {
+      electron.sent.push([channel, ...values]);
     },
   },
 }));
@@ -96,7 +96,7 @@ describe('the bridge exposed to the page', () => {
   it('tells the main process that the page could not start', async () => {
     const bridge = await loadBridge();
     bridge.reportStartFailure();
-    expect(electron.sent).toEqual([[IPC_CHANNELS.pageStartFailed, undefined]]);
+    expect(electron.sent).toEqual([[IPC_CHANNELS.pageStartFailed]]);
   });
 
   it('turns an answer that is not a result into a failed task', async () => {
@@ -198,5 +198,91 @@ describe('closing the window', () => {
       logged.mockRestore();
     }
     expect(electron.sent).toEqual([[IPC_CHANNELS.flushDone, false]]);
+  });
+});
+
+describe('the shared plan through the bridge', () => {
+  it('sends each collaboration request on its own channel with its values', async () => {
+    const bridge = await loadBridge();
+    electron.invoke.mockResolvedValue({ ok: true, value: null });
+    const settings = { name: 'Léa', port: 47_313, firewallNoticeSeen: true };
+    const joining = {
+      address: '192.168.1.24',
+      port: 47_313,
+      code: 'K7Q4MZ',
+      participantId: 'lea',
+      name: 'Léa',
+    };
+    await bridge.collaborationSettings();
+    await bridge.saveCollaborationSettings(settings);
+    await bridge.sharePlan('Thesis', 'Camille');
+    await bridge.stopCollaboration();
+    await bridge.joinPlan(joining);
+    await bridge.openSharedPlan(Uint8Array.of(1));
+    await bridge.findPlans(true);
+    await bridge.dropPeer(2);
+    expect(electron.invoke.mock.calls).toEqual([
+      [IPC_CHANNELS.collaborationSettings],
+      [IPC_CHANNELS.saveCollaborationSettings, settings],
+      [IPC_CHANNELS.sharePlan, 'Thesis', 'Camille'],
+      [IPC_CHANNELS.stopCollaboration],
+      [IPC_CHANNELS.joinPlan, joining],
+      [IPC_CHANNELS.openSharedPlan, Uint8Array.of(1)],
+      [IPC_CHANNELS.findPlans, true],
+      [IPC_CHANNELS.dropPeer, 2],
+    ]);
+  });
+
+  it('sends the messages of the plan without waiting for an answer', async () => {
+    const bridge = await loadBridge();
+    bridge.sendToCollaboration('host', Uint8Array.of(1));
+    bridge.sendToCollaboration(3, Uint8Array.of(2));
+    expect(electron.sent).toEqual([
+      [IPC_CHANNELS.collaborationSend, 'host', Uint8Array.of(1)],
+      [IPC_CHANNELS.collaborationSend, 3, Uint8Array.of(2)],
+    ]);
+  });
+
+  it('passes on each event of the main process of a known shape, and logs any other', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const bridge = await loadBridge();
+    /** Sends an event to the page as the main process does. */
+    const emit = (value: unknown): void => {
+      electron.listeners.get(IPC_CHANNELS.collaborationEvent)?.({}, value);
+    };
+    emit({ kind: 'connected' });
+    const received: unknown[] = [];
+    bridge.onCollaborationEvent((event) => received.push(event));
+    const plan = {
+      key: 'k',
+      planName: 'Thesis',
+      hostName: 'Camille',
+      addresses: ['10.0.0.1'],
+      port: 1,
+    };
+    const valid = [
+      { kind: 'peerJoined', peer: 1, participantId: 'lea', name: 'Léa' },
+      { kind: 'peerMessage', peer: 1, message: Uint8Array.of(1) },
+      { kind: 'peerLeft', peer: 1 },
+      { kind: 'codeChanged', code: 'K7Q4MZ' },
+      { kind: 'nearbyPlans', plans: [plan] },
+      { kind: 'connected' },
+      { kind: 'hostMessage', message: Uint8Array.of(2) },
+      { kind: 'ended', reason: 'WRONG_CODE' },
+    ];
+    const invalid = [
+      null,
+      { kind: 'unknown' },
+      { kind: 'constructor' },
+      { kind: 'peerJoined', peer: 1.5, participantId: 'lea', name: 'Léa' },
+      { kind: 'peerMessage', peer: 1, message: [1] },
+      { kind: 'codeChanged', code: 1 },
+      { kind: 'nearbyPlans', plans: [{ ...plan, addresses: [1] }] },
+      { kind: 'nearbyPlans', plans: 'none' },
+      { kind: 'ended', reason: 'SOMETHING' },
+    ];
+    [...valid, ...invalid].forEach(emit);
+    expect(received).toEqual(valid);
+    expect(errors.mock.calls.map((call): unknown => call[1])).toEqual(invalid);
   });
 });

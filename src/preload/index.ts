@@ -9,12 +9,14 @@ import {
   BRIDGE_NAME,
   IPC_CHANNELS,
   type BridgeResult,
+  type CollaborationEvent,
   type ChannelAnswers,
   type ChannelArguments,
   type ResultChannel,
   type RecentProject,
   type TasklaceBridge,
 } from './bridge-contract';
+import { isCollaborationEvent } from './collaboration-events';
 
 const LIST_SEPARATORS: readonly unknown[] = CSV_SEPARATORS;
 const DATE_ORDER_VALUES: readonly unknown[] = DATE_ORDERS;
@@ -59,6 +61,21 @@ const bridge: TasklaceBridge = {
   saveHeldPdf: () => request(IPC_CHANNELS.saveHeldPdf),
   exportLighterPdf: () => request(IPC_CHANNELS.exportLighterPdf),
   discardHeldPdf: () => request(IPC_CHANNELS.discardHeldPdf),
+  collaborationSettings: () => request(IPC_CHANNELS.collaborationSettings),
+  saveCollaborationSettings: (settings) =>
+    request(IPC_CHANNELS.saveCollaborationSettings, settings),
+  sharePlan: (planName, hostName) => request(IPC_CHANNELS.sharePlan, planName, hostName),
+  stopCollaboration: () => request(IPC_CHANNELS.stopCollaboration),
+  joinPlan: (joining) => request(IPC_CHANNELS.joinPlan, joining),
+  openSharedPlan: (state) => request(IPC_CHANNELS.openSharedPlan, state),
+  findPlans: (searching) => request(IPC_CHANNELS.findPlans, searching),
+  dropPeer: (peer) => request(IPC_CHANNELS.dropPeer, peer),
+  sendToCollaboration: (to, message) => {
+    ipcRenderer.send(IPC_CHANNELS.collaborationSend, to, message);
+  },
+  onCollaborationEvent: (listener) => {
+    collaborationListener = listener;
+  },
   onFlushRequested: (flush) => {
     pageFlush = flush;
   },
@@ -68,6 +85,18 @@ const bridge: TasklaceBridge = {
 };
 
 let pageFlush: (() => Promise<boolean>) | null = null;
+let collaborationListener: ((event: CollaborationEvent) => void) | null = null;
+
+ipcRenderer.on(IPC_CHANNELS.collaborationEvent, (_event, value: unknown) => {
+  if (!isCollaborationEvent(value)) {
+    console.error(
+      'The main process sent an event of the shared plan of an unexpected shape:',
+      value,
+    );
+    return;
+  }
+  collaborationListener?.(value);
+});
 
 ipcRenderer.on(IPC_CHANNELS.flushRequested, answerCloseRequest);
 

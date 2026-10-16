@@ -86,6 +86,10 @@ import type { ZoomLevel } from '../plan/time-scale';
 import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
 import type { Theme } from '../theme/theme';
 import { SettingsPanel } from './settings-panel.svelte';
+import {
+  CollaborationState,
+  type CollaborationFailure,
+} from '../collaboration/collaboration-state.svelte';
 import type { Command } from './shortcuts';
 import type { NewIdentifier } from '../../core/identifiers';
 
@@ -197,6 +201,7 @@ export class AppState {
   readonly settings = new SettingsPanel(() => {
     this.#startMove = null;
   });
+  readonly collaboration: CollaborationState;
   #closePrompt = $state.raw<ClosePrompt | null>(null);
   #pdfExport = $state.raw<PdfExportOpening | null>(null);
   #fileActionRunning = $state(false);
@@ -251,6 +256,16 @@ export class AppState {
         this.#fileActionRunning = running;
       },
     });
+    this.collaboration = new CollaborationState({
+      bridge: context.bridge,
+      createId: context.createId,
+      session: () => this.#session,
+      openShared: async (state) => (await this.#load(this.#files.openShared(state))) !== null,
+      repaired: (repairs) => {
+        this.#notifyRepairs(repairs);
+      },
+      selectedTaskId: () => this.#selectedTaskId,
+    });
     this.#scheduler = context.createScheduler({
       scheduled: (result, project) => {
         this.#showSchedule(result, project);
@@ -281,6 +296,7 @@ export class AppState {
       throw new Error(`The task ${id} to select is not in the project.`);
     }
     this.#selectedTaskId = id;
+    this.collaboration.selectionChanged();
   }
 
   /** Returns the task whose details panel is open, or null. */
@@ -546,6 +562,18 @@ export class AppState {
     }
   }
 
+  /** Joins a shared plan with its code once the user agreed about the open project, the plan opening when the host sent it, and returns why it could not be joined, or null. */
+  async join(target: {
+    readonly address: string;
+    readonly port: number;
+    readonly code: string;
+  }): Promise<Result<null, CollaborationFailure> | null> {
+    if (!(await this.#readyToReplace())) {
+      return null;
+    }
+    return this.collaboration.join(target);
+  }
+
   /** Asks for a project file and opens it. */
   async open(): Promise<void> {
     if (await this.#readyToReplace()) {
@@ -661,7 +689,7 @@ export class AppState {
     if (session === null || trimmed === '' || trimmed === this.project?.name) {
       return false;
     }
-    if (this.#refuseWhileFileActionRuns()) {
+    if (this.#refuseWhileFileActionRuns() || this.#refuseInReadOnly()) {
       return false;
     }
     const renamed = session.apply({ type: 'updateProject', fields: { name: trimmed } });
@@ -897,6 +925,10 @@ export class AppState {
     if (this.#fileActionRunning) {
       return this.messages.fileErrors.BUSY;
     }
+    const readOnly = this.#readOnlyRefusal();
+    if (readOnly !== null) {
+      return readOnly;
+    }
     const context = this.#editContext(project);
     if (context === null) {
       return editErrorMessage(this.messages, 'NOT_POSSIBLE');
@@ -995,7 +1027,7 @@ export class AppState {
 
   /** Undoes the latest local change, unless a file action runs. */
   undo(): void {
-    if (this.#refuseWhileFileActionRuns()) {
+    if (this.#refuseWhileFileActionRuns() || this.#refuseInReadOnly()) {
       return;
     }
     this.settings.restart();
@@ -1004,11 +1036,31 @@ export class AppState {
 
   /** Redoes the latest undone change, unless a file action runs. */
   redo(): void {
-    if (this.#refuseWhileFileActionRuns()) {
+    if (this.#refuseWhileFileActionRuns() || this.#refuseInReadOnly()) {
       return;
     }
     this.settings.restart();
     this.#showHistoryStep(this.#session?.history.redo(), this.messages.notices.redoFailed);
+  }
+
+  /** Returns why the plan cannot change while this person is in read only in a shared plan, naming the host who can let them edit, or null. */
+  #readOnlyRefusal(): string | null {
+    if (!this.collaboration.isReadOnly) {
+      return null;
+    }
+    const host = this.collaboration.hostName;
+    return host === null
+      ? this.messages.collaboration.readOnlyWithoutHost
+      : fillMessage(this.messages.collaboration.readOnly, { host });
+  }
+
+  /** Tells the user that the plan cannot change while they are in read only in a shared plan, telling whether they are. */
+  #refuseInReadOnly(): boolean {
+    const refusal = this.#readOnlyRefusal();
+    if (refusal !== null) {
+      this.#notify('error', refusal);
+    }
+    return refusal !== null;
   }
 
   /** Tells the user that the project cannot change while a file action runs, telling whether one runs. */
@@ -1135,6 +1187,7 @@ export class AppState {
     this.#collapsed = NOTHING_COLLAPSED;
     this.#openedCount += 1;
     this.#stopFollowing = session.onChange(this.#queueRefresh);
+    this.collaboration.attached(session);
     this.#refresh();
   }
 

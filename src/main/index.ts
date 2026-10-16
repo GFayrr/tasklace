@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type { Worker } from 'node:worker_threads';
+import { Bonjour } from 'bonjour-service';
 import { app, BrowserWindow, dialog, protocol, session } from 'electron';
 import {
   APP_ENTRY_URL,
@@ -9,6 +10,8 @@ import {
   isAppAddress,
 } from './app-files';
 import { MAX_PDF_RENDER_MILLISECONDS } from '../core/limits';
+import { registerCollaborationHandlers } from './collaboration/collaboration-service';
+import { mdnsOf } from './collaboration/discovery';
 import { contentSecurityPolicy } from './content-security-policy';
 import { flushBeforeClosing, registerFlushHandler } from './close-flush';
 import { runInFileWorker, startFileWorker } from './file-worker-client';
@@ -92,12 +95,23 @@ function start(): void {
     runTask: (task) => runInFileWorker(createFileWorker, task),
     fonts: printFontsIn(join(rendererRoot, 'fonts')),
   });
+  const collaboration = registerCollaborationHandlers({
+    assertTrusted,
+    userDataFolder: app.getPath('userData'),
+    runTask: (task) => runInFileWorker(createFileWorker, task),
+    createMdns,
+  });
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath);
   logPageMessages(window.webContents, log);
   flushBeforeClosing(window, windowProjectKind, (sender) => {
     forgetWindowProject(sender);
     pdf.forgetHeldPdf(sender);
+    collaboration.forgetWindow(sender);
+  });
+  const contents = window.webContents;
+  window.once('closed', () => {
+    collaboration.forgetWindow(contents);
   });
   let closing = false;
   window.once('close', () => {
@@ -117,6 +131,21 @@ function createFileWorker(): Worker {
   return startFileWorker(fileWorkerPath, (stderr) => {
     logWorkerErrors(stderr, log, process.stderr);
   });
+}
+
+/** Starts the mDNS of the application, an error of its network being only logged since people can still type the address of a host. */
+function createMdns(): ReturnType<
+  Parameters<typeof registerCollaborationHandlers>[0]['createMdns']
+> {
+  const bonjour = new Bonjour(undefined, (error: unknown) => {
+    console.warn('The search for shared plans on the network failed:', error);
+  });
+  return {
+    mdns: mdnsOf(bonjour),
+    destroy: () => {
+      bonjour.destroy();
+    },
+  };
 }
 
 /** Brings the first window forward when the application is launched a second time. */

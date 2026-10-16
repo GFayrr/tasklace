@@ -112,10 +112,26 @@ function readValidatedFile(
     return header;
   }
   const state = decompressPayload(file, header.value, compressor);
-  if (!state.ok) {
-    return state;
+  return state.ok ? validatedState(state.value) : state;
+}
+
+/** Reads an untrusted Yjs state received from a shared plan with the checks of a file once decompressed: its size, its decoding, its project and its document identifier. */
+export function readSharedState(
+  state: Uint8Array,
+): Result<{ readonly state: Uint8Array; readonly documentId: DocumentId }, FileError> {
+  if (state.length > MAX_UNCOMPRESSED_BYTES) {
+    return failure({ code: 'TOO_LARGE' });
   }
-  const document = decodeState(state.value);
+  if (state.length === 0) {
+    return failure({ code: 'INVALID_CONTENT' });
+  }
+  const read = validatedState(state);
+  return read.ok ? success({ state: read.value.state, documentId: read.value.documentId }) : read;
+}
+
+/** Decodes a decompressed Yjs state and checks the project it holds and its document identifier. */
+function validatedState(state: Uint8Array): Result<ValidatedFile, FileError> {
+  const document = decodeState(state);
   if (!document.ok) {
     return document;
   }
@@ -129,7 +145,7 @@ function readValidatedFile(
         code: 'INVALID_PROJECT',
         issues: [{ path: DOCUMENT_ID_KEY, code: 'MISSING_FIELD' }],
       })
-    : success({ state: state.value, document: document.value, documentId });
+    : success({ state, document: document.value, documentId });
 }
 
 /** Checks the size, signature, version, flags and checksum of a file and returns the uncompressed size it declares. */

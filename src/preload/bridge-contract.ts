@@ -24,6 +24,16 @@ export const IPC_CHANNELS = {
   pageStartFailed: 'page:start-failed',
   flushRequested: 'project:flush-requested',
   flushDone: 'project:flush-done',
+  collaborationSettings: 'collaboration:settings',
+  saveCollaborationSettings: 'collaboration:save-settings',
+  sharePlan: 'collaboration:share',
+  stopCollaboration: 'collaboration:stop',
+  joinPlan: 'collaboration:join',
+  openSharedPlan: 'collaboration:open-shared',
+  findPlans: 'collaboration:find-plans',
+  dropPeer: 'collaboration:drop-peer',
+  collaborationSend: 'collaboration:send',
+  collaborationEvent: 'collaboration:event',
 } as const;
 
 export type ExchangeKind = 'json' | 'csv';
@@ -43,6 +53,9 @@ export type FileFailureCode =
   | 'MISSING_CHARACTERS'
   | 'PRINT_FAILED'
   | 'PRINT_INCOMPLETE'
+  | 'NO_FREE_PORT'
+  | 'LISTEN_FAILED'
+  | 'ALREADY_SHARING'
   | 'TASK_FAILED';
 
 export const ISSUE_FAILURE_CODES = ['INVALID_PROJECT', 'INVALID_IMPORT', 'INVALID_STATE'] as const;
@@ -81,6 +94,71 @@ export interface RecentProject {
   readonly folder: string;
 }
 
+export interface CollaborationSettings {
+  readonly name: string | null;
+  readonly port: number;
+  readonly firewallNoticeSeen: boolean;
+}
+
+export interface Sharing {
+  readonly code: string;
+  readonly port: number;
+  readonly addresses: readonly string[];
+}
+
+export interface JoinRequest {
+  readonly address: string;
+  readonly port: number;
+  readonly code: string;
+  readonly participantId: string;
+  readonly name: string;
+}
+
+export interface NearbyPlan {
+  readonly key: string;
+  readonly planName: string;
+  readonly hostName: string;
+  readonly addresses: readonly string[];
+  readonly port: number;
+}
+
+export const GUEST_ENDS = [
+  'MALFORMED',
+  'UNSUPPORTED_VERSION',
+  'INVALID_SHARE',
+  'WRONG_CODE',
+  'TAMPERED',
+  'TOO_LARGE',
+  'INVALID_CONTENT',
+  'WORN_OUT',
+  'BROKEN',
+  'TIMEOUT',
+  'INVALID_INTRODUCTION',
+  'WIRE_CLOSED',
+  'CLOSED',
+  'UNREACHABLE',
+  'NOT_PRIVATE',
+] as const;
+
+export type GuestEndReason = (typeof GUEST_ENDS)[number];
+
+export type CollaborationEvent =
+  | {
+      readonly kind: 'peerJoined';
+      readonly peer: number;
+      readonly participantId: string;
+      readonly name: string;
+    }
+  | { readonly kind: 'peerMessage'; readonly peer: number; readonly message: Uint8Array }
+  | { readonly kind: 'peerLeft'; readonly peer: number }
+  | { readonly kind: 'codeChanged'; readonly code: string }
+  | { readonly kind: 'nearbyPlans'; readonly plans: readonly NearbyPlan[] }
+  | { readonly kind: 'connected' }
+  | { readonly kind: 'hostMessage'; readonly message: Uint8Array }
+  | { readonly kind: 'ended'; readonly reason: GuestEndReason };
+
+export type CollaborationTarget = number | 'host';
+
 export interface TasklaceBridge {
   readonly regionalFormat: () => Promise<RegionalFormat>;
   readonly newProject: () => Promise<string>;
@@ -106,6 +184,18 @@ export interface TasklaceBridge {
   readonly saveHeldPdf: () => Promise<BridgeResult<ExportedFile>>;
   readonly exportLighterPdf: () => Promise<BridgeResult<ExportedFile>>;
   readonly discardHeldPdf: () => Promise<BridgeResult<null>>;
+  readonly collaborationSettings: () => Promise<BridgeResult<CollaborationSettings>>;
+  readonly saveCollaborationSettings: (
+    settings: CollaborationSettings,
+  ) => Promise<BridgeResult<null>>;
+  readonly sharePlan: (planName: string, hostName: string) => Promise<BridgeResult<Sharing>>;
+  readonly stopCollaboration: () => Promise<BridgeResult<null>>;
+  readonly joinPlan: (request: JoinRequest) => Promise<BridgeResult<null>>;
+  readonly openSharedPlan: (state: Uint8Array) => Promise<BridgeResult<OpenedProject>>;
+  readonly findPlans: (searching: boolean) => Promise<BridgeResult<null>>;
+  readonly dropPeer: (peer: number) => Promise<BridgeResult<null>>;
+  readonly sendToCollaboration: (to: CollaborationTarget, message: Uint8Array) => void;
+  readonly onCollaborationEvent: (listener: (event: CollaborationEvent) => void) => void;
   readonly onFlushRequested: (flush: () => Promise<boolean>) => void;
   readonly reportStartFailure: () => void;
 }
@@ -125,6 +215,14 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.saveHeldPdf]: BridgeResult<ExportedFile>;
   readonly [IPC_CHANNELS.exportLighterPdf]: BridgeResult<ExportedFile>;
   readonly [IPC_CHANNELS.discardHeldPdf]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.collaborationSettings]: BridgeResult<CollaborationSettings>;
+  readonly [IPC_CHANNELS.saveCollaborationSettings]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.sharePlan]: BridgeResult<Sharing>;
+  readonly [IPC_CHANNELS.stopCollaboration]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.joinPlan]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.openSharedPlan]: BridgeResult<OpenedProject>;
+  readonly [IPC_CHANNELS.findPlans]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.dropPeer]: BridgeResult<null>;
 }
 
 export interface ChannelArguments {
@@ -146,6 +244,14 @@ export interface ChannelArguments {
   readonly [IPC_CHANNELS.saveHeldPdf]: readonly [];
   readonly [IPC_CHANNELS.exportLighterPdf]: readonly [];
   readonly [IPC_CHANNELS.discardHeldPdf]: readonly [];
+  readonly [IPC_CHANNELS.collaborationSettings]: readonly [];
+  readonly [IPC_CHANNELS.saveCollaborationSettings]: readonly [settings: CollaborationSettings];
+  readonly [IPC_CHANNELS.sharePlan]: readonly [planName: string, hostName: string];
+  readonly [IPC_CHANNELS.stopCollaboration]: readonly [];
+  readonly [IPC_CHANNELS.joinPlan]: readonly [request: JoinRequest];
+  readonly [IPC_CHANNELS.openSharedPlan]: readonly [state: Uint8Array];
+  readonly [IPC_CHANNELS.findPlans]: readonly [searching: boolean];
+  readonly [IPC_CHANNELS.dropPeer]: readonly [peer: number];
 }
 
 export type InvokeChannel = keyof ChannelAnswers & keyof ChannelArguments;
