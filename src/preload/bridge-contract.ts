@@ -16,6 +16,8 @@ export const IPC_CHANNELS = {
   importProject: 'project:import',
   saveProject: 'project:save',
   saveProjectAs: 'project:save-as',
+  keepOwnChanges: 'project:keep-own-changes',
+  openKeptChanges: 'project:open-kept-changes',
   exportProject: 'project:export',
   exportPdf: 'project:export-pdf',
   saveHeldPdf: 'project:save-held-pdf',
@@ -196,6 +198,8 @@ export interface TasklaceBridge {
   readonly importProject: (kind: ExchangeKind) => Promise<BridgeResult<OpenedProject>>;
   readonly adoptProject: (documentId: DocumentId) => Promise<BridgeResult<null>>;
   readonly saveProject: (state: Uint8Array) => Promise<BridgeResult<SavedProject>>;
+  readonly keepOwnChanges: (state: Uint8Array, planName: string) => Promise<BridgeResult<null>>;
+  readonly openKeptChanges: () => Promise<BridgeResult<OpenedProject>>;
   readonly saveProjectAs: (
     state: Uint8Array,
     suggestedName: string,
@@ -249,6 +253,8 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.adoptProject]: BridgeResult<null>;
   readonly [IPC_CHANNELS.saveProject]: BridgeResult<SavedProject>;
   readonly [IPC_CHANNELS.saveProjectAs]: BridgeResult<SavedProject>;
+  readonly [IPC_CHANNELS.keepOwnChanges]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.openKeptChanges]: BridgeResult<OpenedProject>;
   readonly [IPC_CHANNELS.exportProject]: BridgeResult<ExportedFile>;
   readonly [IPC_CHANNELS.exportPdf]: BridgeResult<PdfExport>;
   readonly [IPC_CHANNELS.saveHeldPdf]: BridgeResult<ExportedFile>;
@@ -276,6 +282,8 @@ export interface ChannelArguments {
   readonly [IPC_CHANNELS.adoptProject]: readonly [documentId: DocumentId];
   readonly [IPC_CHANNELS.saveProject]: readonly [state: Uint8Array];
   readonly [IPC_CHANNELS.saveProjectAs]: readonly [state: Uint8Array, suggestedName: string];
+  readonly [IPC_CHANNELS.keepOwnChanges]: readonly [state: Uint8Array, planName: string];
+  readonly [IPC_CHANNELS.openKeptChanges]: readonly [];
   readonly [IPC_CHANNELS.exportProject]: readonly [
     kind: ExchangeKind,
     text: string,

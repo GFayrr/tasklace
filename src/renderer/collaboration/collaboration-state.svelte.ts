@@ -46,6 +46,7 @@ export type CollaborationBridge = Pick<
   | 'dropPeer'
   | 'copyJoinCode'
   | 'findNextHost'
+  | 'keepOwnChanges'
   | 'sendToCollaboration'
   | 'onCollaborationEvent'
 >;
@@ -58,6 +59,7 @@ export interface CollaborationContext {
   readonly openShared: (state: Uint8Array) => Promise<boolean>;
   readonly repaired: (repairs: readonly SharedRepair[]) => void;
   readonly hostChanged: (left: string | null, next: string | null) => void;
+  readonly ownChangesKept: (kept: Result<string, FileFailure>) => void;
   readonly selectedTaskId: () => TaskId | null;
 }
 
@@ -102,6 +104,7 @@ export class CollaborationState {
   #openingShared = false;
   #presenceQueued = false;
   #hostThatLeft: string | null = null;
+  #keepingChanges = false;
 
   /** Starts following the events of the main process about the shared plan. */
   constructor(context: CollaborationContext) {
@@ -146,14 +149,20 @@ export class CollaborationState {
     return this.#hosting?.joinedAt.get(id) ?? null;
   }
 
-  /** Tells whether this page joined a plan in which it may not edit, so that its changes are refused while it is there. */
-  get isReadOnly(): boolean {
-    if (this.#mode.kind !== 'guest' && this.#mode.kind !== 'joining') {
-      return false;
-    }
-    return !this.#participants.some(
+  /** Tells whether the host lets this person edit the plan joined, as last known, so that the changes made away from the host are shared on coming back rather than kept apart. */
+  get canEdit(): boolean {
+    return this.#participants.some(
       (participant) => participant.id === this.#me && participant.canEdit,
     );
+  }
+
+  /** Tells whether this page is connected to a plan in which it may not edit, so that its changes are refused while it is there, changes made away from the host being kept apart once back. */
+  get isReadOnly(): boolean {
+    const connected = this.#mode.kind === 'guest' && this.#mode.connection === 'connected';
+    if (!connected && this.#mode.kind !== 'joining') {
+      return false;
+    }
+    return !this.canEdit;
   }
 
   /** Returns the other people in the shared plan by the task each one selected, in the order of the list, or nobody while the connection to the host is lost, since where they are is then unknown. */
@@ -364,6 +373,7 @@ export class CollaborationState {
     this.#waitingRoster = null;
     this.#openingShared = false;
     this.#hostThatLeft = null;
+    this.#keepingChanges = false;
     this.#participants = [];
     this.#me = null;
     this.#mode = { kind: 'idle' };
@@ -597,7 +607,8 @@ export class CollaborationState {
       this.#participants = message.value.participants;
       return;
     }
-    if (message.value.kind === 'update' && this.#mode.kind === 'joining' && !this.#openingShared) {
+    const awaitsPlan = this.#mode.kind === 'joining' || this.#keepingChanges;
+    if (message.value.kind === 'update' && awaitsPlan && !this.#openingShared) {
       void this.#openPlan(message.value.update);
     }
   }
@@ -606,10 +617,39 @@ export class CollaborationState {
   async #openPlan(state: Uint8Array): Promise<void> {
     this.#openingShared = true;
     const opened = await this.#context.openShared(state);
+    this.#keepingChanges = false;
     if (!opened) {
       this.#openingShared = false;
       await this.stop();
     }
+  }
+
+  /** Keeps apart, in a plan of its own on this computer, the changes this person made away from the host while in read only, then asks the host for the whole shared plan to show it again as it is. */
+  async #keepOwnChanges(): Promise<void> {
+    const session = this.#context.session();
+    const guest = this.#guest;
+    if (session === null || guest === null || this.#keepingChanges) {
+      return;
+    }
+    this.#keepingChanges = true;
+    const planName = session.project().name;
+    const kept = await this.#context.bridge.keepOwnChanges(session.encodeState(), planName);
+    if (!kept.ok) {
+      this.#keepingChanges = false;
+      console.error('The changes made in read only could not be kept apart:', kept.error);
+      this.#context.ownChangesKept(kept);
+      return;
+    }
+    guest.stop();
+    this.#guest = null;
+    const me = this.#me;
+    this.#waitingRoster =
+      me === null ? null : { kind: 'participants', you: me, participants: this.#participants };
+    this.#context.bridge.sendToCollaboration(
+      'host',
+      encodeMessage({ kind: 'stateVector', vector: EMPTY_STATE_VECTOR }),
+    );
+    this.#context.ownChangesKept({ ok: true, value: planName });
   }
 
   /** Tells that the connection to the host ended, keeping the plan open as it is: a plan already opened stays joined but offline, with the people last known, and an attempt to join ends. */
@@ -643,7 +683,7 @@ export class CollaborationState {
         this.#tellNewHost(event.participants);
         return;
       case 'unsharedChanges':
-        console.warn('Changes made in read only stay on this computer.');
+        void this.#keepOwnChanges();
     }
   }
 

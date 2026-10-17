@@ -1,5 +1,5 @@
 import { DEFAULT_CALENDAR } from '../core/calendar/default-calendar';
-import { mkdtemp, readFile, rm, truncate, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as Y from 'yjs';
@@ -514,6 +514,92 @@ describe('reading the state of a shared plan', () => {
     ]);
     expect(errors.mock.calls.map((call): unknown => call[0])).toEqual([
       'The content of the project file could not be decoded:',
+    ]);
+  });
+});
+
+describe('keeping the changes a person could not share', () => {
+  const KEPT_ID = requireDocumentId('00000000-0000-4000-8000-0000000000aa');
+  const TEMPLATE = '{plan} (my changes)';
+
+  /** Builds the task that keeps a state in a file of the test folder. */
+  const keepTask = (state: Uint8Array, path = join(folder, 'kept.tasklace')) =>
+    ({
+      kind: 'keepSharedCopy',
+      state,
+      documentId: KEPT_ID,
+      nameTemplate: TEMPLATE,
+      path,
+      localCopyFolder: join(folder, 'copies'),
+      savedAt: SAVED_AT,
+    }) as const;
+
+  it('writes the plan as a project of its own under a new identifier and a name made from the plan, with its local copy', async () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const task = keepTask(state);
+    const kept = await runFileTask(task);
+    const opened = loadedOf(await runFileTask({ kind: 'openProject', path: task.path }));
+    expect([
+      kept,
+      isResultOf(task, kept),
+      opened.documentId,
+      readSharedProject(documentOf(opened.state)),
+      await readFile(join(folder, 'copies', `${KEPT_ID}.tasklace`)),
+      (await indexIn(join(folder, 'copies')))[KEPT_ID],
+    ]).toEqual([
+      SAVED_WITH_COPY,
+      true,
+      KEPT_ID,
+      readSharedProject(
+        createSharedDocument({ ...SAMPLE, name: `${SAMPLE.name} (my changes)` }, KEPT_ID),
+      ),
+      await readFile(task.path),
+      { path: task.path, savedAt: SAVED_AT.toISOString() },
+    ]);
+  });
+
+  it('refuses and logs a state it cannot read, writing nothing', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const kept = await runFileTask(keepTask(Uint8Array.of(255, 255, 255, 1)));
+    expect([
+      kept,
+      warnings.mock.calls,
+      errors.mock.calls.map((call): unknown => call[0]),
+      await readdir(folder),
+    ]).toEqual([
+      { ok: false, error: { code: 'INVALID_CONTENT' } },
+      [['The changes kept on this computer could not be read: INVALID_CONTENT.']],
+      ['The content of the project file could not be decoded:'],
+      [],
+    ]);
+  });
+
+  it('reports a file that cannot be written, logging why, without a local copy of it', async () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const { result, logged } = await quietly(() =>
+      runFileTask(keepTask(state, join(folder, 'missing-folder', 'kept.tasklace'))),
+    );
+    expect([result, logged, await readdir(folder)]).toEqual([
+      { ok: false, error: { code: 'WRITE_FAILED' } },
+      ['The kept changes could not be written:'],
+      [],
+    ]);
+  });
+
+  it('keeps the file written when its local copy cannot be, telling so', async () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const task = keepTask(state);
+    await writeFile(join(folder, 'copies'), 'a file where the folder of the copies should be');
+    const { result, logged } = await quietly(() => runFileTask(task));
+    expect([
+      result,
+      logged,
+      loadedOf(await runFileTask({ kind: 'openProject', path: task.path })).documentId,
+    ]).toEqual([
+      { ok: true, value: { kind: 'saved', localCopySaved: false } },
+      ['The local copy could not be written:'],
+      KEPT_ID,
     ]);
   });
 });

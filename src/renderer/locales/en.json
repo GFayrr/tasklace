@@ -9,7 +9,8 @@
     "pdfFiles": "PDF documents"
   },
   "projects": {
-    "untitled": "Untitled project"
+    "untitled": "Untitled project",
+    "keptOnThisComputer": "Kept on this computer"
   },
   "fileErrors": {
     "TOO_LARGE": "This file is too large to be opened.",
@@ -607,6 +608,12 @@
     "exportLighter": "Export the lighter PDF…"
   },
   "collaboration": {
+    "ownCopyName": "{plan} (my changes)",
+    "ownChangesNotKept": "Your changes made in read only could not be kept apart. They stay only in the plan open here.",
+    "keptTitle": "Your changes stay in your own copy",
+    "keptBody": "You changed the plan while you were away, but you are in read only in “{plan}”, so your changes cannot be shared. They are kept in a separate plan, “{copy}”, on this computer. You now see the shared plan again.",
+    "openKept": "Open my changes",
+    "keptDone": "OK",
     "readOnly": "You are in read only. {host} can let you edit.",
     "readOnlyWithoutHost": "You are in read only in this shared plan.",
     "share": "Share",
@@ -676,6 +683,7 @@
     "reconnectingShort": "Reconnecting…",
     "offline": "Offline · changes are shared when the plan is shared again",
     "offlineShort": "Offline",
+    "offlineKeptApart": "Offline · you are in read only, so your changes will be kept in your own copy",
     "reconnectingDetail": "Tasklace keeps trying to reach {host}. Your changes are kept on this computer.",
     "hostChanged": "{left} left. {next} now hosts the plan; you are still in.",
     "youHostNow": "{left} left. You now host the plan; the others join you on their own.",

@@ -38,6 +38,7 @@ function side(session: SharedSession | null, ids: readonly string[]) {
   const opened: Uint8Array[] = [];
   const repairs: unknown[] = [];
   const hostChanges: [string | null, string | null][] = [];
+  const kept: unknown[] = [];
   let openSucceeds = true;
   const state: CollaborationState = new CollaborationState({
     bridge: bridge,
@@ -62,6 +63,7 @@ function side(session: SharedSession | null, ids: readonly string[]) {
     },
     repaired: (found) => repairs.push(...found),
     hostChanged: (left, next) => hostChanges.push([left, next]),
+    ownChangesKept: (result) => kept.push(result),
     selectedTaskId: () => (selected === null ? null : testId(selected)),
   });
   return {
@@ -70,6 +72,7 @@ function side(session: SharedSession | null, ids: readonly string[]) {
     opened,
     repairs,
     hostChanges,
+    kept,
     session: () => current,
     select: (id: string | null) => {
       selected = id;
@@ -138,6 +141,21 @@ function rename(session: SharedSession | null, id: string, name: string): void {
     throw new Error('No such task');
   }
   expect(session.apply({ type: 'putTask', task: { ...task, name } }).ok).toBe(true);
+}
+
+/** Reads the names of the tasks in a state sent to the main process, in alphabetical order. */
+function taskNamesIn(state: unknown): readonly string[] {
+  if (!(state instanceof Uint8Array)) {
+    throw new Error('No plan was sent');
+  }
+  const opened = openSharedSessionFromState(state);
+  if (!opened.ok) {
+    throw new Error('The plan sent cannot be opened');
+  }
+  return opened.value
+    .project()
+    .tasks.map((task) => task.name)
+    .sort();
 }
 
 afterEach(() => {
@@ -429,7 +447,7 @@ describe('sharing a plan from the page', () => {
       'BROKEN',
       ['Camille', 'Léa'],
       LEA,
-      true,
+      false,
       'Camille',
     ]);
     expect(guest.session()).not.toBeNull();
@@ -795,13 +813,70 @@ describe('joining and editing together', () => {
     expect(host.session()?.project().dependencies).toHaveLength(1);
   });
 
-  it('tells in the log that changes made in read only stay on this computer', async () => {
-    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  it('lets a person in read only change the plan only while away from the host', async () => {
+    const { guest } = await sharedPair();
+    const readOnly = [guest.state.isReadOnly];
+    emit(guest.collaboration, { kind: 'reconnecting' });
+    readOnly.push(guest.state.isReadOnly);
+    emit(guest.collaboration, { kind: 'offline' });
+    readOnly.push(guest.state.isReadOnly);
+    emit(guest.collaboration, { kind: 'ended', reason: 'REMOVED' });
+    readOnly.push(guest.state.isReadOnly);
+    expect(readOnly).toEqual([true, false, false, false]);
+  });
+
+  it('keeps apart the changes made in read only away from the host, then shows the shared plan again and follows it', async () => {
+    const { host, guest, relay } = await sharedPair();
+    emit(guest.collaboration, { kind: 'reconnecting' });
+    rename(guest.session(), 'a', 'Mine');
+    rename(host.session(), 'b', 'Changed by the host');
+    emit(guest.collaboration, { kind: 'connected' });
+    await relay();
+    const request = guest.collaboration.requests.find(([name]) => name === 'keepOwnChanges');
+    expect([
+      request?.[2],
+      taskNamesIn(request?.[1]),
+      guest.kept,
+      guest.opened.length,
+      guest.state.mode,
+      guest.state.isReadOnly,
+      guest.session()?.project(),
+    ]).toEqual([
+      PLAN_NAME,
+      ['Changed by the host', 'Mine'],
+      [{ ok: true, value: PLAN_NAME }],
+      2,
+      { kind: 'guest', connection: 'connected' },
+      true,
+      host.session()?.project(),
+    ]);
+    rename(host.session(), 'a', 'Shared again');
+    await relay();
+    expect(guest.session()?.project()).toEqual(host.session()?.project());
+  });
+
+  it('keeps the changes in the plan open here when they cannot be kept apart, telling it', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { guest, relay } = await sharedPair();
+    guest.collaboration.keepResult = { ok: false, error: { code: 'WRITE_FAILED' } };
+    emit(guest.collaboration, { kind: 'reconnecting' });
     rename(guest.session(), 'a', 'Mine');
     emit(guest.collaboration, { kind: 'connected' });
     await relay();
-    expect(warnings.mock.calls).toEqual([['Changes made in read only stay on this computer.']]);
+    expect([
+      guest.kept,
+      errors.mock.calls,
+      guest.opened.length,
+      guest
+        .session()
+        ?.project()
+        .tasks.find((task) => task.id === 'a')?.name,
+    ]).toEqual([
+      [{ ok: false, error: { code: 'WRITE_FAILED' } }],
+      [['The changes made in read only could not be kept apart:', { code: 'WRITE_FAILED' }]],
+      1,
+      'Mine',
+    ]);
   });
 
   it('sends the presence once for several selections in a row, and none without a name', async () => {

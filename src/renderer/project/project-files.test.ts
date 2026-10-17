@@ -74,6 +74,10 @@ function fakeBridge(
     openRecentProject: () => Promise.resolve(openResult),
     importProject: () => Promise.resolve(openResult),
     openSharedPlan: () => Promise.resolve(openResult),
+    openKeptChanges: () => {
+      events.push('openKept');
+      return Promise.resolve(openResult);
+    },
     adoptProject: (documentId) => {
       adopted.push(documentId);
       events.push('adopt');
@@ -356,6 +360,17 @@ describe('createProjectFiles', () => {
     expect(files.hasFile()).toBe(true);
     expect(await files.saveAs()).toEqual(SAVED);
     expect(saves).toEqual([{ as: true, documentId: OTHER_ID }]);
+  });
+
+  it('opens the changes kept apart as a project with its file', async () => {
+    const { bridge, events } = fakeBridge(openedOf(OTHER_ID));
+    const files = createProjectFiles(bridge, QUIET, manualTimer());
+    const opened = await files.openKept();
+    expect([opened.ok && opened.value.session.documentId, files.hasFile(), events]).toEqual([
+      OTHER_ID,
+      true,
+      ['openKept', 'adopt'],
+    ]);
   });
 
   it('keeps changes marked unsaved when they come during a save or when the user cancels', async () => {

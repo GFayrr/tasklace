@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
@@ -38,6 +39,45 @@ async function launch(): Promise<Instance> {
   const instance = { application, page, userData };
   instances.push(instance);
   return instance;
+}
+
+/** Starts a relay on this computer that carries every connection to a port, which can be cut and opened again on the same port, so that a guest loses the host for a while. */
+async function startRelay(target: number) {
+  const sockets = new Set<Socket>();
+  let server: Server | null = null;
+  /** Listens on a port, carrying each connection to the target both ways. */
+  const listen = (port: number): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const opened = createServer((incoming) => {
+        const outgoing = createConnection(target, LOOPBACK);
+        for (const socket of [incoming, outgoing]) {
+          sockets.add(socket);
+          socket.on('error', () => socket.destroy());
+          socket.on('close', () => {
+            sockets.delete(socket);
+            incoming.destroy();
+            outgoing.destroy();
+          });
+        }
+        incoming.pipe(outgoing).pipe(incoming);
+      });
+      opened.once('error', reject);
+      opened.listen(port, LOOPBACK, () => {
+        server = opened;
+        const address = opened.address();
+        resolve(typeof address === 'object' && address !== null ? address.port : 0);
+      });
+    });
+  const port = await listen(0);
+  return {
+    port,
+    cut: async (): Promise<void> => {
+      const closing = new Promise((resolve) => server?.close(resolve));
+      sockets.forEach((socket) => socket.destroy());
+      await closing;
+    },
+    restore: () => listen(port),
+  };
 }
 
 /** Saves a picture of a window when a folder for pictures is given, to review the interface by eye. */
@@ -208,4 +248,38 @@ test('lets the oldest guest host once the host stops, the other guest finding it
   await addTask(lea.page, 'After the change');
   await expect(taskRow(noah.page, 'After the change')).toHaveCount(1);
   await picture(noah.page, 'host-changed');
+});
+
+test('keeps apart the changes a guest in read only made away from the host, then shows the shared plan again', async () => {
+  const host = await launch();
+  const { code, port } = await shareNewPlan(host.page);
+  await host.page
+    .getByRole('dialog', { name: 'Share “Untitled project”' })
+    .getByRole('button', { name: 'Done' })
+    .click();
+  await addTask(host.page, 'Survey');
+  const relay = await startRelay(Number(port));
+  const guest = await launch();
+  await joinFrom(guest.page, 'Léa', { port: String(relay.port), code });
+  await expect(taskRow(guest.page, 'Survey')).toHaveCount(1);
+  await relay.cut();
+  await expect(guest.page.locator('.status-bar .badge.reconnecting')).toBeVisible();
+  const name = guest.page.getByRole('textbox', { name: 'Project name' });
+  await name.fill('Mine');
+  await name.press('Enter');
+  await expect(name).toHaveValue('Mine');
+  await relay.restore();
+  const kept = guest.page.getByRole('dialog', { name: 'Your changes stay in your own copy' });
+  await expect(kept).toBeVisible({ timeout: SUCCESSION_LIMIT_MS });
+  await expect(kept).toContainText('They are kept in a separate plan, “Mine (my changes)”');
+  await expect(name).toHaveValue('Untitled project');
+  await expect(host.page.getByRole('textbox', { name: 'Project name' })).toHaveValue(
+    'Untitled project',
+  );
+  await picture(guest.page, 'changes-kept');
+  await kept.getByRole('button', { name: 'Open my changes' }).click();
+  await expect(name).toHaveValue('Mine (my changes)');
+  await expect(guest.page.getByRole('button', { name: 'Share', exact: true })).toBeVisible();
+  await expect(host.page.locator('.status-bar .names')).toHaveText('Camille (host)');
+  await relay.cut();
 });

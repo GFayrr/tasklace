@@ -12,7 +12,7 @@
   const labels: Readonly<Record<GuestConnection, string>> = $derived({
     connected: text.shared,
     reconnecting: text.reconnecting,
-    offline: text.offline,
+    offline: app.collaboration.canEdit ? text.offline : text.offlineKeptApart,
     lost: text.connectionLost,
   });
 </script>

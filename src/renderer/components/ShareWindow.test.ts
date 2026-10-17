@@ -83,10 +83,14 @@ describe('sharing the open plan', () => {
     await clickAndSettle(button(dialog, TEXT.startSharing));
     expect(textsOf(root, '.confirm h3')).toEqual([TEXT.firewallTitle]);
     expect(textsOf(root, '.confirm p')).toEqual([TEXT.firewallBody]);
-    await clickAndSettle(button(single(root, '.confirm'), TEXT.cancel));
+    await clickAndSettle(
+      button(single(root, '.confirm[aria-labelledby="firewall-title"]'), TEXT.cancel),
+    );
     expect([textsOf(root, '.confirm h3'), app.collaboration.mode]).toEqual([[], { kind: 'idle' }]);
     await clickAndSettle(button(dialog, TEXT.startSharing));
-    await clickAndSettle(button(single(root, '.confirm'), TEXT.continue));
+    await clickAndSettle(
+      button(single(root, '.confirm[aria-labelledby="firewall-title"]'), TEXT.continue),
+    );
     expect(control.collaboration.requests).toEqual([
       ['settings'],
       ['saveSettings', { name: 'Camille', port: 47_313, firewallNoticeSeen: false }],
@@ -117,7 +121,9 @@ describe('sharing the open plan', () => {
     await clickAndSettle(button(root, TEXT.share));
     control.collaboration.saveSettingsResult = { ok: false, error: { code: 'WRITE_FAILED' } };
     await clickAndSettle(button(shareWindow(root), TEXT.startSharing));
-    await clickAndSettle(button(single(root, '.confirm'), TEXT.continue));
+    await clickAndSettle(
+      button(single(root, '.confirm[aria-labelledby="firewall-title"]'), TEXT.continue),
+    );
     expect([app.collaboration.mode.kind, errors.mock.calls]).toEqual([
       'hosting',
       [['The word about the network could not be kept as seen:', { code: 'WRITE_FAILED' }]],

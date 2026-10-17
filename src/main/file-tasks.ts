@@ -1,5 +1,6 @@
 import { open, type FileHandle } from 'node:fs/promises';
 import * as Y from 'yjs';
+import { ownCopyName } from '../core/collaboration/own-copy';
 import type { CsvWarning } from '../core/exchange/csv/csv-rows';
 import { importProjectCsv, type CsvImportOptions } from '../core/exchange/csv/project-csv-import';
 import { importProjectJson } from '../core/exchange/project-json';
@@ -11,6 +12,7 @@ import {
 } from '../core/limits';
 import {
   checkStateToSave,
+  copySharedState,
   encodeTasklaceState,
   readSharedState,
   readTasklaceDocument,
@@ -51,6 +53,15 @@ export type FileTask =
       readonly savedAt: Date;
     }
   | {
+      readonly kind: 'keepSharedCopy';
+      readonly state: Uint8Array;
+      readonly documentId: DocumentId;
+      readonly nameTemplate: string;
+      readonly path: string;
+      readonly localCopyFolder: string;
+      readonly savedAt: Date;
+    }
+  | {
       readonly kind: 'writeDirectPdf';
       readonly document: CheckedPrintDocument;
       readonly fonts: PrintFonts;
@@ -85,6 +96,7 @@ interface TaskOutcomes {
   readonly importJson: LoadedProject;
   readonly importCsv: LoadedProject;
   readonly saveProject: SavedFiles;
+  readonly keepSharedCopy: SavedFiles;
   readonly writeDirectPdf: DirectPdf;
 }
 
@@ -96,6 +108,7 @@ const OUTCOME_KINDS = {
   importJson: 'loaded',
   importCsv: 'loaded',
   saveProject: 'saved',
+  keepSharedCopy: 'saved',
   writeDirectPdf: 'directPdf',
 } as const satisfies { readonly [Kind in FileTask['kind']]: TaskOutcomes[Kind]['kind'] };
 
@@ -129,6 +142,8 @@ export async function runFileTask(task: FileTask): Promise<FileTaskResult> {
       );
     case 'saveProject':
       return saveProject(task);
+    case 'keepSharedCopy':
+      return keepSharedCopy(task);
     case 'writeDirectPdf':
       return directPdf(task.document, task.fonts);
   }
@@ -273,10 +288,7 @@ async function saveProject(
     return failure(checked.error);
   }
   const file = encodeTasklaceState(task.state, zlibCompressor);
-  if (file.length > MAX_FILE_BYTES) {
-    console.error(
-      `The project was not saved: its file would weigh ${String(file.length)} bytes, more than the ${String(MAX_FILE_BYTES)} a project file may weigh to be opened again.`,
-    );
+  if (!canBeReopened(file, 'The project was not saved: its file')) {
     return failure({ code: 'TOO_LARGE_TO_SAVE' });
   }
   const { path } = task;
@@ -292,6 +304,43 @@ async function saveProject(
     return failure({ code: 'LOCAL_COPY_FAILED' });
   }
   return success({ kind: 'saved', localCopySaved });
+}
+
+/** Writes as a project file of its own a shared plan in which this person could not share their changes, under a new identifier and a name made from the plan's, with its local copy, the plan being checked as the content of a file. */
+async function keepSharedCopy(
+  task: Extract<FileTask, { kind: 'keepSharedCopy' }>,
+): Promise<FileTaskResult> {
+  const copy = copySharedState(
+    task.state,
+    { nameOf: (name) => ownCopyName(name, task.nameTemplate), documentId: task.documentId },
+    zlibCompressor,
+  );
+  if (!copy.ok) {
+    console.warn(`The changes kept on this computer could not be read: ${copy.error.code}.`);
+    return failure(withoutReason(copy.error));
+  }
+  const file = copy.value;
+  if (!canBeReopened(file, 'The changes were not kept: their file')) {
+    return failure({ code: 'TOO_LARGE_TO_SAVE' });
+  }
+  if (!(await attemptWrite('The kept changes', () => writeFileSafely(task.path, file)))) {
+    return failure({ code: 'WRITE_FAILED' });
+  }
+  const localCopySaved = await attemptWrite('The local copy', () =>
+    saveLocalCopy(task.localCopyFolder, task.documentId, file, task.path, task.savedAt),
+  );
+  return success({ kind: 'saved', localCopySaved });
+}
+
+/** Tells whether a project file is small enough to be opened again, logging the size of one that is not after what was not written. */
+function canBeReopened(file: Uint8Array, what: string): boolean {
+  if (file.length <= MAX_FILE_BYTES) {
+    return true;
+  }
+  console.error(
+    `${what} would weigh ${String(file.length)} bytes, more than the ${String(MAX_FILE_BYTES)} a project file may weigh to be opened again.`,
+  );
+  return false;
 }
 
 /** Runs a write and tells whether it succeeded, logging the whole error of the system that stopped it, any other error being thrown again so that a programming error is never shown as a file that could not be written. */

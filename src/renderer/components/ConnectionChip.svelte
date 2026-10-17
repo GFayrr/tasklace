@@ -18,7 +18,7 @@
   const names: Readonly<Record<GuestConnection, string>> = $derived({
     connected: text.connected,
     reconnecting: text.reconnecting,
-    offline: text.offline,
+    offline: collaboration.canEdit ? text.offline : text.offlineKeptApart,
     lost: text.connectionLost,
   });
   const hints: Readonly<Record<GuestConnection, string>> = $derived({

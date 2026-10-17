@@ -77,6 +77,8 @@ describe('the bridge exposed to the page', () => {
     await bridge.adoptProject(requireDocumentId('11111111-1111-4111-8111-111111111111'));
     await bridge.saveProject(state);
     await bridge.saveProjectAs(state, 'Plan');
+    await bridge.keepOwnChanges(state, 'Plan');
+    await bridge.openKeptChanges();
     await bridge.exportProject('json', '{}', 'Plan');
     await bridge.exportPdf(PRINTED, 'Plan');
     await bridge.saveHeldPdf();
@@ -88,6 +90,8 @@ describe('the bridge exposed to the page', () => {
       [IPC_CHANNELS.adoptProject, '11111111-1111-4111-8111-111111111111'],
       [IPC_CHANNELS.saveProject, state],
       [IPC_CHANNELS.saveProjectAs, state, 'Plan'],
+      [IPC_CHANNELS.keepOwnChanges, state, 'Plan'],
+      [IPC_CHANNELS.openKeptChanges],
       [IPC_CHANNELS.exportProject, 'json', '{}', 'Plan'],
       [IPC_CHANNELS.exportPdf, PRINTED, 'Plan'],
       [IPC_CHANNELS.saveHeldPdf],

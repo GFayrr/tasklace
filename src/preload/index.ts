@@ -55,6 +55,8 @@ const bridge: TasklaceBridge = {
   saveProject: (state) => request(IPC_CHANNELS.saveProject, state),
   saveProjectAs: (state, suggestedName) =>
     request(IPC_CHANNELS.saveProjectAs, state, suggestedName),
+  keepOwnChanges: (state, planName) => request(IPC_CHANNELS.keepOwnChanges, state, planName),
+  openKeptChanges: () => request(IPC_CHANNELS.openKeptChanges),
   exportProject: (kind, text, suggestedName) =>
     request(IPC_CHANNELS.exportProject, kind, text, suggestedName),
   exportPdf: (document, suggestedName) => request(IPC_CHANNELS.exportPdf, document, suggestedName),

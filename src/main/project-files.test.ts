@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, readFile, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { ipcMain as electronIpcMain, type WebContents } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MAX_FILE_BYTES } from '../core/limits';
+import { MAX_FILE_BYTES, MAX_PROJECT_NAME_LENGTH } from '../core/limits';
 import { failure, success } from '../core/result';
 import { IPC_CHANNELS } from '../preload/bridge-contract';
 import { isResultOf, type FileTask, type FileTaskResult } from './file-tasks';
@@ -14,7 +14,7 @@ import {
   windowProjectKind,
 } from './project-files';
 import type { FakeIpcMain } from './testing/fake-electron';
-import { requireDocumentId } from '../core/shared/shared-document';
+import { isDocumentId, requireDocumentId } from '../core/shared/shared-document';
 
 const dialogs = vi.hoisted(() => ({
   open: vi.fn<() => Promise<{ canceled: boolean; filePaths: string[] }>>(),
@@ -346,6 +346,8 @@ describe('opening projects', () => {
       [IPC_CHANNELS.saveProject, STATE],
       [IPC_CHANNELS.saveProjectAs, STATE, 'Plan'],
       [IPC_CHANNELS.exportProject, 'json', '{}', 'Plan'],
+      [IPC_CHANNELS.keepOwnChanges, STATE, 'Plan'],
+      [IPC_CHANNELS.openKeptChanges],
     ];
     for (const [channel, ...values] of requests) {
       await expect(request(channel, {}, ...values)).rejects.toThrow(RefusedRequest);
@@ -702,5 +704,105 @@ describe('the kind of project a window holds', () => {
       logged.mockRestore();
     }
     expect(windowProjectKind(fresh as WebContents)).toBe('none');
+  });
+});
+
+describe('keeping the changes a person could not share', () => {
+  const KEPT = 'kept-plans';
+
+  /** Returns the last task sent to keep changes, failing the test when there is none. */
+  const keptTask = (): Extract<FileTask, { kind: 'keepSharedCopy' }> => {
+    const task = tasks.at(-1);
+    if (task?.kind !== 'keepSharedCopy') {
+      throw new Error('No changes were kept.');
+    }
+    return task;
+  };
+
+  it('refuses a page without project, a state that is not bytes and a plan name that is too long', async () => {
+    expect(await quietly(() => request(IPC_CHANNELS.keepOwnChanges, {}, STATE, 'Thesis'))).toEqual({
+      answer: failure({ code: 'NO_PROJECT' }),
+      logged: [['A page asked to keep its changes without holding a project.']],
+    });
+    await expect(request(IPC_CHANNELS.keepOwnChanges, {}, 'state', 'Thesis')).rejects.toThrow(
+      RefusedRequest,
+    );
+    await expect(
+      request(IPC_CHANNELS.keepOwnChanges, {}, STATE, 'a'.repeat(MAX_PROJECT_NAME_LENGTH + 1)),
+    ).rejects.toThrow(RefusedRequest);
+  });
+
+  it('keeps the plan under a new identifier in a folder of this computer, first among the recent projects, and opens it again', async () => {
+    const sender = await openedIn(join(folder, 'Thesis.tasklace'));
+    const before = Date.now();
+    expect(await request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis')).toEqual(
+      success(null),
+    );
+    const task = keptTask();
+    const path = join(userData, KEPT, 'Thesis (my changes).tasklace');
+    expect([
+      task.state,
+      isDocumentId(task.documentId) && task.documentId !== DOCUMENT_ID,
+      task.nameTemplate,
+      task.path,
+      task.localCopyFolder,
+      task.savedAt.getTime() >= before,
+    ]).toEqual([STATE, true, '{plan} (my changes)', path, join(userData, 'local-copies'), true]);
+    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(
+      success([
+        { name: 'Thesis (my changes)', folder: 'Kept on this computer' },
+        { name: 'Thesis', folder },
+      ]),
+    );
+    await writeFile(path, 'project');
+    runTask.mockResolvedValueOnce(success(LOADED));
+    expect(await request(IPC_CHANNELS.openKeptChanges, sender)).toMatchObject({ ok: true });
+    expect(tasks.at(-1)).toEqual({ kind: 'openProject', path });
+  });
+
+  it('numbers the name of a file already kept, then names it after an identifier once every number is taken', async () => {
+    const sender = await openedIn(join(folder, 'Thesis.tasklace'));
+    const kept = join(userData, KEPT);
+    await mkdir(kept);
+    await writeFile(join(kept, 'Thesis (my changes).tasklace'), 'taken');
+    await request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis');
+    expect(keptTask().path).toBe(join(kept, 'Thesis (my changes) 2.tasklace'));
+    for (let number = 2; number <= 64; number += 1) {
+      await writeFile(join(kept, `Thesis (my changes) ${String(number)}.tasklace`), 'taken');
+    }
+    await request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis');
+    const named = keptTask().path;
+    expect([named.startsWith(kept), isDocumentId(basename(named, '.tasklace'))]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it('gives back a failure of the task, keeping nothing to open nor to list', async () => {
+    const sender = await openedIn(join(folder, 'Thesis.tasklace'));
+    runTask.mockResolvedValueOnce(failure({ code: 'WRITE_FAILED' }));
+    expect(await request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis')).toEqual(
+      failure({ code: 'WRITE_FAILED' }),
+    );
+    expect(await quietly(() => request(IPC_CHANNELS.openKeptChanges, sender))).toEqual({
+      answer: failure({ code: 'TASK_FAILED' }),
+      logged: [['A page asked to open the changes it kept, but its window kept none.']],
+    });
+    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(
+      success([{ name: 'Thesis', folder }]),
+    );
+  });
+
+  it('reports a folder that cannot be created as a failed write, logging why', async () => {
+    const sender = await openedIn(join(folder, 'Thesis.tasklace'));
+    await writeFile(join(userData, KEPT), 'a file where the folder should be');
+    const { answer, logged } = await quietly(() =>
+      request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis'),
+    );
+    expect([answer, logged.map((call): unknown => call[0]), tasks.at(-1)?.kind]).toEqual([
+      failure({ code: 'WRITE_FAILED' }),
+      ['The folder of the kept changes could not be created:'],
+      'openProject',
+    ]);
   });
 });

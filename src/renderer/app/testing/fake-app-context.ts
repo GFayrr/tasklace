@@ -65,6 +65,8 @@ export interface FakeCollaboration {
   openSharedResult: BridgeResult<OpenedProject>;
   copyResult: BridgeResult<null>;
   findNextHostResult: BridgeResult<null>;
+  keepResult: BridgeResult<null>;
+  openKeptResult: BridgeResult<OpenedProject>;
   listener: ((event: CollaborationEvent) => void) | null;
   readonly requests: (readonly [string, ...unknown[]])[];
   readonly sent: (readonly [CollaborationTarget, Uint8Array])[];
@@ -135,6 +137,8 @@ export function fakeBridge(): {
       openSharedResult: { ok: false, error: { code: 'TASK_FAILED' } },
       copyResult: { ok: true, value: null },
       findNextHostResult: { ok: true, value: null },
+      keepResult: { ok: true, value: null },
+      openKeptResult: { ok: false, error: { code: 'CANCELLED' } },
       listener: null,
       requests: [],
       sent: [],
@@ -217,6 +221,9 @@ export function fakeBridge(): {
         ['findNextHost', queue, planName, hostName, knownTokens],
         collaboration.findNextHostResult,
       ),
+    keepOwnChanges: (state, planName) =>
+      asked(['keepOwnChanges', state, planName], collaboration.keepResult),
+    openKeptChanges: () => asked(['openKeptChanges'], collaboration.openKeptResult),
     sendToCollaboration: (to, message) => {
       collaboration.sent.push([to, message]);
     },

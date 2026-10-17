@@ -203,7 +203,7 @@ describe('the chip of the connection', () => {
   });
 
   it('says that it reconnects, keeping the changes, then that it is offline, with the people hidden', async () => {
-    const { root, control } = await renderJoined();
+    const { root, control } = await renderJoined(true);
     control.collaboration.listener?.({ kind: 'reconnecting' });
     update();
     expect([
@@ -220,6 +220,13 @@ describe('the chip of the connection', () => {
       textsOf(root, '.status-bar .badge.offline'),
       textsOf(single(root, 'header.toolbar'), '.label'),
     ]).toEqual([[TEXT.offlineShort], [TEXT.offline]]);
+  });
+
+  it('says to a person in read only who is offline that the changes will be kept in their own copy', async () => {
+    const { root, control } = await renderJoined();
+    control.collaboration.listener?.({ kind: 'offline' });
+    update();
+    expect(textsOf(single(root, 'header.toolbar'), '.label')).toEqual([TEXT.offlineKeptApart]);
   });
 
   it('says when the connection to the host is lost, the plan staying open', async () => {
