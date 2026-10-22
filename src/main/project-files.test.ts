@@ -1,13 +1,4 @@
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rm,
-  truncate,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { ipcMain as electronIpcMain, type WebContents } from 'electron';
@@ -34,6 +25,7 @@ const dialogs = vi.hoisted(() => ({
 
 const recording = vi.hoisted((): { failure: Error | null } => ({ failure: null }));
 const examining = vi.hoisted((): { failure: Error | null } => ({ failure: null }));
+const moving = vi.hoisted((): { failure: Error | null } => ({ failure: null }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:fs/promises')>();
@@ -43,6 +35,11 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       const failure = examining.failure;
       examining.failure = null;
       return failure === null ? original.stat(...values) : Promise.reject(failure);
+    },
+    rename: (...values: Parameters<typeof original.rename>) => {
+      const failure = moving.failure;
+      moving.failure = null;
+      return failure === null ? original.rename(...values) : Promise.reject(failure);
     },
   };
 });
@@ -926,17 +923,15 @@ describe('setting aside the local copy of an opened file', () => {
   it('reports a copy the system cannot move as a failed write, logging why', async () => {
     const { sender, path } = await offeredFile();
     await writeCopy();
-    await chmod(copiesIn(userData), 0o555);
-    try {
-      const { answer, logged } = await quietly(() =>
-        request(IPC_CHANNELS.setLocalCopyAside, sender, DOCUMENT_ID),
-      );
-      expect([answer, logged.map((call): unknown => call[0])]).toEqual([
-        failure({ code: 'WRITE_FAILED' }),
-        [`The local copy of ${path} could not be set aside:`],
-      ]);
-    } finally {
-      await chmod(copiesIn(userData), 0o755);
-    }
+    const denied = Object.assign(new Error('denied'), { code: 'EPERM' });
+    moving.failure = denied;
+    const { answer, logged } = await quietly(() =>
+      request(IPC_CHANNELS.setLocalCopyAside, sender, DOCUMENT_ID),
+    );
+    expect([answer, logged, await readdir(copiesIn(userData))]).toEqual([
+      failure({ code: 'WRITE_FAILED' }),
+      [[`The local copy of ${path} could not be set aside:`, denied]],
+      [`${DOCUMENT_ID}.tasklace`],
+    ]);
   });
 });
