@@ -17,6 +17,7 @@ test-results/
 /pdf-compare/
 playwright-report/
 blob-report/
+/ci_results/
 .eslintcache
 
 .claude/settings.local.json
