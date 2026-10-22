@@ -2,7 +2,13 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { formatLocalCopyIndex, localCopyPath, readIndexText, saveLocalCopy } from './local-copies';
+import {
+  formatLocalCopyIndex,
+  localCopyPath,
+  readIndexText,
+  saveLocalCopy,
+  setLocalCopyAside,
+} from './local-copies';
 import { requireDocumentId } from '../core/shared/shared-document';
 import { forgedDocumentId } from '../core/testing/project-builder';
 
@@ -111,5 +117,19 @@ describe('local copies', () => {
       saveLocalCopy(folder, forgedDocumentId('../escape'), Uint8Array.from([1]), null, SAVED_AT),
     ).rejects.toThrow();
     expect(await readdir(folder)).toEqual([]);
+  });
+
+  it('sets a copy aside under a name holding the time, gives nothing for a missing one, and refuses an invalid identifier', async () => {
+    await saveLocalCopy(folder, FIRST, Uint8Array.from([1]), SOURCE, SAVED_AT);
+    const aside = await setLocalCopyAside(folder, FIRST, SAVED_AT);
+    const name = `${FIRST}.set-aside-2026-09-30T10-00-00-000Z.tasklace`;
+    expect([
+      aside,
+      await setLocalCopyAside(folder, FIRST, SAVED_AT),
+      (await readdir(folder)).sort(),
+    ]).toEqual([join(folder, name), null, [name, 'index.json']]);
+    await expect(
+      setLocalCopyAside(folder, forgedDocumentId('../escape'), SAVED_AT),
+    ).rejects.toThrow('Invalid document identifier for a local copy.');
   });
 });

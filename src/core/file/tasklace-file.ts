@@ -159,6 +159,15 @@ export function copySharedState(
   return success(encodeTasklaceFile(renamed, compressor));
 }
 
+/** Tells whether a checked state holds changes another checked state of the same plan lacks, deletions included, by the snapshot of the other before and after the state is added to it. */
+export function holdsChangesMissingFrom(state: Uint8Array, other: Uint8Array): boolean {
+  const document = new Y.Doc();
+  Y.applyUpdate(document, other);
+  const before = Y.snapshot(document);
+  Y.applyUpdate(document, state);
+  return !Y.equalSnapshots(before, Y.snapshot(document));
+}
+
 /** Decodes a decompressed Yjs state and checks the project it holds and its document identifier. */
 function validatedState(state: Uint8Array): Result<ValidatedFile, FileError> {
   const document = decodeState(state);

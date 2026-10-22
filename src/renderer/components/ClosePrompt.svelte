@@ -5,6 +5,26 @@
   let { app }: { app: AppState } = $props();
 
   const text = $derived(app.messages.closePrompt);
+  const wording = $derived.by(() => {
+    const prompt = app.closePrompt;
+    if (prompt?.reason === 'saveFailed') {
+      return {
+        title: text.failedTitle,
+        body: fillMessage(text.failedBody, { reason: prompt.detail }),
+        discard: text.closeAnyway,
+        save: text.saveElsewhere,
+      };
+    }
+    if (prompt?.reason === 'localChanges') {
+      return {
+        title: text.localChangesTitle,
+        body: fillMessage(text.localChangesBody, { file: prompt.fileName }),
+        discard: text.openAlone,
+        save: text.addThem,
+      };
+    }
+    return { title: text.title, body: text.body, discard: text.discard, save: text.save };
+  });
   let dialog: HTMLDialogElement | undefined = $state();
 
   $effect(() => {
@@ -31,13 +51,8 @@
     answer('cancel');
   }}
 >
-  {#if app.closePrompt?.reason === 'saveFailed'}
-    <h2 id="close-prompt-title">{text.failedTitle}</h2>
-    <p id="close-prompt-body">{fillMessage(text.failedBody, { reason: app.closePrompt.detail })}</p>
-  {:else}
-    <h2 id="close-prompt-title">{text.title}</h2>
-    <p id="close-prompt-body">{text.body}</p>
-  {/if}
+  <h2 id="close-prompt-title">{wording.title}</h2>
+  <p id="close-prompt-body">{wording.body}</p>
   <div class="actions">
     <button
       type="button"
@@ -51,14 +66,14 @@
       class="button"
       onclick={() => {
         answer('discard');
-      }}>{app.closePrompt?.reason === 'saveFailed' ? text.closeAnyway : text.discard}</button
+      }}>{wording.discard}</button
     >
     <button
       type="button"
       class="button primary"
       onclick={() => {
         answer('save');
-      }}>{app.closePrompt?.reason === 'saveFailed' ? text.saveElsewhere : text.save}</button
+      }}>{wording.save}</button
     >
   </div>
 </dialog>

@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MAX_FILE_WORKER_HEAP_MEBIBYTES } from '../core/limits';
 import { runInFileWorker, startFileWorker } from './file-worker-client';
 
-const TASK = { kind: 'openProject', path: '/nowhere' } as const;
+const TASK = { kind: 'openProject', path: '/nowhere', localCopyFolder: '/nowhere/copies' } as const;
 const SMALL_HEAP_MEBIBYTES = 16;
 
 /** Returns a factory of workers running some JavaScript with a small memory limit. */
@@ -36,7 +36,12 @@ describe('runInFileWorker', () => {
     const factory = workerRunning(
       "require('node:worker_threads').parentPort.once('message', () => {});",
     );
-    const unsendable = { kind: 'openProject', path: '/nowhere', extra: () => undefined } as const;
+    const unsendable = {
+      kind: 'openProject',
+      path: '/nowhere',
+      localCopyFolder: '/nowhere/copies',
+      extra: () => undefined,
+    } as const;
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       const result = await runInFileWorker(() => {

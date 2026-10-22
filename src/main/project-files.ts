@@ -43,6 +43,7 @@ import {
   projectNameFromPath,
   withExtension,
 } from './project-names';
+import { setLocalCopyAside } from './local-copies';
 import { readRecentProjects, recordRecentProject } from './recent-projects';
 import { writeFileSafely } from './safe-write';
 import { createSerialQueue } from './serial-queue';
@@ -155,6 +156,9 @@ export function registerProjectFileHandlers(services: ProjectFileServices): void
   handleFileAction(IPC_CHANNELS.openKeptChanges, (event) =>
     openKeptChanges(services, event.sender),
   );
+  handleFileAction(IPC_CHANNELS.setLocalCopyAside, (event, documentId) =>
+    setCopyAside(services, event.sender, documentId),
+  );
 }
 
 /** Answers a file request of the bridge, turning an Error other than a refusal into a logged task failure the page can report, and throwing again a value that is not an Error. */
@@ -203,10 +207,50 @@ async function adoptProject(
   return success(null);
 }
 
+/** Sets aside the local copy of the file offered to a window or opened in it, whose changes the user chose not to add, so that the next save does not replace them, noting in the log where they went. */
+async function setCopyAside(
+  services: ProjectFileServices,
+  sender: WebContents,
+  value: unknown,
+): Promise<BridgeResult<null>> {
+  const documentId = isDocumentId(value) ? value : refuseMessage();
+  const project = [offered.get(sender), projects.get(sender)].find(
+    (candidate) => candidate?.documentId === documentId,
+  );
+  const path = project?.path ?? null;
+  if (path === null) {
+    console.error('The page set aside the local copy of a file its window was not given.');
+    return failure({ code: 'TASK_FAILED' });
+  }
+  try {
+    const aside = await setLocalCopyAside(
+      join(services.userDataFolder, LOCAL_COPY_FOLDER),
+      documentId,
+      new Date(),
+    );
+    console.warn(
+      `The changes kept on this computer for ${path} were not added to it and were set aside as ${aside ?? 'nothing, the copy being gone'}.`,
+    );
+    return success(null);
+  } catch (error) {
+    if (!isSystemError(error)) {
+      throw error;
+    }
+    console.error(`The local copy of ${path} could not be set aside:`, error);
+    return failure({ code: 'WRITE_FAILED' });
+  }
+}
+
 /** Offers a window the shared plan it joined, whose state the worker checked, as a project without file, giving what the page opens. */
 export function offerSharedProject(sender: WebContents, loaded: LoadedProject): OpenedProject {
   offerProject(sender, null, loaded.documentId);
-  return { state: loaded.state, documentId: loaded.documentId, fileName: '', warnings: [] };
+  return {
+    state: loaded.state,
+    documentId: loaded.documentId,
+    fileName: '',
+    warnings: [],
+    localChanges: null,
+  };
 }
 
 /** Lets the user choose a project file, then opens it. */
@@ -283,7 +327,11 @@ async function openPath(
   if (tooLarge !== null) {
     return tooLarge;
   }
-  const loaded = await services.runTask({ kind: 'openProject', path });
+  const loaded = await services.runTask({
+    kind: 'openProject',
+    path,
+    localCopyFolder: join(services.userDataFolder, LOCAL_COPY_FOLDER),
+  });
   if (!loaded.ok) {
     return loaded;
   }
@@ -504,6 +552,7 @@ function openedProject(loaded: LoadedProject, path: string): OpenedProject {
     documentId: loaded.documentId,
     fileName: basename(path),
     warnings: loaded.warnings,
+    localChanges: loaded.localChanges,
   };
 }
 

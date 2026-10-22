@@ -1,7 +1,13 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isDocumentId, type DocumentId } from '../core/shared/shared-document';
-import { isStoredPath, parseStoredJson, readStoredText, setDamagedFileAside } from './stored-files';
+import {
+  isMissingFile,
+  isStoredPath,
+  parseStoredJson,
+  readStoredText,
+  setDamagedFileAside,
+} from './stored-files';
 import { writeFileSafely } from './safe-write';
 import { createSerialQueue } from './serial-queue';
 
@@ -15,12 +21,37 @@ export type LocalCopyIndex = Readonly<Record<DocumentId, LocalCopyEntry>>;
 const INDEX_FILE = 'index.json';
 const COPY_EXTENSION = '.tasklace';
 const INDEX_VERSION = 1;
+const ASIDE_MARK = '.set-aside-';
+const UNSAFE_IN_NAMES = /[:.]/g;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const runInOrder = createSerialQueue();
 
 /** Returns where the local copy of a document is kept, only for a valid identifier so that no identifier can point outside the folder. */
 export function localCopyPath(folder: string, documentId: DocumentId): string | null {
   return isDocumentId(documentId) ? join(folder, `${documentId}${COPY_EXTENSION}`) : null;
+}
+
+/** Moves the local copy of a document aside under a name holding the time, so that the next save does not replace the changes it holds, giving where it went, or null when there is no copy. */
+export async function setLocalCopyAside(
+  folder: string,
+  documentId: DocumentId,
+  now: Date,
+): Promise<string | null> {
+  const copyPath = localCopyPath(folder, documentId);
+  if (copyPath === null) {
+    throw new Error('Invalid document identifier for a local copy.');
+  }
+  const stamp = now.toISOString().replace(UNSAFE_IN_NAMES, '-');
+  const asidePath = join(folder, `${documentId}${ASIDE_MARK}${stamp}${COPY_EXTENSION}`);
+  try {
+    await rename(copyPath, asidePath);
+    return asidePath;
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export interface IndexReading {

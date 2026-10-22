@@ -32,6 +32,7 @@ import { crc32 } from './crc32';
 import {
   checkStateToSave,
   copySharedState,
+  holdsChangesMissingFrom,
   encodeTasklaceFile,
   encodeTasklaceState,
   HEADER_BYTES,
@@ -618,6 +619,42 @@ describe('copySharedState', () => {
     ]).toEqual([
       failure({ code: 'INVALID_CONTENT' }),
       failure({ code: 'INVALID_PROJECT', issues: [{ path: 'name', code: 'EMPTY_TEXT' }] }),
+    ]);
+  });
+});
+
+describe('holdsChangesMissingFrom', () => {
+  /** Gives the state of a document after a change made in a copy of another state. */
+  const changed = (state: Uint8Array, change: (document: Y.Doc) => void): Uint8Array => {
+    const document = new Y.Doc();
+    Y.applyUpdate(document, state);
+    change(document);
+    return Y.encodeStateAsUpdate(document);
+  };
+  const base = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+
+  it('finds an added or changed value, and a deletion, which leaves the state vector as it is', () => {
+    const renamed = changed(base, (document) => {
+      document.getMap('project').set('name', 'Renamed');
+    });
+    const tag = SAMPLE.tags[0]?.id ?? '';
+    const deleted = changed(base, (document) => {
+      document.getMap(TAGS_ROOT).delete(tag);
+    });
+    expect([
+      holdsChangesMissingFrom(renamed, base),
+      holdsChangesMissingFrom(deleted, base),
+      Y.encodeStateVector(documentOf(deleted)),
+    ]).toEqual([true, true, Y.encodeStateVector(documentOf(base))]);
+  });
+
+  it('finds nothing in the same state, nor in an older one whose changes the other already holds', () => {
+    const newer = changed(base, (document) => {
+      document.getMap('project').set('name', 'Renamed');
+    });
+    expect([holdsChangesMissingFrom(base, base), holdsChangesMissingFrom(base, newer)]).toEqual([
+      false,
+      false,
     ]);
   });
 });

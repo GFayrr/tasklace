@@ -118,6 +118,9 @@
     "showConflict": "Show this conflict"
   },
   "notices": {
+    "localChangesAdded": "The changes kept on this computer were added to the plan.",
+    "localChangesNotAdded": "The changes kept on this computer could not be added. They were set aside on this computer, and the file opened as it is.",
+    "localChangesLost": "The changes kept on this computer could not be added nor set aside. The next save may replace them.",
     "dismiss": "Dismiss",
     "clockOutOfRange": "The clock of this computer is outside the years Tasklace handles, so the new project starts on the first day Tasklace handles. Check the date of the computer, then set the start of the project in its settings.",
     "label": "Messages",
@@ -306,7 +309,11 @@
     "failedTitle": "The project could not be saved",
     "failedBody": "Its latest changes could not be written: {reason} Save it under another name, close without saving, or cancel to keep it open.",
     "saveElsewhere": "Save as…",
-    "closeAnyway": "Close without saving"
+    "closeAnyway": "Close without saving",
+    "localChangesTitle": "Add the changes kept on this computer?",
+    "localChangesBody": "This computer kept changes to “{file}” that the file does not have, for example because they could not be written to it. Add them to the plan, or open the file as it is and keep them aside on this computer.",
+    "openAlone": "Open the file alone",
+    "addThem": "Add them"
   },
   "issues": {
     "INVALID_JSON": "The file is not valid JSON.",

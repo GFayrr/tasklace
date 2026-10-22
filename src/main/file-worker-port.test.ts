@@ -3,7 +3,11 @@ import { failure, success } from '../core/result';
 import type { FileTask, FileTaskResult } from './file-tasks';
 import { serveFileTask, type FileTaskPort } from './file-worker-port';
 
-const TASK: FileTask = { kind: 'openProject', path: '/nowhere/Plan.tasklace' };
+const TASK: FileTask = {
+  kind: 'openProject',
+  path: '/nowhere/Plan.tasklace',
+  localCopyFolder: '/nowhere/copies',
+};
 
 /** Creates a port that delivers one task and records the results sent back. */
 function fakePort(): FileTaskPort & {

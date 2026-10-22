@@ -32,7 +32,7 @@ describe('the file worker', () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       await import('./file-worker');
-      worker.send({ kind: 'openProject', path: '/plan.tasklace' });
+      worker.send({ kind: 'openProject', path: '/plan.tasklace', localCopyFolder: '/copies' });
       await vi.waitFor(() => {
         expect(worker.posted).toEqual([{ ok: false, error: { code: 'TASK_FAILED' } }]);
       });

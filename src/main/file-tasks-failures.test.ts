@@ -11,7 +11,11 @@ vi.mock('node:fs/promises', async (importOriginal) => ({
 
 const { runFileTask } = await import('./file-tasks');
 
-const OPEN_TASK = { kind: 'openProject', path: '/plan.tasklace' } as const;
+const OPEN_TASK = {
+  kind: 'openProject',
+  path: '/plan.tasklace',
+  localCopyFolder: '/copies',
+} as const;
 const JSON_TASK = {
   kind: 'importJson',
   path: '/plan.json',

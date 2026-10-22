@@ -87,6 +87,8 @@ import {
   type OpenedSession,
   type ProjectFiles,
   type SaveStatus,
+  type LocalChangesChoice,
+  type LocalChangesOutcome,
 } from '../project/project-files';
 import type { ZoomLevel } from '../plan/time-scale';
 import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
@@ -113,7 +115,9 @@ export interface KeptChanges {
 }
 
 type CloseQuestion =
-  { readonly reason: 'unsaved' } | { readonly reason: 'saveFailed'; readonly detail: string };
+  | { readonly reason: 'unsaved' }
+  | { readonly reason: 'saveFailed'; readonly detail: string }
+  | { readonly reason: 'localChanges'; readonly fileName: string };
 
 export type ClosePrompt = CloseQuestion & { readonly answer: (choice: CloseChoice) => void };
 
@@ -126,6 +130,12 @@ interface StartMove {
   readonly base: Schedule;
   readonly project: Project | null;
 }
+
+const LOCAL_CHANGES_CHOICES: Readonly<Record<CloseChoice, LocalChangesChoice>> = {
+  save: 'add',
+  discard: 'alone',
+  cancel: 'cancel',
+};
 
 const DAILY_WINDOW_CODES: readonly ValidationIssueCode[] = [
   'INVALID_HOURS_PER_DAY',
@@ -271,6 +281,8 @@ export class AppState {
       fileActionRunning: (running) => {
         this.#fileActionRunning = running;
       },
+      chooseLocalChanges: async (fileName) =>
+        LOCAL_CHANGES_CHOICES[await this.#ask({ reason: 'localChanges', fileName })],
     });
     this.collaboration = new CollaborationState({
       bridge: context.bridge,
@@ -1279,8 +1291,21 @@ export class AppState {
       );
     }
     this.#notifyRepairs(opened.value.session.openingRepairs);
+    this.#tellLocalChanges(opened.value.localChanges);
     await this.loadRecentProjects();
     return opened.value;
+  }
+
+  /** Tells what became of the changes the local copy of an opened file held: added, with the repairs they needed, or not added and set aside, or not even set aside. */
+  #tellLocalChanges(outcome: LocalChangesOutcome): void {
+    const text = this.messages.notices;
+    if (outcome.kind === 'added') {
+      this.#notify('info', text.localChangesAdded);
+      this.#notifyRepairs(outcome.repairs);
+    } else if (outcome.kind === 'notAdded') {
+      const body = outcome.setAside ? text.localChangesNotAdded : text.localChangesLost;
+      this.#notify('error', body, null, true);
+    }
   }
 
   /** Returns what the editing commands need to know about the open project, or null, logged, when its calendar cannot be compiled, which the validation of every project rules out. */
