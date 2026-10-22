@@ -1,17 +1,24 @@
+import { execFile } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { closeDiscarding, launchApplication } from './application';
 import { addTask, taskRow } from './table';
 
 const LOOPBACK = '127.0.0.1';
+const REMOVAL_RETRIES = 20;
+const REMOVAL_RETRY_STEP_MS = 100;
+const runFile = promisify(execFile);
 const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
 const CODE_PATTERN = /^[A-HJ-NP-Z2-9]{6}$/;
 const PORT_PATTERN = /port (\d+)/;
 const TOOLBAR_WIDTH = 1_280;
 const SUCCESSION_LIMIT_MS = 20_000;
+const VANISHED_HOST_LIMIT_MS = 45_000;
+const VANISHED_HOST_TEST_MS = 120_000;
 const ONE_TOOLBAR_LINE_LIMIT = 80;
 
 interface Instance {
@@ -41,10 +48,11 @@ async function launch(): Promise<Instance> {
   return instance;
 }
 
-/** Starts a relay on this computer that carries every connection to a port, which can be cut and opened again on the same port, so that a guest loses the host for a while. */
+/** Starts a relay on this computer that carries every connection to a port, which can be cut and opened again on the same port, so that a guest loses the host for a while, or go silent without closing anything, as a computer switched off. */
 async function startRelay(target: number) {
   const sockets = new Set<Socket>();
   let server: Server | null = null;
+  let silent = false;
   /** Listens on a port, carrying each connection to the target both ways. */
   const listen = (port: number): Promise<number> =>
     new Promise((resolve, reject) => {
@@ -55,11 +63,22 @@ async function startRelay(target: number) {
           socket.on('error', () => socket.destroy());
           socket.on('close', () => {
             sockets.delete(socket);
-            incoming.destroy();
-            outgoing.destroy();
+            if (!silent) {
+              incoming.destroy();
+              outgoing.destroy();
+            }
           });
         }
-        incoming.pipe(outgoing).pipe(incoming);
+        incoming.on('data', (chunk: Buffer) => {
+          if (!silent) {
+            outgoing.write(chunk);
+          }
+        });
+        outgoing.on('data', (chunk: Buffer) => {
+          if (!silent) {
+            incoming.write(chunk);
+          }
+        });
       });
       opened.once('error', reject);
       opened.listen(port, LOOPBACK, () => {
@@ -77,7 +96,42 @@ async function startRelay(target: number) {
       await closing;
     },
     restore: () => listen(port),
+    silence: (): void => {
+      silent = true;
+      server?.close();
+    },
   };
+}
+
+/** Stops an instance at once, as when its computer is switched off, without letting it tell anyone, and forgets it once its folder is removed. */
+async function switchOff(instance: Instance): Promise<void> {
+  instances.splice(instances.indexOf(instance), 1);
+  const main = instance.application.process();
+  const exited = new Promise<void>((resolve) => {
+    main.once('exit', () => {
+      resolve();
+    });
+  });
+  await stopProcessTree(main.pid);
+  await exited;
+  await rm(instance.userData, {
+    recursive: true,
+    force: true,
+    maxRetries: REMOVAL_RETRIES,
+    retryDelay: REMOVAL_RETRY_STEP_MS,
+  });
+}
+
+/** Stops a process at once with every process it started, which Windows leaves running when only the first one is killed. */
+async function stopProcessTree(pid: number | undefined): Promise<void> {
+  if (pid === undefined) {
+    throw new Error('The application has no process to stop.');
+  }
+  if (process.platform === 'win32') {
+    await runFile('taskkill', ['/pid', String(pid), '/t', '/f']);
+    return;
+  }
+  process.kill(pid, 'SIGKILL');
 }
 
 /** Saves a picture of a window when a folder for pictures is given, to review the interface by eye. */
@@ -281,5 +335,65 @@ test('keeps apart the changes a guest in read only made away from the host, then
   await expect(name).toHaveValue('Mine (my changes)');
   await expect(guest.page.getByRole('button', { name: 'Share', exact: true })).toBeVisible();
   await expect(host.page.locator('.status-bar .names')).toHaveText('Camille (host)');
+  await relay.cut();
+});
+
+test('lets the oldest guest host once the computer of the host is switched off, the other guest finding it', async () => {
+  test.setTimeout(VANISHED_HOST_TEST_MS);
+  const camille = await launch();
+  const { code, port } = await shareNewPlan(camille.page);
+  await camille.page
+    .getByRole('dialog', { name: 'Share “Untitled project”' })
+    .getByRole('button', { name: 'Done' })
+    .click();
+  await addTask(camille.page, 'Survey');
+  const relay = await startRelay(Number(port));
+  const lea = await launch();
+  await joinFrom(lea.page, 'Léa', { port: String(relay.port), code });
+  const noah = await launch();
+  await joinFrom(noah.page, 'Noah', { port: String(relay.port), code });
+  await expect(camille.page.locator('.status-bar .names')).toHaveText('Camille (host), Léa, Noah');
+  relay.silence();
+  await switchOff(camille);
+  await expect(
+    lea.page.getByText('Camille left. You now host the plan; the others join you on their own.'),
+  ).toBeVisible({ timeout: VANISHED_HOST_LIMIT_MS });
+  await expect(
+    noah.page.getByText('Camille left. Léa now hosts the plan; you are still in.'),
+  ).toBeVisible({ timeout: VANISHED_HOST_LIMIT_MS });
+  await expect(lea.page.locator('.status-bar .names')).toHaveText('Léa (host), Noah');
+  await expect(taskRow(noah.page, 'Survey')).toHaveCount(1);
+  await addTask(lea.page, 'After the host vanished');
+  await expect(taskRow(noah.page, 'After the host vanished')).toHaveCount(1);
+  await picture(noah.page, 'host-vanished');
+  await relay.cut();
+});
+
+test('shares the changes a guest who may edit made away from the host once the connection comes back', async () => {
+  const host = await launch();
+  const { code, port } = await shareNewPlan(host.page);
+  const shareWindow = host.page.getByRole('dialog', { name: 'Share “Untitled project”' });
+  await shareWindow.getByRole('button', { name: 'Done' }).click();
+  const relay = await startRelay(Number(port));
+  const guest = await launch();
+  await joinFrom(guest.page, 'Léa', { port: String(relay.port), code });
+  await host.page.getByRole('button', { name: 'Shared, connected' }).click();
+  await shareWindow
+    .getByRole('radiogroup', { name: 'What Léa may do' })
+    .getByText('Can edit')
+    .click();
+  await shareWindow.getByRole('button', { name: 'Done' }).click();
+  await expect(guest.page.locator('.status-bar .read-only')).toHaveCount(0);
+  await relay.cut();
+  await expect(guest.page.locator('.status-bar .badge.reconnecting')).toBeVisible();
+  await addTask(guest.page, 'Written offline');
+  await relay.restore();
+  await expect(taskRow(host.page, 'Written offline')).toHaveCount(1, {
+    timeout: SUCCESSION_LIMIT_MS,
+  });
+  await expect(guest.page.getByRole('button', { name: 'Shared, connected' })).toBeVisible();
+  await expect(
+    guest.page.getByRole('dialog', { name: 'Your changes stay in your own copy' }),
+  ).toHaveCount(0);
   await relay.cut();
 });
