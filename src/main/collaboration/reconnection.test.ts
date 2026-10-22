@@ -57,7 +57,7 @@ async function until(condition: () => boolean): Promise<void> {
   }
 }
 
-/** Starts a relay that passes the bytes of a guest to a host on a port chosen at each connection, and can cut every connection at once as a lost network would, without any closing message, which it also does by itself once the host sent a number of bytes. */
+/** Starts a relay that passes the bytes of a guest to a host on a port chosen at each connection, and cuts every connection at once as a lost network would, without any closing message, on demand or once the host sent a number of bytes. */
 async function relay(target: () => number, cutAfterHostBytes = Number.POSITIVE_INFINITY) {
   const sockets = new Set<Socket>();
   let hostBytes = 0;
