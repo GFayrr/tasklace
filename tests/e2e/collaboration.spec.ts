@@ -12,6 +12,8 @@ const CODE_PATTERN = /^[A-HJ-NP-Z2-9]{6}$/;
 const PORT_PATTERN = /port (\d+)/;
 const TOOLBAR_WIDTH = 1_280;
 const SUCCESSION_LIMIT_MS = 20_000;
+const VANISHED_HOST_LIMIT_MS = 45_000;
+const VANISHED_HOST_TEST_MS = 120_000;
 const ONE_TOOLBAR_LINE_LIMIT = 80;
 
 interface Instance {
@@ -78,6 +80,19 @@ async function startRelay(target: number) {
     },
     restore: () => listen(port),
   };
+}
+
+/** Stops an instance at once, as when its computer is switched off, without letting it tell anyone, and forgets it once its folder is removed. */
+async function switchOff(instance: Instance): Promise<void> {
+  instances.splice(instances.indexOf(instance), 1);
+  const closed = new Promise<void>((resolve) => {
+    instance.application.once('close', () => {
+      resolve();
+    });
+  });
+  instance.application.process().kill('SIGKILL');
+  await closed;
+  await rm(instance.userData, { recursive: true, force: true });
 }
 
 /** Saves a picture of a window when a folder for pictures is given, to review the interface by eye. */
@@ -281,5 +296,62 @@ test('keeps apart the changes a guest in read only made away from the host, then
   await expect(name).toHaveValue('Mine (my changes)');
   await expect(guest.page.getByRole('button', { name: 'Share', exact: true })).toBeVisible();
   await expect(host.page.locator('.status-bar .names')).toHaveText('Camille (host)');
+  await relay.cut();
+});
+
+test('lets the oldest guest host once the computer of the host is switched off, the other guest finding it', async () => {
+  test.setTimeout(VANISHED_HOST_TEST_MS);
+  const camille = await launch();
+  const { code, port } = await shareNewPlan(camille.page);
+  await camille.page
+    .getByRole('dialog', { name: 'Share “Untitled project”' })
+    .getByRole('button', { name: 'Done' })
+    .click();
+  await addTask(camille.page, 'Survey');
+  const lea = await launch();
+  await joinFrom(lea.page, 'Léa', { port, code });
+  const noah = await launch();
+  await joinFrom(noah.page, 'Noah', { port, code });
+  await expect(camille.page.locator('.status-bar .names')).toHaveText('Camille (host), Léa, Noah');
+  await switchOff(camille);
+  await expect(
+    lea.page.getByText('Camille left. You now host the plan; the others join you on their own.'),
+  ).toBeVisible({ timeout: VANISHED_HOST_LIMIT_MS });
+  await expect(
+    noah.page.getByText('Camille left. Léa now hosts the plan; you are still in.'),
+  ).toBeVisible({ timeout: VANISHED_HOST_LIMIT_MS });
+  await expect(lea.page.locator('.status-bar .names')).toHaveText('Léa (host), Noah');
+  await expect(taskRow(noah.page, 'Survey')).toHaveCount(1);
+  await addTask(lea.page, 'After the host vanished');
+  await expect(taskRow(noah.page, 'After the host vanished')).toHaveCount(1);
+  await picture(noah.page, 'host-vanished');
+});
+
+test('shares the changes a guest who may edit made away from the host once the connection comes back', async () => {
+  const host = await launch();
+  const { code, port } = await shareNewPlan(host.page);
+  const shareWindow = host.page.getByRole('dialog', { name: 'Share “Untitled project”' });
+  await shareWindow.getByRole('button', { name: 'Done' }).click();
+  const relay = await startRelay(Number(port));
+  const guest = await launch();
+  await joinFrom(guest.page, 'Léa', { port: String(relay.port), code });
+  await host.page.getByRole('button', { name: 'Shared, connected' }).click();
+  await shareWindow
+    .getByRole('radiogroup', { name: 'What Léa may do' })
+    .getByText('Can edit')
+    .click();
+  await shareWindow.getByRole('button', { name: 'Done' }).click();
+  await expect(guest.page.locator('.status-bar .read-only')).toHaveCount(0);
+  await relay.cut();
+  await expect(guest.page.locator('.status-bar .badge.reconnecting')).toBeVisible();
+  await addTask(guest.page, 'Written offline');
+  await relay.restore();
+  await expect(taskRow(host.page, 'Written offline')).toHaveCount(1, {
+    timeout: SUCCESSION_LIMIT_MS,
+  });
+  await expect(guest.page.getByRole('button', { name: 'Shared, connected' })).toBeVisible();
+  await expect(
+    guest.page.getByRole('dialog', { name: 'Your changes stay in your own copy' }),
+  ).toHaveCount(0);
   await relay.cut();
 });
