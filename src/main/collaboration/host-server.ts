@@ -27,6 +27,7 @@ import {
   type SecureConnection,
   type StartTimer,
 } from './secure-connection';
+import { watchHeartbeat } from './heartbeat';
 
 export interface Peer {
   readonly number: number;
@@ -314,6 +315,7 @@ function attachGuest(
   socket.on('error', (error) => {
     console.warn(`A connection to the shared plan failed: ${error.message}`);
   });
+  watchHeartbeat(socket, options.startTimer);
 }
 
 /** Gives the close code that tells a guest why the host ended its connection: a wrong code, counted, the last wrong code before a new one was drawn, or a key of the plan the host does not hold. */

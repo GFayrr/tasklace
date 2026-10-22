@@ -43,10 +43,11 @@ async function launch(): Promise<Instance> {
   return instance;
 }
 
-/** Starts a relay on this computer that carries every connection to a port, which can be cut and opened again on the same port, so that a guest loses the host for a while. */
+/** Starts a relay on this computer that carries every connection to a port, which can be cut and opened again on the same port, so that a guest loses the host for a while, or go silent without closing anything, as a computer switched off. */
 async function startRelay(target: number) {
   const sockets = new Set<Socket>();
   let server: Server | null = null;
+  let silent = false;
   /** Listens on a port, carrying each connection to the target both ways. */
   const listen = (port: number): Promise<number> =>
     new Promise((resolve, reject) => {
@@ -57,11 +58,22 @@ async function startRelay(target: number) {
           socket.on('error', () => socket.destroy());
           socket.on('close', () => {
             sockets.delete(socket);
-            incoming.destroy();
-            outgoing.destroy();
+            if (!silent) {
+              incoming.destroy();
+              outgoing.destroy();
+            }
           });
         }
-        incoming.pipe(outgoing).pipe(incoming);
+        incoming.on('data', (chunk: Buffer) => {
+          if (!silent) {
+            outgoing.write(chunk);
+          }
+        });
+        outgoing.on('data', (chunk: Buffer) => {
+          if (!silent) {
+            incoming.write(chunk);
+          }
+        });
       });
       opened.once('error', reject);
       opened.listen(port, LOOPBACK, () => {
@@ -79,19 +91,24 @@ async function startRelay(target: number) {
       await closing;
     },
     restore: () => listen(port),
+    silence: (): void => {
+      silent = true;
+      server?.close();
+    },
   };
 }
 
 /** Stops an instance at once, as when its computer is switched off, without letting it tell anyone, and forgets it once its folder is removed. */
 async function switchOff(instance: Instance): Promise<void> {
   instances.splice(instances.indexOf(instance), 1);
-  const closed = new Promise<void>((resolve) => {
-    instance.application.once('close', () => {
+  const process = instance.application.process();
+  const exited = new Promise<void>((resolve) => {
+    process.once('exit', () => {
       resolve();
     });
   });
-  instance.application.process().kill('SIGKILL');
-  await closed;
+  process.kill('SIGKILL');
+  await exited;
   await rm(instance.userData, { recursive: true, force: true });
 }
 
@@ -308,11 +325,13 @@ test('lets the oldest guest host once the computer of the host is switched off, 
     .getByRole('button', { name: 'Done' })
     .click();
   await addTask(camille.page, 'Survey');
+  const relay = await startRelay(Number(port));
   const lea = await launch();
-  await joinFrom(lea.page, 'Léa', { port, code });
+  await joinFrom(lea.page, 'Léa', { port: String(relay.port), code });
   const noah = await launch();
-  await joinFrom(noah.page, 'Noah', { port, code });
+  await joinFrom(noah.page, 'Noah', { port: String(relay.port), code });
   await expect(camille.page.locator('.status-bar .names')).toHaveText('Camille (host), Léa, Noah');
+  relay.silence();
   await switchOff(camille);
   await expect(
     lea.page.getByText('Camille left. You now host the plan; the others join you on their own.'),
@@ -325,6 +344,7 @@ test('lets the oldest guest host once the computer of the host is switched off, 
   await addTask(lea.page, 'After the host vanished');
   await expect(taskRow(noah.page, 'After the host vanished')).toHaveCount(1);
   await picture(noah.page, 'host-vanished');
+  await relay.cut();
 });
 
 test('shares the changes a guest who may edit made away from the host once the connection comes back', async () => {

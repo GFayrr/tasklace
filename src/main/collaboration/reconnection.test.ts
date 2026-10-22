@@ -2,7 +2,11 @@ import { connect, createServer, type Server, type Socket } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
 import { createGuest } from '../../core/collaboration/sync';
-import { CHANNEL_CHUNK_BYTES, MAX_TASK_NAME_LENGTH } from '../../core/limits';
+import {
+  CHANNEL_CHUNK_BYTES,
+  HEARTBEAT_MILLISECONDS,
+  MAX_TASK_NAME_LENGTH,
+} from '../../core/limits';
 import { createSharedDocument } from '../../core/shared/shared-document';
 import { project, TEST_DOCUMENT_ID, workTask } from '../../core/testing/project-builder';
 import { sessionOn } from '../../core/testing/session-copy';
@@ -61,6 +65,7 @@ async function until(condition: () => boolean): Promise<void> {
 async function relay(target: () => number, cutAfterHostBytes = Number.POSITIVE_INFINITY) {
   const sockets = new Set<Socket>();
   let hostBytes = 0;
+  let frozen = false;
   /** Destroys every connection passing through the relay. */
   const cut = (): void => {
     sockets.forEach((socket) => socket.destroy());
@@ -70,7 +75,16 @@ async function relay(target: () => number, cutAfterHostBytes = Number.POSITIVE_I
     const hostSide = connect(target(), LOOPBACK);
     sockets.add(guestSide);
     sockets.add(hostSide);
-    guestSide.pipe(hostSide).pipe(guestSide);
+    guestSide.on('data', (chunk: Buffer) => {
+      if (!frozen) {
+        hostSide.write(chunk);
+      }
+    });
+    hostSide.on('data', (chunk: Buffer) => {
+      if (!frozen) {
+        guestSide.write(chunk);
+      }
+    });
     guestSide.on('error', () => undefined);
     hostSide.on('error', () => undefined);
     hostSide.on('data', (chunk: Buffer) => {
@@ -87,6 +101,9 @@ async function relay(target: () => number, cutAfterHostBytes = Number.POSITIVE_I
     port: typeof address === 'object' && address !== null ? address.port : 0,
     hostBytes: () => hostBytes,
     cut,
+    freeze: () => {
+      frozen = true;
+    },
     close: () =>
       new Promise<void>((resolve) => {
         server.close(() => {
@@ -113,18 +130,19 @@ function drawnNames(count: number): string[] {
 }
 
 /** Starts a host with the key of the plan on a port, counting who joins. */
-async function host(port: number) {
+async function host(port: number, startTimer: StartTimer = () => () => undefined) {
   const joined: string[] = [];
+  const left: string[] = [];
   const started = await startHostServer({
     port,
     planKey: PLAN_KEY,
     knownTokens: new Map(),
-    startTimer: () => () => undefined,
+    startTimer,
     randomBytes: systemRandomBytes,
     events: {
       joined: (_peer, introduction) => joined.push(introduction.name),
       message: () => undefined,
-      left: () => undefined,
+      left: (_peer, reason) => left.push(reason),
       codeChanged: () => undefined,
       planKeyChanged: () => undefined,
     },
@@ -133,7 +151,7 @@ async function host(port: number) {
     throw new Error(started.error);
   }
   servers.push(started.value);
-  return { server: started.value, joined };
+  return { server: started.value, joined, left };
 }
 
 describe('coming back to a host over the network', () => {
@@ -306,4 +324,55 @@ describe('coming back to a host over the network', () => {
       await network.close();
     },
   );
+
+  it('cuts the connection once the other end goes silent without closing it, as when its computer is switched off, on both sides', async () => {
+    const beats: (() => void)[] = [];
+    /** Keeps the beats of the heartbeat for the test to fire, and starts no other timer. */
+    const startTimer: StartTimer = (milliseconds, onEnd) => {
+      if (milliseconds === HEARTBEAT_MILLISECONDS) {
+        beats.push(onEnd);
+      }
+      return () => undefined;
+    };
+    /** Fires every beat waiting, as when the time between two pings went by. */
+    const beat = (): void => {
+      beats.splice(0).forEach((onEnd) => {
+        onEnd();
+      });
+    };
+    const shared = await host(await freePort(), startTimer);
+    const network = await relay(() => shared.server.port);
+    const told: CollaborationEvent['kind'][] = [];
+    let keys = 0;
+    const session = startGuestSession({
+      address: LOOPBACK,
+      port: network.port,
+      secret: { kind: 'code', code: shared.server.code() },
+      introduction: LEA,
+      startTimer,
+      connect: (options) =>
+        connectAsGuest({
+          ...options,
+          randomBytes: systemRandomBytes,
+          events: {
+            ...options.events,
+            planKey: (key) => {
+              keys += 1;
+              options.events.planKey(key);
+            },
+          },
+        }),
+      tell: (event) => told.push(event.kind),
+      ended: () => undefined,
+    });
+    await until(() => keys === 1 && shared.joined.length === 1 && beats.length === 2);
+    network.freeze();
+    beat();
+    beat();
+    await until(() => told.includes('reconnecting') && shared.left.length === 1);
+    expect([told, shared.left]).toEqual([['connected', 'reconnecting'], ['WIRE_CLOSED']]);
+    session.close();
+    network.cut();
+    await network.close();
+  });
 });

@@ -21,6 +21,7 @@ import {
   type SecureConnection,
   type StartTimer,
 } from './secure-connection';
+import { watchHeartbeat } from './heartbeat';
 
 export type GuestEnd =
   | ConnectionEnd
@@ -120,6 +121,9 @@ export function connectAsGuest(options: GuestOptions): GuestClient {
     endReason ??= reason;
     connection.close();
   };
+  socket.on('open', () => {
+    watchHeartbeat(socket, options.startTimer);
+  });
   socket.on('upgrade', (response: IncomingMessage) => {
     if (!isPrivateAddress(response.socket.remoteAddress ?? '')) {
       endWith('NOT_PRIVATE');
