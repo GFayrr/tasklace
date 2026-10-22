@@ -63,6 +63,29 @@ describe('saving a project larger than a project file may be', () => {
     expect(await readdir(folder)).toEqual(['plan.tasklace']);
   });
 
+  it('keeps no changes whose file could not be opened again, logging why', async () => {
+    limits.fileBytes = 64;
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const result = await runFileTask({
+      kind: 'keepSharedCopy',
+      state: STATE,
+      documentId: TEST_DOCUMENT_ID,
+      nameTemplate: '{plan} (my changes)',
+      path: join(folder, 'kept.tasklace'),
+      localCopyFolder: join(folder, 'copies'),
+      savedAt: SAVED_AT,
+    });
+    const lines = logged.mock.calls.map((call): unknown => call[0]);
+    logged.mockRestore();
+    expect([result, await readdir(folder)]).toEqual([
+      { ok: false, error: { code: 'TOO_LARGE_TO_SAVE' } },
+      [],
+    ]);
+    expect(lines.map((line) => String(line).replace(/ \d+ bytes/, ' {size} bytes'))).toEqual([
+      'The changes were not kept: their file would weigh {size} bytes, more than the 64 a project file may weigh to be opened again.',
+    ]);
+  });
+
   it('writes a project whose file weighs exactly as much as a project file may', async () => {
     const path = join(folder, 'plan.tasklace');
     const copies = join(folder, 'copies');

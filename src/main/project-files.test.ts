@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, readFile, rm, truncate, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { ipcMain as electronIpcMain, type WebContents } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MAX_FILE_BYTES } from '../core/limits';
+import { MAX_FILE_BYTES, MAX_PROJECT_NAME_LENGTH } from '../core/limits';
 import { failure, success } from '../core/result';
 import { IPC_CHANNELS } from '../preload/bridge-contract';
 import { isResultOf, type FileTask, type FileTaskResult } from './file-tasks';
@@ -14,7 +14,7 @@ import {
   windowProjectKind,
 } from './project-files';
 import type { FakeIpcMain } from './testing/fake-electron';
-import { requireDocumentId } from '../core/shared/shared-document';
+import { isDocumentId, requireDocumentId } from '../core/shared/shared-document';
 
 const dialogs = vi.hoisted(() => ({
   open: vi.fn<() => Promise<{ canceled: boolean; filePaths: string[] }>>(),
@@ -25,6 +25,7 @@ const dialogs = vi.hoisted(() => ({
 
 const recording = vi.hoisted((): { failure: Error | null } => ({ failure: null }));
 const examining = vi.hoisted((): { failure: Error | null } => ({ failure: null }));
+const moving = vi.hoisted((): { failure: Error | null } => ({ failure: null }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:fs/promises')>();
@@ -34,6 +35,11 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       const failure = examining.failure;
       examining.failure = null;
       return failure === null ? original.stat(...values) : Promise.reject(failure);
+    },
+    rename: (...values: Parameters<typeof original.rename>) => {
+      const failure = moving.failure;
+      moving.failure = null;
+      return failure === null ? original.rename(...values) : Promise.reject(failure);
     },
   };
 });
@@ -67,7 +73,13 @@ const ipcMain = electronIpcMain as unknown as FakeIpcMain;
 const STATE = Uint8Array.from([1, 2, 3]);
 const DOCUMENT_ID = requireDocumentId('11111111-1111-4111-8111-111111111111');
 const OTHER_ID = requireDocumentId('22222222-2222-4222-8222-222222222222');
-const LOADED = { kind: 'loaded', state: STATE, documentId: DOCUMENT_ID, warnings: [] } as const;
+const LOADED = {
+  kind: 'loaded',
+  state: STATE,
+  documentId: DOCUMENT_ID,
+  warnings: [],
+  localChanges: null,
+} as const;
 const SAVED = { kind: 'saved', localCopySaved: true } as const;
 const tasks: FileTask[] = [];
 const runTask = vi.fn<(task: FileTask) => Promise<FileTaskResult>>();
@@ -89,6 +101,11 @@ registerProjectFileHandlers({
     return userData;
   },
 });
+
+/** Returns where the local copies of a user data folder are kept. */
+function copiesIn(folder: string): string {
+  return join(folder, 'local-copies');
+}
 
 /** Invokes a file request of the bridge from a page, a refusal becoming a rejected promise as through Electron. */
 function request(channel: string, sender: object, ...values: unknown[]): Promise<unknown> {
@@ -151,13 +168,17 @@ afterEach(async () => {
 });
 
 describe('opening projects', () => {
-  it('opens a chosen project file, tells its name, and remembers it once the page adopts it', async () => {
+  it('opens a chosen project file with the changes its local copy holds, tells its name, and remembers it once the page adopts it', async () => {
     const path = join(folder, 'Thesis.tasklace');
     const sender = {};
     await writeFile(path, 'project');
     chooseToOpen(path);
     runTask.mockResolvedValueOnce(
-      success({ ...LOADED, warnings: [{ path: '', code: 'UNKNOWN_COLUMN' }] }),
+      success({
+        ...LOADED,
+        warnings: [{ path: '', code: 'UNKNOWN_COLUMN' }],
+        localChanges: Uint8Array.of(4, 5),
+      }),
     );
     expect(await request(IPC_CHANNELS.openProject, sender)).toEqual({
       ok: true,
@@ -166,9 +187,10 @@ describe('opening projects', () => {
         documentId: DOCUMENT_ID,
         fileName: 'Thesis.tasklace',
         warnings: [{ path: '', code: 'UNKNOWN_COLUMN' }],
+        localChanges: Uint8Array.of(4, 5),
       },
     });
-    expect(tasks).toEqual([{ kind: 'openProject', path }]);
+    expect(tasks).toEqual([{ kind: 'openProject', path, localCopyFolder: copiesIn(userData) }]);
     expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(success([]));
     expect(await request(IPC_CHANNELS.adoptProject, sender, DOCUMENT_ID)).toEqual(success(null));
     expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(
@@ -205,7 +227,11 @@ describe('opening projects', () => {
     await openedIn(path);
     runTask.mockResolvedValueOnce(success(LOADED));
     expect(await request(IPC_CHANNELS.openRecentProject, {}, 0)).toMatchObject({ ok: true });
-    expect(tasks.at(-1)).toEqual({ kind: 'openProject', path });
+    expect(tasks.at(-1)).toEqual({
+      kind: 'openProject',
+      path,
+      localCopyFolder: copiesIn(userData),
+    });
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       expect(await request(IPC_CHANNELS.openRecentProject, {}, 2)).toEqual(
@@ -346,6 +372,9 @@ describe('opening projects', () => {
       [IPC_CHANNELS.saveProject, STATE],
       [IPC_CHANNELS.saveProjectAs, STATE, 'Plan'],
       [IPC_CHANNELS.exportProject, 'json', '{}', 'Plan'],
+      [IPC_CHANNELS.keepOwnChanges, STATE, 'Plan'],
+      [IPC_CHANNELS.openKeptChanges],
+      [IPC_CHANNELS.setLocalCopyAside, DOCUMENT_ID],
     ];
     for (const [channel, ...values] of requests) {
       await expect(request(channel, {}, ...values)).rejects.toThrow(RefusedRequest);
@@ -702,5 +731,207 @@ describe('the kind of project a window holds', () => {
       logged.mockRestore();
     }
     expect(windowProjectKind(fresh as WebContents)).toBe('none');
+  });
+});
+
+describe('keeping the changes a person could not share', () => {
+  const KEPT = 'kept-plans';
+
+  /** Returns the last task sent to keep changes, failing the test when there is none. */
+  const keptTask = (): Extract<FileTask, { kind: 'keepSharedCopy' }> => {
+    const task = tasks.at(-1);
+    if (task?.kind !== 'keepSharedCopy') {
+      throw new Error('No changes were kept.');
+    }
+    return task;
+  };
+
+  it('refuses a page without project, a state that is not bytes and a plan name that is too long', async () => {
+    expect(await quietly(() => request(IPC_CHANNELS.keepOwnChanges, {}, STATE, 'Thesis'))).toEqual({
+      answer: failure({ code: 'NO_PROJECT' }),
+      logged: [['A page asked to keep its changes without holding a project.']],
+    });
+    await expect(request(IPC_CHANNELS.keepOwnChanges, {}, 'state', 'Thesis')).rejects.toThrow(
+      RefusedRequest,
+    );
+    await expect(
+      request(IPC_CHANNELS.keepOwnChanges, {}, STATE, 'a'.repeat(MAX_PROJECT_NAME_LENGTH + 1)),
+    ).rejects.toThrow(RefusedRequest);
+  });
+
+  it('keeps the plan under a new identifier in a folder of this computer, first among the recent projects, and opens it again', async () => {
+    const sender = await openedIn(join(folder, 'Thesis.tasklace'));
+    const before = Date.now();
+    expect(await request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis')).toEqual(
+      success(null),
+    );
+    const task = keptTask();
+    const path = join(userData, KEPT, 'Thesis (my changes).tasklace');
+    expect([
+      task.state,
+      isDocumentId(task.documentId) && task.documentId !== DOCUMENT_ID,
+      task.nameTemplate,
+      task.path,
+      task.localCopyFolder,
+      task.savedAt.getTime() >= before,
+    ]).toEqual([STATE, true, '{plan} (my changes)', path, join(userData, 'local-copies'), true]);
+    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(
+      success([
+        { name: 'Thesis (my changes)', folder: 'Kept on this computer' },
+        { name: 'Thesis', folder },
+      ]),
+    );
+    await writeFile(path, 'project');
+    runTask.mockResolvedValueOnce(success(LOADED));
+    expect(await request(IPC_CHANNELS.openKeptChanges, sender)).toMatchObject({ ok: true });
+    expect(tasks.at(-1)).toEqual({
+      kind: 'openProject',
+      path,
+      localCopyFolder: copiesIn(userData),
+    });
+  });
+
+  it('numbers the name of a file already kept, then names it after an identifier once every number is taken', async () => {
+    const sender = await openedIn(join(folder, 'Thesis.tasklace'));
+    const kept = join(userData, KEPT);
+    await mkdir(kept);
+    await writeFile(join(kept, 'Thesis (my changes).tasklace'), 'taken');
+    await request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis');
+    expect(keptTask().path).toBe(join(kept, 'Thesis (my changes) 2.tasklace'));
+    for (let number = 2; number <= 64; number += 1) {
+      await writeFile(join(kept, `Thesis (my changes) ${String(number)}.tasklace`), 'taken');
+    }
+    await request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis');
+    const named = keptTask().path;
+    expect([named.startsWith(kept), isDocumentId(basename(named, '.tasklace'))]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it('gives back a failure of the task, keeping nothing to open nor to list', async () => {
+    const sender = await openedIn(join(folder, 'Thesis.tasklace'));
+    runTask.mockResolvedValueOnce(failure({ code: 'WRITE_FAILED' }));
+    expect(await request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis')).toEqual(
+      failure({ code: 'WRITE_FAILED' }),
+    );
+    expect(await quietly(() => request(IPC_CHANNELS.openKeptChanges, sender))).toEqual({
+      answer: failure({ code: 'TASK_FAILED' }),
+      logged: [['A page asked to open the changes it kept, but its window kept none.']],
+    });
+    expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(
+      success([{ name: 'Thesis', folder }]),
+    );
+  });
+
+  it('reports a folder that cannot be created as a failed write, logging why', async () => {
+    const sender = await openedIn(join(folder, 'Thesis.tasklace'));
+    await writeFile(join(userData, KEPT), 'a file where the folder should be');
+    const { answer, logged } = await quietly(() =>
+      request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis'),
+    );
+    expect([answer, logged.map((call): unknown => call[0]), tasks.at(-1)?.kind]).toEqual([
+      failure({ code: 'WRITE_FAILED' }),
+      ['The folder of the kept changes could not be created:'],
+      'openProject',
+    ]);
+  });
+});
+
+describe('setting aside the local copy of an opened file', () => {
+  const NOW = new Date(Date.UTC(2026, 9, 22, 9, 30, 15, 250));
+  const ASIDE_NAME = `${DOCUMENT_ID}.set-aside-2026-10-22T09-30-15-250Z.tasklace`;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Offers a file to a new page as the open dialog would, without adopting it, returning the page and the path. */
+  async function offeredFile(): Promise<{ readonly sender: object; readonly path: string }> {
+    const sender = {};
+    const path = join(folder, 'Thesis.tasklace');
+    await writeFile(path, 'project');
+    chooseToOpen(path);
+    runTask.mockResolvedValueOnce(success(LOADED));
+    await request(IPC_CHANNELS.openProject, sender);
+    return { sender, path };
+  }
+
+  /** Writes a local copy of the sample document. */
+  async function writeCopy(): Promise<void> {
+    await mkdir(copiesIn(userData), { recursive: true });
+    await writeFile(join(copiesIn(userData), `${DOCUMENT_ID}.tasklace`), 'copy');
+  }
+
+  it('moves the copy of a file offered or adopted under a name holding the time, noting it in the log', async () => {
+    const { sender, path } = await offeredFile();
+    await writeCopy();
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const offered = await request(IPC_CHANNELS.setLocalCopyAside, sender, DOCUMENT_ID);
+    await request(IPC_CHANNELS.adoptProject, sender, DOCUMENT_ID);
+    const adopted = await request(IPC_CHANNELS.setLocalCopyAside, sender, DOCUMENT_ID);
+    expect([
+      offered,
+      adopted,
+      await readdir(copiesIn(userData)),
+      await readFile(join(copiesIn(userData), ASIDE_NAME), 'utf8'),
+      warnings.mock.calls,
+    ]).toEqual([
+      success(null),
+      success(null),
+      [ASIDE_NAME],
+      'copy',
+      [
+        [
+          `The changes kept on this computer for ${path} were not added to it and were set aside as ${join(copiesIn(userData), ASIDE_NAME)}.`,
+        ],
+        [
+          `The changes kept on this computer for ${path} were not added to it and were set aside as nothing, the copy being gone.`,
+        ],
+      ],
+    ]);
+  });
+
+  it('refuses a document its window was not given, a project without file, and an identifier that is none', async () => {
+    const { sender } = await offeredFile();
+    const unsaved = {};
+    const newId = await request(IPC_CHANNELS.newProject, unsaved);
+    const other = await quietly(() => request(IPC_CHANNELS.setLocalCopyAside, sender, OTHER_ID));
+    const withoutFile = await quietly(() =>
+      request(IPC_CHANNELS.setLocalCopyAside, unsaved, newId),
+    );
+    expect([other, withoutFile]).toEqual([
+      {
+        answer: failure({ code: 'TASK_FAILED' }),
+        logged: [['The page set aside the local copy of a file its window was not given.']],
+      },
+      {
+        answer: failure({ code: 'TASK_FAILED' }),
+        logged: [['The page set aside the local copy of a file its window was not given.']],
+      },
+    ]);
+    await expect(request(IPC_CHANNELS.setLocalCopyAside, sender, 'nope')).rejects.toThrow(
+      RefusedRequest,
+    );
+  });
+
+  it('reports a copy the system cannot move as a failed write, logging why', async () => {
+    const { sender, path } = await offeredFile();
+    await writeCopy();
+    const denied = Object.assign(new Error('denied'), { code: 'EPERM' });
+    moving.failure = denied;
+    const { answer, logged } = await quietly(() =>
+      request(IPC_CHANNELS.setLocalCopyAside, sender, DOCUMENT_ID),
+    );
+    expect([answer, logged, await readdir(copiesIn(userData))]).toEqual([
+      failure({ code: 'WRITE_FAILED' }),
+      [[`The local copy of ${path} could not be set aside:`, denied]],
+      [`${DOCUMENT_ID}.tasklace`],
+    ]);
   });
 });

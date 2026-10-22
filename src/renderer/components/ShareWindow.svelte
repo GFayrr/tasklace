@@ -7,6 +7,7 @@
     LAST_PORT,
   } from '../../core/collaboration/ports';
   import { MAX_PARTICIPANT_NAME_LENGTH } from '../../core/limits';
+  import { successionQueue } from '../../core/collaboration/succession';
   import type { Project } from '../../core/model/project';
   import type { AppState } from '../app/app-state.svelte';
   import { collaborationFailureText } from '../collaboration/collaboration-text';
@@ -31,6 +32,7 @@
     collaboration.mode.kind === 'hosting' ? collaboration.mode.sharing : null,
   );
   const settings = $derived(collaboration.settings);
+  const successor = $derived(successionQueue(collaboration.participants)[0]);
   const timeFormat = $derived(
     new Intl.DateTimeFormat(app.locale, { hour: 'numeric', minute: '2-digit' }),
   );
@@ -259,6 +261,9 @@
             {/each}
           </ul>
           <p class="hint">{text.newcomers}</p>
+          {#if successor !== undefined}
+            <p class="hint">{fillMessage(text.successor, { name: successor.name })}</p>
+          {/if}
         </section>
       {/if}
       <label class="field">

@@ -26,6 +26,8 @@ import {
   type Participant,
   type ParticipantId,
 } from './participants';
+import { readEndpoint } from './endpoint';
+import { isTokenDigest } from './secure/token-digest';
 
 export type CollaborationMessage =
   | { readonly kind: 'stateVector'; readonly vector: Uint8Array }
@@ -50,7 +52,17 @@ const KIND_CODES = {
 } as const satisfies Readonly<Record<CollaborationMessage['kind'], number>>;
 const PRESENCE_KEYS = ['name', 'selectedTaskId'];
 const PARTICIPANTS_KEYS = ['you', 'participants'];
-const PARTICIPANT_KEYS = ['id', 'name', 'color', 'canEdit', 'isHost', 'rank', 'selectedTaskId'];
+const PARTICIPANT_KEYS = [
+  'id',
+  'name',
+  'color',
+  'canEdit',
+  'isHost',
+  'rank',
+  'selectedTaskId',
+  'endpoint',
+  'tokenDigest',
+];
 const ENCODER = new TextEncoder();
 const DECODER = new TextDecoder('utf-8', { fatal: true });
 
@@ -206,8 +218,10 @@ function readParticipant(field: Field, issues: IssueList): Participant | undefin
     isHost: readBoolean(child('isHost'), issues),
     rank: readInteger(child('rank'), issues, 0, MAX_JOIN_RANK),
     selectedTaskId: readNullable(child('selectedTaskId'), issues, readIdentifier),
+    endpoint: readNullable(child('endpoint'), issues, readEndpoint),
+    tokenDigest: readNullable(child('tokenDigest'), issues, readTokenDigest),
   };
-  const { name, color, canEdit, isHost, rank, selectedTaskId } = participant;
+  const { name, color, canEdit, isHost, rank, selectedTaskId, endpoint, tokenDigest } = participant;
   if (
     !isParticipantId(id) ||
     name === undefined ||
@@ -215,9 +229,20 @@ function readParticipant(field: Field, issues: IssueList): Participant | undefin
     canEdit === undefined ||
     isHost === undefined ||
     rank === undefined ||
-    selectedTaskId === undefined
+    selectedTaskId === undefined ||
+    endpoint === undefined ||
+    tokenDigest === undefined
   ) {
     return undefined;
   }
-  return { id, name, color, canEdit, isHost, rank, selectedTaskId };
+  return { id, name, color, canEdit, isHost, rank, selectedTaskId, endpoint, tokenDigest };
+}
+
+/** Reads the digest of the token of a participant. */
+function readTokenDigest(field: Field, issues: IssueList): string | undefined {
+  if (isTokenDigest(field.value)) {
+    return field.value;
+  }
+  issues.add(field.path, 'INVALID_IDENTIFIER');
+  return undefined;
 }

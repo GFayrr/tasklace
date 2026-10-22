@@ -36,6 +36,8 @@ async function joinWith(answers: boolean[]): Promise<{ ends: GuestEnd[]; joined:
   let joined = 0;
   const started = await startHostServer({
     port: await freePort(),
+    planKey: null,
+    knownTokens: new Map(),
     startTimer: () => () => undefined,
     randomBytes: systemRandomBytes,
     events: {
@@ -45,6 +47,7 @@ async function joinWith(answers: boolean[]): Promise<{ ends: GuestEnd[]; joined:
       message: () => undefined,
       left: () => undefined,
       codeChanged: () => undefined,
+      planKeyChanged: () => undefined,
     },
   });
   if (!started.ok) {
@@ -56,13 +59,19 @@ async function joinWith(answers: boolean[]): Promise<{ ends: GuestEnd[]; joined:
   connectAsGuest({
     address: LOOPBACK,
     port: started.value.port,
-    code: started.value.code(),
-    introduction: { participantId: requireParticipantId('lea'), name: 'Léa' },
+    secret: { kind: 'code', code: started.value.code() },
+    introduction: {
+      participantId: requireParticipantId('lea'),
+      name: 'Léa',
+      token: 'ab'.repeat(32),
+      endpoint: { addresses: [], port: 47_313 },
+    },
     startTimer: () => () => undefined,
     randomBytes: systemRandomBytes,
     events: {
       opened: () => undefined,
       message: () => undefined,
+      planKey: () => undefined,
       ended: (reason) => ends.push(reason),
     },
   });

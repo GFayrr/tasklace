@@ -2,19 +2,14 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ipcMain as electronIpcMain, type WebContents } from 'electron';
+import { ipcMain as electronIpcMain } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { success } from '../../core/result';
 import { TEST_DOCUMENT_ID } from '../../core/testing/project-builder';
 import { IPC_CHANNELS, type CollaborationEvent } from '../../preload/bridge-contract';
 import type { FileTask } from '../file-tasks';
 import type { FakeIpcMain } from '../testing/fake-electron';
-import {
-  privateAddressesOf,
-  registerCollaborationHandlers,
-  startGuest,
-  type WindowSharing,
-} from './collaboration-service';
+import { privateAddressesOf, registerCollaborationHandlers } from './collaboration-service';
 import type { AnnouncedService, Mdns } from './discovery';
 
 vi.mock('electron', async () => {
@@ -32,6 +27,7 @@ vi.mock('../project-files', () => ({
 }));
 
 const ipcMain = electronIpcMain as unknown as FakeIpcMain;
+const KNOWN = [{ participantId: 'lea', tokenDigest: 'e'.repeat(64) }];
 const LOOPBACK = '127.0.0.1';
 
 /** A fake page that records the events the main process sends it. */
@@ -162,7 +158,7 @@ async function shareFrom(page: FakePage) {
     port,
     firewallNoticeSeen: false,
   });
-  return invoke(page, IPC_CHANNELS.sharePlan, 'Thesis', 'Camille');
+  return invoke(page, IPC_CHANNELS.sharePlan, 'Thesis', 'Camille', 'camille');
 }
 
 describe('the collaboration service', () => {
@@ -197,10 +193,24 @@ describe('the collaboration service', () => {
         firewallNoticeSeen: false,
       }),
     ).toEqual({ ok: false, error: { code: 'WRITE_FAILED' } });
-    expect(await invoke(page, IPC_CHANNELS.sharePlan, 'Thesis', 'Camille')).toEqual({
+    expect(await invoke(page, IPC_CHANNELS.sharePlan, 'Thesis', 'Camille', 'camille')).toEqual({
       ok: false,
       error: { code: 'READ_FAILED' },
     });
+    const joining = {
+      address: LOOPBACK,
+      port: 1,
+      code: 'K7Q4MZ',
+      participantId: 'lea',
+      name: 'Léa',
+    };
+    expect([
+      await invoke(page, IPC_CHANNELS.joinPlan, joining),
+      await invoke(page, IPC_CHANNELS.findNextHost, [], 'Thesis', 'Léa', []),
+    ]).toEqual([
+      { ok: false, error: { code: 'READ_FAILED' } },
+      { ok: false, error: { code: 'READ_FAILED' } },
+    ]);
   });
 
   it('shares a plan, lets a guest join and passes their messages both ways, until the host drops the guest', async () => {
@@ -220,10 +230,16 @@ describe('the collaboration service', () => {
         name: expect.stringMatching(/^Tasklace [0-9a-f]{8}$/) as unknown,
         type: 'tasklace',
         port: shared.value.port,
-        txt: { v: '1', plan: 'Thesis', host: 'Camille' },
+        txt: {
+          v: '1',
+          plan: 'Thesis',
+          host: 'Camille',
+          share: expect.stringMatching(/^[0-9a-f]{32}$/) as unknown,
+          rank: '0',
+        },
       },
     ]);
-    expect(await invoke(host, IPC_CHANNELS.sharePlan, 'Thesis', 'Camille')).toEqual({
+    expect(await invoke(host, IPC_CHANNELS.sharePlan, 'Thesis', 'Camille', 'camille')).toEqual({
       ok: false,
       error: { code: 'ALREADY_SHARING' },
     });
@@ -241,7 +257,16 @@ describe('the collaboration service', () => {
     });
     await until(() => host.events.length === 1 && guest.events.length === 1);
     expect([host.events, guest.events]).toEqual([
-      [{ kind: 'peerJoined', peer: 1, participantId: 'lea', name: 'Léa' }],
+      [
+        {
+          kind: 'peerJoined',
+          peer: 1,
+          participantId: 'lea',
+          name: 'Léa',
+          endpoint: { addresses: ['192.168.1.24'], port: shared.value.port },
+          tokenDigest: expect.stringMatching(/^[0-9a-f]{64}$/) as unknown,
+        },
+      ],
       [{ kind: 'connected' }],
     ]);
     ipcMain.send(IPC_CHANNELS.collaborationSend, { sender: host }, 1, Uint8Array.of(1));
@@ -255,11 +280,19 @@ describe('the collaboration service', () => {
     await until(() => host.events.length === 3 && guest.events.length === 3);
     expect([host.events[2], guest.events[2]]).toEqual([
       { kind: 'peerLeft', peer: 1 },
-      { kind: 'ended', reason: 'WIRE_CLOSED' },
+      { kind: 'ended', reason: 'REMOVED' },
     ]);
     expect(await invoke(host, IPC_CHANNELS.stopCollaboration)).toEqual(success(null));
     expect(await invoke(guest, IPC_CHANNELS.stopCollaboration)).toEqual(success(null));
-    expect([mdnsFake.record.servicesStopped, mdnsFake.record.destroyed]).toEqual([1, 1]);
+    const shares = mdnsFake.record.published.map(
+      (service) => (service as { txt: { share: string } }).txt.share,
+    );
+    expect([
+      mdnsFake.record.servicesStopped,
+      mdnsFake.record.destroyed,
+      shares.length,
+      shares[0] === shares[1],
+    ]).toEqual([2, 1, 2, false]);
   });
 
   it('tells the host each new code and refuses to drop a guest that is not there', async () => {
@@ -419,7 +452,7 @@ describe('the collaboration service', () => {
       fqdn: 'one',
       port: 47_313,
       addresses: ['192.168.1.24'],
-      txt: { v: '1', plan: 'Thesis', host: 'Camille' },
+      txt: { v: '1', plan: 'Thesis', host: 'Camille', share: 'a'.repeat(32), rank: '0' },
     });
     expect(page.events).toEqual([
       {
@@ -470,8 +503,10 @@ describe('the collaboration service', () => {
     const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const failure = new Error('No multicast');
     mdnsFake.mdns = {
-      ...mdnsFake.mdns,
       publish: () => {
+        throw failure;
+      },
+      find: () => {
         throw failure;
       },
     };
@@ -480,33 +515,68 @@ describe('the collaboration service', () => {
     expect(shared.ok).toBe(true);
     expect(warnings.mock.calls).toEqual([
       ['The shared plan could not be announced on the network:', failure],
+      ['The shared plan could not look for other hosts on the network:', failure],
     ]);
     expect(await invoke(page, IPC_CHANNELS.stopCollaboration)).toEqual(success(null));
   });
-});
 
-describe('the connection of a window to a host', () => {
-  /** Builds a fake connection to a host. */
-  const fakeClient = () => ({ send: () => success(null), close: () => undefined });
-
-  it('forgets a window whose connection ended at once, and keeps a newer connection when an older one ends late', () => {
-    const sharings = new Map<WebContents, WindowSharing>();
-    const page = new FakePage() as unknown as WebContents;
-    startGuest(sharings, page, (ended) => {
-      ended();
-      return fakeClient();
+  it('looks for the next host of a plan joined with its key, refusing a queue of another shape and a window without the key', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const host = new FakePage();
+    const guest = new FakePage();
+    const shared = (await shareFrom(host)) as { ok: true; value: { code: string; port: number } };
+    const queue = [
+      { participantId: 'lea', rank: 1, endpoint: { addresses: ['192.168.1.24'], port: 47_313 } },
+      { participantId: 'noah', rank: 2, endpoint: null },
+    ];
+    expect(await invoke(guest, IPC_CHANNELS.findNextHost, queue, 'Thesis', 'Léa', KNOWN)).toEqual({
+      ok: false,
+      error: { code: 'TASK_FAILED' },
     });
-    expect(sharings.size).toBe(0);
-    let endOlder = (): void => undefined;
-    startGuest(sharings, page, (ended) => {
-      endOlder = ended;
-      return fakeClient();
+    for (const invalid of [
+      null,
+      [{ participantId: 'a b', rank: 1, endpoint: null }],
+      [{ participantId: 'lea', rank: -1, endpoint: null }],
+      [{ participantId: 'lea', rank: 1, endpoint: { port: 1 } }],
+      [{ participantId: 'lea', rank: 1 }],
+      [7],
+    ]) {
+      await expect(
+        invoke(guest, IPC_CHANNELS.findNextHost, invalid, 'Thesis', 'Léa', KNOWN),
+      ).rejects.toThrow('Request refused');
+    }
+    await expect(invoke(guest, IPC_CHANNELS.findNextHost, queue, '', 'Léa', KNOWN)).rejects.toThrow(
+      'Request refused',
+    );
+    for (const tokens of [
+      null,
+      [{ participantId: 'lea', tokenDigest: 'x' }],
+      [{ participantId: 'a b', tokenDigest: 'e'.repeat(64) }],
+    ]) {
+      await expect(
+        invoke(guest, IPC_CHANNELS.findNextHost, queue, 'Thesis', 'Léa', tokens),
+      ).rejects.toThrow('Request refused');
+    }
+    await invoke(guest, IPC_CHANNELS.joinPlan, {
+      address: LOOPBACK,
+      port: shared.value.port,
+      code: shared.value.code,
+      participantId: 'lea',
+      name: 'Léa',
     });
-    sharings.delete(page);
-    const newer = fakeClient();
-    startGuest(sharings, page, () => newer);
-    endOlder();
-    expect(sharings.get(page)).toEqual({ kind: 'guest', client: newer });
+    await until(() => guest.events.some((event) => event.kind === 'connected'));
+    let asked = await invoke(guest, IPC_CHANNELS.findNextHost, queue, 'Thesis', 'Léa', KNOWN);
+    while (JSON.stringify(asked) !== JSON.stringify(success(null))) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      asked = await invoke(guest, IPC_CHANNELS.findNextHost, queue, 'Thesis', 'Léa', KNOWN);
+    }
+    expect(asked).toEqual(success(null));
+    expect(errors.mock.calls[0]).toEqual([
+      'A page looked for the next host without having joined a plan with its key.',
+    ]);
+    forget(host as never);
+    forget(guest as never);
+    await until(() => mdnsFake.record.destroyed === 1);
   });
 });
 

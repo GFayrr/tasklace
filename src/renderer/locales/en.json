@@ -9,7 +9,8 @@
     "pdfFiles": "PDF documents"
   },
   "projects": {
-    "untitled": "Untitled project"
+    "untitled": "Untitled project",
+    "keptOnThisComputer": "Kept on this computer"
   },
   "fileErrors": {
     "TOO_LARGE": "This file is too large to be opened.",
@@ -117,6 +118,9 @@
     "showConflict": "Show this conflict"
   },
   "notices": {
+    "localChangesAdded": "The changes kept on this computer were added to the plan.",
+    "localChangesNotAdded": "The changes kept on this computer could not be added. They were set aside on this computer, and the file opened as it is.",
+    "localChangesLost": "The changes kept on this computer could not be added nor set aside. The next save may replace them.",
     "dismiss": "Dismiss",
     "clockOutOfRange": "The clock of this computer is outside the years Tasklace handles, so the new project starts on the first day Tasklace handles. Check the date of the computer, then set the start of the project in its settings.",
     "label": "Messages",
@@ -305,7 +309,11 @@
     "failedTitle": "The project could not be saved",
     "failedBody": "Its latest changes could not be written: {reason} Save it under another name, close without saving, or cancel to keep it open.",
     "saveElsewhere": "Save as…",
-    "closeAnyway": "Close without saving"
+    "closeAnyway": "Close without saving",
+    "localChangesTitle": "Add the changes kept on this computer?",
+    "localChangesBody": "This computer kept changes to “{file}” that the file does not have, for example because they could not be written to it. Add them to the plan, or open the file as it is and keep them aside on this computer.",
+    "openAlone": "Open the file alone",
+    "addThem": "Add them"
   },
   "issues": {
     "INVALID_JSON": "The file is not valid JSON.",
@@ -607,6 +615,12 @@
     "exportLighter": "Export the lighter PDF…"
   },
   "collaboration": {
+    "ownCopyName": "{plan} (my changes)",
+    "ownChangesNotKept": "Your changes made in read only could not be kept apart. They stay only in the plan open here.",
+    "keptTitle": "Your changes stay in your own copy",
+    "keptBody": "You changed the plan while you were away, but you are in read only in “{plan}”, so your changes cannot be shared. They are kept in a separate plan, “{copy}”, on this computer. You now see the shared plan again.",
+    "openKept": "Open my changes",
+    "keptDone": "OK",
     "readOnly": "You are in read only. {host} can let you edit.",
     "readOnlyWithoutHost": "You are in read only in this shared plan.",
     "share": "Share",
@@ -671,6 +685,15 @@
     "peopleLabel": "People in the shared plan",
     "hostName": "{name} (host)",
     "moreFaces": "+{count}",
-    "canLetYouEdit": "{host} can let you edit."
+    "canLetYouEdit": "{host} can let you edit.",
+    "reconnecting": "Reconnecting… your changes are kept",
+    "reconnectingShort": "Reconnecting…",
+    "offline": "Offline · changes are shared when the plan is shared again",
+    "offlineShort": "Offline",
+    "offlineKeptApart": "Offline · you are in read only, so your changes will be kept in your own copy",
+    "reconnectingDetail": "Tasklace keeps trying to reach {host}. Your changes are kept on this computer.",
+    "hostChanged": "{left} left. {next} now hosts the plan; you are still in.",
+    "youHostNow": "{left} left. You now host the plan; the others join you on their own.",
+    "successor": "If you leave, {name}, who has been here the longest, becomes the host and keeps these choices."
   }
 }

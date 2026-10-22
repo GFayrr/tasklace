@@ -15,21 +15,31 @@ describe('a secure connection whose channel cannot seal', () => {
     const ends: ConnectionEnd[] = [];
     const opened = vi.fn();
     const common = {
-      code: 'K7Q4MZ',
       startTimer: () => () => undefined,
       randomBytes: systemRandomBytes,
     };
     const host = acceptGuest({
       ...common,
+      secrets: { code: 'K7Q4MZ', planKey: new Uint8Array(32) },
       wire: { send: (bytes) => toGuest.push(bytes), close: () => undefined },
-      events: { message: () => undefined, ended: () => undefined },
+      events: { message: () => undefined, planKey: null, ended: () => undefined },
       joined: () => undefined,
     });
     const guest = connectToHost({
       ...common,
+      secret: { kind: 'code', code: 'K7Q4MZ' },
       wire: { send: (bytes) => toHost.push(bytes), close: () => undefined },
-      events: { message: () => undefined, ended: (reason) => ends.push(reason) },
-      introduction: { participantId: requireParticipantId('lea'), name: 'Léa' },
+      events: {
+        message: () => undefined,
+        planKey: () => undefined,
+        ended: (reason) => ends.push(reason),
+      },
+      introduction: {
+        participantId: requireParticipantId('lea'),
+        name: 'Léa',
+        token: 'ab'.repeat(32),
+        endpoint: { addresses: [], port: 47_313 },
+      },
       opened,
     });
     guest.receive(toGuest.splice(0)[0] ?? new Uint8Array());

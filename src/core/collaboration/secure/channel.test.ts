@@ -4,7 +4,13 @@ import { equalBytes } from '@noble/curves/utils.js';
 import { describe, expect, it, vi } from 'vitest';
 import { CHANNEL_CHUNK_BYTES, MAX_COLLABORATION_MESSAGE_BYTES } from '../../limits';
 import { failure, success } from '../../result';
-import { AEAD_TAG_BYTES, MAX_SEALED_FRAME_BYTES, openSecureChannel, type Aead } from './channel';
+import {
+  AEAD_TAG_BYTES,
+  MAX_SEALED_FRAME_BYTES,
+  openSecureChannel,
+  type Aead,
+  type ChannelKind,
+} from './channel';
 import type { Compressor } from '../../file/tasklace-file';
 import type { SessionKeys } from './cpace';
 
@@ -58,12 +64,18 @@ function ends(compression: Compressor = plainCompression) {
   };
 }
 
-/** Seals a message, failing the test when it is refused. */
+/** Gives what the channel opens for a message of the plan. */
+function plan(message: Uint8Array) {
+  return success({ kind: 'plan', message });
+}
+
+/** Seals a message of the plan, or of another kind, failing the test when it is refused. */
 function sealed(
   channel: ReturnType<typeof openSecureChannel>,
   message: Uint8Array,
+  kind: ChannelKind = 'plan',
 ): readonly Uint8Array[] {
-  const frames = channel.seal(message);
+  const frames = channel.seal(message, kind);
   if (!frames.ok) {
     throw new Error(frames.error);
   }
@@ -74,14 +86,37 @@ describe('the encrypted channel', () => {
   it('carries messages both ways, in order', () => {
     const { host, guest } = ends();
     expect(sealed(host, Uint8Array.of(1, 2, 3)).map((frame) => guest.open(frame))).toEqual([
-      success(Uint8Array.of(1, 2, 3)),
+      plan(Uint8Array.of(1, 2, 3)),
     ]);
     expect(sealed(guest, new Uint8Array()).map((frame) => host.open(frame))).toEqual([
-      success(new Uint8Array()),
+      plan(new Uint8Array()),
     ]);
     expect(sealed(host, Uint8Array.of(4)).map((frame) => guest.open(frame))).toEqual([
-      success(Uint8Array.of(4)),
+      plan(Uint8Array.of(4)),
     ]);
+  });
+
+  it('tells a key of the plan apart from a message of the plan', () => {
+    const { host, guest } = ends();
+    expect(sealed(host, Uint8Array.of(9), 'planKey').map((frame) => guest.open(frame))).toEqual([
+      success({ kind: 'planKey', message: Uint8Array.of(9) }),
+    ]);
+  });
+
+  it('breaks when the frames of one message are of different kinds', () => {
+    const { guest } = ends();
+    /** Builds the nonce of a frame number below 256. */
+    const nonce = (counter: number) => {
+      const bytes = new Uint8Array(12);
+      bytes[11] = counter;
+      return bytes;
+    };
+    expect(guest.open(testAead.seal(HOST_TO_GUEST, nonce(0), Uint8Array.of(0, 1)))).toEqual(
+      success(null),
+    );
+    expect(guest.open(testAead.seal(HOST_TO_GUEST, nonce(1), Uint8Array.of(3, 1)))).toEqual(
+      failure('TAMPERED'),
+    );
   });
 
   it('cuts a large message into frames of one mebibyte and joins them back', () => {
@@ -99,7 +134,9 @@ describe('the encrypted channel', () => {
     const opened = frames.map((frame) => guest.open(frame));
     expect(opened.slice(0, 2)).toEqual([success(null), success(null)]);
     const last = opened[2];
-    expect(last?.ok === true && last.value !== null && equalBytes(last.value, message)).toBe(true);
+    expect(
+      last?.ok === true && last.value?.kind === 'plan' && equalBytes(last.value.message, message),
+    ).toBe(true);
   });
 
   it('compresses before sealing and decompresses within the limit of a message', () => {
@@ -107,7 +144,7 @@ describe('the encrypted channel', () => {
     const decompress = vi.fn(() => success(Uint8Array.of(8, 9)));
     const { host, guest } = ends({ compress, decompress });
     expect(sealed(host, Uint8Array.of(1, 2)).map((frame) => guest.open(frame))).toEqual([
-      success(Uint8Array.of(8, 9)),
+      plan(Uint8Array.of(8, 9)),
     ]);
     expect(compress.mock.calls).toEqual([[Uint8Array.of(1, 2)]]);
     expect(decompress.mock.calls).toEqual([[Uint8Array.of(7), MAX_COLLABORATION_MESSAGE_BYTES]]);
@@ -115,9 +152,9 @@ describe('the encrypted channel', () => {
 
   it('refuses to seal a message above the limit', () => {
     const { host } = ends();
-    expect(host.seal({ length: MAX_COLLABORATION_MESSAGE_BYTES + 1 } as Uint8Array)).toEqual(
-      failure('TOO_LARGE'),
-    );
+    expect(
+      host.seal({ length: MAX_COLLABORATION_MESSAGE_BYTES + 1 } as Uint8Array, 'plan'),
+    ).toEqual(failure('TOO_LARGE'));
   });
 
   it.each([
@@ -154,7 +191,7 @@ describe('the encrypted channel', () => {
       failure('TAMPERED'),
     );
     const header = ends();
-    expect(header.guest.open(testAead.seal(HOST_TO_GUEST, nonce, Uint8Array.of(2, 0)))).toEqual(
+    expect(header.guest.open(testAead.seal(HOST_TO_GUEST, nonce, Uint8Array.of(4, 0)))).toEqual(
       failure('TAMPERED'),
     );
   });

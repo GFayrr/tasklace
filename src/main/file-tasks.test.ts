@@ -1,5 +1,5 @@
 import { DEFAULT_CALENDAR } from '../core/calendar/default-calendar';
-import { mkdtemp, readFile, rm, truncate, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as Y from 'yjs';
@@ -25,6 +25,19 @@ import {
 import { isResultOf, runFileTask, type FileTaskResult, type LoadedProject } from './file-tasks';
 
 const writing = vi.hoisted(() => ({ fault: null as Error | null }));
+const examining = vi.hoisted(() => ({ fault: null as Error | null }));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...original,
+    stat: (...values: Parameters<typeof original.stat>) => {
+      const fault = examining.fault;
+      examining.fault = null;
+      return fault === null ? original.stat(...values) : Promise.reject(fault);
+    },
+  };
+});
 
 vi.mock('./safe-write', async (importOriginal) => {
   const original = await importOriginal<typeof import('./safe-write')>();
@@ -87,6 +100,11 @@ async function quietly(task: () => Promise<FileTaskResult>) {
   }
 }
 
+/** Builds the task that opens a project file, its local copies kept in the test folder. */
+function opening(path: string) {
+  return { kind: 'openProject', path, localCopyFolder: folder } as const;
+}
+
 /** Opens a Yjs state as a shared document. */
 function documentOf(state: Uint8Array): Y.Doc {
   const document = new Y.Doc();
@@ -110,7 +128,7 @@ describe('file tasks', () => {
         savedAt: SAVED_AT,
       }),
     ).toEqual(SAVED_WITH_COPY);
-    const opened = loadedOf(await runFileTask({ kind: 'openProject', path }));
+    const opened = loadedOf(await runFileTask(opening(path)));
     expect(opened.documentId).toBe(TEST_DOCUMENT_ID);
     expect(opened.state.byteOffset).toBe(0);
     expect(opened.state.buffer.byteLength).toBe(opened.state.byteLength);
@@ -177,7 +195,7 @@ describe('file tasks', () => {
     const file = encodeTasklaceFile(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID), zlibCompressor);
     file[file.length - 1] = (file[file.length - 1] ?? 0) ^ 1;
     await writeFile(forged, file);
-    expect(await runFileTask({ kind: 'openProject', path: missing })).toEqual({
+    expect(await runFileTask(opening(missing))).toEqual({
       ok: false,
       error: { code: 'READ_FAILED' },
     });
@@ -203,7 +221,7 @@ describe('file tasks', () => {
       ok: false,
       error: { code: 'INVALID_IMPORT', issues: [{ path: '', code: 'INVALID_JSON' }] },
     });
-    expect(await runFileTask({ kind: 'openProject', path: forged })).toEqual({
+    expect(await runFileTask(opening(forged))).toEqual({
       ok: false,
       error: { code: 'CORRUPTED' },
     });
@@ -222,10 +240,7 @@ describe('file tasks', () => {
     expect(await runFileTask(task)).toEqual(SAVED_WITH_COPY);
     expect((await indexIn(folder))[TEST_DOCUMENT_ID]?.path).toBeNull();
     const opened = loadedOf(
-      await runFileTask({
-        kind: 'openProject',
-        path: join(folder, `${TEST_DOCUMENT_ID}.tasklace`),
-      }),
+      await runFileTask(opening(join(folder, `${TEST_DOCUMENT_ID}.tasklace`))),
     );
     expect(opened.documentId).toBe(TEST_DOCUMENT_ID);
   });
@@ -244,10 +259,7 @@ describe('file tasks', () => {
     expect(result).toEqual({ ok: false, error: { code: 'WRITE_FAILED' } });
     expect(logged).toEqual(['The project file could not be written:']);
     const opened = loadedOf(
-      await runFileTask({
-        kind: 'openProject',
-        path: join(folder, `${TEST_DOCUMENT_ID}.tasklace`),
-      }),
+      await runFileTask(opening(join(folder, `${TEST_DOCUMENT_ID}.tasklace`))),
     );
     expect(opened.documentId).toBe(TEST_DOCUMENT_ID);
   });
@@ -258,15 +270,13 @@ describe('file tasks', () => {
       path,
       encodeTasklaceState(new Uint8Array([255, 255, 255, 255]), zlibCompressor),
     );
-    const { result, logged } = await quietly(() => runFileTask({ kind: 'openProject', path }));
+    const { result, logged } = await quietly(() => runFileTask(opening(path)));
     expect(result).toEqual({ ok: false, error: { code: 'INVALID_CONTENT' } });
     expect(logged).toEqual(['The content of the project file could not be decoded:']);
   });
 
   it('refuses to read a path that is not a regular file, logging it', async () => {
-    const { result, logged } = await quietly(() =>
-      runFileTask({ kind: 'openProject', path: folder }),
-    );
+    const { result, logged } = await quietly(() => runFileTask(opening(folder)));
     expect(result).toEqual({ ok: false, error: { code: 'READ_FAILED' } });
     expect(logged).toEqual([`${folder} is not a regular file, so it cannot be read.`]);
   });
@@ -307,9 +317,7 @@ describe('file tasks', () => {
     const { result, logged } = await quietly(() => runFileTask(task));
     expect(result).toEqual({ ok: true, value: { kind: 'saved', localCopySaved: false } });
     expect(logged).toEqual(['The local copy could not be written:']);
-    expect(loadedOf(await runFileTask({ kind: 'openProject', path })).documentId).toBe(
-      TEST_DOCUMENT_ID,
-    );
+    expect(loadedOf(await runFileTask(opening(path))).documentId).toBe(TEST_DOCUMENT_ID);
   });
 
   it('fails to save a project without file whose local copy cannot be written, since nothing was written', async () => {
@@ -357,7 +365,7 @@ describe('file tasks', () => {
     document.getMap('project').delete('documentId');
     const path = join(folder, 'anonymous.tasklace');
     await writeFile(path, encodeTasklaceState(Y.encodeStateAsUpdate(document), zlibCompressor));
-    expect(await runFileTask({ kind: 'openProject', path })).toEqual({
+    expect(await runFileTask(opening(path))).toEqual({
       ok: false,
       error: {
         code: 'INVALID_PROJECT',
@@ -367,14 +375,14 @@ describe('file tasks', () => {
   });
 
   it('reads only regular files, refusing a folder, and refuses a file larger than its limit through the same handle', async () => {
-    expect(await runFileTask({ kind: 'openProject', path: folder })).toEqual({
+    expect(await runFileTask(opening(folder))).toEqual({
       ok: false,
       error: { code: 'READ_FAILED' },
     });
     const huge = join(folder, 'huge.tasklace');
     await writeFile(huge, '');
     await truncate(huge, MAX_FILE_BYTES + 1);
-    expect(await runFileTask({ kind: 'openProject', path: huge })).toEqual({
+    expect(await runFileTask(opening(huge))).toEqual({
       ok: false,
       error: { code: 'TOO_LARGE' },
     });
@@ -391,7 +399,7 @@ describe('file tasks', () => {
     const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const results = [];
     for (const path of [empty, text, huge]) {
-      results.push(await runFileTask({ kind: 'openProject', path }));
+      results.push(await runFileTask(opening(path)));
     }
     const calls = [...warned.mock.calls];
     warned.mockRestore();
@@ -438,7 +446,7 @@ describe('file tasks', () => {
 
 describe('isResultOf', () => {
   it('accepts a failure, and a success only of the kind its task gives', () => {
-    const opening = { kind: 'openProject', path: '/plan.tasklace' } as const;
+    const openingTask = opening('/plan.tasklace');
     const saving = {
       kind: 'saveProject',
       path: null,
@@ -450,7 +458,7 @@ describe('isResultOf', () => {
     const loaded = { ok: true, value: { kind: 'loaded' } };
     const saved = { ok: true, value: { kind: 'saved' } };
     const failed = { ok: false, error: { code: 'TASK_FAILED' } };
-    expect([loaded, saved, failed].map((value) => isResultOf(opening, value))).toEqual([
+    expect([loaded, saved, failed].map((value) => isResultOf(openingTask, value))).toEqual([
       true,
       false,
       true,
@@ -461,7 +469,7 @@ describe('isResultOf', () => {
       true,
     ]);
     expect(
-      [null, 'ok', { ok: 'yes' }, { ok: true }].map((value) => isResultOf(opening, value)),
+      [null, 'ok', { ok: 'yes' }, { ok: true }].map((value) => isResultOf(openingTask, value)),
     ).toEqual([false, false, false, false]);
   });
 });
@@ -477,7 +485,7 @@ describe('the state an opening sends', () => {
         path,
         encodeTasklaceFile(createSharedDocument(project(tasks), TEST_DOCUMENT_ID), zlibCompressor),
       );
-      const { state } = loadedOf(await runFileTask({ kind: 'openProject', path }));
+      const { state } = loadedOf(await runFileTask(opening(path)));
       expect([state.byteOffset, state.buffer.byteLength]).toEqual([0, state.byteLength]);
       expect(readSharedProject(documentOf(state))).toMatchObject({ ok: true });
     }
@@ -493,7 +501,13 @@ describe('reading the state of a shared plan', () => {
     const read = await runFileTask({ kind: 'readSharedState', state: view });
     expect(read).toEqual({
       ok: true,
-      value: { kind: 'loaded', state, documentId: TEST_DOCUMENT_ID, warnings: [] },
+      value: {
+        kind: 'loaded',
+        state,
+        documentId: TEST_DOCUMENT_ID,
+        warnings: [],
+        localChanges: null,
+      },
     });
     expect(read.ok && read.value.kind === 'loaded' && read.value.state.buffer.byteLength).toBe(
       state.length,
@@ -515,5 +529,166 @@ describe('reading the state of a shared plan', () => {
     expect(errors.mock.calls.map((call): unknown => call[0])).toEqual([
       'The content of the project file could not be decoded:',
     ]);
+  });
+});
+
+describe('keeping the changes a person could not share', () => {
+  const KEPT_ID = requireDocumentId('00000000-0000-4000-8000-0000000000aa');
+  const TEMPLATE = '{plan} (my changes)';
+
+  /** Builds the task that keeps a state in a file of the test folder. */
+  const keepTask = (state: Uint8Array, path = join(folder, 'kept.tasklace')) =>
+    ({
+      kind: 'keepSharedCopy',
+      state,
+      documentId: KEPT_ID,
+      nameTemplate: TEMPLATE,
+      path,
+      localCopyFolder: join(folder, 'copies'),
+      savedAt: SAVED_AT,
+    }) as const;
+
+  it('writes the plan as a project of its own under a new identifier and a name made from the plan, with its local copy', async () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const task = keepTask(state);
+    const kept = await runFileTask(task);
+    const opened = loadedOf(await runFileTask(opening(task.path)));
+    expect([
+      kept,
+      isResultOf(task, kept),
+      opened.documentId,
+      readSharedProject(documentOf(opened.state)),
+      await readFile(join(folder, 'copies', `${KEPT_ID}.tasklace`)),
+      (await indexIn(join(folder, 'copies')))[KEPT_ID],
+    ]).toEqual([
+      SAVED_WITH_COPY,
+      true,
+      KEPT_ID,
+      readSharedProject(
+        createSharedDocument({ ...SAMPLE, name: `${SAMPLE.name} (my changes)` }, KEPT_ID),
+      ),
+      await readFile(task.path),
+      { path: task.path, savedAt: SAVED_AT.toISOString() },
+    ]);
+  });
+
+  it('refuses and logs a state it cannot read, writing nothing', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const kept = await runFileTask(keepTask(Uint8Array.of(255, 255, 255, 1)));
+    expect([
+      kept,
+      warnings.mock.calls,
+      errors.mock.calls.map((call): unknown => call[0]),
+      await readdir(folder),
+    ]).toEqual([
+      { ok: false, error: { code: 'INVALID_CONTENT' } },
+      [['The changes kept on this computer could not be read: INVALID_CONTENT.']],
+      ['The content of the project file could not be decoded:'],
+      [],
+    ]);
+  });
+
+  it('reports a file that cannot be written, logging why, without a local copy of it', async () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const { result, logged } = await quietly(() =>
+      runFileTask(keepTask(state, join(folder, 'missing-folder', 'kept.tasklace'))),
+    );
+    expect([result, logged, await readdir(folder)]).toEqual([
+      { ok: false, error: { code: 'WRITE_FAILED' } },
+      ['The kept changes could not be written:'],
+      [],
+    ]);
+  });
+
+  it('keeps the file written when its local copy cannot be, telling so', async () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const task = keepTask(state);
+    await writeFile(join(folder, 'copies'), 'a file where the folder of the copies should be');
+    const { result, logged } = await quietly(() => runFileTask(task));
+    expect([result, logged, loadedOf(await runFileTask(opening(task.path))).documentId]).toEqual([
+      { ok: true, value: { kind: 'saved', localCopySaved: false } },
+      ['The local copy could not be written:'],
+      KEPT_ID,
+    ]);
+  });
+});
+
+describe('the changes the local copy of an opened file holds', () => {
+  const PATH_NAME = 'plan.tasklace';
+
+  /** Writes a project file of a state and, when given, a local copy of another state in the test folder. */
+  async function filesOf(state: Uint8Array, copy: Uint8Array | null): Promise<string> {
+    const path = join(folder, PATH_NAME);
+    await writeFile(path, encodeTasklaceState(state, zlibCompressor));
+    if (copy !== null) {
+      await writeFile(
+        join(folder, `${TEST_DOCUMENT_ID}.tasklace`),
+        encodeTasklaceState(copy, zlibCompressor),
+      );
+    }
+    return path;
+  }
+
+  /** Gives the state of the sample plan, and the state of a copy of it in which the plan was renamed. */
+  function statesOf(): { readonly state: Uint8Array; readonly renamed: Uint8Array } {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    const state = Y.encodeStateAsUpdate(document);
+    document.getMap('project').set('name', 'Renamed here');
+    return { state, renamed: Y.encodeStateAsUpdate(document) };
+  }
+
+  it('gives the state of a copy holding changes the file lacks, owning its buffer', async () => {
+    const { state, renamed } = statesOf();
+    const opened = loadedOf(await runFileTask(opening(await filesOf(state, renamed))));
+    expect([opened.localChanges, opened.localChanges?.buffer.byteLength]).toEqual([
+      renamed,
+      renamed.byteLength,
+    ]);
+  });
+
+  it('gives nothing for a missing copy, nor for one the file already holds, logging nothing', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { state, renamed } = statesOf();
+    const missing = loadedOf(await runFileTask(opening(await filesOf(state, null))));
+    const older = loadedOf(await runFileTask(opening(await filesOf(renamed, state))));
+    expect([missing.localChanges, older.localChanges, warnings.mock.calls]).toEqual([
+      null,
+      null,
+      [],
+    ]);
+  });
+
+  it('leaves aside, logging why, a copy it cannot examine, read or check, or of another document', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { state } = statesOf();
+    const path = await filesOf(state, null);
+    const copy = join(folder, `${TEST_DOCUMENT_ID}.tasklace`);
+    const results: (Uint8Array | null)[] = [];
+    const denied = Object.assign(new Error('denied'), { code: 'EACCES' });
+    examining.fault = denied;
+    await writeFile(copy, 'not a project');
+    results.push(loadedOf(await runFileTask(opening(path))).localChanges);
+    results.push(loadedOf(await runFileTask(opening(path))).localChanges);
+    const other = createSharedDocument(SAMPLE, NEW_DOCUMENT_ID);
+    await writeFile(copy, encodeTasklaceFile(other, zlibCompressor));
+    results.push(loadedOf(await runFileTask(opening(path))).localChanges);
+    expect([results, warnings.mock.calls, errors.mock.calls]).toEqual([
+      [null, null, null],
+      [
+        [`The local copy ${copy} could not be examined, so it was left aside:`, denied],
+        [`The local copy ${copy} could not be read, so it was left aside: TRUNCATED.`],
+        [`The local copy ${copy} holds another document, so it was left aside.`],
+      ],
+      [],
+    ]);
+  });
+
+  it('throws an error of the program met while examining the copy', async () => {
+    const { state } = statesOf();
+    const path = await filesOf(state, null);
+    examining.fault = new TypeError('a fault of the program');
+    await expect(runFileTask(opening(path))).rejects.toThrow('a fault of the program');
   });
 });

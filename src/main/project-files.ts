@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { stat } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { mkdir, stat } from 'node:fs/promises';
+import { basename, dirname, extname, join } from 'node:path';
 import {
   app,
   BrowserWindow,
@@ -9,6 +9,7 @@ import {
   type IpcMainInvokeEvent,
   type WebContents,
 } from 'electron';
+import { ownCopyName } from '../core/collaboration/own-copy';
 import { MAX_CSV_FILE_BYTES, MAX_FILE_BYTES, MAX_JSON_FILE_BYTES } from '../core/limits';
 import { failure, success } from '../core/result';
 import { isDocumentId, requireDocumentId, type DocumentId } from '../core/shared/shared-document';
@@ -42,6 +43,7 @@ import {
   projectNameFromPath,
   withExtension,
 } from './project-names';
+import { setLocalCopyAside } from './local-copies';
 import { readRecentProjects, recordRecentProject } from './recent-projects';
 import { writeFileSafely } from './safe-write';
 import { createSerialQueue } from './serial-queue';
@@ -84,9 +86,12 @@ const REPLACE_BUTTON = 0;
 const CANCEL_BUTTON = 1;
 const FILE_PLACEHOLDER = '{file}';
 const LOCAL_COPY_FOLDER = 'local-copies';
+const KEPT_FOLDER = 'kept-plans';
+const KEPT_NAME_ATTEMPTS = 64;
 const projects = new WeakMap<WebContents, WindowProject>();
 const saveInOrder = createSerialQueue();
 const offered = new WeakMap<WebContents, WindowProject>();
+const keptChanges = new WeakMap<WebContents, string>();
 
 /** Forgets the project of the window of a page about to reload, the reloaded page starting without any project. */
 export function forgetWindowProject(sender: WebContents): void {
@@ -103,7 +108,7 @@ export function windowProjectKind(sender: WebContents): WindowProjectKind {
   return project.path === null ? 'withoutFile' : 'withFile';
 }
 
-/** Answers the project file requests of the bridge (new, open, recent, import, adopt, save, save as, export), the main process alone choosing paths and knowing the project of each window, which changes only once its page adopts it. */
+/** Answers the project file requests of the bridge (new, open, recent, import, adopt, save, save as, export, changes kept apart), the main process alone choosing paths and knowing the project of each window, which changes only once its page adopts it. */
 export function registerProjectFileHandlers(services: ProjectFileServices): void {
   /** Registers the answer of a channel, which checks first that the page asking is trusted. */
   const handle = <C extends InvokeChannel>(channel: C, answer: ChannelHandler<C>): void => {
@@ -144,6 +149,15 @@ export function registerProjectFileHandlers(services: ProjectFileServices): void
   );
   handleFileAction(IPC_CHANNELS.exportProject, (event, kind, text, name) =>
     exportProject(event.sender, kind, text, name),
+  );
+  handleFileAction(IPC_CHANNELS.keepOwnChanges, (event, state, planName) =>
+    keepOwnChanges(services, event.sender, state, planName),
+  );
+  handleFileAction(IPC_CHANNELS.openKeptChanges, (event) =>
+    openKeptChanges(services, event.sender),
+  );
+  handleFileAction(IPC_CHANNELS.setLocalCopyAside, (event, documentId) =>
+    setCopyAside(services, event.sender, documentId),
   );
 }
 
@@ -193,10 +207,50 @@ async function adoptProject(
   return success(null);
 }
 
+/** Sets aside the local copy of the file offered to a window or opened in it, whose changes the user chose not to add, so that the next save does not replace them, noting in the log where they went. */
+async function setCopyAside(
+  services: ProjectFileServices,
+  sender: WebContents,
+  value: unknown,
+): Promise<BridgeResult<null>> {
+  const documentId = isDocumentId(value) ? value : refuseMessage();
+  const project = [offered.get(sender), projects.get(sender)].find(
+    (candidate) => candidate?.documentId === documentId,
+  );
+  const path = project?.path ?? null;
+  if (path === null) {
+    console.error('The page set aside the local copy of a file its window was not given.');
+    return failure({ code: 'TASK_FAILED' });
+  }
+  try {
+    const aside = await setLocalCopyAside(
+      join(services.userDataFolder, LOCAL_COPY_FOLDER),
+      documentId,
+      new Date(),
+    );
+    console.warn(
+      `The changes kept on this computer for ${path} were not added to it and were set aside as ${aside ?? 'nothing, the copy being gone'}.`,
+    );
+    return success(null);
+  } catch (error) {
+    if (!isSystemError(error)) {
+      throw error;
+    }
+    console.error(`The local copy of ${path} could not be set aside:`, error);
+    return failure({ code: 'WRITE_FAILED' });
+  }
+}
+
 /** Offers a window the shared plan it joined, whose state the worker checked, as a project without file, giving what the page opens. */
 export function offerSharedProject(sender: WebContents, loaded: LoadedProject): OpenedProject {
   offerProject(sender, null, loaded.documentId);
-  return { state: loaded.state, documentId: loaded.documentId, fileName: '', warnings: [] };
+  return {
+    state: loaded.state,
+    documentId: loaded.documentId,
+    fileName: '',
+    warnings: [],
+    localChanges: null,
+  };
 }
 
 /** Lets the user choose a project file, then opens it. */
@@ -239,7 +293,10 @@ async function listRecent(
     ? success(
         read.value.map((path) => ({
           name: projectNameFromPath(path, MESSAGES.projects.untitled),
-          folder: dirname(path),
+          folder:
+            dirname(path) === join(services.userDataFolder, KEPT_FOLDER)
+              ? MESSAGES.projects.keptOnThisComputer
+              : dirname(path),
         })),
       )
     : read;
@@ -270,7 +327,11 @@ async function openPath(
   if (tooLarge !== null) {
     return tooLarge;
   }
-  const loaded = await services.runTask({ kind: 'openProject', path });
+  const loaded = await services.runTask({
+    kind: 'openProject',
+    path,
+    localCopyFolder: join(services.userDataFolder, LOCAL_COPY_FOLDER),
+  });
   if (!loaded.ok) {
     return loaded;
   }
@@ -353,6 +414,88 @@ async function saveProject(
   return success({ localCopySaved: saved.value.localCopySaved });
 }
 
+/** Keeps, as a project file of its own in a folder of this computer and first among the recent projects, the shared plan of a window in which this person could not share their changes, so that the page can show the shared plan again without losing them. */
+async function keepOwnChanges(
+  services: ProjectFileServices,
+  sender: WebContents,
+  value: unknown,
+  name: unknown,
+): Promise<BridgeResult<null>> {
+  const state = readProjectState(value) ?? refuseMessage();
+  const planName = readSuggestedName(name) ?? refuseMessage();
+  if (projects.get(sender) === undefined) {
+    console.error('A page asked to keep its changes without holding a project.');
+    return failure({ code: 'NO_PROJECT' });
+  }
+  const folder = join(services.userDataFolder, KEPT_FOLDER);
+  if (!(await createdFolder(folder))) {
+    return failure({ code: 'WRITE_FAILED' });
+  }
+  const fileName = fileNameForProject(
+    ownCopyName(planName, MESSAGES.collaboration.ownCopyName),
+    'tasklace',
+    MESSAGES.projects.untitled,
+  );
+  const path = await freePathIn(folder, fileName);
+  const kept = await saveInOrder(() =>
+    services.runTask({
+      kind: 'keepSharedCopy',
+      state,
+      documentId: requireDocumentId(randomUUID()),
+      nameTemplate: MESSAGES.collaboration.ownCopyName,
+      path,
+      localCopyFolder: join(services.userDataFolder, LOCAL_COPY_FOLDER),
+      savedAt: new Date(),
+    }),
+  );
+  if (!kept.ok) {
+    return kept;
+  }
+  keptChanges.set(sender, path);
+  await rememberRecentProject(services, path);
+  return success(null);
+}
+
+/** Opens the plan a window last kept the changes of its person in. */
+async function openKeptChanges(
+  services: ProjectFileServices,
+  sender: WebContents,
+): Promise<BridgeResult<OpenedProject>> {
+  const path = keptChanges.get(sender);
+  if (path === undefined) {
+    console.error('A page asked to open the changes it kept, but its window kept none.');
+    return failure({ code: 'TASK_FAILED' });
+  }
+  return openPath(services, sender, path);
+}
+
+/** Creates a folder when it is missing, telling whether it now exists, an error of the system being logged. */
+async function createdFolder(folder: string): Promise<boolean> {
+  try {
+    await mkdir(folder, { recursive: true });
+    return true;
+  } catch (error) {
+    if (!isSystemError(error)) {
+      throw error;
+    }
+    console.error('The folder of the kept changes could not be created:', error);
+    return false;
+  }
+}
+
+/** Finds a path in a folder for a file name that no file uses yet, numbering the name after the first, then naming it after a random identifier once every number tried is taken. */
+async function freePathIn(folder: string, fileName: string): Promise<string> {
+  const extension = extname(fileName);
+  const stem = fileName.slice(0, fileName.length - extension.length);
+  for (let number = 1; number <= KEPT_NAME_ATTEMPTS; number += 1) {
+    const path = join(folder, number === 1 ? fileName : `${stem} ${String(number)}${extension}`);
+    if (!(await fileExists(path))) {
+      return path;
+    }
+  }
+  return join(folder, `${randomUUID()}${extension}`);
+}
+
 /** Adds a project to the recent list, a list that cannot be read or written being only logged since the project itself is fine. */
 async function rememberRecentProject(services: ProjectFileServices, path: string): Promise<void> {
   try {
@@ -409,6 +552,7 @@ function openedProject(loaded: LoadedProject, path: string): OpenedProject {
     documentId: loaded.documentId,
     fileName: basename(path),
     warnings: loaded.warnings,
+    localChanges: loaded.localChanges,
   };
 }
 

@@ -1,5 +1,6 @@
-import { open, type FileHandle } from 'node:fs/promises';
+import { open, stat, type FileHandle } from 'node:fs/promises';
 import * as Y from 'yjs';
+import { ownCopyName } from '../core/collaboration/own-copy';
 import type { CsvWarning } from '../core/exchange/csv/csv-rows';
 import { importProjectCsv, type CsvImportOptions } from '../core/exchange/csv/project-csv-import';
 import { importProjectJson } from '../core/exchange/project-json';
@@ -11,7 +12,9 @@ import {
 } from '../core/limits';
 import {
   checkStateToSave,
+  copySharedState,
   encodeTasklaceState,
+  holdsChangesMissingFrom,
   readSharedState,
   readTasklaceDocument,
   type FileError,
@@ -21,14 +24,14 @@ import type { CheckedPrintDocument } from '../core/print/read-print-document';
 import { failure, success, type Result } from '../core/result';
 import { createSharedDocument, type DocumentId } from '../core/shared/shared-document';
 import type { FileFailure } from '../preload/bridge-contract';
-import { saveLocalCopy } from './local-copies';
+import { localCopyPath, saveLocalCopy } from './local-copies';
 import { MissingCharacter, TooLargePdf, writeDirectPdf, type PrintFonts } from './pdf/direct-pdf';
-import { isSystemError } from './stored-files';
+import { isMissingFile, isSystemError } from './stored-files';
 import { writeFileSafely } from './safe-write';
 import { zlibCompressor } from './zlib-compressor';
 
 export type FileTask =
-  | { readonly kind: 'openProject'; readonly path: string }
+  | { readonly kind: 'openProject'; readonly path: string; readonly localCopyFolder: string }
   | { readonly kind: 'readSharedState'; readonly state: Uint8Array }
   | {
       readonly kind: 'importJson';
@@ -51,6 +54,15 @@ export type FileTask =
       readonly savedAt: Date;
     }
   | {
+      readonly kind: 'keepSharedCopy';
+      readonly state: Uint8Array;
+      readonly documentId: DocumentId;
+      readonly nameTemplate: string;
+      readonly path: string;
+      readonly localCopyFolder: string;
+      readonly savedAt: Date;
+    }
+  | {
       readonly kind: 'writeDirectPdf';
       readonly document: CheckedPrintDocument;
       readonly fonts: PrintFonts;
@@ -66,6 +78,7 @@ export interface LoadedProject {
   readonly state: Uint8Array;
   readonly documentId: DocumentId;
   readonly warnings: readonly CsvWarning[];
+  readonly localChanges: Uint8Array | null;
 }
 
 export interface SavedFiles {
@@ -85,6 +98,7 @@ interface TaskOutcomes {
   readonly importJson: LoadedProject;
   readonly importCsv: LoadedProject;
   readonly saveProject: SavedFiles;
+  readonly keepSharedCopy: SavedFiles;
   readonly writeDirectPdf: DirectPdf;
 }
 
@@ -96,6 +110,7 @@ const OUTCOME_KINDS = {
   importJson: 'loaded',
   importCsv: 'loaded',
   saveProject: 'saved',
+  keepSharedCopy: 'saved',
   writeDirectPdf: 'directPdf',
 } as const satisfies { readonly [Kind in FileTask['kind']]: TaskOutcomes[Kind]['kind'] };
 
@@ -116,7 +131,7 @@ const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 export async function runFileTask(task: FileTask): Promise<FileTaskResult> {
   switch (task.kind) {
     case 'openProject':
-      return openProject(task.path);
+      return openProject(task.path, task.localCopyFolder);
     case 'readSharedState':
       return sharedState(task.state);
     case 'importJson':
@@ -129,6 +144,8 @@ export async function runFileTask(task: FileTask): Promise<FileTaskResult> {
       );
     case 'saveProject':
       return saveProject(task);
+    case 'keepSharedCopy':
+      return keepSharedCopy(task);
     case 'writeDirectPdf':
       return directPdf(task.document, task.fonts);
   }
@@ -171,30 +188,90 @@ function sharedState(state: Uint8Array): FileTaskResult {
     state: ownBytes(read.value.state),
     documentId: read.value.documentId,
     warnings: [],
+    localChanges: null,
   });
 }
 
-/** Reads a .tasklace file and checks it completely, giving back its Yjs state and document identifier, a file refused being logged with its code. */
-async function openProject(path: string): Promise<FileTaskResult> {
-  const opened = await readProjectFile(path);
-  if (!opened.ok) {
-    console.warn(`The project file ${path} could not be opened: ${opened.error.code}.`);
-  }
-  return opened;
-}
-
-/** Reads a .tasklace file and checks it completely, giving back its Yjs state and document identifier. */
-async function readProjectFile(path: string): Promise<FileTaskResult> {
+/** Reads a .tasklace file and checks it completely, giving back its Yjs state and document identifier with the changes its local copy holds that it lacks, a file refused being logged with its code. */
+async function openProject(path: string, localCopyFolder: string): Promise<FileTaskResult> {
   const bytes = await readBytes(path, MAX_FILE_BYTES);
   if (!bytes.ok) {
-    return bytes;
+    return refusedFile(path, bytes);
   }
-  const read = readTasklaceDocument(bytes.value, zlibCompressor);
+  const opened = loadedProjectOf(bytes.value);
+  if (!opened.ok) {
+    return refusedFile(path, opened);
+  }
+  const file = { bytes: bytes.value, state: opened.value.state };
+  const localChanges = await readLocalChanges(localCopyFolder, opened.value.documentId, file);
+  return success({ ...opened.value, localChanges });
+}
+
+/** Logs a project file refused at its opening with the code of the refusal, which it gives back. */
+function refusedFile(path: string, refusal: { readonly error: FileFailure }): FileTaskResult {
+  console.warn(`The project file ${path} could not be opened: ${refusal.error.code}.`);
+  return failure(refusal.error);
+}
+
+/** Gives the state of the local copy of an opened file when it holds changes the file lacks, a copy with the same bytes holding none, a missing one neither, and one unreadable or of another document being logged and left aside. */
+async function readLocalChanges(
+  folder: string,
+  documentId: DocumentId,
+  file: { readonly bytes: Uint8Array; readonly state: Uint8Array },
+): Promise<Uint8Array | null> {
+  const path = localCopyPath(folder, documentId);
+  if (path === null || !(await isPresent(path))) {
+    return null;
+  }
+  const bytes = await readBytes(path, MAX_FILE_BYTES);
+  if (bytes.ok && Buffer.compare(bytes.value, file.bytes) === 0) {
+    return null;
+  }
+  const read = bytes.ok ? readTasklaceDocument(bytes.value, zlibCompressor) : bytes;
+  if (!read.ok) {
+    console.warn(
+      `The local copy ${path} could not be read, so it was left aside: ${read.error.code}.`,
+    );
+    return null;
+  }
+  if (read.value.documentId !== documentId) {
+    console.warn(`The local copy ${path} holds another document, so it was left aside.`);
+    return null;
+  }
+  const { state } = read.value;
+  return holdsChangesMissingFrom(state, file.state) ? ownBytes(state) : null;
+}
+
+/** Tells whether a file can be found, one that cannot be examined being logged and counted as missing. */
+async function isPresent(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (!isSystemError(error)) {
+      throw error;
+    }
+    if (!isMissingFile(error)) {
+      console.warn(`The local copy ${path} could not be examined, so it was left aside:`, error);
+    }
+    return false;
+  }
+}
+
+/** Checks completely the bytes of a .tasklace file, giving back its Yjs state and document identifier. */
+function loadedProjectOf(bytes: Uint8Array): Result<LoadedProject, FileFailure> {
+  const read = readTasklaceDocument(bytes, zlibCompressor);
   if (!read.ok) {
     return failure(withoutReason(read.error));
   }
   const { state, documentId } = read.value;
-  return success({ kind: 'loaded', state: ownBytes(state), documentId, warnings: [] });
+  return success({
+    kind: 'loaded',
+    state: ownBytes(state),
+    documentId,
+    warnings: [],
+    localChanges: null,
+  });
 }
 
 /** Logs why the content of a file could not be decoded, and keeps only its code for the page, which never needs the inner error. */
@@ -261,7 +338,7 @@ function loaded(
   warnings: LoadedProject['warnings'],
 ): LoadedProject {
   const state = Y.encodeStateAsUpdate(createSharedDocument(project, documentId));
-  return { kind: 'loaded', state, documentId, warnings };
+  return { kind: 'loaded', state, documentId, warnings, localChanges: null };
 }
 
 /** Checks the state to save and the size of its file, which must be one Tasklace can open again, then writes the project file safely when it has one and its local copy in every case, so that a failed file still leaves a local copy: the save fails when the file could not be written, or for a project without file when its local copy could not be, and otherwise tells whether the local copy was written. */
@@ -273,10 +350,7 @@ async function saveProject(
     return failure(checked.error);
   }
   const file = encodeTasklaceState(task.state, zlibCompressor);
-  if (file.length > MAX_FILE_BYTES) {
-    console.error(
-      `The project was not saved: its file would weigh ${String(file.length)} bytes, more than the ${String(MAX_FILE_BYTES)} a project file may weigh to be opened again.`,
-    );
+  if (!canBeReopened(file, 'The project was not saved: its file')) {
     return failure({ code: 'TOO_LARGE_TO_SAVE' });
   }
   const { path } = task;
@@ -292,6 +366,43 @@ async function saveProject(
     return failure({ code: 'LOCAL_COPY_FAILED' });
   }
   return success({ kind: 'saved', localCopySaved });
+}
+
+/** Writes as a project file of its own a shared plan in which this person could not share their changes, under a new identifier and a name made from the plan's, with its local copy, the plan being checked as the content of a file. */
+async function keepSharedCopy(
+  task: Extract<FileTask, { kind: 'keepSharedCopy' }>,
+): Promise<FileTaskResult> {
+  const copy = copySharedState(
+    task.state,
+    { nameOf: (name) => ownCopyName(name, task.nameTemplate), documentId: task.documentId },
+    zlibCompressor,
+  );
+  if (!copy.ok) {
+    console.warn(`The changes kept on this computer could not be read: ${copy.error.code}.`);
+    return failure(withoutReason(copy.error));
+  }
+  const file = copy.value;
+  if (!canBeReopened(file, 'The changes were not kept: their file')) {
+    return failure({ code: 'TOO_LARGE_TO_SAVE' });
+  }
+  if (!(await attemptWrite('The kept changes', () => writeFileSafely(task.path, file)))) {
+    return failure({ code: 'WRITE_FAILED' });
+  }
+  const localCopySaved = await attemptWrite('The local copy', () =>
+    saveLocalCopy(task.localCopyFolder, task.documentId, file, task.path, task.savedAt),
+  );
+  return success({ kind: 'saved', localCopySaved });
+}
+
+/** Tells whether a project file is small enough to be opened again, logging the size of one that is not after what was not written. */
+function canBeReopened(file: Uint8Array, what: string): boolean {
+  if (file.length <= MAX_FILE_BYTES) {
+    return true;
+  }
+  console.error(
+    `${what} would weigh ${String(file.length)} bytes, more than the ${String(MAX_FILE_BYTES)} a project file may weigh to be opened again.`,
+  );
+  return false;
 }
 
 /** Runs a write and tells whether it succeeded, logging the whole error of the system that stopped it, any other error being thrown again so that a programming error is never shown as a file that could not be written. */

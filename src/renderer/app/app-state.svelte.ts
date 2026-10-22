@@ -36,7 +36,13 @@ import type { TagConflict } from '../../core/tags/tag-conflicts';
 import type { PrintDocument } from '../../core/print/print-document';
 import type { ProjectHour } from '../../core/time';
 import { deadlinesOf } from '../plan/timeline-geometry';
-import type { ExchangeKind, RecentProject, TasklaceBridge } from '../../preload/bridge-contract';
+import type {
+  ExchangeKind,
+  FileFailure,
+  RecentProject,
+  TasklaceBridge,
+} from '../../preload/bridge-contract';
+import { ownCopyName } from '../../core/collaboration/own-copy';
 import { createDayFormatter } from '../i18n/format';
 import {
   countMessage,
@@ -81,6 +87,8 @@ import {
   type OpenedSession,
   type ProjectFiles,
   type SaveStatus,
+  type LocalChangesChoice,
+  type LocalChangesOutcome,
 } from '../project/project-files';
 import type { ZoomLevel } from '../plan/time-scale';
 import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
@@ -101,8 +109,15 @@ export type DrawingPart = 'timeline' | 'patterns';
 
 export type CollaborationWindow = 'share' | 'join';
 
+export interface KeptChanges {
+  readonly planName: string;
+  readonly copyName: string;
+}
+
 type CloseQuestion =
-  { readonly reason: 'unsaved' } | { readonly reason: 'saveFailed'; readonly detail: string };
+  | { readonly reason: 'unsaved' }
+  | { readonly reason: 'saveFailed'; readonly detail: string }
+  | { readonly reason: 'localChanges'; readonly fileName: string };
 
 export type ClosePrompt = CloseQuestion & { readonly answer: (choice: CloseChoice) => void };
 
@@ -115,6 +130,12 @@ interface StartMove {
   readonly base: Schedule;
   readonly project: Project | null;
 }
+
+const LOCAL_CHANGES_CHOICES: Readonly<Record<CloseChoice, LocalChangesChoice>> = {
+  save: 'add',
+  discard: 'alone',
+  cancel: 'cancel',
+};
 
 const DAILY_WINDOW_CODES: readonly ValidationIssueCode[] = [
   'INVALID_HOURS_PER_DAY',
@@ -207,6 +228,7 @@ export class AppState {
   #closePrompt = $state.raw<ClosePrompt | null>(null);
   #pdfExport = $state.raw<PdfExportOpening | null>(null);
   #collaborationWindow = $state<CollaborationWindow | null>(null);
+  #keptChanges = $state.raw<KeptChanges | null>(null);
   #shareFailure = $state.raw<CollaborationFailure | null>(null);
   #fileActionRunning = $state(false);
   #report = $state.raw<Report | null>(null);
@@ -259,6 +281,8 @@ export class AppState {
       fileActionRunning: (running) => {
         this.#fileActionRunning = running;
       },
+      chooseLocalChanges: async (fileName) =>
+        LOCAL_CHANGES_CHOICES[await this.#ask({ reason: 'localChanges', fileName })],
     });
     this.collaboration = new CollaborationState({
       bridge: context.bridge,
@@ -268,6 +292,12 @@ export class AppState {
       openShared: async (state) => (await this.#load(this.#files.openShared(state))) !== null,
       repaired: (repairs) => {
         this.#notifyRepairs(repairs);
+      },
+      hostChanged: (left, next) => {
+        this.#tellHostChanged(left, next);
+      },
+      ownChangesKept: (kept) => {
+        this.#ownChangesKept(kept);
       },
       selectedTaskId: () => this.#selectedTaskId,
     });
@@ -849,6 +879,49 @@ export class AppState {
     }
   }
 
+  /** Returns the changes made in read only away from the host that were just kept in a plan of their own, for the window that tells it, or null. */
+  get keptChanges(): KeptChanges | null {
+    return this.#keptChanges;
+  }
+
+  /** Closes the window that tells where the changes made in read only were kept. */
+  closeKeptChanges(): void {
+    this.#keptChanges = null;
+  }
+
+  /** Opens the plan that keeps the changes made in read only, once the user agreed about the shared plan open now, which this leaves. */
+  async openKeptChanges(): Promise<void> {
+    this.#keptChanges = null;
+    if (await this.#readyToReplace()) {
+      await this.#load(this.#files.openKept());
+    }
+  }
+
+  /** Tells the person where the changes they made in read only away from the host are kept, or that they could not be kept apart and stay only in the plan open here. */
+  #ownChangesKept(kept: Result<string, FileFailure>): void {
+    const text = this.messages.collaboration;
+    if (!kept.ok) {
+      this.#notify('error', text.ownChangesNotKept, null, true);
+      return;
+    }
+    this.#keptChanges = {
+      planName: kept.value,
+      copyName: ownCopyName(kept.value, text.ownCopyName),
+    };
+  }
+
+  /** Tells the person that the host of the shared plan left and who hosts it now, this person or another. */
+  #tellHostChanged(left: string | null, next: string | null): void {
+    const text = this.messages.collaboration;
+    const leaving = left ?? text.theHost;
+    this.#notify(
+      'info',
+      next === null
+        ? fillMessage(text.youHostNow, { left: leaving })
+        : fillMessage(text.hostChanged, { left: leaving, next }),
+    );
+  }
+
   /** Reads the settings of this computer about shared plans unless read already, telling a failure to read them. */
   async #settingsRead(): Promise<boolean> {
     if (this.collaboration.settings !== null) {
@@ -1218,8 +1291,21 @@ export class AppState {
       );
     }
     this.#notifyRepairs(opened.value.session.openingRepairs);
+    this.#tellLocalChanges(opened.value.localChanges);
     await this.loadRecentProjects();
     return opened.value;
+  }
+
+  /** Tells what became of the changes the local copy of an opened file held: added, with the repairs they needed, or not added and set aside, or not even set aside. */
+  #tellLocalChanges(outcome: LocalChangesOutcome): void {
+    const text = this.messages.notices;
+    if (outcome.kind === 'added') {
+      this.#notify('info', text.localChangesAdded);
+      this.#notifyRepairs(outcome.repairs);
+    } else if (outcome.kind === 'notAdded') {
+      const body = outcome.setAside ? text.localChangesNotAdded : text.localChangesLost;
+      this.#notify('error', body, null, true);
+    }
   }
 
   /** Returns what the editing commands need to know about the open project, or null, logged, when its calendar cannot be compiled, which the validation of every project rules out. */

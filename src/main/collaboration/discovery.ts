@@ -3,6 +3,8 @@ import { MAX_PARTICIPANT_NAME_LENGTH, MAX_PROJECT_NAME_LENGTH } from '../../core
 import { createIssueList } from '../../core/validation/validation-issues';
 import { readText } from '../../core/validation/value-readers';
 import { isPort } from '../../core/collaboration/ports';
+import { SHARING_ID_BYTES } from '../../core/collaboration/succession';
+import { MAX_JOIN_RANK } from '../../core/limits';
 import { isPrivateAddress } from './private-addresses';
 
 export interface AnnouncedService {
@@ -30,8 +32,11 @@ export interface Mdns {
 
 export interface NearbyPlan {
   readonly key: string;
+  readonly instance: string;
   readonly planName: string;
   readonly hostName: string;
+  readonly sharingId: string;
+  readonly rank: number;
   readonly addresses: readonly string[];
   readonly port: number;
 }
@@ -42,6 +47,8 @@ export const MAX_TXT_VALUE_BYTES = 200;
 
 const SERVICE_NAME_PREFIX = 'Tasklace';
 const ENCODER = new TextEncoder();
+const SHARING_ID_PATTERN = new RegExp(`^[0-9a-f]{${String(SHARING_ID_BYTES * 2)}}$`);
+const RANK_PATTERN = /^(0|[1-9][0-9]{0,9})$/;
 
 /** Gives bonjour-service the shape the announcement and the search use, its services typing their stop as any function. */
 export function mdnsOf(bonjour: Pick<Bonjour, 'publish' | 'find'>): Mdns {
@@ -58,7 +65,12 @@ export function mdnsOf(bonjour: Pick<Bonjour, 'publish' | 'find'>): Mdns {
   };
 }
 
-/** Announces a shared plan on the private networks with its name, the name of its host and its port, never its code. */
+/** Gives the name a host announces its plan under on the network. */
+export function serviceNameOf(instance: string): string {
+  return `${SERVICE_NAME_PREFIX} ${instance}`;
+}
+
+/** Announces a shared plan on the private networks with its name, the name of its host, the identifier of the sharing, the rank of its host and its port, never its code nor its key. */
 export function announcePlan(
   mdns: Mdns,
   plan: {
@@ -66,13 +78,21 @@ export function announcePlan(
     readonly port: number;
     readonly planName: string;
     readonly hostName: string;
+    readonly sharingId: string;
+    readonly rank: number;
   },
 ): () => Promise<void> {
   const service = mdns.publish({
-    name: `${SERVICE_NAME_PREFIX} ${plan.instance}`,
+    name: serviceNameOf(plan.instance),
     type: SERVICE_TYPE,
     port: plan.port,
-    txt: { v: ANNOUNCE_VERSION, plan: fitBytes(plan.planName), host: fitBytes(plan.hostName) },
+    txt: {
+      v: ANNOUNCE_VERSION,
+      plan: fitBytes(plan.planName),
+      host: fitBytes(plan.hostName),
+      share: plan.sharingId,
+      rank: String(plan.rank),
+    },
   });
   return () =>
     new Promise((resolve) => {
@@ -111,7 +131,7 @@ export function findPlans(mdns: Mdns, changed: (plans: readonly NearbyPlan[]) =>
   };
 }
 
-/** Reads an announcement heard on the network, which anyone nearby can send, keeping only its private addresses and refusing it without a valid port, version, names or address. */
+/** Reads an announcement heard on the network, which anyone nearby can send, keeping only its private addresses and refusing it without a valid port, version, names, sharing, rank or address. */
 export function readNearbyPlan(service: AnnouncedService): NearbyPlan | null {
   const txt: unknown = service.txt;
   if (typeof txt !== 'object' || txt === null || Reflect.get(txt, 'v') !== ANNOUNCE_VERSION) {
@@ -128,18 +148,34 @@ export function readNearbyPlan(service: AnnouncedService): NearbyPlan | null {
     issues,
     MAX_PARTICIPANT_NAME_LENGTH,
   );
+  const sharingId: unknown = Reflect.get(txt, 'share');
+  const rank: unknown = Reflect.get(txt, 'rank');
   const addresses = (Array.isArray(service.addresses) ? service.addresses : []).filter(
     (address): address is string => typeof address === 'string' && isPrivateAddress(address),
   );
   if (
     planName === undefined ||
     hostName === undefined ||
+    typeof sharingId !== 'string' ||
+    !SHARING_ID_PATTERN.test(sharingId) ||
+    typeof rank !== 'string' ||
+    !RANK_PATTERN.test(rank) ||
+    Number(rank) > MAX_JOIN_RANK ||
     addresses.length === 0 ||
     !isPort(service.port)
   ) {
     return null;
   }
-  return { key: service.fqdn, planName, hostName, addresses, port: service.port };
+  return {
+    key: service.fqdn,
+    instance: service.name,
+    planName,
+    hostName,
+    sharingId,
+    rank: Number(rank),
+    addresses,
+    port: service.port,
+  };
 }
 
 /** Shortens a name, by whole characters, to what a value of an announcement can hold. */

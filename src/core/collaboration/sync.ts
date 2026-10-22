@@ -5,7 +5,7 @@ import { failure, success, type Result } from '../result';
 import type { MergeFailure, SharedRepair } from '../shared/shared-project';
 import type { SharedSession } from '../shared/shared-session';
 import type { CollaborationMessage } from './messages';
-import type { Participant, ParticipantId } from './participants';
+import type { Endpoint, Participant, ParticipantId } from './participants';
 import {
   joinRoster,
   leaveRoster,
@@ -42,7 +42,12 @@ export interface Outgoing {
 
 export interface Host {
   readonly roster: () => Roster;
-  readonly connect: (peer: ParticipantId, name: string) => Result<null, RosterRefusal>;
+  readonly connect: (
+    peer: ParticipantId,
+    name: string,
+    endpoint: Endpoint | null,
+    tokenDigest: string | null,
+  ) => Result<null, RosterRefusal>;
   readonly disconnect: (peer: ParticipantId) => void;
   readonly receive: (from: ParticipantId, message: CollaborationMessage) => void;
   readonly setRight: (peer: ParticipantId, canEdit: boolean) => Result<null, RosterRefusal>;
@@ -62,6 +67,8 @@ interface HostOptions {
   readonly session: SharedSession;
   readonly hostId: ParticipantId;
   readonly name: string;
+  readonly tokenDigest: string | null;
+  readonly roster: Roster | null;
   readonly send: (outgoing: Outgoing) => void;
   readonly report: (event: SyncEvent) => void;
 }
@@ -77,10 +84,10 @@ interface Merger {
   readonly forget: () => void;
 }
 
-/** Runs the host of a shared plan: it keeps the list of participants, sends each one what it lacks, merges the changes of those who may edit and passes every change of its copy to everyone. */
+/** Runs the host of a shared plan, from a new list or the one taken over from a host that left: it keeps the list of participants, sends each one what it lacks, merges the changes of those who may edit and passes every change to everyone. */
 export function createHost(options: HostOptions): Host {
   const { session, hostId, send, report } = options;
-  let roster = startRoster(hostId, options.name);
+  let roster = options.roster ?? startRoster(hostId, options.name, options.tokenDigest);
   const mergers = new Map<ParticipantId, Merger>();
   /** Sends a message to every participant but the host. */
   const toEveryone = (message: CollaborationMessage): void => {
@@ -116,8 +123,8 @@ export function createHost(options: HostOptions): Host {
   };
   return {
     roster: () => roster,
-    connect: (peer, name) => {
-      const joined = joinRoster(roster, peer, name);
+    connect: (peer, name, endpoint, tokenDigest) => {
+      const joined = joinRoster(roster, peer, name, endpoint, tokenDigest);
       if (!joined.ok) {
         return joined;
       }

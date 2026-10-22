@@ -3,7 +3,12 @@ import { requireParticipantId } from '../../core/collaboration/participants';
 import { MAX_COLLABORATION_MESSAGE_BYTES, MAX_HANDSHAKE_MILLISECONDS } from '../../core/limits';
 import { failure, success } from '../../core/result';
 import { openSecureChannel } from '../../core/collaboration/secure/channel';
-import { answerHostLink } from '../../core/collaboration/secure/link';
+import {
+  answerHostLink,
+  encodeIntroduction,
+  PLAN_KEY_BYTES,
+  type JoinSecret,
+} from '../../core/collaboration/secure/link';
 import { zlibCompressor } from '../zlib-compressor';
 import { aesGcm, systemRandomBytes } from './aes-gcm';
 import {
@@ -14,11 +19,19 @@ import {
   type StartTimer,
 } from './secure-connection';
 
-const INTRODUCTION = { participantId: requireParticipantId('lea-1'), name: 'Léa' };
+const INTRODUCTION = {
+  participantId: requireParticipantId('lea-1'),
+  name: 'Léa',
+  token: 'ab'.repeat(32),
+  endpoint: { addresses: [], port: 47_313 },
+};
+const PLAN_KEY = Uint8Array.from({ length: PLAN_KEY_BYTES }, (_unused, index) => index);
+const CODE: JoinSecret = { kind: 'code', code: 'K7Q4MZ' };
 
 interface Side {
   readonly sent: Uint8Array[];
   readonly messages: Uint8Array[];
+  readonly keys: Uint8Array[];
   readonly ends: ConnectionEnd[];
   readonly closes: number[];
 }
@@ -51,7 +64,7 @@ function manualTimers() {
 function side(): Side & {
   wire: { send: (bytes: Uint8Array) => void; close: (reason: ConnectionEnd) => void };
 } {
-  const recorded: Side = { sent: [], messages: [], ends: [], closes: [] };
+  const recorded: Side = { sent: [], messages: [], keys: [], ends: [], closes: [] };
   return {
     ...recorded,
     wire: {
@@ -62,31 +75,33 @@ function side(): Side & {
 }
 
 /** Opens a host and a guest whose wires are handed over by the test. */
-function pair(hostCode = 'K7Q4MZ', guestCode = 'K7Q4MZ') {
+function pair(hostCode = 'K7Q4MZ', guestSecret: JoinSecret = CODE) {
   const timers = manualTimers();
   const hostSide = side();
   const guestSide = side();
   const joined = vi.fn();
   const opened = vi.fn();
   const host = acceptGuest({
-    code: hostCode,
+    secrets: { code: hostCode, planKey: PLAN_KEY },
     wire: hostSide.wire,
     startTimer: timers.startTimer,
     randomBytes: systemRandomBytes,
     events: {
       message: (bytes) => hostSide.messages.push(bytes),
+      planKey: null,
       ended: (reason) => hostSide.ends.push(reason),
     },
     joined,
   });
   const guest = connectToHost({
-    code: guestCode,
+    secret: guestSecret,
     wire: guestSide.wire,
     startTimer: timers.startTimer,
     randomBytes: systemRandomBytes,
     introduction: INTRODUCTION,
     events: {
       message: (bytes) => guestSide.messages.push(bytes),
+      planKey: (key) => guestSide.keys.push(key),
       ended: (reason) => guestSide.ends.push(reason),
     },
     opened,
@@ -130,7 +145,7 @@ describe('a secure connection', () => {
   });
 
   it('refuses a guest with a wrong code on the side of the host, which closes the wire', () => {
-    const net = pair('K7Q4MZ', 'K7Q4MA');
+    const net = pair('K7Q4MZ', { kind: 'code', code: 'K7Q4MA' });
     net.flush();
     expect([net.hostSide.ends, net.hostSide.closes, net.joined.mock.calls]).toEqual([
       ['WRONG_CODE'],
@@ -139,6 +154,26 @@ describe('a secure connection', () => {
     ]);
     net.host.wireClosed();
     expect(net.hostSide.ends).toEqual(['WRONG_CODE']);
+  });
+
+  it('opens with the key of the plan, which the host sends the guest, and refuses another key', () => {
+    const net = pair('K7Q4MZ', { kind: 'key', key: PLAN_KEY });
+    net.flush();
+    expect(net.joined.mock.calls).toEqual([[INTRODUCTION]]);
+    expect(net.host.sendPlanKey(PLAN_KEY)).toEqual(success(null));
+    net.flush();
+    expect([net.guestSide.keys, net.guestSide.messages]).toEqual([[Buffer.from(PLAN_KEY)], []]);
+    const stranger = pair('K7Q4MZ', { kind: 'key', key: Uint8Array.from(PLAN_KEY).reverse() });
+    stranger.flush();
+    expect([stranger.hostSide.ends, stranger.joined.mock.calls]).toEqual([['WRONG_KEY'], []]);
+  });
+
+  it('ends a connection that receives a key where none is expected, or bytes of no known kind', () => {
+    const fromGuest = pair();
+    fromGuest.flush();
+    expect(fromGuest.guest.sendPlanKey(PLAN_KEY)).toEqual(success(null));
+    fromGuest.flush();
+    expect([fromGuest.hostSide.ends, fromGuest.hostSide.messages]).toEqual([['MALFORMED'], []]);
   });
 
   it('refuses to send before the channel is open', () => {
@@ -188,7 +223,7 @@ describe('a secure connection', () => {
     const net = pair();
     const guest = answerHostLink(
       net.hostSide.sent.splice(0)[0] ?? new Uint8Array(),
-      'K7Q4MZ',
+      CODE,
       systemRandomBytes,
     );
     if (!guest.ok) {
@@ -199,11 +234,40 @@ describe('a secure connection', () => {
     if (!keys.ok) {
       throw new Error(keys.error);
     }
-    const frames = openSecureChannel(keys.value, aesGcm, zlibCompressor).seal(Uint8Array.of(1));
+    const channel = openSecureChannel(keys.value, aesGcm, zlibCompressor);
+    const frames = channel.seal(Uint8Array.of(1), 'plan');
     (frames.ok ? frames.value : []).forEach((frame) => {
       net.host.receive(frame);
     });
     expect([net.hostSide.ends, net.joined.mock.calls]).toEqual([['INVALID_INTRODUCTION'], []]);
+  });
+
+  it('ends on an introduction sent as a key of the plan, and on a key of the wrong length', () => {
+    const net = pair();
+    const guest = answerHostLink(
+      net.hostSide.sent.splice(0)[0] ?? new Uint8Array(),
+      CODE,
+      systemRandomBytes,
+    );
+    if (!guest.ok) {
+      throw new Error(guest.error);
+    }
+    net.host.receive(guest.value.reply);
+    const keys = guest.value.finish(net.hostSide.sent.splice(0)[0] ?? new Uint8Array());
+    if (!keys.ok) {
+      throw new Error(keys.error);
+    }
+    const channel = openSecureChannel(keys.value, aesGcm, zlibCompressor);
+    const frames = channel.seal(encodeIntroduction(INTRODUCTION), 'planKey');
+    (frames.ok ? frames.value : []).forEach((frame) => {
+      net.host.receive(frame);
+    });
+    expect([net.hostSide.ends, net.joined.mock.calls]).toEqual([['INVALID_INTRODUCTION'], []]);
+    const short = pair();
+    short.flush();
+    expect(short.host.sendPlanKey(Uint8Array.of(1))).toEqual(success(null));
+    short.flush();
+    expect([short.guestSide.ends, short.guestSide.keys]).toEqual([['MALFORMED'], []]);
   });
 
   it('ends once when closed, without closing a wire that closed by itself', () => {

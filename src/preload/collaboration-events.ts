@@ -1,5 +1,8 @@
 import { isOneOf } from '../core/one-of';
 import { GUEST_ENDS, type CollaborationEvent, type NearbyPlan } from './bridge-contract';
+import { readEndpoint } from '../core/collaboration/endpoint';
+import { isTokenDigest } from '../core/collaboration/secure/token-digest';
+import { createIssueList } from '../core/validation/validation-issues';
 
 const GUEST_END_VALUES: readonly unknown[] = GUEST_ENDS;
 
@@ -26,11 +29,30 @@ function isNearbyPlan(value: unknown): value is NearbyPlan {
   );
 }
 
+/** Tells whether a value says where a participant could host the plan, as the core reads it. */
+function isEndpoint(value: unknown): boolean {
+  return readEndpoint({ value, path: '' }, createIssueList()) !== undefined;
+}
+
+/** Tells whether a value describes a plan this window now hosts: its code, port and addresses. */
+function isSharing(value: unknown): boolean {
+  const addresses = field(value, 'addresses');
+  return (
+    typeof field(value, 'code') === 'string' &&
+    isTokenDigest(field(value, 'tokenDigest')) &&
+    isWhole(field(value, 'port')) &&
+    Array.isArray(addresses) &&
+    addresses.every((address) => typeof address === 'string')
+  );
+}
+
 const EVENT_CHECKS: Readonly<Record<CollaborationEvent['kind'], (value: unknown) => boolean>> = {
   peerJoined: (value) =>
     isWhole(field(value, 'peer')) &&
     typeof field(value, 'participantId') === 'string' &&
-    typeof field(value, 'name') === 'string',
+    typeof field(value, 'name') === 'string' &&
+    isEndpoint(field(value, 'endpoint')) &&
+    isTokenDigest(field(value, 'tokenDigest')),
   peerMessage: (value) =>
     isWhole(field(value, 'peer')) && field(value, 'message') instanceof Uint8Array,
   peerLeft: (value) => isWhole(field(value, 'peer')),
@@ -40,6 +62,11 @@ const EVENT_CHECKS: Readonly<Record<CollaborationEvent['kind'], (value: unknown)
     return Array.isArray(plans) && plans.every(isNearbyPlan);
   },
   connected: () => true,
+  reconnecting: () => true,
+  hostLeft: () => true,
+  yielded: () => true,
+  becameHost: (value) => isSharing(field(value, 'sharing')),
+  offline: () => true,
   hostMessage: (value) => field(value, 'message') instanceof Uint8Array,
   ended: (value) => GUEST_END_VALUES.includes(field(value, 'reason')),
 };
@@ -51,6 +78,11 @@ const EVENT_KINDS: readonly CollaborationEvent['kind'][] = [
   'codeChanged',
   'nearbyPlans',
   'connected',
+  'reconnecting',
+  'hostLeft',
+  'becameHost',
+  'yielded',
+  'offline',
   'hostMessage',
   'ended',
 ];

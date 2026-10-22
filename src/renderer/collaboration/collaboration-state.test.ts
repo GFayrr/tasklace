@@ -18,6 +18,8 @@ import { CollaborationState, EMPTY_STATE_VECTOR } from './collaboration-state.sv
 
 const LEA = requireParticipantId('lea');
 const HOST_ID = requireParticipantId('camille');
+const ENDPOINT = { addresses: [], port: 47_313 };
+const PLAN_NAME = project([]).name;
 const JOINED_AT = new Date('2026-10-16T10:42:00');
 
 /** Waits for the microtasks and promises queued so far. */
@@ -35,6 +37,8 @@ function side(session: SharedSession | null, ids: readonly string[]) {
   const remaining = [...ids];
   const opened: Uint8Array[] = [];
   const repairs: unknown[] = [];
+  const hostChanges: [string | null, string | null][] = [];
+  const kept: unknown[] = [];
   let openSucceeds = true;
   const state: CollaborationState = new CollaborationState({
     bridge: bridge,
@@ -58,6 +62,8 @@ function side(session: SharedSession | null, ids: readonly string[]) {
       return Promise.resolve(true);
     },
     repaired: (found) => repairs.push(...found),
+    hostChanged: (left, next) => hostChanges.push([left, next]),
+    ownChangesKept: (result) => kept.push(result),
     selectedTaskId: () => (selected === null ? null : testId(selected)),
   });
   return {
@@ -65,6 +71,8 @@ function side(session: SharedSession | null, ids: readonly string[]) {
     collaboration: control.collaboration,
     opened,
     repairs,
+    hostChanges,
+    kept,
     session: () => current,
     select: (id: string | null) => {
       selected = id;
@@ -100,7 +108,14 @@ async function sharedPair() {
       value: null,
     },
   );
-  emit(host.collaboration, { kind: 'peerJoined', peer: 1, participantId: 'lea', name: 'Léa' });
+  emit(host.collaboration, {
+    kind: 'peerJoined',
+    peer: 1,
+    participantId: 'lea',
+    name: 'Léa',
+    endpoint: ENDPOINT,
+    tokenDigest: 'd'.repeat(64),
+  });
   emit(guest.collaboration, { kind: 'connected' });
   /** Carries the messages each side sent to the other, until nothing is left. */
   const relay = async (): Promise<void> => {
@@ -128,6 +143,21 @@ function rename(session: SharedSession | null, id: string, name: string): void {
   expect(session.apply({ type: 'putTask', task: { ...task, name } }).ok).toBe(true);
 }
 
+/** Reads the names of the tasks in a state sent to the main process, in alphabetical order. */
+function taskNamesIn(state: unknown): readonly string[] {
+  if (!(state instanceof Uint8Array)) {
+    throw new Error('No plan was sent');
+  }
+  const opened = openSharedSessionFromState(state);
+  if (!opened.ok) {
+    throw new Error('The plan sent cannot be opened');
+  }
+  return opened.value
+    .project()
+    .tasks.map((task) => task.name)
+    .sort();
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -146,7 +176,7 @@ describe('sharing a plan from the page', () => {
   });
 
   it('gives back why the main process could not share, staying idle', async () => {
-    const page = side(sessionOn(createSharedDocument(project([]), TEST_DOCUMENT_ID)), []);
+    const page = side(sessionOn(createSharedDocument(project([]), TEST_DOCUMENT_ID)), ['camille']);
     await named(page.state, 'Camille');
     page.collaboration.shareResult = { ok: false, error: { code: 'NO_FREE_PORT' } };
     expect(await page.state.share()).toEqual({ ok: false, error: { code: 'NO_FREE_PORT' } });
@@ -157,7 +187,12 @@ describe('sharing a plan from the page', () => {
     const { host, guest } = await sharedPair();
     expect(host.state.mode).toEqual({
       kind: 'hosting',
-      sharing: { code: 'K7Q4MZ', port: 47_313, addresses: ['192.168.1.24'] },
+      sharing: {
+        code: 'K7Q4MZ',
+        port: 47_313,
+        addresses: ['192.168.1.24'],
+        tokenDigest: 'd'.repeat(64),
+      },
     });
     expect(guest.collaboration.requests.find(([name]) => name === 'join')).toEqual([
       'join',
@@ -170,7 +205,7 @@ describe('sharing a plan from the page', () => {
       guest.state.me,
       guest.state.isReadOnly,
       guest.state.hostName,
-    ]).toEqual([{ kind: 'guest', connected: true }, LEA, true, 'Camille']);
+    ]).toEqual([{ kind: 'guest', connection: 'connected' }, LEA, true, 'Camille']);
     expect(
       host.state.participants.map((participant) => [participant.name, participant.canEdit]),
     ).toEqual([
@@ -186,7 +221,14 @@ describe('sharing a plan from the page', () => {
     await host.state.share();
     await settle();
     host.collaboration.sent.splice(0);
-    emit(host.collaboration, { kind: 'peerJoined', peer: 1, participantId: 'lea', name: 'Léa' });
+    emit(host.collaboration, {
+      kind: 'peerJoined',
+      peer: 1,
+      participantId: 'lea',
+      name: 'Léa',
+      endpoint: ENDPOINT,
+      tokenDigest: 'd'.repeat(64),
+    });
     const sent = host.collaboration.sent.map(([to, message]) => {
       const read = readMessage(message);
       return [to, read.ok ? read.value.kind : read.error];
@@ -238,20 +280,40 @@ describe('sharing a plan from the page', () => {
     ]);
   });
 
-  it('turns away a guest claiming an identifier already in the plan or an invalid one', async () => {
+  it('replaces the old connection of a person who comes back on a new one, keeping the right, and turns away an invalid identifier', async () => {
     const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { host } = await sharedPair();
-    emit(host.collaboration, { kind: 'peerJoined', peer: 2, participantId: 'lea', name: 'Fake' });
-    emit(host.collaboration, { kind: 'peerJoined', peer: 3, participantId: 'a b', name: 'Fake' });
+    expect(host.state.setRight(LEA, true)).toBe(true);
+    emit(host.collaboration, {
+      kind: 'peerJoined',
+      peer: 2,
+      participantId: 'lea',
+      name: 'Léa',
+      endpoint: ENDPOINT,
+      tokenDigest: 'd'.repeat(64),
+    });
+    emit(host.collaboration, {
+      kind: 'peerJoined',
+      peer: 3,
+      participantId: 'a b',
+      name: 'Fake',
+      endpoint: ENDPOINT,
+      tokenDigest: 'd'.repeat(64),
+    });
+    emit(host.collaboration, { kind: 'peerLeft', peer: 1 });
     expect(host.collaboration.requests.filter(([name]) => name === 'dropPeer')).toEqual([
-      ['dropPeer', 2],
+      ['dropPeer', 1],
       ['dropPeer', 3],
     ]);
     expect(warnings.mock.calls).toEqual([
-      ['A guest was turned away from the shared plan: ALREADY_IN.'],
       ['A guest was turned away from the shared plan: INVALID_IDENTIFIER.'],
     ]);
-    expect(host.state.participants).toHaveLength(2);
+    expect(
+      host.state.participants.map((participant) => [participant.name, participant.canEdit]),
+    ).toEqual([
+      ['Camille', true],
+      ['Léa', true],
+    ]);
   });
 
   it('turns away a guest once the plan is full, forgetting its connection', async () => {
@@ -265,6 +327,8 @@ describe('sharing a plan from the page', () => {
         peer,
         participantId: `p${String(peer)}`,
         name: 'Someone',
+        endpoint: ENDPOINT,
+        tokenDigest: 'd'.repeat(64),
       });
     }
     expect([host.state.participants.length, warnings.mock.calls]).toEqual([
@@ -276,6 +340,8 @@ describe('sharing a plan from the page', () => {
       peer: 99,
       participantId: `p${String(MAX_PARTICIPANTS)}`,
       name: 'Again',
+      endpoint: ENDPOINT,
+      tokenDigest: 'd'.repeat(64),
     });
     expect(host.collaboration.requests.filter(([name]) => name === 'dropPeer')).toEqual([
       ['dropPeer', MAX_PARTICIPANTS],
@@ -323,12 +389,19 @@ describe('sharing a plan from the page', () => {
     emit(host.collaboration, { kind: 'codeChanged', code: 'ABCDEF' });
     emit(guest.collaboration, { kind: 'codeChanged', code: 'ABCDEF' });
     expect(host.state.mode.kind === 'hosting' && host.state.mode.sharing.code).toBe('ABCDEF');
-    expect(guest.state.mode).toEqual({ kind: 'guest', connected: true });
+    expect(guest.state.mode).toEqual({ kind: 'guest', connection: 'connected' });
   });
 
   it('ignores the events of a side the page does not hold', () => {
     const page = side(null, []);
-    emit(page.collaboration, { kind: 'peerJoined', peer: 1, participantId: 'lea', name: 'Léa' });
+    emit(page.collaboration, {
+      kind: 'peerJoined',
+      peer: 1,
+      participantId: 'lea',
+      name: 'Léa',
+      endpoint: ENDPOINT,
+      tokenDigest: 'd'.repeat(64),
+    });
     emit(page.collaboration, { kind: 'peerLeft', peer: 1 });
     emit(page.collaboration, {
       kind: 'hostMessage',
@@ -370,11 +443,11 @@ describe('sharing a plan from the page', () => {
       guest.state.isReadOnly,
       guest.state.hostName,
     ]).toEqual([
-      { kind: 'guest', connected: false },
+      { kind: 'guest', connection: 'lost' },
       'BROKEN',
       ['Camille', 'Léa'],
       LEA,
-      true,
+      false,
       'Camille',
     ]);
     expect(guest.session()).not.toBeNull();
@@ -386,6 +459,182 @@ describe('sharing a plan from the page', () => {
     expect([guest.state.mode, guest.collaboration.requests.at(-1)]).toEqual([
       { kind: 'idle' },
       ['stop'],
+    ]);
+  });
+
+  it('keeps the changes made while reconnecting and shares them once the connection comes back', async () => {
+    const { host, guest, relay } = await sharedPair();
+    expect(host.state.setRight(LEA, true)).toBe(true);
+    await relay();
+    host.select('b');
+    await relay();
+    expect([...guest.state.presence.keys()]).toEqual(['b']);
+    emit(guest.collaboration, { kind: 'reconnecting' });
+    expect([guest.state.mode, guest.state.presence.size]).toEqual([
+      { kind: 'guest', connection: 'reconnecting' },
+      0,
+    ]);
+    rename(guest.session(), 'a', 'Written while away');
+    guest.select('a');
+    await settle();
+    expect(guest.collaboration.sent).toEqual([]);
+    emit(guest.collaboration, { kind: 'offline' });
+    expect(guest.state.mode).toEqual({ kind: 'guest', connection: 'offline' });
+    emit(guest.collaboration, { kind: 'connected' });
+    expect(guest.state.mode).toEqual({ kind: 'guest', connection: 'connected' });
+    await relay();
+    expect(
+      host
+        .session()
+        ?.project()
+        .tasks.find((task) => task.id === 'a')?.name,
+    ).toBe('Written while away');
+    expect(
+      host.state.participants.find((participant) => participant.id === LEA)?.selectedTaskId,
+    ).toBe('a');
+  });
+
+  it('ignores a lost connection or a new one while no plan joined is open', () => {
+    const idle = side(null, []);
+    emit(idle.collaboration, { kind: 'reconnecting' });
+    emit(idle.collaboration, { kind: 'offline' });
+    expect(idle.state.mode).toEqual({ kind: 'idle' });
+  });
+
+  it('asks once for the next host when the host leaves, giving the people from the oldest, and logs a request it could not make', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { guest } = await sharedPair();
+    guest.collaboration.findNextHostResult = { ok: false, error: { code: 'TASK_FAILED' } };
+    emit(guest.collaboration, { kind: 'hostLeft' });
+    emit(guest.collaboration, { kind: 'offline' });
+    await settle();
+    expect([
+      guest.state.mode,
+      guest.collaboration.requests.filter(([name]) => name === 'findNextHost'),
+      errors.mock.calls,
+    ]).toEqual([
+      { kind: 'guest', connection: 'offline' },
+      [
+        [
+          'findNextHost',
+          [{ participantId: 'lea', rank: 1, endpoint: ENDPOINT }],
+          PLAN_NAME,
+          'Léa',
+          [
+            { participantId: 'camille', tokenDigest: 'd'.repeat(64) },
+            { participantId: 'lea', tokenDigest: 'd'.repeat(64) },
+          ],
+        ],
+      ],
+      [['The next host of the shared plan could not be looked for:', { code: 'TASK_FAILED' }]],
+    ]);
+  });
+
+  it('hosts the plan once its turn came, the old host coming back with its rank and right, and tells who left', async () => {
+    const { guest } = await sharedPair();
+    emit(guest.collaboration, { kind: 'hostLeft' });
+    await settle();
+    emit(guest.collaboration, {
+      kind: 'becameHost',
+      sharing: {
+        code: 'N3WC0D',
+        port: 47_313,
+        addresses: ['10.0.0.2'],
+        tokenDigest: 'd'.repeat(64),
+      },
+    });
+    expect([
+      guest.state.mode.kind,
+      guest.state.participants.map((each) => [each.name, each.isHost]),
+    ]).toEqual(['hosting', [['Léa', true]]]);
+    emit(guest.collaboration, {
+      kind: 'peerJoined',
+      peer: 1,
+      participantId: 'camille',
+      name: 'Camille',
+      endpoint: ENDPOINT,
+      tokenDigest: 'd'.repeat(64),
+    });
+    expect([
+      guest.state.participants.map((each) => [each.name, each.rank, each.canEdit]),
+      guest.hostChanges,
+    ]).toEqual([
+      [
+        ['Léa', 1, true],
+        ['Camille', 0, true],
+      ],
+      [['Camille', null]],
+    ]);
+  });
+
+  it('tells the people of the plan who now hosts it once its first list arrives after the host left', async () => {
+    const { guest } = await sharedPair();
+    emit(guest.collaboration, { kind: 'hostLeft' });
+    await settle();
+    const me = guest.state.me ?? LEA;
+    const newHost = {
+      id: requireParticipantId('noah'),
+      name: 'Noah',
+      color: 2,
+      canEdit: true,
+      isHost: true,
+      rank: 2,
+      selectedTaskId: null,
+      endpoint: null,
+      tokenDigest: null,
+    };
+    const lea = {
+      ...newHost,
+      id: me,
+      name: 'Léa',
+      isHost: false,
+      canEdit: false,
+      rank: 1,
+      color: 1,
+    };
+    emit(guest.collaboration, { kind: 'connected' });
+    emit(guest.collaboration, {
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'participants', you: me, participants: [newHost, lea] }),
+    });
+    emit(guest.collaboration, {
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'participants', you: me, participants: [newHost, lea] }),
+    });
+    expect([guest.hostChanges, guest.state.hostName]).toEqual([[['Camille', 'Noah']], 'Noah']);
+  });
+
+  it('gives way to an older host: stops hosting and waits to join it as a guest, telling nobody left', async () => {
+    const { host } = await sharedPair();
+    emit(host.collaboration, { kind: 'yielded' });
+    expect([host.state.mode, host.hostChanges]).toEqual([
+      { kind: 'guest', connection: 'reconnecting' },
+      [],
+    ]);
+    emit(host.collaboration, { kind: 'connected' });
+    const sent = host.collaboration.sent.map(([to, message]) => {
+      const read = readMessage(message);
+      return [to, read.ok ? read.value.kind : read.error];
+    });
+    expect([host.state.mode, sent.at(-1)]).toEqual([
+      { kind: 'guest', connection: 'connected' },
+      ['host', 'stateVector'],
+    ]);
+  });
+
+  it('ignores a turn to host, a request to give way or the host leaving while it does not hold the matching role', () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const idle = side(null, []);
+    emit(idle.collaboration, { kind: 'hostLeft' });
+    emit(idle.collaboration, { kind: 'yielded' });
+    emit(idle.collaboration, {
+      kind: 'becameHost',
+      sharing: { code: 'N3WC0D', port: 1, addresses: [], tokenDigest: 'd'.repeat(64) },
+    });
+    expect([idle.state.mode, idle.collaboration.requests, errors.mock.calls]).toEqual([
+      { kind: 'idle' },
+      [],
+      [['The page cannot host the plan it was told to host.']],
     ]);
   });
 
@@ -564,13 +813,70 @@ describe('joining and editing together', () => {
     expect(host.session()?.project().dependencies).toHaveLength(1);
   });
 
-  it('tells in the log that changes made in read only stay on this computer', async () => {
-    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  it('lets a person in read only change the plan only while away from the host', async () => {
+    const { guest } = await sharedPair();
+    const readOnly = [guest.state.isReadOnly];
+    emit(guest.collaboration, { kind: 'reconnecting' });
+    readOnly.push(guest.state.isReadOnly);
+    emit(guest.collaboration, { kind: 'offline' });
+    readOnly.push(guest.state.isReadOnly);
+    emit(guest.collaboration, { kind: 'ended', reason: 'REMOVED' });
+    readOnly.push(guest.state.isReadOnly);
+    expect(readOnly).toEqual([true, false, false, false]);
+  });
+
+  it('keeps apart the changes made in read only away from the host, then shows the shared plan again and follows it', async () => {
+    const { host, guest, relay } = await sharedPair();
+    emit(guest.collaboration, { kind: 'reconnecting' });
+    rename(guest.session(), 'a', 'Mine');
+    rename(host.session(), 'b', 'Changed by the host');
+    emit(guest.collaboration, { kind: 'connected' });
+    await relay();
+    const request = guest.collaboration.requests.find(([name]) => name === 'keepOwnChanges');
+    expect([
+      request?.[2],
+      taskNamesIn(request?.[1]),
+      guest.kept,
+      guest.opened.length,
+      guest.state.mode,
+      guest.state.isReadOnly,
+      guest.session()?.project(),
+    ]).toEqual([
+      PLAN_NAME,
+      ['Changed by the host', 'Mine'],
+      [{ ok: true, value: PLAN_NAME }],
+      2,
+      { kind: 'guest', connection: 'connected' },
+      true,
+      host.session()?.project(),
+    ]);
+    rename(host.session(), 'a', 'Shared again');
+    await relay();
+    expect(guest.session()?.project()).toEqual(host.session()?.project());
+  });
+
+  it('keeps the changes in the plan open here when they cannot be kept apart, telling it', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { guest, relay } = await sharedPair();
+    guest.collaboration.keepResult = { ok: false, error: { code: 'WRITE_FAILED' } };
+    emit(guest.collaboration, { kind: 'reconnecting' });
     rename(guest.session(), 'a', 'Mine');
     emit(guest.collaboration, { kind: 'connected' });
     await relay();
-    expect(warnings.mock.calls).toEqual([['Changes made in read only stay on this computer.']]);
+    expect([
+      guest.kept,
+      errors.mock.calls,
+      guest.opened.length,
+      guest
+        .session()
+        ?.project()
+        .tasks.find((task) => task.id === 'a')?.name,
+    ]).toEqual([
+      [{ ok: false, error: { code: 'WRITE_FAILED' } }],
+      [['The changes made in read only could not be kept apart:', { code: 'WRITE_FAILED' }]],
+      1,
+      'Mine',
+    ]);
   });
 
   it('sends the presence once for several selections in a row, and none without a name', async () => {

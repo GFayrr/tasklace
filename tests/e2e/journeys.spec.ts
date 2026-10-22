@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
@@ -231,4 +231,51 @@ test('moves the project start and adds a day off from the settings, then undoes 
   await page.keyboard.press('Control+z');
   await expect(cell(START_COLUMN)).toHaveText(before[0] ?? '');
   await expect(cell(END_COLUMN)).toHaveText(before[1] ?? '');
+});
+
+/** Saves a new plan to a file, keeps that file, adds a task saved to the file and its local copy, then puts the older file back and restarts, so that the copy holds a task the file lacks. */
+async function fileBehindItsCopy(): Promise<string> {
+  const path = join(folder, 'Thesis.tasklace');
+  const older = join(folder, 'older.tasklace');
+  await page.getByRole('button', { name: /New project/ }).click();
+  await projectName().fill('Thesis');
+  await projectName().press('Enter');
+  await addTask(page, 'Research');
+  await save(path);
+  await copyFile(path, older);
+  await addTask(page, 'Kept here');
+  await page.keyboard.press('Control+s');
+  await expect(page.getByText('All changes saved')).toBeVisible();
+  await closeDiscarding(application, page);
+  await copyFile(older, path);
+  await launch();
+  await page.getByRole('region', { name: 'Recent projects' }).getByRole('button').click();
+  return path;
+}
+
+test('adds to a file the changes its local copy kept, once asked', async () => {
+  const path = await fileBehindItsCopy();
+  const question = page.getByRole('dialog', { name: 'Add the changes kept on this computer?' });
+  await expect(question).toContainText('This computer kept changes to “Thesis.tasklace”');
+  await question.getByRole('button', { name: 'Add them' }).click();
+  await expect(taskRow(page, 'Kept here')).toHaveCount(1);
+  await expect(
+    page.getByText('The changes kept on this computer were added to the plan.'),
+  ).toBeVisible();
+  await expect(page.getByText('All changes saved')).toBeVisible();
+  expect((await projectIn(path)).tasks.map((task) => task.name).sort()).toEqual([
+    'Kept here',
+    'Research',
+  ]);
+});
+
+test('opens a file alone, setting aside the changes its local copy kept', async () => {
+  await fileBehindItsCopy();
+  const question = page.getByRole('dialog', { name: 'Add the changes kept on this computer?' });
+  await question.getByRole('button', { name: 'Open the file alone' }).click();
+  await expect(projectName()).toHaveValue('Thesis');
+  await expect(taskRow(page, 'Research')).toHaveCount(1);
+  await expect(taskRow(page, 'Kept here')).toHaveCount(0);
+  const copies = await readdir(join(userData, 'local-copies'));
+  expect(copies.filter((name) => name.includes('.set-aside-'))).toHaveLength(1);
 });

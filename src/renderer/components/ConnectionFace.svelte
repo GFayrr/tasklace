@@ -1,22 +1,29 @@
 <script lang="ts">
   import type { AppState } from '../app/app-state.svelte';
+  import type { GuestConnection } from '../collaboration/collaboration-state.svelte';
   import Icon from './Icon.svelte';
   import PeopleFaces from './PeopleFaces.svelte';
 
-  let { app, isLost }: { app: AppState; isLost: boolean } = $props();
+  let { app, connection }: { app: AppState; connection: GuestConnection } = $props();
 
   const FACES_SHOWN = 3;
 
   const text = $derived(app.messages.collaboration);
+  const labels: Readonly<Record<GuestConnection, string>> = $derived({
+    connected: text.shared,
+    reconnecting: text.reconnecting,
+    offline: app.collaboration.canEdit ? text.offline : text.offlineKeptApart,
+    lost: text.connectionLost,
+  });
 </script>
 
 <span class="chip">
-  <span class={['dot', { lost: isLost }]}></span>
-  {#if isLost}
+  <span class={['dot', connection]}></span>
+  {#if connection === 'lost'}
     <span class="lost-icon"><Icon name="alert" /></span>
-    <span class="label">{text.connectionLost}</span>
-  {:else}
-    <span class="label">{text.shared}</span>
+  {/if}
+  <span class="label">{labels[connection]}</span>
+  {#if connection === 'connected'}
     <PeopleFaces
       people={app.collaboration.participants}
       locale={app.locale}
@@ -53,8 +60,13 @@
     background: var(--color-success);
   }
 
+  .dot.reconnecting,
   .dot.lost {
     background: var(--color-warning);
+  }
+
+  .dot.offline {
+    background: var(--color-text-secondary);
   }
 
   .lost-icon {

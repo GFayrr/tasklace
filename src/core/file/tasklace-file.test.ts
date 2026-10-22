@@ -7,6 +7,7 @@ import type { Project } from '../model/project';
 import { failure, success } from '../result';
 import {
   createSharedDocument,
+  readDocumentId,
   readSharedData,
   TAGS_ROOT,
   TASKS_ROOT,
@@ -30,6 +31,8 @@ import {
 import { crc32 } from './crc32';
 import {
   checkStateToSave,
+  copySharedState,
+  holdsChangesMissingFrom,
   encodeTasklaceFile,
   encodeTasklaceState,
   HEADER_BYTES,
@@ -579,5 +582,79 @@ describe('reading a state received from a shared plan', () => {
     expect(readSharedState(Y.encodeStateAsUpdate(document))).toEqual(
       failure({ code: 'INVALID_PROJECT', issues: [{ path: 'name', code: 'EMPTY_TEXT' }] }),
     );
+  });
+});
+
+describe('copySharedState', () => {
+  const COPY_ID = requireDocumentId('22222222-2222-4222-8222-222222222222');
+
+  it('makes a separate plan of the same project under another name and identifier, which opens like any file', () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const copied = copySharedState(
+      state,
+      { nameOf: (name) => `${name} (my changes)`, documentId: COPY_ID },
+      storingCompressor,
+    );
+    if (!copied.ok) {
+      throw new Error(copied.error.code);
+    }
+    const document = readTasklaceFile(copied.value, storingCompressor);
+    if (!document.ok) {
+      throw new Error(document.error.code);
+    }
+    const project = readSharedProject(document.value);
+    expect([readDocumentId(document.value), project.ok ? sorted(project.value) : project]).toEqual([
+      COPY_ID,
+      sorted({ ...SAMPLE, name: `${SAMPLE.name} (my changes)` }),
+    ]);
+  });
+
+  it('refuses a state it would refuse as the content of a file', () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    document.getMap('project').set('name', '');
+    const copy = { nameOf: () => 'Copy', documentId: COPY_ID };
+    expect([
+      copySharedState(new Uint8Array(), copy, storingCompressor),
+      copySharedState(Y.encodeStateAsUpdate(document), copy, storingCompressor),
+    ]).toEqual([
+      failure({ code: 'INVALID_CONTENT' }),
+      failure({ code: 'INVALID_PROJECT', issues: [{ path: 'name', code: 'EMPTY_TEXT' }] }),
+    ]);
+  });
+});
+
+describe('holdsChangesMissingFrom', () => {
+  /** Gives the state of a document after a change made in a copy of another state. */
+  const changed = (state: Uint8Array, change: (document: Y.Doc) => void): Uint8Array => {
+    const document = new Y.Doc();
+    Y.applyUpdate(document, state);
+    change(document);
+    return Y.encodeStateAsUpdate(document);
+  };
+  const base = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+
+  it('finds an added or changed value, and a deletion, which leaves the state vector as it is', () => {
+    const renamed = changed(base, (document) => {
+      document.getMap('project').set('name', 'Renamed');
+    });
+    const tag = SAMPLE.tags[0]?.id ?? '';
+    const deleted = changed(base, (document) => {
+      document.getMap(TAGS_ROOT).delete(tag);
+    });
+    expect([
+      holdsChangesMissingFrom(renamed, base),
+      holdsChangesMissingFrom(deleted, base),
+      Y.encodeStateVector(documentOf(deleted)),
+    ]).toEqual([true, true, Y.encodeStateVector(documentOf(base))]);
+  });
+
+  it('finds nothing in the same state, nor in an older one whose changes the other already holds', () => {
+    const newer = changed(base, (document) => {
+      document.getMap('project').set('name', 'Renamed');
+    });
+    expect([holdsChangesMissingFrom(base, base), holdsChangesMissingFrom(base, newer)]).toEqual([
+      false,
+      false,
+    ]);
   });
 });

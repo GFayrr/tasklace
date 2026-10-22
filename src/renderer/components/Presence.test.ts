@@ -25,6 +25,8 @@ const HOST: Participant = {
   isHost: true,
   rank: 0,
   selectedTaskId: testId('a'),
+  endpoint: null,
+  tokenDigest: null,
 };
 const GUESTS = ['Léa', 'Noah', 'Inès', 'Omar', 'Zoé', 'Yann'];
 
@@ -51,6 +53,8 @@ async function renderHosting(guestCount: number) {
       peer: index + 1,
       participantId: `guest${String(index)}`,
       name,
+      endpoint: { addresses: [], port: 47_313 },
+      tokenDigest: 'd'.repeat(64),
     });
   });
   collaboration.listener?.({
@@ -86,6 +90,8 @@ async function renderJoined(canEdit = false) {
     rank: 1,
     color: 1,
     selectedTaskId: null,
+    endpoint: null,
+    tokenDigest: null,
   };
   collaboration.listener?.({ kind: 'connected' });
   collaboration.listener?.({
@@ -194,6 +200,33 @@ describe('the chip of the connection', () => {
     expect(textsOf(root, '[role="menuitem"]')).toEqual([
       'Leave the shared plan Shared by the person who shares it',
     ]);
+  });
+
+  it('says that it reconnects, keeping the changes, then that it is offline, with the people hidden', async () => {
+    const { root, control } = await renderJoined(true);
+    control.collaboration.listener?.({ kind: 'reconnecting' });
+    update();
+    expect([
+      textsOf(root, '.status-bar .badge.reconnecting'),
+      root.querySelector('.people'),
+    ]).toEqual([[TEXT.reconnectingShort], null]);
+    click(button(root, TEXT.reconnecting));
+    expect(textsOf(root, '[role="menuitem"]')).toEqual([
+      'Leave the shared plan Tasklace keeps trying to reach Camille. Your changes are kept on this computer.',
+    ]);
+    control.collaboration.listener?.({ kind: 'offline' });
+    update();
+    expect([
+      textsOf(root, '.status-bar .badge.offline'),
+      textsOf(single(root, 'header.toolbar'), '.label'),
+    ]).toEqual([[TEXT.offlineShort], [TEXT.offline]]);
+  });
+
+  it('says to a person in read only who is offline that the changes will be kept in their own copy', async () => {
+    const { root, control } = await renderJoined();
+    control.collaboration.listener?.({ kind: 'offline' });
+    update();
+    expect(textsOf(single(root, 'header.toolbar'), '.label')).toEqual([TEXT.offlineKeptApart]);
   });
 
   it('says when the connection to the host is lost, the plan staying open', async () => {

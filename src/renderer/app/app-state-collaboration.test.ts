@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
 import { requireParticipantId, type Participant } from '../../core/collaboration/participants';
 import { project, testId, workTask } from '../../core/testing/project-builder';
@@ -15,12 +15,13 @@ const HOST: Participant = {
   isHost: true,
   rank: 0,
   selectedTaskId: null,
+  endpoint: null,
+  tokenDigest: null,
 };
 const TARGET = { address: '192.168.1.24', port: 47_313, code: 'K7Q4MZ' };
 
 /** Joins the plan in a new application state, the host sending the people in it, this page in read only unless told, then the whole plan. */
-async function joinedApp(canEdit = false) {
-  const fake = fakeAppContext();
+async function joinedApp(canEdit = false, fake = fakeAppContext()) {
   const app = new AppState(fake.context);
   const { collaboration } = fake.control;
   collaboration.settingsResult = {
@@ -72,7 +73,7 @@ describe('a plan joined in read only', () => {
     expect([app.project?.name, app.hasFile, app.collaboration.mode]).toEqual([
       PLAN.name,
       false,
-      { kind: 'guest', connected: true },
+      { kind: 'guest', connection: 'connected' },
     ]);
   });
 
@@ -209,7 +210,7 @@ describe('the windows of a shared plan', () => {
     ]);
     opened.control.collaboration.shareResult = {
       ok: true,
-      value: { code: 'K7Q4MZ', port: 47_313, addresses: [] },
+      value: { code: 'K7Q4MZ', port: 47_313, addresses: [], tokenDigest: 'd'.repeat(64) },
     };
     await opened.app.startSharing();
     expect([opened.app.shareFailure, opened.app.collaboration.mode.kind]).toEqual([
@@ -264,7 +265,7 @@ describe('the windows of a shared plan', () => {
     await settle();
     expect([app.collaborationWindow, app.collaboration.mode]).toEqual([
       null,
-      { kind: 'guest', connected: true },
+      { kind: 'guest', connection: 'connected' },
     ]);
     expect(fake.control.collaboration.requests.at(-1)).toEqual(['findPlans', false]);
   });
@@ -282,5 +283,99 @@ describe('the windows of a shared plan', () => {
     expect(opened.control.collaboration.requests.filter(([name]) => name === 'findPlans')).toEqual(
       [],
     );
+  });
+});
+
+describe('a host that changes', () => {
+  it('tells the person who now hosts the plan that the host left', async () => {
+    const { app, control } = await joinedApp();
+    control.collaboration.listener?.({ kind: 'hostLeft' });
+    await settle();
+    control.collaboration.listener?.({
+      kind: 'becameHost',
+      sharing: { code: 'N3WC0D', port: 47_313, addresses: [], tokenDigest: 'd'.repeat(64) },
+    });
+    expect(noticeTexts(app)).toEqual([
+      'Camille left. You now host the plan; the others join you on their own.',
+    ]);
+  });
+
+  it('tells a guest who hosts the plan now', async () => {
+    const { app, control } = await joinedApp();
+    control.collaboration.listener?.({ kind: 'hostLeft' });
+    await settle();
+    const me = app.collaboration.me ?? HOST.id;
+    const noah: Participant = { ...HOST, id: requireParticipantId('noah'), name: 'Noah', rank: 2 };
+    const lea: Participant = { ...HOST, id: me, name: 'Léa', isHost: false, rank: 1, color: 1 };
+    control.collaboration.listener?.({ kind: 'connected' });
+    control.collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'participants', you: me, participants: [noah, lea] }),
+    });
+    expect(noticeTexts(app)).toEqual(['Camille left. Noah now hosts the plan; you are still in.']);
+  });
+});
+
+describe('changes made in read only away from the host', () => {
+  /** Joins in read only, changes the plan while the connection is lost, then comes back, the host telling what it holds. */
+  async function changedAway(fake = fakeAppContext()) {
+    const joined = await joinedApp(false, fake);
+    const { app, control } = joined;
+    control.collaboration.listener?.({ kind: 'reconnecting' });
+    expect(app.rename('Mine')).toBe(true);
+    control.collaboration.listener?.({ kind: 'connected' });
+    control.collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'stateVector', vector: Uint8Array.of(0) }),
+    });
+    await settle();
+    return joined;
+  }
+
+  it('tells where the changes are kept once the shared plan shows again, and opens them when asked', async () => {
+    const { app, control } = await changedAway();
+    control.collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'update', update: Uint8Array.of(0, 0) }),
+    });
+    await settle();
+    await settle();
+    expect([
+      control.collaboration.requests.filter(([name]) => name === 'keepOwnChanges').length,
+      app.keptChanges,
+      app.project?.name,
+    ]).toEqual([1, { planName: 'Mine', copyName: 'Mine (my changes)' }, PLAN.name]);
+    control.collaboration.openKeptResult = openedProjectOf({ ...PLAN, name: 'Mine (my changes)' });
+    const opening = app.openKeptChanges();
+    await settle();
+    app.closePrompt?.answer('discard');
+    await opening;
+    await settle();
+    expect([
+      app.keptChanges,
+      app.project?.name,
+      app.hasFile,
+      app.collaboration.mode,
+      control.collaboration.requests.at(-1),
+    ]).toEqual([null, 'Mine (my changes)', true, { kind: 'idle' }, ['stop']]);
+  });
+
+  it('closes the window that tells where the changes are kept', async () => {
+    const { app } = await changedAway();
+    app.closeKeptChanges();
+    expect(app.keptChanges).toBeNull();
+  });
+
+  it('tells, lastingly, that the changes could not be kept apart', async () => {
+    const fake = fakeAppContext();
+    fake.control.collaboration.keepResult = { ok: false, error: { code: 'WRITE_FAILED' } };
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { app } = await changedAway(fake);
+    expect([
+      app.keptChanges,
+      noticeTexts(app),
+      app.notices.map((notice) => notice.lasting),
+    ]).toEqual([null, [english.collaboration.ownChangesNotKept], [true]]);
+    errors.mockRestore();
   });
 });

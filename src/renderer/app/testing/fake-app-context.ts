@@ -2,7 +2,11 @@ import * as Y from 'yjs';
 import type { Project } from '../../../core/model/project';
 import type { PrintDocument } from '../../../core/print/print-document';
 import { scheduleProject } from '../../../core/scheduling/schedule-project';
-import { createSharedDocument, requireDocumentId } from '../../../core/shared/shared-document';
+import {
+  createSharedDocument,
+  requireDocumentId,
+  type DocumentId,
+} from '../../../core/shared/shared-document';
 import { TEST_DOCUMENT_ID, testId } from '../../../core/testing/project-builder';
 import type {
   BridgeResult,
@@ -42,6 +46,7 @@ export interface FakeBridgeControl {
   pdfResult: BridgeResult<PdfExport>;
   heldPdfResult: BridgeResult<ExportedFile>;
   discardResult: BridgeResult<null>;
+  setAsideResult: BridgeResult<null>;
   adoptResult: BridgeResult<null>;
   recent: readonly RecentProject[] | Error | 'unreadable';
   newDocumentId: string;
@@ -52,6 +57,7 @@ export interface FakeBridgeControl {
   readonly imports: ExchangeKind[];
   readonly exports: { readonly kind: ExchangeKind; readonly text: string; readonly name: string }[];
   readonly pdfExports: { readonly document: PrintDocument; readonly name: string }[];
+  readonly setAside: DocumentId[];
   readonly collaboration: FakeCollaboration;
 }
 
@@ -64,6 +70,9 @@ export interface FakeCollaboration {
   findPlansResult: BridgeResult<null>;
   openSharedResult: BridgeResult<OpenedProject>;
   copyResult: BridgeResult<null>;
+  findNextHostResult: BridgeResult<null>;
+  keepResult: BridgeResult<null>;
+  openKeptResult: BridgeResult<OpenedProject>;
   listener: ((event: CollaborationEvent) => void) | null;
   readonly requests: (readonly [string, ...unknown[]])[];
   readonly sent: (readonly [CollaborationTarget, Uint8Array])[];
@@ -88,6 +97,7 @@ export function openedProjectOf(
       documentId: OPENED_DOCUMENT_ID,
       fileName: `${project.name}.tasklace`,
       warnings: [],
+      localChanges: null,
       ...overrides,
     },
   };
@@ -106,6 +116,7 @@ export function fakeBridge(): {
     pdfResult: { ok: true, value: { kind: 'exported', fileName: 'Thesis.pdf' } },
     heldPdfResult: { ok: true, value: { fileName: 'Thesis.pdf' } },
     discardResult: { ok: true, value: null },
+    setAsideResult: { ok: true, value: null },
     adoptResult: { ok: true, value: null },
     recent: [],
     newDocumentId: TEST_DOCUMENT_ID,
@@ -116,18 +127,27 @@ export function fakeBridge(): {
     imports: [],
     exports: [],
     pdfExports: [],
+    setAside: [],
     collaboration: {
       settingsResult: { ok: true, value: { name: null, port: 47_313, firewallNoticeSeen: false } },
       saveSettingsResult: { ok: true, value: null },
       shareResult: {
         ok: true,
-        value: { code: 'K7Q4MZ', port: 47_313, addresses: ['192.168.1.24'] },
+        value: {
+          code: 'K7Q4MZ',
+          port: 47_313,
+          addresses: ['192.168.1.24'],
+          tokenDigest: 'd'.repeat(64),
+        },
       },
       joinResult: { ok: true, value: null },
       stopResult: { ok: true, value: null },
       findPlansResult: { ok: true, value: null },
       openSharedResult: { ok: false, error: { code: 'TASK_FAILED' } },
       copyResult: { ok: true, value: null },
+      findNextHostResult: { ok: true, value: null },
+      keepResult: { ok: true, value: null },
+      openKeptResult: { ok: false, error: { code: 'CANCELLED' } },
       listener: null,
       requests: [],
       sent: [],
@@ -205,6 +225,18 @@ export function fakeBridge(): {
     findPlans: (searching) => asked(['findPlans', searching], collaboration.findPlansResult),
     dropPeer: (peer) => asked(['dropPeer', peer], { ok: true, value: null }),
     copyJoinCode: () => asked(['copyCode'], collaboration.copyResult),
+    findNextHost: (queue, planName, hostName, knownTokens) =>
+      asked(
+        ['findNextHost', queue, planName, hostName, knownTokens],
+        collaboration.findNextHostResult,
+      ),
+    keepOwnChanges: (state, planName) =>
+      asked(['keepOwnChanges', state, planName], collaboration.keepResult),
+    openKeptChanges: () => asked(['openKeptChanges'], collaboration.openKeptResult),
+    setLocalCopyAside: (documentId) => {
+      control.setAside.push(documentId);
+      return called('setLocalCopyAside', control.setAsideResult);
+    },
     sendToCollaboration: (to, message) => {
       collaboration.sent.push([to, message]);
     },

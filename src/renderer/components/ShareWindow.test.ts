@@ -83,10 +83,14 @@ describe('sharing the open plan', () => {
     await clickAndSettle(button(dialog, TEXT.startSharing));
     expect(textsOf(root, '.confirm h3')).toEqual([TEXT.firewallTitle]);
     expect(textsOf(root, '.confirm p')).toEqual([TEXT.firewallBody]);
-    await clickAndSettle(button(single(root, '.confirm'), TEXT.cancel));
+    await clickAndSettle(
+      button(single(root, '.confirm[aria-labelledby="firewall-title"]'), TEXT.cancel),
+    );
     expect([textsOf(root, '.confirm h3'), app.collaboration.mode]).toEqual([[], { kind: 'idle' }]);
     await clickAndSettle(button(dialog, TEXT.startSharing));
-    await clickAndSettle(button(single(root, '.confirm'), TEXT.continue));
+    await clickAndSettle(
+      button(single(root, '.confirm[aria-labelledby="firewall-title"]'), TEXT.continue),
+    );
     expect(control.collaboration.requests).toEqual([
       ['settings'],
       ['saveSettings', { name: 'Camille', port: 47_313, firewallNoticeSeen: false }],
@@ -117,7 +121,9 @@ describe('sharing the open plan', () => {
     await clickAndSettle(button(root, TEXT.share));
     control.collaboration.saveSettingsResult = { ok: false, error: { code: 'WRITE_FAILED' } };
     await clickAndSettle(button(shareWindow(root), TEXT.startSharing));
-    await clickAndSettle(button(single(root, '.confirm'), TEXT.continue));
+    await clickAndSettle(
+      button(single(root, '.confirm[aria-labelledby="firewall-title"]'), TEXT.continue),
+    );
     expect([app.collaboration.mode.kind, errors.mock.calls]).toEqual([
       'hosting',
       [['The word about the network could not be kept as seen:', { code: 'WRITE_FAILED' }]],
@@ -145,7 +151,7 @@ describe('sharing the open plan', () => {
     const { root, control } = await renderApp({ name: 'Camille', firewallNoticeSeen: true });
     control.collaboration.shareResult = {
       ok: true,
-      value: { code: 'K7Q4MZ', port: 47_314, addresses: [] },
+      value: { code: 'K7Q4MZ', port: 47_314, addresses: [], tokenDigest: 'd'.repeat(64) },
     };
     await clickAndSettle(button(root, TEXT.share));
     expect(textsOf(shareWindow(root), '.code-part .message, .code-part .hint')).toEqual([
@@ -162,12 +168,18 @@ describe('sharing the open plan', () => {
       peer: 1,
       participantId: 'lea',
       name: 'Léa',
+      endpoint: { addresses: [], port: 47_313 },
+      tokenDigest: 'd'.repeat(64),
     });
     update();
     const dialog = shareWindow(root);
     expect(textsOf(dialog, '.person')).toEqual([
       'CA Camille You · host Can edit',
       'LÉ Léa Joined at 10:00 AM Read only Can edit',
+    ]);
+    expect(textsOf(dialog, '.people .hint')).toEqual([
+      TEXT.newcomers,
+      'If you leave, Léa, who has been here the longest, becomes the host and keeps these choices.',
     ]);
     expect(single(dialog, '[role="radiogroup"]').getAttribute('aria-label')).toBe(
       'What Léa may do',
@@ -193,6 +205,8 @@ describe('sharing the open plan', () => {
       peer: 1,
       participantId: 'lea',
       name: 'Léa',
+      endpoint: { addresses: [], port: 47_313 },
+      tokenDigest: 'd'.repeat(64),
     });
     update();
     const dialog = shareWindow(root);

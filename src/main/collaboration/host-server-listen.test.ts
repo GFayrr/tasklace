@@ -47,6 +47,8 @@ function start(port: number, outcomes: (string | Error | null)[]) {
   listening.calls = [];
   return startHostServer({
     port,
+    planKey: null,
+    knownTokens: new Map(),
     startTimer: () => () => undefined,
     randomBytes: systemRandomBytes,
     events: {
@@ -54,6 +56,7 @@ function start(port: number, outcomes: (string | Error | null)[]) {
       message: () => undefined,
       left: () => undefined,
       codeChanged: () => undefined,
+      planKeyChanged: () => undefined,
     },
   });
 }

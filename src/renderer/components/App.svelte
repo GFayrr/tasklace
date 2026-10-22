@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { AppState } from '../app/app-state.svelte';
   import { commandOf, type Command } from '../app/shortcuts';
+  import { fillMessage } from '../i18n/messages';
   import ClosePrompt from './ClosePrompt.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import ConflictList from './ConflictList.svelte';
   import ReportDialog from './ReportDialog.svelte';
   import Notices from './Notices.svelte';
@@ -35,6 +37,7 @@
       app.detailsTaskId !== null ||
       app.pdfExport !== null ||
       app.collaborationWindow !== null ||
+      app.keptChanges !== null ||
       (app.settings.isOpen && !SETTINGS_COMMANDS.includes(command))
     ) {
       return;
@@ -66,6 +69,26 @@
   <ShareWindow {app} project={app.project} />
 {/if}
 <JoinWindow {app} />
+<ConfirmDialog
+  question={app.keptChanges === null
+    ? null
+    : {
+        title: app.messages.collaboration.keptTitle,
+        body: fillMessage(app.messages.collaboration.keptBody, {
+          plan: app.keptChanges.planName,
+          copy: app.keptChanges.copyName,
+        }),
+        confirm: app.messages.collaboration.openKept,
+        danger: false,
+      }}
+  titleId="kept-changes-title"
+  cancel={app.messages.collaboration.keptDone}
+  main="cancel"
+  confirmed={() => void app.openKeptChanges()}
+  dismissed={() => {
+    app.closeKeptChanges();
+  }}
+/>
 <Notices {app} />
 <ClosePrompt {app} />
 <ReportDialog {app} />

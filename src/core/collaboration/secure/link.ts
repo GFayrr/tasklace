@@ -1,12 +1,25 @@
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { MAX_INTRODUCTION_BYTES, MAX_PARTICIPANT_NAME_LENGTH } from '../../limits';
 import { failure, success, type Result } from '../../result';
 import { createIssueList } from '../../validation/validation-issues';
 import { childField, readIdentifier, readRecord, readText } from '../../validation/value-readers';
 import { parsedJson } from '../messages';
-import { isParticipantId, type ParticipantId } from '../participants';
+import { readEndpoint } from '../endpoint';
+import { isParticipantId, type Endpoint, type ParticipantId } from '../participants';
 import { SESSION_ID_BYTES, SHARE_BYTES, startHandshake, type SessionKeys } from './cpace';
 
-export type LinkRefusal = 'MALFORMED' | 'UNSUPPORTED_VERSION' | 'INVALID_SHARE' | 'WRONG_CODE';
+export type LinkRefusal =
+  'MALFORMED' | 'UNSUPPORTED_VERSION' | 'INVALID_SHARE' | 'WRONG_CODE' | 'WRONG_KEY';
+
+export type JoinSecret =
+  | { readonly kind: 'code'; readonly code: string }
+  | { readonly kind: 'key'; readonly key: Uint8Array };
+
+export interface HostSecrets {
+  readonly code: string;
+  readonly planKey: Uint8Array;
+}
 
 export interface HostLink {
   readonly hello: Uint8Array;
@@ -23,46 +36,70 @@ export interface GuestLink {
 export interface Introduction {
   readonly participantId: ParticipantId;
   readonly name: string;
+  readonly token: string;
+  readonly endpoint: Endpoint;
 }
 
 export const LINK_VERSION = 1;
 export const PROOF_BYTES = 64;
-export const HELLO_BYTES = 1 + SESSION_ID_BYTES + SHARE_BYTES;
-export const REPLY_BYTES = SHARE_BYTES + PROOF_BYTES;
+export const PLAN_KEY_BYTES = 32;
+export const REJOIN_TOKEN_BYTES = 32;
+export const HELLO_BYTES = 1 + SESSION_ID_BYTES + SHARE_BYTES + SHARE_BYTES;
+export const REPLY_BYTES = 1 + SHARE_BYTES + PROOF_BYTES;
 
-const INTRODUCTION_KEYS = ['participantId', 'name'];
+const CODE_MODE = 0;
+const KEY_MODE = 1;
+const KEY_PASSWORD_PREFIX = 'key:';
+const CODE_SHARE_OFFSET = 1 + SESSION_ID_BYTES;
+const KEY_SHARE_OFFSET = CODE_SHARE_OFFSET + SHARE_BYTES;
+const INTRODUCTION_KEYS = ['participantId', 'name', 'token', 'endpoint'];
+const HEX_DIGITS_PER_BYTE = 2;
+const TOKEN_PATTERN = new RegExp(`^[0-9a-f]{${String(REJOIN_TOKEN_BYTES * HEX_DIGITS_PER_BYTE)}}$`);
 const ENCODER = new TextEncoder();
 
-/** Starts the opening of a connection on the side of the host: a hello with the version, a random session and the share of the host, the proof of the host being sent only once the guest proved it knows the code. */
-export function startHostLink(code: string, randomBytes: (count: number) => Uint8Array): HostLink {
+/** Starts the opening of a connection on the side of the host: a hello with the version, a random session and a share from the join code and one from the key of the plan, its proof sent only once the guest proved its secret. */
+export function startHostLink(
+  secrets: HostSecrets,
+  randomBytes: (count: number) => Uint8Array,
+): HostLink {
   const sessionId = randomBytes(SESSION_ID_BYTES);
-  const handshake = startHandshake(code, sessionId, 'host', randomBytes);
+  const byCode = startHandshake(secrets.code, sessionId, 'host', randomBytes);
+  const byKey = startHandshake(keyPassword(secrets.planKey), sessionId, 'host', randomBytes);
   const hello = new Uint8Array(HELLO_BYTES);
   hello[0] = LINK_VERSION;
   hello.set(sessionId, 1);
-  hello.set(handshake.share, 1 + SESSION_ID_BYTES);
+  hello.set(byCode.share, CODE_SHARE_OFFSET);
+  hello.set(byKey.share, KEY_SHARE_OFFSET);
   return {
     hello,
     answer: (reply) => {
-      if (reply.length !== REPLY_BYTES) {
+      const mode = reply[0];
+      if (reply.length !== REPLY_BYTES || (mode !== CODE_MODE && mode !== KEY_MODE)) {
         return failure('MALFORMED');
       }
-      const confirmation = handshake.answer(reply.subarray(0, SHARE_BYTES));
+      const handshake = mode === KEY_MODE ? byKey : byCode;
+      const confirmation = handshake.answer(reply.subarray(1, 1 + SHARE_BYTES));
       if (!confirmation.ok) {
         return confirmation;
       }
-      const keys = confirmation.value.check(reply.subarray(SHARE_BYTES));
-      return keys.ok
-        ? success({ confirm: confirmation.value.proof, keys: keys.value })
-        : failure(keys.error);
+      const keys = confirmation.value.check(reply.subarray(1 + SHARE_BYTES));
+      if (!keys.ok) {
+        return failure(mode === KEY_MODE ? 'WRONG_KEY' : keys.error);
+      }
+      return success({ confirm: confirmation.value.proof, keys: keys.value });
     },
   };
 }
 
-/** Answers the hello of a host on the side of a guest with its share and its proof of the code, giving the keys once the proof of the host matches. */
+/** Gives the password a key of a plan stands for in the exchange of keys, which can never be a join code since a code has no colon. */
+function keyPassword(key: Uint8Array): string {
+  return `${KEY_PASSWORD_PREFIX}${bytesToHex(key)}`;
+}
+
+/** Answers the hello of a host on the side of a guest with the secret it holds, the join code or the key of the plan, its share and its proof, giving the keys once the proof of the host matches. */
 export function answerHostLink(
   hello: Uint8Array,
-  code: string,
+  secret: JoinSecret,
   randomBytes: (count: number) => Uint8Array,
 ): Result<GuestLink, LinkRefusal> {
   if (hello.length !== HELLO_BYTES) {
@@ -71,32 +108,47 @@ export function answerHostLink(
   if (hello[0] !== LINK_VERSION) {
     return failure('UNSUPPORTED_VERSION');
   }
-  const sessionId = hello.subarray(1, 1 + SESSION_ID_BYTES);
-  const handshake = startHandshake(code, sessionId, 'guest', randomBytes);
-  const confirmation = handshake.answer(hello.subarray(1 + SESSION_ID_BYTES));
+  const sessionId = hello.subarray(1, CODE_SHARE_OFFSET);
+  const byKey = secret.kind === 'key';
+  const password = byKey ? keyPassword(secret.key) : secret.code;
+  const handshake = startHandshake(password, sessionId, 'guest', randomBytes);
+  const offset = byKey ? KEY_SHARE_OFFSET : CODE_SHARE_OFFSET;
+  const confirmation = handshake.answer(hello.subarray(offset, offset + SHARE_BYTES));
   if (!confirmation.ok) {
     return confirmation;
   }
   const reply = new Uint8Array(REPLY_BYTES);
-  reply.set(handshake.share);
-  reply.set(confirmation.value.proof, SHARE_BYTES);
+  reply[0] = byKey ? KEY_MODE : CODE_MODE;
+  reply.set(handshake.share, 1);
+  reply.set(confirmation.value.proof, 1 + SHARE_BYTES);
   return success({
     reply,
     finish: (confirm) => {
       if (confirm.length !== PROOF_BYTES) {
         return failure('MALFORMED');
       }
-      return confirmation.value.check(confirm);
+      const keys = confirmation.value.check(confirm);
+      return keys.ok || !byKey ? keys : failure('WRONG_KEY');
     },
   });
 }
 
-/** Writes the first message a guest sends once the channel is open: who it is and the name it shows. */
+/** Draws the token a guest shows each time it joins, so that the host knows it is the same person, written as hexadecimal digits. */
+export function drawRejoinToken(randomBytes: (count: number) => Uint8Array): string {
+  return bytesToHex(randomBytes(REJOIN_TOKEN_BYTES));
+}
+
+/** Gives the digest of the token of a guest, which the list of people carries so that a host taking over knows who may come back under an identifier, without the token itself. */
+export function tokenDigestOf(token: string): string {
+  return bytesToHex(sha256(ENCODER.encode(token)));
+}
+
+/** Writes the first message a guest sends once the channel is open: who it is, the name it shows, the token that proves it is the same person when it comes back and where it could host the plan. */
 export function encodeIntroduction(introduction: Introduction): Uint8Array {
   return ENCODER.encode(JSON.stringify(introduction));
 }
 
-/** Reads the first message of a guest from untrusted bytes, refusing anything but a short record of an identifier of a participant and a well-formed name. */
+/** Reads the first message of a guest from untrusted bytes, refusing anything but a short record of an identifier of a participant, a well-formed name, a token of hexadecimal digits and an endpoint. */
 export function readIntroduction(bytes: Uint8Array): Introduction | null {
   if (bytes.length > MAX_INTRODUCTION_BYTES) {
     return null;
@@ -109,7 +161,17 @@ export function readIntroduction(bytes: Uint8Array): Introduction | null {
   }
   const participantId = readIdentifier(childField(record, 'participantId', ''), issues);
   const name = readText(childField(record, 'name', ''), issues, MAX_PARTICIPANT_NAME_LENGTH);
-  return isParticipantId(participantId) && name !== undefined && issues.issues.length === 0
-    ? { participantId, name }
-    : null;
+  const token = record['token'];
+  const endpoint = readEndpoint(childField(record, 'endpoint', ''), issues);
+  if (
+    !isParticipantId(participantId) ||
+    name === undefined ||
+    typeof token !== 'string' ||
+    !TOKEN_PATTERN.test(token) ||
+    endpoint === undefined ||
+    issues.issues.length > 0
+  ) {
+    return null;
+  }
+  return { participantId, name, token, endpoint };
 }

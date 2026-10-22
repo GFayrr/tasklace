@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { AppState } from '../app/app-state.svelte';
+  import type { GuestConnection } from '../collaboration/collaboration-state.svelte';
   import { fillMessage } from '../i18n/messages';
   import ConnectionFace from './ConnectionFace.svelte';
   import Icon from './Icon.svelte';
@@ -11,21 +12,33 @@
   const collaboration = $derived(app.collaboration);
   const mode = $derived(collaboration.mode);
   const host = $derived(collaboration.hostName ?? text.theHost);
-  const isLost = $derived(mode.kind === 'guest' && !mode.connected);
+  const connection: GuestConnection = $derived(
+    mode.kind === 'guest' ? mode.connection : 'connected',
+  );
+  const names: Readonly<Record<GuestConnection, string>> = $derived({
+    connected: text.connected,
+    reconnecting: text.reconnecting,
+    offline: collaboration.canEdit ? text.offline : text.offlineKeptApart,
+    lost: text.connectionLost,
+  });
+  const hints: Readonly<Record<GuestConnection, string>> = $derived({
+    connected: text.sharedBy,
+    reconnecting: text.reconnectingDetail,
+    offline: text.reconnectingDetail,
+    lost: text.connectionLostDetail,
+  });
   const guestItems: readonly MenuItem[] = $derived([
     {
       key: 'leave',
       label: text.leave,
-      hint: isLost
-        ? fillMessage(text.connectionLostDetail, { host })
-        : fillMessage(text.sharedBy, { host }),
+      hint: fillMessage(hints[connection], { host }),
       select: () => void collaboration.stop(),
     },
   ]);
 </script>
 
 {#snippet face()}
-  <ConnectionFace {app} {isLost} />
+  <ConnectionFace {app} {connection} />
 {/snippet}
 
 {#if mode.kind === 'idle'}
@@ -35,15 +48,10 @@
   </button>
 {:else if mode.kind === 'hosting'}
   <button type="button" class="host" aria-label={text.connected} onclick={() => app.openShare()}>
-    <ConnectionFace {app} isLost={false} />
+    <ConnectionFace {app} connection="connected" />
   </button>
 {:else if mode.kind === 'guest'}
-  <MenuButton
-    label={isLost ? text.connectionLost : text.connected}
-    items={guestItems}
-    trigger={face}
-    alignEnd
-  />
+  <MenuButton label={names[connection]} items={guestItems} trigger={face} alignEnd />
 {/if}
 
 <style>
