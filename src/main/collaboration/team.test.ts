@@ -1,8 +1,7 @@
-import { createServer } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import { encodeMessage, readMessage } from '../../core/collaboration/messages';
-import { requireParticipantId, type ParticipantId } from '../../core/collaboration/participants';
-import { createGuest, createHost } from '../../core/collaboration/sync';
+import { encodeMessage } from '../../core/collaboration/messages';
+import { requireParticipantId } from '../../core/collaboration/participants';
+import { createGuest } from '../../core/collaboration/sync';
 import type { TaskId } from '../../core/model/project';
 import { createSharedDocument } from '../../core/shared/shared-document';
 import type { SharedSession } from '../../core/shared/shared-session';
@@ -10,13 +9,12 @@ import { project, TEST_DOCUMENT_ID, workTask } from '../../core/testing/project-
 import { sessionOn } from '../../core/testing/session-copy';
 import { systemRandomBytes } from './aes-gcm';
 import { connectAsGuest, type GuestClient } from './guest-client';
-import { startHostServer, type HostServer, type Peer } from './host-server';
+import type { HostServer } from './host-server';
 import type { StartTimer } from './secure-connection';
+import { LOOPBACK, messageOf, startPlanHost, until } from '../testing/plan-host';
 
 const LARGEST_TESTED_TEAM = 25;
 const TEAM_TIMEOUT_MS = 60_000;
-const LOOPBACK = '127.0.0.1';
-const HOST = requireParticipantId('host');
 const COMMON_TASK = 'common';
 const TOKEN_HEX_DIGITS = 64;
 const OWN_TASK_DIGITS = 2;
@@ -27,35 +25,6 @@ const servers: HostServer[] = [];
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
 });
-
-/** Finds a port nobody listens on, by letting the system choose one and freeing it. */
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const probe = createServer();
-    probe.listen(0, LOOPBACK, () => {
-      const address = probe.address();
-      probe.close(() => {
-        resolve(typeof address === 'object' && address !== null ? address.port : 0);
-      });
-    });
-  });
-}
-
-/** Waits until a condition holds, checking at each turn of the event loop. */
-async function until(condition: () => boolean): Promise<void> {
-  while (!condition()) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
-
-/** Reads a message that a test expects to be well formed. */
-function messageOf(bytes: Uint8Array) {
-  const read = readMessage(bytes);
-  if (!read.ok) {
-    throw new Error(read.error);
-  }
-  return read.value;
-}
 
 /** Names the task a guest of a given rank renames on its own. */
 function ownTaskOf(index: number): string {
@@ -69,59 +38,6 @@ function rename(session: SharedSession, id: string, name: string): void {
     throw new Error(`No task ${id}`);
   }
   expect(session.apply({ type: 'putTask', task: { ...task, name } }).ok).toBe(true);
-}
-
-/** Starts a host of a plan on a free port, merging what its guests send and passing it to the others. */
-async function startTeamHost(session: SharedSession) {
-  const peers = new Map<ParticipantId, Peer>();
-  const ids = new Map<number, ParticipantId>();
-  const refusals: string[] = [];
-  const host = createHost({
-    session,
-    roster: null,
-    tokenDigest: null,
-    hostId: HOST,
-    name: 'Camille',
-    send: ({ to, message }) => {
-      expect(peers.get(to)?.send(encodeMessage(message)).ok).toBe(true);
-    },
-    report: (event) => {
-      if (event.kind === 'refused') {
-        refusals.push(event.reason);
-      }
-    },
-  });
-  const started = await startHostServer({
-    port: await freePort(),
-    planKey: null,
-    knownTokens: new Map(),
-    startTimer: noTimer,
-    randomBytes: systemRandomBytes,
-    events: {
-      joined: (peer, introduction) => {
-        peers.set(introduction.participantId, peer);
-        ids.set(peer.number, introduction.participantId);
-        expect(host.connect(introduction.participantId, introduction.name, null, null).ok).toBe(
-          true,
-        );
-        expect(host.setRight(introduction.participantId, true).ok).toBe(true);
-      },
-      message: (peer, bytes) => {
-        const from = ids.get(peer.number);
-        if (from !== undefined) {
-          host.receive(from, messageOf(bytes));
-        }
-      },
-      left: () => undefined,
-      codeChanged: () => undefined,
-      planKeyChanged: () => undefined,
-    },
-  });
-  if (!started.ok) {
-    throw new Error(started.error);
-  }
-  servers.push(started.value);
-  return { server: started.value, refusals };
 }
 
 /** Joins a host as a guest of a given rank with the code, syncing a session of its own and telling when it may edit. */
@@ -182,7 +98,8 @@ describe('a shared plan for the largest tested team', () => {
         TEST_DOCUMENT_ID,
       );
       const hostSession = sessionOn(origin, 1);
-      const shared = await startTeamHost(hostSession);
+      const shared = await startPlanHost(hostSession, { planKey: null, letEdit: true });
+      servers.push(shared.server);
       const sessions: SharedSession[] = [];
       const members: { canEdit: () => boolean }[] = [];
       for (let index = 0; index < LARGEST_TESTED_TEAM; index += 1) {
