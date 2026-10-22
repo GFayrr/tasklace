@@ -1,12 +1,17 @@
+import { execFile } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { closeDiscarding, launchApplication } from './application';
 import { addTask, taskRow } from './table';
 
 const LOOPBACK = '127.0.0.1';
+const REMOVAL_RETRIES = 20;
+const REMOVAL_RETRY_STEP_MS = 100;
+const runFile = promisify(execFile);
 const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
 const CODE_PATTERN = /^[A-HJ-NP-Z2-9]{6}$/;
 const PORT_PATTERN = /port (\d+)/;
@@ -101,15 +106,32 @@ async function startRelay(target: number) {
 /** Stops an instance at once, as when its computer is switched off, without letting it tell anyone, and forgets it once its folder is removed. */
 async function switchOff(instance: Instance): Promise<void> {
   instances.splice(instances.indexOf(instance), 1);
-  const process = instance.application.process();
+  const main = instance.application.process();
   const exited = new Promise<void>((resolve) => {
-    process.once('exit', () => {
+    main.once('exit', () => {
       resolve();
     });
   });
-  process.kill('SIGKILL');
+  await stopProcessTree(main.pid);
   await exited;
-  await rm(instance.userData, { recursive: true, force: true });
+  await rm(instance.userData, {
+    recursive: true,
+    force: true,
+    maxRetries: REMOVAL_RETRIES,
+    retryDelay: REMOVAL_RETRY_STEP_MS,
+  });
+}
+
+/** Stops a process at once with every process it started, which Windows leaves running when only the first one is killed. */
+async function stopProcessTree(pid: number | undefined): Promise<void> {
+  if (pid === undefined) {
+    throw new Error('The application has no process to stop.');
+  }
+  if (process.platform === 'win32') {
+    await runFile('taskkill', ['/pid', String(pid), '/t', '/f']);
+    return;
+  }
+  process.kill(pid, 'SIGKILL');
 }
 
 /** Saves a picture of a window when a folder for pictures is given, to review the interface by eye. */
