@@ -10,13 +10,13 @@ import {
   SUCCESSION_TURN_MILLISECONDS,
 } from './succession';
 
-/** Builds a participant with a rank. */
-function person(id: string, rank: number, isHost = false): Participant {
+/** Builds a participant with a rank, allowed to edit unless told otherwise. */
+function person(id: string, rank: number, isHost = false, canEdit = true): Participant {
   return {
     id: requireParticipantId(id),
     name: id,
     color: 0,
-    canEdit: false,
+    canEdit,
     isHost,
     rank,
     selectedTaskId: null,
@@ -28,8 +28,14 @@ function person(id: string, rank: number, isHost = false): Participant {
 const HOST = person('camille', 0, true);
 
 describe('who takes over a plan whose host left', () => {
-  it('lines up everyone but the host, oldest first, the identifier deciding between equal ranks', () => {
-    const queue = successionQueue([person('noah', 3), HOST, person('lea', 1), person('ines', 3)]);
+  it('lines up everyone allowed to edit but the host, oldest first, the identifier deciding between equal ranks', () => {
+    const queue = successionQueue([
+      person('noah', 3),
+      HOST,
+      person('lea', 1),
+      person('ines', 3),
+      person('reader', 0, false, false),
+    ]);
     expect(queue.map((participant) => participant.id)).toEqual(['lea', 'ines', 'noah']);
   });
 

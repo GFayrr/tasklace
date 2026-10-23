@@ -53,6 +53,10 @@ async function joinedApp(canEdit = false, fake = fakeAppContext()) {
     kind: 'hostMessage',
     message: encodeMessage({ kind: 'update', update: Uint8Array.of(0, 0) }),
   });
+  collaboration.listener?.({
+    kind: 'hostMessage',
+    message: encodeMessage({ kind: 'stateVector', vector: Uint8Array.of(0) }),
+  });
   await settle();
   await settle();
   return { app, ...fake };
@@ -261,6 +265,10 @@ describe('the windows of a shared plan', () => {
       kind: 'hostMessage',
       message: encodeMessage({ kind: 'update', update: Uint8Array.of(0, 0) }),
     });
+    fake.control.collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'stateVector', vector: Uint8Array.of(0) }),
+    });
     await settle();
     await settle();
     expect([app.collaborationWindow, app.collaboration.mode]).toEqual([
@@ -338,6 +346,10 @@ describe('changes made in read only away from the host', () => {
       kind: 'hostMessage',
       message: encodeMessage({ kind: 'update', update: Uint8Array.of(0, 0) }),
     });
+    control.collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'stateVector', vector: Uint8Array.of(0) }),
+    });
     await settle();
     await settle();
     expect([
@@ -364,6 +376,16 @@ describe('changes made in read only away from the host', () => {
     const { app } = await changedAway();
     app.closeKeptChanges();
     expect(app.keptChanges).toBeNull();
+  });
+
+  it('warns when the local copy of the changes kept apart could not be written', async () => {
+    const fake = fakeAppContext();
+    fake.control.collaboration.keepResult = { ok: true, value: { localCopySaved: false } };
+    const { app } = await changedAway(fake);
+    expect([app.keptChanges, noticeTexts(app)]).toEqual([
+      { planName: 'Mine', copyName: 'Mine (my changes)' },
+      [english.notices.localCopyFailed],
+    ]);
   });
 
   it('tells, lastingly, that the changes could not be kept apart', async () => {

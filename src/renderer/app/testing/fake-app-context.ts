@@ -71,7 +71,10 @@ export interface FakeCollaboration {
   openSharedResult: BridgeResult<OpenedProject>;
   copyResult: BridgeResult<null>;
   findNextHostResult: BridgeResult<null>;
-  keepResult: BridgeResult<null>;
+  allowResult: BridgeResult<null>;
+  dropResult: BridgeResult<null>;
+  forgetResult: BridgeResult<null>;
+  keepResult: BridgeResult<SavedProject>;
   openKeptResult: BridgeResult<OpenedProject>;
   listener: ((event: CollaborationEvent) => void) | null;
   readonly requests: (readonly [string, ...unknown[]])[];
@@ -146,7 +149,10 @@ export function fakeBridge(): {
       openSharedResult: { ok: false, error: { code: 'TASK_FAILED' } },
       copyResult: { ok: true, value: null },
       findNextHostResult: { ok: true, value: null },
-      keepResult: { ok: true, value: null },
+      allowResult: { ok: true, value: null },
+      dropResult: { ok: true, value: null },
+      forgetResult: { ok: true, value: null },
+      keepResult: { ok: true, value: { localCopySaved: true } },
       openKeptResult: { ok: false, error: { code: 'CANCELLED' } },
       listener: null,
       requests: [],
@@ -223,7 +229,9 @@ export function fakeBridge(): {
     joinPlan: (joining) => asked(['join', joining], collaboration.joinResult),
     openSharedPlan: (state) => asked(['openShared', state], collaboration.openSharedResult),
     findPlans: (searching) => asked(['findPlans', searching], collaboration.findPlansResult),
-    dropPeer: (peer) => asked(['dropPeer', peer], { ok: true, value: null }),
+    dropPeer: (peer) => asked(['dropPeer', peer], collaboration.dropResult),
+    allowPeerToEdit: (peer) => asked(['allowPeerToEdit', peer], collaboration.allowResult),
+    forgetGuests: (ids) => asked(['forgetGuests', ids], collaboration.forgetResult),
     copyJoinCode: () => asked(['copyCode'], collaboration.copyResult),
     findNextHost: (queue, planName, hostName, knownTokens) =>
       asked(

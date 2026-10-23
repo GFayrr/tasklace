@@ -310,7 +310,7 @@ describe('the shared plan through the bridge', () => {
       { kind: 'offline' },
       { kind: 'hostMessage', message: Uint8Array.of(2) },
       { kind: 'ended', reason: 'WRONG_CODE' },
-      { kind: 'ended', reason: 'REMOVED' },
+      { kind: 'ended', reason: 'TURNED_AWAY' },
     ];
     const invalid = [
       null,

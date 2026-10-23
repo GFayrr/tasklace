@@ -29,13 +29,14 @@ function fakeMdns() {
   const listeners = new Map<string, (service: AnnouncedService) => void>();
   const published: unknown[] = [];
   const stopped: string[] = [];
+  const stopping: { error: unknown } = { error: undefined };
   const mdns: Mdns = {
     publish: (options) => {
       published.push(options);
       return {
         stop: (done) => {
           stopped.push('service');
-          done?.();
+          done?.(stopping.error);
         },
       };
     },
@@ -51,6 +52,7 @@ function fakeMdns() {
     mdns,
     published,
     stopped,
+    stopping,
     up: (service: AnnouncedService) => listeners.get('up')?.(service),
     down: (service: AnnouncedService) => listeners.get('down')?.(service),
   };
@@ -92,6 +94,26 @@ describe('announcing a shared plan', () => {
     ]);
     await stop();
     expect(fake.stopped).toEqual(['service']);
+  });
+
+  it('logs a network that could not be told the plan is no longer shared, stopping all the same', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const fake = fakeMdns();
+    const failed = new Error('send failed');
+    fake.stopping.error = failed;
+    const stop = announcePlan(fake.mdns, {
+      instance: '1a2b',
+      port: 47_313,
+      planName: 'Thesis',
+      hostName: 'Camille',
+      sharingId: SHARING,
+      rank: 0,
+    });
+    await stop();
+    expect([fake.stopped, warnings.mock.calls]).toEqual([
+      ['service'],
+      [['The shared plan could not tell the network it is no longer shared:', failed]],
+    ]);
   });
 
   it('shortens a long name by whole characters to fit an announcement', () => {

@@ -177,10 +177,7 @@ describe('sharing the open plan', () => {
       'CA Camille You · host Can edit',
       'LÉ Léa Joined at 10:00 AM Read only Can edit',
     ]);
-    expect(textsOf(dialog, '.people .hint')).toEqual([
-      TEXT.newcomers,
-      'If you leave, Léa, who has been here the longest, becomes the host and keeps these choices.',
-    ]);
+    expect(textsOf(dialog, '.people .hint')).toEqual([TEXT.newcomers]);
     expect(single(dialog, '[role="radiogroup"]').getAttribute('aria-label')).toBe(
       'What Léa may do',
     );
@@ -196,6 +193,10 @@ describe('sharing the open plan', () => {
       true,
     ]);
     expect(textsOf(dialog, '.segment.chosen')).toEqual([TEXT.canEdit]);
+    expect(textsOf(dialog, '.people .hint')).toEqual([
+      TEXT.newcomers,
+      'If you leave, Léa, who has been here the longest, becomes the host and keeps these choices.',
+    ]);
   });
 
   it('keeps the choice shown when the host cannot give a right, as for a guest who just left', async () => {

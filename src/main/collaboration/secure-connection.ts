@@ -1,5 +1,7 @@
 import {
+  compressMessage,
   openSecureChannel,
+  type CompressedMessage,
   type ChannelBreak,
   type ChannelKind,
   type ChannelMessage,
@@ -19,7 +21,7 @@ import {
   PLAN_KEY_BYTES,
 } from '../../core/collaboration/secure/link';
 import { zlibCompressor } from '../zlib-compressor';
-import { MAX_HANDSHAKE_MILLISECONDS } from '../../core/limits';
+import { MAX_COLLABORATION_MESSAGE_BYTES, MAX_HANDSHAKE_MILLISECONDS } from '../../core/limits';
 import { failure, success, type Result } from '../../core/result';
 import { aesGcm } from './aes-gcm';
 
@@ -37,18 +39,23 @@ export interface ConnectionEvents {
   readonly message: (bytes: Uint8Array) => void;
   readonly ended: (reason: ConnectionEnd) => void;
   readonly planKey: ((key: Uint8Array) => void) | null;
+  readonly identity?: (message: Uint8Array) => void;
 }
 
 export interface SecureConnection {
   readonly receive: (bytes: Uint8Array) => void;
   readonly send: (message: Uint8Array) => Result<null, SealRefusal | 'NOT_OPEN'>;
   readonly sendPlanKey: (key: Uint8Array) => Result<null, SealRefusal | 'NOT_OPEN'>;
+  readonly sendCompressed: (message: CompressedMessage) => Result<null, SealRefusal | 'NOT_OPEN'>;
+  readonly sendIdentity: (message: Uint8Array) => Result<null, SealRefusal | 'NOT_OPEN'>;
   readonly wireClosed: () => void;
   readonly close: () => void;
+  readonly allowLargeMessages: () => void;
 }
 
 interface Common {
   readonly wire: Wire;
+  readonly messageLimit?: number;
   readonly startTimer: StartTimer;
   readonly events: ConnectionEvents;
   readonly randomBytes: (count: number) => Uint8Array;
@@ -76,12 +83,29 @@ function connectionCore(common: Common) {
     }
     common.events.ended(reason);
   };
+  /** Seals a compressed message on the channel and sends its frames, giving why it could not. */
+  const sendSealed = (
+    open: SecureChannel,
+    compressed: CompressedMessage,
+  ): Result<null, SealRefusal> => {
+    const frames = open.sealCompressed(compressed);
+    if (!frames.ok) {
+      return frames;
+    }
+    frames.value.forEach((frame) => {
+      common.wire.send(frame);
+    });
+    return success(null);
+  };
   return {
     end,
     isOver: () => isOver,
     open: (keys: SessionKeys): SecureChannel => {
-      channel = openSecureChannel(keys, aesGcm, zlibCompressor);
+      channel = openSecureChannel(keys, aesGcm, zlibCompressor, common.messageLimit);
       return channel;
+    },
+    allowLargeMessages: () => {
+      channel?.allowMessagesUpTo(MAX_COLLABORATION_MESSAGE_BYTES);
     },
     opened: () => {
       stopTimer();
@@ -90,15 +114,11 @@ function connectionCore(common: Common) {
       if (channel === null) {
         return failure('NOT_OPEN');
       }
-      const frames = channel.seal(message, kind);
-      if (!frames.ok) {
-        return frames;
-      }
-      frames.value.forEach((frame) => {
-        common.wire.send(frame);
-      });
-      return success(null);
+      const compressed = compressMessage(message, kind, zlibCompressor);
+      return compressed.ok ? sendSealed(channel, compressed.value) : compressed;
     },
+    sealCompressed: (compressed: CompressedMessage): Result<null, SealRefusal | 'NOT_OPEN'> =>
+      channel === null ? failure('NOT_OPEN') : sendSealed(channel, compressed),
     /** Opens one frame of the channel, ending the connection when the channel breaks, and gives the message it completes, if any. */
     openFrame: (open: SecureChannel, bytes: Uint8Array): ChannelMessage | null => {
       const opened = open.open(bytes);
@@ -111,7 +131,7 @@ function connectionCore(common: Common) {
   };
 }
 
-/** Gives each complete message of the open channel to the events of the connection: a message of the plan, or a key of the plan of the right length where the connection expects one, anything else ending it. */
+/** Gives each complete message of the open channel to the events of the connection: a message of the plan, a key of the plan of the right length or an identity where the connection expects one, anything else ending it. */
 function openStepOf(
   core: ReturnType<typeof connectionCore>,
   channel: SecureChannel,
@@ -124,7 +144,13 @@ function openStepOf(
     }
     if (message.kind === 'plan') {
       events.message(message.message);
-    } else if (events.planKey !== null && message.message.length === PLAN_KEY_BYTES) {
+    } else if (message.kind === 'identity' && events.identity !== undefined) {
+      events.identity(message.message);
+    } else if (
+      message.kind === 'planKey' &&
+      events.planKey !== null &&
+      message.message.length === PLAN_KEY_BYTES
+    ) {
       events.planKey(message.message);
     } else {
       core.end('MALFORMED');
@@ -145,12 +171,15 @@ function connectionOf(
     },
     send: (message) => core.seal(message, 'plan'),
     sendPlanKey: (key) => core.seal(key, 'planKey'),
+    sendCompressed: core.sealCompressed,
+    sendIdentity: (message) => core.seal(message, 'identity'),
     wireClosed: () => {
       core.end('WIRE_CLOSED');
     },
     close: () => {
       core.end('CLOSED');
     },
+    allowLargeMessages: core.allowLargeMessages,
   };
 }
 

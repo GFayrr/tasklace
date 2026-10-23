@@ -138,6 +138,7 @@ export function createProjectFiles(
   let current: Current | null = null;
   let changeCount = 0;
   let busy = false;
+  let running: Promise<unknown> = Promise.resolve();
   let lastSave: Promise<unknown> = Promise.resolve();
   /** Sends the latest state of the project to be saved after the saves already sent, one at a time. */
   const sendSave = (
@@ -191,12 +192,24 @@ export function createProjectFiles(
     }
     busy = true;
     listener.fileActionRunning(true);
+    const run = action();
+    running = run.then(
+      () => undefined,
+      () => undefined,
+    );
     try {
-      return await action();
+      return await run;
     } finally {
       busy = false;
       listener.fileActionRunning(false);
     }
+  };
+  /** Runs a file action once the one under way ends, for an action the person did not ask for and that cannot be refused, such as opening the plan a host sent. */
+  const onceFree = async <T>(action: () => Promise<ActionResult<T>>): Promise<ActionResult<T>> => {
+    while (busy) {
+      await running;
+    }
+    return exclusive(action);
   };
   /** Finishes the pending save of the open project before another one replaces it, telling why when it fails. */
   const saveBeforeSwitching = async (): Promise<ActionResult<null>> => {
@@ -310,7 +323,7 @@ export function createProjectFiles(
     open: () => exclusive(() => load(bridge.openProject, true)),
     openRecent: (index) => exclusive(() => load(() => bridge.openRecentProject(index), true)),
     importFile: (kind) => exclusive(() => load(() => bridge.importProject(kind), false)),
-    openShared: (state) => exclusive(() => load(() => bridge.openSharedPlan(state), false)),
+    openShared: (state) => onceFree(() => load(() => bridge.openSharedPlan(state), false)),
     openKept: () => exclusive(() => load(bridge.openKeptChanges, true)),
     save: () =>
       exclusive(() => (current?.hasFile === true ? trackSave(bridge.saveProject) : saveAs())),

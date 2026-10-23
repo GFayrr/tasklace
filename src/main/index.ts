@@ -105,11 +105,18 @@ function start(): void {
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath);
   logPageMessages(window.webContents, log);
-  flushBeforeClosing(window, windowProjectKind, (sender) => {
-    forgetWindowProject(sender);
-    pdf.forgetHeldPdf(sender);
-    collaboration.forgetWindow(sender);
-  });
+  flushBeforeClosing(
+    window,
+    windowProjectKind,
+    (sender) => {
+      forgetWindowProject(sender);
+      pdf.forgetHeldPdf(sender);
+      collaboration.forgetWindow(sender);
+    },
+    (sender) => {
+      collaboration.forgetWindow(sender);
+    },
+  );
   const contents = window.webContents;
   window.once('closed', () => {
     collaboration.forgetWindow(contents);

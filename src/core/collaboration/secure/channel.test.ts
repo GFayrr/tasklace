@@ -7,6 +7,7 @@ import { failure, success } from '../../result';
 import {
   AEAD_TAG_BYTES,
   MAX_SEALED_FRAME_BYTES,
+  compressMessage,
   openSecureChannel,
   type Aead,
   type ChannelKind,
@@ -96,10 +97,13 @@ describe('the encrypted channel', () => {
     ]);
   });
 
-  it('tells a key of the plan apart from a message of the plan', () => {
+  it('tells a key of the plan and an identity apart from a message of the plan', () => {
     const { host, guest } = ends();
     expect(sealed(host, Uint8Array.of(9), 'planKey').map((frame) => guest.open(frame))).toEqual([
       success({ kind: 'planKey', message: Uint8Array.of(9) }),
+    ]);
+    expect(sealed(host, Uint8Array.of(8), 'identity').map((frame) => guest.open(frame))).toEqual([
+      success({ kind: 'identity', message: Uint8Array.of(8) }),
     ]);
   });
 
@@ -150,6 +154,61 @@ describe('the encrypted channel', () => {
     expect(decompress.mock.calls).toEqual([[Uint8Array.of(7), MAX_COLLABORATION_MESSAGE_BYTES]]);
   });
 
+  it('decompresses no further than the limit it was opened with, until it is allowed larger messages, never smaller', () => {
+    const decompress = vi.fn((bytes: Uint8Array, maxBytes: number) =>
+      bytes.length > maxBytes ? failure('OUTPUT_TOO_LARGE' as const) : success(bytes),
+    );
+    const compression = { compress: (bytes: Uint8Array) => bytes, decompress };
+    const host = openSecureChannel(HOST_KEYS, testAead, compression);
+    const guest = openSecureChannel(GUEST_KEYS, testAead, compression, 4);
+    expect(sealed(host, Uint8Array.of(1, 2, 3, 4)).map((frame) => guest.open(frame))).toEqual([
+      plan(Uint8Array.of(1, 2, 3, 4)),
+    ]);
+    guest.allowMessagesUpTo(2);
+    guest.allowMessagesUpTo(MAX_COLLABORATION_MESSAGE_BYTES + 1);
+    expect(decompress.mock.calls.map(([, maxBytes]) => maxBytes)).toEqual([4]);
+    expect(sealed(host, Uint8Array.of(5)).map((frame) => guest.open(frame))).toEqual([
+      plan(Uint8Array.of(5)),
+    ]);
+    expect(decompress.mock.calls.map(([, maxBytes]) => maxBytes)).toEqual([
+      4,
+      MAX_COLLABORATION_MESSAGE_BYTES,
+    ]);
+    const fresh = openSecureChannel(HOST_KEYS, testAead, compression);
+    const small = openSecureChannel(GUEST_KEYS, testAead, compression, 4);
+    expect(sealed(fresh, Uint8Array.of(1, 2, 3, 4, 5)).map((frame) => small.open(frame))).toEqual([
+      failure('TOO_LARGE'),
+    ]);
+  });
+
+  it('stops gathering the frames of a message once they hold more than its limit and one frame', () => {
+    const { host } = ends();
+    const guest = openSecureChannel(GUEST_KEYS, testAead, plainCompression, 1);
+    const frames = sealed(host, new Uint8Array(CHANNEL_CHUNK_BYTES + 2));
+    expect(frames.map((frame) => guest.open(frame))).toEqual([success(null), failure('TOO_LARGE')]);
+  });
+
+  it('seals a message compressed once for several channels, which each open it', () => {
+    const first = ends();
+    const second = ends();
+    const compressed = compressMessage(Uint8Array.of(1, 2), 'plan', plainCompression);
+    if (!compressed.ok) {
+      throw new Error(compressed.error);
+    }
+    const opened = [first, second].map(({ host, guest }) => {
+      const frames = host.sealCompressed(compressed.value);
+      return frames.ok ? frames.value.map((frame) => guest.open(frame)) : frames;
+    });
+    expect(opened).toEqual([[plan(Uint8Array.of(1, 2))], [plan(Uint8Array.of(1, 2))]]);
+    expect(
+      compressMessage(
+        { length: MAX_COLLABORATION_MESSAGE_BYTES + 1 } as Uint8Array,
+        'plan',
+        plainCompression,
+      ),
+    ).toEqual(failure('TOO_LARGE'));
+  });
+
   it('refuses to seal a message above the limit', () => {
     const { host } = ends();
     expect(
@@ -191,7 +250,11 @@ describe('the encrypted channel', () => {
       failure('TAMPERED'),
     );
     const header = ends();
-    expect(header.guest.open(testAead.seal(HOST_TO_GUEST, nonce, Uint8Array.of(4, 0)))).toEqual(
+    expect(header.guest.open(testAead.seal(HOST_TO_GUEST, nonce, Uint8Array.of(8, 0)))).toEqual(
+      failure('TAMPERED'),
+    );
+    const twoKinds = ends();
+    expect(twoKinds.guest.open(testAead.seal(HOST_TO_GUEST, nonce, Uint8Array.of(7, 0)))).toEqual(
       failure('TAMPERED'),
     );
   });

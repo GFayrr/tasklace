@@ -81,6 +81,7 @@ const LOADED = {
   localChanges: null,
 } as const;
 const SAVED = { kind: 'saved', localCopySaved: true } as const;
+const LATER_TURNS = 64;
 const tasks: FileTask[] = [];
 const runTask = vi.fn<(task: FileTask) => Promise<FileTaskResult>>();
 const trusted = vi.fn();
@@ -137,6 +138,13 @@ async function openedIn(path: string): Promise<object> {
   expect(await request(IPC_CHANNELS.openProject, sender)).toMatchObject({ ok: true });
   expect(await request(IPC_CHANNELS.adoptProject, sender, DOCUMENT_ID)).toEqual(success(null));
   return sender;
+}
+
+/** Lets the event loop turn a number of times, so that work started meanwhile goes as far as it can. */
+async function laterTurns(count: number): Promise<void> {
+  for (let turn = 0; turn < count; turn += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
 }
 
 /** Runs a request while silencing, and returning, what it logs as errors. */
@@ -763,7 +771,7 @@ describe('keeping the changes a person could not share', () => {
     const sender = await openedIn(join(folder, 'Thesis.tasklace'));
     const before = Date.now();
     expect(await request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis')).toEqual(
-      success(null),
+      success({ localCopySaved: true }),
     );
     const task = keptTask();
     const path = join(userData, KEPT, 'Thesis (my changes).tasklace');
@@ -789,6 +797,27 @@ describe('keeping the changes a person could not share', () => {
       path,
       localCopyFolder: copiesIn(userData),
     });
+  });
+
+  it('gives two windows keeping their changes at once two files, each choosing its name once the other is written', async () => {
+    const first = await openedIn(join(folder, 'Thesis.tasklace'));
+    const second = await openedIn(join(folder, 'Thesis copy.tasklace'));
+    runTask.mockImplementation(async (task) => {
+      if (task.kind === 'keepSharedCopy') {
+        await laterTurns(LATER_TURNS);
+        await writeFile(task.path, 'kept');
+      }
+      return success(SAVED);
+    });
+    await Promise.all([
+      request(IPC_CHANNELS.keepOwnChanges, first, STATE, 'Thesis'),
+      request(IPC_CHANNELS.keepOwnChanges, second, STATE, 'Thesis'),
+    ]);
+    const kept = join(userData, KEPT);
+    expect(tasks.flatMap((task) => (task.kind === 'keepSharedCopy' ? [task.path] : []))).toEqual([
+      join(kept, 'Thesis (my changes).tasklace'),
+      join(kept, 'Thesis (my changes) 2.tasklace'),
+    ]);
   });
 
   it('numbers the name of a file already kept, then names it after an identifier once every number is taken', async () => {

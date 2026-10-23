@@ -1,5 +1,5 @@
 import { connect, createServer, type Server, type Socket } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
 import { createGuest } from '../../core/collaboration/sync';
 import {
@@ -10,7 +10,7 @@ import {
 import { createSharedDocument } from '../../core/shared/shared-document';
 import { project, TEST_DOCUMENT_ID, workTask } from '../../core/testing/project-builder';
 import { sessionOn } from '../../core/testing/session-copy';
-import { messageOf, startPlanHost } from '../testing/plan-host';
+import { messageOf, spacedClock, startPlanHost } from '../testing/plan-host';
 import { requireParticipantId } from '../../core/collaboration/participants';
 import { FIRST_RECONNECT_MILLISECONDS } from '../../core/collaboration/reconnection';
 import type { Introduction } from '../../core/collaboration/secure/link';
@@ -139,12 +139,13 @@ async function host(port: number, startTimer: StartTimer = () => () => undefined
     knownTokens: new Map(),
     startTimer,
     randomBytes: systemRandomBytes,
+    identity: null,
+    now: spacedClock(),
     events: {
       joined: (_peer, introduction) => joined.push(introduction.name),
       message: () => undefined,
       left: (_peer, reason) => left.push(reason),
       codeChanged: () => undefined,
-      planKeyChanged: () => undefined,
     },
   });
   if (!started.ok) {
@@ -326,10 +327,11 @@ describe('coming back to a host over the network', () => {
   );
 
   it('cuts the connection once the other end goes silent without closing it, as when its computer is switched off, on both sides', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const beats: (() => void)[] = [];
-    /** Keeps the beats of the heartbeat for the test to fire, and starts no other timer. */
+    /** Keeps the beats of the heartbeat and its last look before cutting for the test to fire, and starts no other timer. */
     const startTimer: StartTimer = (milliseconds, onEnd) => {
-      if (milliseconds === HEARTBEAT_MILLISECONDS) {
+      if (milliseconds === HEARTBEAT_MILLISECONDS || milliseconds === 0) {
         beats.push(onEnd);
       }
       return () => undefined;
@@ -369,8 +371,14 @@ describe('coming back to a host over the network', () => {
     network.freeze();
     beat();
     beat();
+    beat();
+    beat();
     await until(() => told.includes('reconnecting') && shared.left.length === 1);
     expect([told, shared.left]).toEqual([['connected', 'reconnecting'], ['WIRE_CLOSED']]);
+    expect(warnings.mock.calls.filter(([text]) => String(text).includes('stayed silent'))).toEqual([
+      ['A connection to the shared plan stayed silent and was cut.'],
+      ['A connection to the shared plan stayed silent and was cut.'],
+    ]);
     session.close();
     network.cut();
     await network.close();

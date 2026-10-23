@@ -8,10 +8,10 @@ export const SHARING_ID_BYTES = 16;
 
 const SHARING_ID_DOMAIN = new TextEncoder().encode('Tasklace sharing identifier v1');
 
-/** Orders the participants who may take over a plan whose host left, the one connected the longest first, the identifier deciding between equal ranks, so that every copy of the list gives the same order. */
+/** Orders the participants allowed to edit, who may take over a plan whose host left, the one connected the longest first, the identifier deciding between equal ranks, so that every copy of the list gives the same order. */
 export function successionQueue(participants: readonly Participant[]): readonly Participant[] {
   return participants
-    .filter((participant) => !participant.isHost)
+    .filter((participant) => !participant.isHost && participant.canEdit)
     .toSorted((first, second) => (isOlder(first, second) ? -1 : 1));
 }
 

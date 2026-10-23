@@ -36,6 +36,8 @@ export const IPC_CHANNELS = {
   openSharedPlan: 'collaboration:open-shared',
   findPlans: 'collaboration:find-plans',
   dropPeer: 'collaboration:drop-peer',
+  allowPeerToEdit: 'collaboration:allow-peer-to-edit',
+  forgetGuests: 'collaboration:forget-guests',
   copyJoinCode: 'collaboration:copy-join-code',
   findNextHost: 'collaboration:find-next-host',
   collaborationSend: 'collaboration:send',
@@ -118,6 +120,8 @@ export interface Sharing {
 export interface KnownToken {
   readonly participantId: string;
   readonly tokenDigest: string;
+  readonly rank: number;
+  readonly canEdit: boolean;
 }
 
 export interface JoinRequest {
@@ -150,7 +154,8 @@ export const GUEST_ENDS = [
   'CODE_REPLACED',
   'WRONG_KEY',
   'IDENTITY_TAKEN',
-  'REMOVED',
+  'TURNED_AWAY',
+  'TRY_LATER',
   'HOST_LEFT',
   'TAMPERED',
   'TOO_LARGE',
@@ -189,7 +194,7 @@ export type CollaborationEvent =
   | { readonly kind: 'offline' }
   | { readonly kind: 'ended'; readonly reason: GuestEndReason };
 
-export type CollaborationTarget = number | 'host';
+export type CollaborationTarget = number | readonly number[] | 'host';
 
 export interface TasklaceBridge {
   readonly regionalFormat: () => Promise<RegionalFormat>;
@@ -200,7 +205,10 @@ export interface TasklaceBridge {
   readonly importProject: (kind: ExchangeKind) => Promise<BridgeResult<OpenedProject>>;
   readonly adoptProject: (documentId: DocumentId) => Promise<BridgeResult<null>>;
   readonly saveProject: (state: Uint8Array) => Promise<BridgeResult<SavedProject>>;
-  readonly keepOwnChanges: (state: Uint8Array, planName: string) => Promise<BridgeResult<null>>;
+  readonly keepOwnChanges: (
+    state: Uint8Array,
+    planName: string,
+  ) => Promise<BridgeResult<SavedProject>>;
   readonly openKeptChanges: () => Promise<BridgeResult<OpenedProject>>;
   readonly setLocalCopyAside: (documentId: DocumentId) => Promise<BridgeResult<null>>;
   readonly saveProjectAs: (
@@ -233,6 +241,8 @@ export interface TasklaceBridge {
   readonly openSharedPlan: (state: Uint8Array) => Promise<BridgeResult<OpenedProject>>;
   readonly findPlans: (searching: boolean) => Promise<BridgeResult<null>>;
   readonly dropPeer: (peer: number) => Promise<BridgeResult<null>>;
+  readonly allowPeerToEdit: (peer: number) => Promise<BridgeResult<null>>;
+  readonly forgetGuests: (participantIds: readonly string[]) => Promise<BridgeResult<null>>;
   readonly copyJoinCode: () => Promise<BridgeResult<null>>;
   readonly findNextHost: (
     queue: readonly NextHostCandidate[],
@@ -256,7 +266,7 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.adoptProject]: BridgeResult<null>;
   readonly [IPC_CHANNELS.saveProject]: BridgeResult<SavedProject>;
   readonly [IPC_CHANNELS.saveProjectAs]: BridgeResult<SavedProject>;
-  readonly [IPC_CHANNELS.keepOwnChanges]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.keepOwnChanges]: BridgeResult<SavedProject>;
   readonly [IPC_CHANNELS.openKeptChanges]: BridgeResult<OpenedProject>;
   readonly [IPC_CHANNELS.setLocalCopyAside]: BridgeResult<null>;
   readonly [IPC_CHANNELS.exportProject]: BridgeResult<ExportedFile>;
@@ -272,6 +282,8 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.openSharedPlan]: BridgeResult<OpenedProject>;
   readonly [IPC_CHANNELS.findPlans]: BridgeResult<null>;
   readonly [IPC_CHANNELS.dropPeer]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.allowPeerToEdit]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.forgetGuests]: BridgeResult<null>;
   readonly [IPC_CHANNELS.copyJoinCode]: BridgeResult<null>;
   readonly [IPC_CHANNELS.findNextHost]: BridgeResult<null>;
 }
@@ -310,6 +322,8 @@ export interface ChannelArguments {
   readonly [IPC_CHANNELS.openSharedPlan]: readonly [state: Uint8Array];
   readonly [IPC_CHANNELS.findPlans]: readonly [searching: boolean];
   readonly [IPC_CHANNELS.dropPeer]: readonly [peer: number];
+  readonly [IPC_CHANNELS.allowPeerToEdit]: readonly [peer: number];
+  readonly [IPC_CHANNELS.forgetGuests]: readonly [participantIds: readonly string[]];
   readonly [IPC_CHANNELS.copyJoinCode]: readonly [];
   readonly [IPC_CHANNELS.findNextHost]: readonly [
     queue: readonly NextHostCandidate[],

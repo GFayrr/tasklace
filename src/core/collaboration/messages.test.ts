@@ -57,6 +57,7 @@ describe('messages of a shared plan', () => {
     { kind: 'presence', name: 'Léa', selectedTaskId: testId('t1') },
     { kind: 'presence', name: 'Noah', selectedTaskId: null },
     { kind: 'participants', you: GUEST, participants: ROSTER },
+    { kind: 'refused' },
   ])('reads back the message %j it wrote', (message) => {
     expect(readMessage(encodeMessage(message))).toEqual(success(message));
   });
@@ -85,6 +86,7 @@ describe('messages of a shared plan', () => {
     ['another version', Uint8Array.of(2, 2, 1), 'UNSUPPORTED_VERSION'],
     ['an unknown kind', Uint8Array.of(1, 9, 1), 'UNKNOWN_KIND'],
     ['an empty update', Uint8Array.of(1, 2), 'INVALID_CONTENT'],
+    ['a refusal with content', Uint8Array.of(1, 5, 0), 'INVALID_CONTENT'],
     ['text that is not UTF-8', Uint8Array.of(1, 3, 0xff, 0xfe), 'INVALID_CONTENT'],
     ['text that is not JSON', Uint8Array.of(1, 3, 0x7b), 'INVALID_CONTENT'],
   ] as const)('refuses %s', (_label, bytes, refusal) => {

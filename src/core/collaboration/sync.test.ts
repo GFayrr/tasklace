@@ -8,7 +8,14 @@ import { project, TEST_DOCUMENT_ID, testId, workTask } from '../testing/project-
 import { sessionOn } from '../testing/session-copy';
 import type { CollaborationMessage } from './messages';
 import { requireParticipantId, type ParticipantId } from './participants';
-import { createGuest, createHost, type Guest, type Host, type SyncEvent } from './sync';
+import {
+  createGuest,
+  createHost,
+  type Guest,
+  type Host,
+  type Outgoing,
+  type SyncEvent,
+} from './sync';
 
 const HOST = requireParticipantId('host');
 const LEA = requireParticipantId('lea');
@@ -24,7 +31,7 @@ interface Network {
 }
 
 /** Builds a host and two guests on copies of the same plan, with queues holding what each sends until it is delivered. */
-function network(): Network {
+function network(shareLater?: (share: () => void) => void): Network {
   const origin = createSharedDocument(project([workTask('a'), workTask('b')]), TEST_DOCUMENT_ID);
   const hostSession = sessionOn(origin, 1);
   const toHost: Network['toHost'] = [];
@@ -38,6 +45,7 @@ function network(): Network {
     name: 'Camille',
     send: (outgoing) => toGuests.push(outgoing),
     report: (event) => events.push({ at: HOST, event }),
+    ...(shareLater === undefined ? {} : { shareLater }),
   });
   const guests: Network['guests'] = new Map();
   [LEA, NOAH].forEach((id, index) => {
@@ -239,9 +247,80 @@ describe('a host and its guests', () => {
       [HOST, { kind: 'refused', from: LEA, reason: 'INVALID_STATE_VECTOR' }],
       [HOST, { kind: 'refused', from: LEA, reason: 'malformedUpdate' }],
       [LEA, { kind: 'refused', from: null, reason: 'malformedUpdate' }],
+      [LEA, { kind: 'unsharedChanges' }],
       [LEA, { kind: 'refused', from: null, reason: 'INVALID_STATE_VECTOR' }],
     ]);
+    expect(
+      net.toGuests.filter(({ message }) => message.kind === 'refused').map(({ to }) => to),
+    ).toEqual([LEA]);
     expect(MAX_PENDING_UPDATE_BYTES).toBe(2 ** 26);
+  });
+
+  it('tells a guest whose change reached the host after its right was taken away, so that it keeps its version apart', () => {
+    const net = network();
+    join(net, LEA, 'Léa');
+    expect(net.host.setRight(LEA, true)).toEqual(success(null));
+    deliverAll(net);
+    net.events.splice(0);
+    rename(sessionOf(net, LEA), 'a', 'Late');
+    expect(net.host.setRight(LEA, false)).toEqual(success(null));
+    deliverAll(net);
+    expect(
+      net.events.filter(({ event }) => event.kind !== 'roster').map(({ at, event }) => [at, event]),
+    ).toEqual([
+      [HOST, { kind: 'refused', from: LEA, reason: 'READ_ONLY' }],
+      [LEA, { kind: 'unsharedChanges' }],
+    ]);
+    expect(names(net.hostSession)).toEqual(['a', 'b']);
+  });
+
+  it('shares the list once for all the presences of a moment, and not at all once a fuller share or the end came first', () => {
+    const later: (() => void)[] = [];
+    const net = network((share) => later.push(share));
+    join(net, LEA, 'Léa');
+    net.toGuests.splice(0);
+    /** Counts the lists of participants sent since the last count. */
+    const lists = (): number =>
+      net.toGuests.splice(0).filter(({ message }) => message.kind === 'participants').length;
+    net.host.receive(LEA, { kind: 'presence', name: 'Léa', selectedTaskId: testId('a') });
+    net.host.receive(LEA, { kind: 'presence', name: 'Léa', selectedTaskId: testId('b') });
+    net.host.setPresence('Camille', testId('a'));
+    const before = lists();
+    later.splice(0).forEach((share) => {
+      share();
+    });
+    const after = lists();
+    net.host.receive(LEA, { kind: 'presence', name: 'Léa', selectedTaskId: null });
+    expect(net.host.setRight(LEA, true)).toEqual(success(null));
+    const right = lists();
+    net.host.receive(LEA, { kind: 'presence', name: 'Léa', selectedTaskId: testId('a') });
+    net.host.stop();
+    later.splice(0).forEach((share) => {
+      share();
+    });
+    expect([before, after, later.length, right, lists()]).toEqual([0, 1, 0, 1, 0]);
+  });
+
+  it('passes a change to every guest in one message when the transport can send one to many', () => {
+    const origin = createSharedDocument(project([workTask('a')]), TEST_DOCUMENT_ID);
+    const session = sessionOn(origin, 1);
+    const sent: Outgoing[] = [];
+    const broadcasts: [readonly ParticipantId[], string][] = [];
+    const host = createHost({
+      session,
+      roster: null,
+      tokenDigest: null,
+      hostId: HOST,
+      name: 'Camille',
+      send: (outgoing) => sent.push(outgoing),
+      report: () => undefined,
+      broadcast: (to, message) => broadcasts.push([to, message.kind]),
+    });
+    expect(host.connect(LEA, 'Léa', null, null)).toEqual(success(null));
+    expect(host.connect(NOAH, 'Noah', null, null)).toEqual(success(null));
+    sent.splice(0);
+    rename(session, 'a', 'Changed');
+    expect([broadcasts, sent]).toEqual([[[[LEA, NOAH], 'update']], []]);
   });
 
   it('refuses a newcomer already in the list, and a right for an unknown participant', () => {

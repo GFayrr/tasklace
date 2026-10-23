@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { AppState } from '../app/app-state.svelte';
   import type { GuestConnection } from '../collaboration/collaboration-state.svelte';
+  import { lostText } from '../collaboration/collaboration-text';
   import { fillMessage } from '../i18n/messages';
   import ConnectionFace from './ConnectionFace.svelte';
   import Icon from './Icon.svelte';
@@ -25,13 +26,13 @@
     connected: text.sharedBy,
     reconnecting: text.reconnectingDetail,
     offline: text.reconnectingDetail,
-    lost: text.connectionLostDetail,
+    lost: lostText(app.messages, collaboration.lastEnd, host),
   });
   const guestItems: readonly MenuItem[] = $derived([
     {
       key: 'leave',
       label: text.leave,
-      hint: fillMessage(hints[connection], { host }),
+      hint: connection === 'lost' ? hints.lost : fillMessage(hints[connection], { host }),
       select: () => void collaboration.stop(),
     },
   ]);

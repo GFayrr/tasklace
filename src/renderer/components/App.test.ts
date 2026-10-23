@@ -173,6 +173,7 @@ describe('the window that tells where changes made in read only are kept', () =>
     collaboration.listener?.({ kind: 'connected' });
     fromHost({ kind: 'participants', you: me, participants: [host, lea] });
     fromHost({ kind: 'update', update: Uint8Array.of(0, 0) });
+    fromHost({ kind: 'stateVector', vector: Uint8Array.of(0) });
     await settle();
     await settle();
     collaboration.listener?.({ kind: 'reconnecting' });
@@ -181,6 +182,7 @@ describe('the window that tells where changes made in read only are kept', () =>
     fromHost({ kind: 'stateVector', vector: Uint8Array.of(0) });
     await settle();
     fromHost({ kind: 'update', update: Uint8Array.of(0, 0) });
+    fromHost({ kind: 'stateVector', vector: Uint8Array.of(0) });
     await settle();
     await settle();
     const root = render(App, { app });

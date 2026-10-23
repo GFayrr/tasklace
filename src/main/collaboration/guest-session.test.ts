@@ -14,13 +14,14 @@ const INTRODUCTION = {
   endpoint: { addresses: [], port: 47_313 },
 };
 
-/** Builds a session on fake connections and timers the test drives by hand. */
-function session() {
+/** Builds a session on fake connections and timers the test drives by hand, joining with the code unless another secret is given. */
+function session(secret: JoinSecret = { kind: 'code', code: 'K7Q4MZ' }) {
   const connections: {
     secret: JoinSecret;
     events: GuestOptions['events'];
     closed: number;
     sent: Uint8Array[];
+    asked: number;
   }[] = [];
   const timers: { milliseconds: number; onEnd: () => void; stopped: boolean }[] = [];
   const told: CollaborationEvent[] = [];
@@ -28,7 +29,7 @@ function session() {
   const started = startGuestSession({
     address: '127.0.0.1',
     port: 47_313,
-    secret: { kind: 'code', code: 'K7Q4MZ' },
+    secret,
     introduction: INTRODUCTION,
     startTimer: (milliseconds, onEnd) => {
       const timer = { milliseconds, onEnd, stopped: false };
@@ -43,12 +44,16 @@ function session() {
         events: options.events,
         closed: 0,
         sent: [] as Uint8Array[],
+        asked: 0,
       };
       connections.push(connection);
       return {
         send: (message) => {
           connection.sent.push(message);
           return success(null);
+        },
+        askIdentity: () => {
+          connection.asked += 1;
         },
         close: () => {
           connection.closed += 1;
@@ -134,7 +139,6 @@ describe('a window joined to a host', () => {
     'CODE_REPLACED',
     'WRONG_KEY',
     'IDENTITY_TAKEN',
-    'REMOVED',
     'NOT_PRIVATE',
     'UNSUPPORTED_VERSION',
     'MALFORMED',
@@ -160,6 +164,28 @@ describe('a window joined to a host', () => {
     expect([before.told, withoutKey.told.at(-1)]).toEqual([
       [{ kind: 'ended', reason: 'UNREACHABLE' }],
       { kind: 'ended', reason: 'WIRE_CLOSED' },
+    ]);
+  });
+
+  it('keeps trying a host it joins with the key until it answers, as when looking for the next host', () => {
+    const search = session({ kind: 'key', key: KEY });
+    search.lose('UNREACHABLE');
+    search.fire(1_000);
+    search.lose('WIRE_CLOSED');
+    search.fire(2_000);
+    search.admit();
+    expect([
+      search.told,
+      search.connections.map((each) => each.secret),
+      search.ended.mock.calls,
+    ]).toEqual([
+      [{ kind: 'reconnecting' }, { kind: 'connected' }],
+      [
+        { kind: 'key', key: KEY },
+        { kind: 'key', key: KEY },
+        { kind: 'key', key: KEY },
+      ],
+      [],
     ]);
   });
 

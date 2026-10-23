@@ -275,6 +275,18 @@ test('shows where each person is, shares the changes once the host lets a guest 
   await picture(guest.page, 'new-host');
 });
 
+/** Lets a guest edit from the window of the host, then closes that window, the next host being one of the people allowed to edit. */
+async function letEdit(host: Page, guest: Page, name: string): Promise<void> {
+  await host.getByRole('button', { name: 'Shared, connected' }).click();
+  const dialog = host.getByRole('dialog', { name: /^Share / });
+  await dialog
+    .getByRole('radiogroup', { name: `What ${name} may do` })
+    .getByText('Can edit')
+    .click();
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await expect(guest.locator('.status-bar .read-only')).toHaveCount(0);
+}
+
 test('lets the oldest guest host once the host stops, the other guest finding it on its own', async () => {
   const camille = await launch();
   const { code, port } = await shareNewPlan(camille.page);
@@ -287,6 +299,7 @@ test('lets the oldest guest host once the host stops, the other guest finding it
   const noah = await launch();
   await joinFrom(noah.page, 'Noah', { port, code });
   await expect(camille.page.locator('.status-bar .names')).toHaveText('Camille (host), Léa, Noah');
+  await letEdit(camille.page, lea.page, 'Léa');
   await camille.page.getByRole('button', { name: 'Shared, connected' }).click();
   await camille.page
     .getByRole('dialog', { name: 'Share “Untitled project”' })
@@ -353,6 +366,7 @@ test('lets the oldest guest host once the computer of the host is switched off, 
   const noah = await launch();
   await joinFrom(noah.page, 'Noah', { port: String(relay.port), code });
   await expect(camille.page.locator('.status-bar .names')).toHaveText('Camille (host), Léa, Noah');
+  await letEdit(camille.page, lea.page, 'Léa');
   relay.silence();
   await switchOff(camille);
   await expect(

@@ -420,7 +420,7 @@ async function keepOwnChanges(
   sender: WebContents,
   value: unknown,
   name: unknown,
-): Promise<BridgeResult<null>> {
+): Promise<BridgeResult<SavedProject>> {
   const state = readProjectState(value) ?? refuseMessage();
   const planName = readSuggestedName(name) ?? refuseMessage();
   if (projects.get(sender) === undefined) {
@@ -436,9 +436,9 @@ async function keepOwnChanges(
     'tasklace',
     MESSAGES.projects.untitled,
   );
-  const path = await freePathIn(folder, fileName);
-  const kept = await saveInOrder(() =>
-    services.runTask({
+  const kept = await saveInOrder(async () => {
+    const path = await freePathIn(folder, fileName);
+    const written = await services.runTask({
       kind: 'keepSharedCopy',
       state,
       documentId: requireDocumentId(randomUUID()),
@@ -446,14 +446,15 @@ async function keepOwnChanges(
       path,
       localCopyFolder: join(services.userDataFolder, LOCAL_COPY_FOLDER),
       savedAt: new Date(),
-    }),
-  );
+    });
+    return written.ok ? success({ path, localCopySaved: written.value.localCopySaved }) : written;
+  });
   if (!kept.ok) {
     return kept;
   }
-  keptChanges.set(sender, path);
-  await rememberRecentProject(services, path);
-  return success(null);
+  keptChanges.set(sender, kept.value.path);
+  await rememberRecentProject(services, kept.value.path);
+  return success({ localCopySaved: kept.value.localCopySaved });
 }
 
 /** Opens the plan a window last kept the changes of its person in. */

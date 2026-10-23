@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { HEARTBEAT_MILLISECONDS } from '../../core/limits';
 import { watchHeartbeat, type HeartbeatSocket } from './heartbeat';
 import type { StartTimer } from './secure-connection';
@@ -63,12 +63,34 @@ describe('the heartbeat of a connection', () => {
     expect(socket.done).toEqual(['ping', 'ping']);
   });
 
-  it('cuts a socket that sent nothing since the previous ping, and pings no more', () => {
+  it('cuts a socket silent for two pings, once what already arrived was read, logs it and pings no more', () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const socket = watched();
     socket.beat();
     socket.beat();
-    expect(socket.done).toEqual(['ping', 'terminate']);
-    expect(socket.timers).toHaveLength(2);
+    socket.beat();
+    expect(socket.done).toEqual(['ping', 'ping']);
+    socket.beat();
+    expect([socket.done, warnings.mock.calls]).toEqual([
+      ['ping', 'ping', 'terminate'],
+      [['A connection to the shared plan stayed silent and was cut.']],
+    ]);
+    expect(socket.timers.map((timer) => timer.milliseconds)).toEqual([
+      HEARTBEAT_MILLISECONDS,
+      HEARTBEAT_MILLISECONDS,
+      HEARTBEAT_MILLISECONDS,
+      0,
+    ]);
+  });
+
+  it('keeps a socket whose answer was waiting while this process was busy', () => {
+    const socket = watched();
+    socket.beat();
+    socket.beat();
+    socket.beat();
+    socket.emit('pong');
+    socket.beat();
+    expect(socket.done).toEqual(['ping', 'ping', 'ping']);
   });
 
   it('stops beating once the socket closes', () => {

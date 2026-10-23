@@ -71,6 +71,8 @@ interface HostOptions {
   readonly roster: Roster | null;
   readonly send: (outgoing: Outgoing) => void;
   readonly report: (event: SyncEvent) => void;
+  readonly shareLater?: (share: () => void) => void;
+  readonly broadcast?: (to: readonly ParticipantId[], message: CollaborationMessage) => void;
 }
 
 interface GuestOptions {
@@ -89,16 +91,21 @@ export function createHost(options: HostOptions): Host {
   const { session, hostId, send, report } = options;
   let roster = options.roster ?? startRoster(hostId, options.name, options.tokenDigest);
   const mergers = new Map<ParticipantId, Merger>();
-  /** Sends a message to every participant but the host. */
+  /** Sends a message to every participant but the host, at once when the transport can send one message to many. */
   const toEveryone = (message: CollaborationMessage): void => {
-    for (const participant of roster.participants) {
-      if (participant.id !== hostId) {
-        send({ to: participant.id, message });
-      }
+    const others = roster.participants.filter(({ id }) => id !== hostId).map(({ id }) => id);
+    if (options.broadcast !== undefined) {
+      options.broadcast(others, message);
+      return;
+    }
+    for (const to of others) {
+      send({ to, message });
     }
   };
+  let presenceQueued = false;
   /** Sends every participant the list of participants, each told which one it is. */
   const shareRoster = (): void => {
+    presenceQueued = false;
     for (const participant of roster.participants) {
       if (participant.id !== hostId) {
         send({
@@ -109,16 +116,37 @@ export function createHost(options: HostOptions): Host {
     }
     report({ kind: 'roster', you: hostId, participants: roster.participants });
   };
+  /** Shares the list once for all the presences of a moment, so that a participant sending many cannot make the host send the list to everyone each time. */
+  const sharePresence = (): void => {
+    if (options.shareLater === undefined) {
+      shareRoster();
+      return;
+    }
+    if (presenceQueued) {
+      return;
+    }
+    presenceQueued = true;
+    options.shareLater(() => {
+      if (presenceQueued) {
+        shareRoster();
+      }
+    });
+  };
   const stopUpdates = session.onUpdate((update) => {
     toEveryone({ kind: 'update', update });
   });
+  /** Tells a participant the host refused its change, so that it keeps its version apart and takes the plan of the host again. */
+  const refuse = (from: ParticipantId, reason: SyncRefusal): void => {
+    report({ kind: 'refused', from, reason });
+    send({ to: from, message: { kind: 'refused' } });
+  };
   /** Merges a change a participant sent, keeping an incomplete one with the next and asking it for what is missing. */
   const mergeFrom = (from: ParticipantId, merger: Merger, update: Uint8Array): void => {
     const merged = merger.merge(update);
     if (!merged.ok && merged.error === 'incompleteUpdate') {
       send({ to: from, message: { kind: 'stateVector', vector: session.encodeStateVector() } });
     } else if (!merged.ok) {
-      report({ kind: 'refused', from, reason: merged.error });
+      refuse(from, merged.error);
     }
   };
   return {
@@ -161,12 +189,12 @@ export function createHost(options: HostOptions): Host {
           if (mayEdit(roster, from)) {
             mergeFrom(from, merger, update);
           } else {
-            report({ kind: 'refused', from, reason: 'READ_ONLY' });
+            refuse(from, 'READ_ONLY');
           }
         },
         presence: (name, selectedTaskId) => {
           roster = updatePresence(roster, from, { name, selectedTaskId });
-          shareRoster();
+          sharePresence();
         },
         unexpected: () => {
           report({ kind: 'refused', from, reason: 'UNEXPECTED_MESSAGE' });
@@ -184,9 +212,12 @@ export function createHost(options: HostOptions): Host {
     },
     setPresence: (name, selectedTaskId) => {
       roster = updatePresence(roster, hostId, { name, selectedTaskId });
-      shareRoster();
+      sharePresence();
     },
-    stop: stopUpdates,
+    stop: () => {
+      presenceQueued = false;
+      stopUpdates();
+    },
   };
 }
 
@@ -197,7 +228,7 @@ interface HostHandlers {
   readonly unexpected: () => void;
 }
 
-/** Hands a message received by the host to the handler of its kind, a list of participants being unexpected since only the host sends one. */
+/** Hands a message received by the host to the handler of its kind, a list of participants or a refusal being unexpected since only the host sends one. */
 function receiveAtHost(message: CollaborationMessage, handlers: HostHandlers): void {
   switch (message.kind) {
     case 'stateVector':
@@ -210,6 +241,7 @@ function receiveAtHost(message: CollaborationMessage, handlers: HostHandlers): v
       handlers.presence(message.name, message.selectedTaskId);
       return;
     case 'participants':
+    case 'refused':
       handlers.unexpected();
   }
 }
@@ -313,13 +345,14 @@ export function createGuest(options: GuestOptions): Guest {
       unshared = true;
     }
   });
-  /** Merges what the host sent, asking it again for what is missing when the update depends on changes not received. */
+  /** Merges what the host sent, asking it again for what is missing when the update depends on changes not received, and, when it cannot be merged, telling that this copy no longer follows the plan of the host. */
   const mergeFromHost = (update: Uint8Array): void => {
     const merged = merger.merge(update);
     if (!merged.ok && merged.error === 'incompleteUpdate') {
       send({ kind: 'stateVector', vector: session.encodeStateVector() });
     } else if (!merged.ok) {
       report({ kind: 'refused', from: null, reason: merged.error });
+      report({ kind: 'unsharedChanges' });
     }
   };
   /** Sends the host what it lacks while this participant may edit, or tells that changes made while unable to share stay here. */
@@ -360,6 +393,9 @@ export function createGuest(options: GuestOptions): Guest {
             (participant) => participant.id === message.you && participant.canEdit,
           );
           report({ kind: 'roster', you: message.you, participants: message.participants });
+          return;
+        case 'refused':
+          report({ kind: 'unsharedChanges' });
           return;
         case 'presence':
           report({ kind: 'refused', from: null, reason: 'UNEXPECTED_MESSAGE' });

@@ -1,4 +1,4 @@
-import { tokenDigestOf } from '../../core/collaboration/secure/link';
+import { tokenDigestOf, type Introduction } from '../../core/collaboration/secure/link';
 import { sharingIdOf, shouldYield } from '../../core/collaboration/succession';
 import { failure, success, type Result } from '../../core/result';
 import type { CollaborationEvent } from '../../preload/bridge-contract';
@@ -11,11 +11,13 @@ export interface HostingOptions {
   readonly port: number;
   readonly planKey: Uint8Array | null;
   readonly knownTokens: ReadonlyMap<string, string>;
+  readonly identity: Introduction;
   readonly rank: number;
   readonly planName: string;
   readonly hostName: string;
   readonly instance: string;
   readonly startTimer: StartTimer;
+  readonly now: () => number;
   readonly mdns: () => Mdns;
   readonly tell: (event: CollaborationEvent) => void;
   readonly olderHost: (host: NearbyPlan, planKey: Uint8Array) => void;
@@ -27,19 +29,19 @@ export interface Hosting {
   readonly stop: () => Promise<void>;
 }
 
-/** Hosts a shared plan: starts the server, passes to the page what happens to its guests, announces the plan with the identifier of its key and its rank, again when the key changes, and tells of each older host of the same plan heard. */
+/** Hosts a shared plan: starts the server, passes to the page what happens to its guests, announces the plan with the identifier of its key and its rank, and tells of each older host of the same plan heard. */
 export async function startHosting(
   options: HostingOptions,
 ): Promise<Result<Hosting, ListenFailure>> {
   const peers = new Map<number, Peer>();
-  let announcement: (() => Promise<void>) | null = null;
-  let listeningPort = options.port;
   const started = await startHostServer({
     port: options.port,
     planKey: options.planKey,
     knownTokens: options.knownTokens,
+    identity: options.identity,
     startTimer: options.startTimer,
     randomBytes: systemRandomBytes,
+    now: options.now,
     events: {
       joined: (peer, introduction) => {
         peers.set(peer.number, peer);
@@ -62,25 +64,20 @@ export async function startHosting(
       codeChanged: (code) => {
         options.tell({ kind: 'codeChanged', code });
       },
-      planKeyChanged: (planKey) => {
-        void announcement?.();
-        announcement = announceSafely(options, listeningPort, planKey);
-      },
     },
   });
   if (!started.ok) {
     return failure(started.error);
   }
   const server = started.value;
-  listeningPort = server.port;
-  announcement = announceSafely(options, listeningPort, server.planKey());
+  const announcement = announceSafely(options, server.port, server.planKey());
   const stopWatching = watchOlderHosts(options, server);
   return success({
     server,
     peers,
     stop: async () => {
       stopWatching();
-      await announcement?.();
+      await announcement();
       await server.close();
     },
   });

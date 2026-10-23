@@ -21,6 +21,7 @@ vi.mock('electron', async () => {
 const ipcMain = electronIpcMain as unknown as FakeIpcMain;
 const trusted = vi.fn();
 const forget = vi.fn();
+const failed = vi.fn();
 const FIRST_BUTTON = 0;
 const SECOND_BUTTON = 1;
 const MICROTASK_STEPS = 10;
@@ -58,9 +59,10 @@ const projectKind: { current: WindowProjectKind } = { current: 'withFile' };
 beforeEach(() => {
   projectKind.current = 'withFile';
   window = new FakeWindow();
-  flushBeforeClosing(window as unknown as BrowserWindow, () => projectKind.current, forget);
+  flushBeforeClosing(window as unknown as BrowserWindow, () => projectKind.current, forget, failed);
   trusted.mockReset();
   forget.mockReset();
+  failed.mockReset();
   questions.show.mockReset();
 });
 
@@ -116,7 +118,7 @@ describe('flushBeforeClosing', () => {
 
   it('closes only the window whose page agreed, and ignores an agreement that comes after a refusal', () => {
     const other = new FakeWindow();
-    flushBeforeClosing(other as unknown as BrowserWindow, () => 'withFile', forget);
+    flushBeforeClosing(other as unknown as BrowserWindow, () => 'withFile', forget, failed);
     window.close();
     other.close();
     ipcMain.send(IPC_CHANNELS.flushDone, { sender: other.webContents }, true);
@@ -218,7 +220,7 @@ describe('a page that crashes', () => {
     await settle();
     expect(window.webContents.reloads).toBe(0);
     const broken = new FakeWindow();
-    flushBeforeClosing(broken as unknown as BrowserWindow, () => 'withFile', forget);
+    flushBeforeClosing(broken as unknown as BrowserWindow, () => 'withFile', forget, failed);
     questions.show.mockRejectedValueOnce(new Error('no dialog'));
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
@@ -291,6 +293,15 @@ describe('a page that fails', () => {
     expect(logged).toEqual([['The page of a window stopped:', details]]);
   });
 
+  it('tells at once of a page that crashed or lost its bridge, before any answer to the question', async () => {
+    await logsOf(async () => {
+      window.webContents.emit('render-process-gone', {}, { reason: 'crashed' });
+      window.webContents.emit('preload-error', {}, '/app/preload.cjs', new Error('bridge failed'));
+      await settle();
+    });
+    expect(failed.mock.calls).toEqual([[window.webContents], [window.webContents]]);
+  });
+
   it('logs a first load that failed without asking anything, the failed start of the application reporting it, and lets the window close', async () => {
     const logged = await logsOf(async () => {
       window.webContents.emit(
@@ -342,6 +353,7 @@ describe('a page that fails', () => {
     ]);
     expect(questionsShown()).toEqual([en.pageProblems.startFailedBody]);
     expect([window.webContents.reloads, forget.mock.calls]).toEqual([1, [[window.webContents]]]);
+    expect(failed.mock.calls).toEqual([[window.webContents]]);
     window.close();
     expect([window.closed, window.webContents.sent]).toEqual([true, []]);
   });

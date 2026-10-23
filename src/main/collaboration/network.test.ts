@@ -1,4 +1,5 @@
 import { request } from 'node:http';
+import { spacedClock } from '../testing/plan-host';
 import { createServer } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -12,6 +13,7 @@ import {
 import {
   MAX_DEPARTED_PARTICIPANTS,
   MAX_OPEN_HANDSHAKES,
+  MAX_READ_ONLY_MESSAGE_BYTES,
   MAX_PARTICIPANTS,
 } from '../../core/limits';
 import { success } from '../../core/result';
@@ -64,6 +66,8 @@ async function host(
   port?: number,
   planKey: Uint8Array | null = null,
   knownTokens: ReadonlyMap<string, string> = new Map(),
+  now: () => number = spacedClock(),
+  identity: Introduction | null = null,
 ) {
   const joined: [Peer, Introduction][] = [];
   const messages: [number, Uint8Array][] = [];
@@ -75,12 +79,13 @@ async function host(
     knownTokens,
     startTimer: noTimer,
     randomBytes: systemRandomBytes,
+    now,
+    identity,
     events: {
       joined: (peer, introduction) => joined.push([peer, introduction]),
       message: (peer, message) => messages.push([peer.number, message]),
       left: (peer, reason) => left.push([peer.number, reason]),
       codeChanged: (code) => codes.push(code),
-      planKeyChanged: () => undefined,
     },
   });
   if (!started.ok) {
@@ -95,6 +100,7 @@ function guest(port: number, secret: string | JoinSecret, introduction: Introduc
   const messages: Uint8Array[] = [];
   const ends: GuestEnd[] = [];
   const keys: Uint8Array[] = [];
+  const identities: (Introduction | null)[] = [];
   let isOpen = false;
   const client = connectAsGuest({
     address: LOOPBACK,
@@ -109,10 +115,11 @@ function guest(port: number, secret: string | JoinSecret, introduction: Introduc
       },
       message: (message) => messages.push(message),
       planKey: (key) => keys.push(key),
+      identity: (host) => identities.push(host),
       ended: (reason) => ends.push(reason),
     },
   });
-  return { client, messages, ends, keys, isOpen: () => isOpen };
+  return { client, messages, ends, keys, identities, isOpen: () => isOpen };
 }
 
 describe('a shared plan over the network', () => {
@@ -153,6 +160,77 @@ describe('a shared plan over the network', () => {
     const late = guest(shared.server.port, first);
     await until(() => late.ends.length === 1);
     expect(late.ends).toEqual(['WRONG_CODE']);
+  });
+
+  it('tells who hosts the plan only to a guest allowed to edit, logging any other guest asking', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const hostIdentity = {
+      ...LEA,
+      participantId: requireParticipantId('camille'),
+      name: 'Camille',
+    };
+    const shared = await host(undefined, null, new Map(), spacedClock(), hostIdentity);
+    const lea = guest(shared.server.port, shared.server.code());
+    await until(() => lea.isOpen() && shared.joined.length === 1);
+    lea.client.askIdentity();
+    await until(() => warnings.mock.calls.length === 1);
+    shared.joined[0]?.[0].allowEditing();
+    lea.client.askIdentity();
+    await until(() => lea.identities.length === 1);
+    expect([warnings.mock.calls, lea.identities]).toEqual([
+      [['A guest not allowed to know who hosts the plan asked for it.']],
+      [hostIdentity],
+    ]);
+  });
+
+  it('takes from a guest only small messages until the host lets it edit', async () => {
+    const shared = await host();
+    const large = new Uint8Array(MAX_READ_ONLY_MESSAGE_BYTES + 1);
+    const reader = guest(shared.server.port, shared.server.code());
+    await until(() => reader.isOpen() && shared.joined.length === 1);
+    expect(reader.client.send(large)).toEqual(success(null));
+    await until(() => shared.left.length === 1);
+    const editor = guest(shared.server.port, shared.server.code());
+    await until(() => editor.isOpen() && shared.joined.length === 2);
+    shared.joined[1]?.[0].allowEditing();
+    expect(editor.client.send(large)).toEqual(success(null));
+    await until(() => shared.messages.length === 1);
+    expect([shared.left, shared.messages.map(([peer, message]) => [peer, message.length])]).toEqual(
+      [[[1, 'TOO_LARGE']], [[2, MAX_READ_ONLY_MESSAGE_BYTES + 1]]],
+    );
+  });
+
+  it('makes an address that typed wrong codes in a row wait before trying again, telling it so', async () => {
+    const shared = await host(undefined, null, new Map(), () => 0);
+    const wrongCode = shared.server.code() === 'AAAAAA' ? 'BBBBBB' : 'AAAAAA';
+    const ends: GuestEnd[] = [];
+    for (const secret of [wrongCode, wrongCode, shared.server.code()]) {
+      const attempt = guest(shared.server.port, secret);
+      await until(() => attempt.ends.length === 1);
+      ends.push(...attempt.ends);
+    }
+    expect(ends).toEqual(['WRONG_CODE', 'WRONG_CODE', 'TRY_LATER']);
+  });
+
+  it('does not count against a new code the wrong codes tried against the one it replaced', async () => {
+    const shared = await host();
+    const first = shared.server.code();
+    const wrong = first === 'AAAAAA' ? 'BBBBBB' : 'AAAAAA';
+    const together = Array.from({ length: WRONG_CODES_BEFORE_NEW_CODE + 1 }, () =>
+      guest(shared.server.port, wrong),
+    );
+    await until(() => together.every((attempt) => attempt.ends.length === 1));
+    const ends = together.flatMap((attempt) => attempt.ends).toSorted();
+    const second = shared.server.code();
+    const next = second === 'AAAAAA' ? 'BBBBBB' : 'AAAAAA';
+    for (let attempt = 0; attempt < WRONG_CODES_BEFORE_NEW_CODE - 1; attempt += 1) {
+      const wrongAgain = guest(shared.server.port, next);
+      await until(() => wrongAgain.ends.length === 1);
+    }
+    expect([ends, shared.codes.length]).toEqual([
+      ['CODE_REPLACED', 'CODE_REPLACED', 'WRONG_CODE', 'WRONG_CODE', 'WRONG_CODE', 'WRONG_CODE'],
+      1,
+    ]);
   });
 
   it('gives each guest the key of the plan, which lets it come back once the code changed, a wrong key not counting as a wrong code', async () => {
@@ -196,35 +274,40 @@ describe('a shared plan over the network', () => {
     expect(shared.joined.map(([, introduction]) => introduction.name)).toEqual(['Léa', 'Léa']);
   });
 
-  it('gives the guests still in a new key when the host removes one, whose key, code and identifier then open nothing', async () => {
+  it('closes the old connection of a person who comes back before the host saw it end, without refusing that person or changing the key', async () => {
     const shared = await host(undefined, PLAN_KEY);
-    const noahIntroduction = {
-      ...LEA,
-      participantId: requireParticipantId('noah'),
-      token: 'cd'.repeat(32),
-    };
-    const lea = guest(shared.server.port, shared.server.code());
-    const noah = guest(shared.server.port, shared.server.code(), noahIntroduction);
-    await until(() => lea.keys.length === 1 && noah.keys.length === 1);
-    const leaPeer = shared.joined.find(([, introduction]) => introduction.name === 'Léa')?.[0];
-    leaPeer?.remove();
-    await until(() => lea.ends.length === 1 && noah.keys.length === 2);
-    const newKey = noah.keys[1] ?? new Uint8Array();
-    expect([lea.ends, Buffer.from(newKey).equals(Buffer.from(PLAN_KEY))]).toEqual([
-      ['REMOVED'],
-      false,
+    const first = guest(shared.server.port, shared.server.code());
+    await until(() => first.keys.length === 1);
+    const second = guest(shared.server.port, { kind: 'key', key: PLAN_KEY });
+    await until(() => second.keys.length === 1 && first.ends.length === 1);
+    expect([first.ends, shared.left, shared.joined.map(([peer]) => peer.number)]).toEqual([
+      ['WIRE_CLOSED'],
+      [[1, 'CLOSED']],
+      [1, 2],
     ]);
-    const withOldKey = guest(shared.server.port, { kind: 'key', key: PLAN_KEY });
-    const withCode = guest(shared.server.port, shared.server.code());
-    await until(() => withOldKey.ends.length === 1 && withCode.ends.length === 1);
-    expect([withOldKey.ends, withCode.ends]).toEqual([['WRONG_KEY'], ['IDENTITY_TAKEN']]);
-    noah.client.close();
-    const noahBack = guest(shared.server.port, { kind: 'key', key: newKey }, noahIntroduction);
-    await until(() => noahBack.isOpen());
+    second.client.close();
+    await until(() => shared.left.length === 2);
+    const third = guest(shared.server.port, { kind: 'key', key: PLAN_KEY });
+    await until(() => third.keys.length === 1);
+    expect([third.ends, Buffer.from(third.keys[0] ?? []).equals(Buffer.from(PLAN_KEY))]).toEqual([
+      [],
+      true,
+    ]);
+  });
+
+  it('tells a guest the host turned it away, without refusing the person, who may come back with the code', async () => {
+    const shared = await host(undefined, PLAN_KEY);
+    const lea = guest(shared.server.port, shared.server.code());
+    await until(() => lea.keys.length === 1);
+    shared.joined[0]?.[0].turnAway();
+    await until(() => lea.ends.length === 1);
+    const back = guest(shared.server.port, shared.server.code());
+    await until(() => back.keys.length === 1);
+    expect([lea.ends, back.ends, shared.codes]).toEqual([['TURNED_AWAY'], [], []]);
   });
 
   it(
-    'refuses any new identifier once it remembers as many tokens as it may, never forgetting one',
+    'refuses any new identifier once it remembers as many tokens as it may, until the host forgets someone who left, never someone connected',
     { timeout: MANY_CONNECTIONS_TIMEOUT_MS },
     async () => {
       const shared = await host();
@@ -248,6 +331,18 @@ describe('a shared plan over the network', () => {
           shared.joined.length === MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS + 1,
       );
       expect(late.ends).toEqual(['IDENTITY_TAKEN']);
+      first.client.close();
+      await until(() => shared.left.length === MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS + 1);
+      shared.server.forget(['p1', 'p0']);
+      const newcomer = guest(shared.server.port, shared.server.code());
+      await until(() => newcomer.isOpen());
+      shared.server.forget(['lea']);
+      const impostor = guest(shared.server.port, shared.server.code(), {
+        ...LEA,
+        token: 'cd'.repeat(32),
+      });
+      await until(() => impostor.ends.length === 1);
+      expect(impostor.ends).toEqual(['IDENTITY_TAKEN']);
     },
   );
 
@@ -394,6 +489,24 @@ describe('host addresses', () => {
         },
       }),
     ).toThrow('Not a host address: a b:1');
+  });
+
+  it('ends for good, as a fault of the host, a connection whose host sends a frame larger than any the channel makes', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const port = await freePort();
+    const faulty = new WebSocketServer({ host: LOOPBACK, port });
+    faulty.on('connection', (socket) => {
+      socket.send(new Uint8Array(MAX_SEALED_FRAME_BYTES + 1));
+    });
+    const lea = guest(port, 'K7Q4MZ');
+    await until(() => lea.ends.length === 1);
+    await new Promise((resolve) => {
+      faulty.close(resolve);
+    });
+    expect([lea.ends, warnings.mock.calls]).toEqual([
+      ['MALFORMED'],
+      [['The connection to the shared plan failed: Max payload size exceeded']],
+    ]);
   });
 
   it('closes and logs a guest that sends a frame larger than any the channel makes', async () => {

@@ -16,7 +16,7 @@ export interface Aead {
 export type SealRefusal = 'TOO_LARGE' | 'WORN_OUT';
 export type ChannelBreak = 'TAMPERED' | 'TOO_LARGE' | 'INVALID_CONTENT' | 'WORN_OUT' | 'BROKEN';
 
-export type ChannelKind = 'plan' | 'planKey';
+export type ChannelKind = 'plan' | 'planKey' | 'identity';
 
 export interface ChannelMessage {
   readonly kind: ChannelKind;
@@ -28,7 +28,16 @@ export interface SecureChannel {
     message: Uint8Array,
     kind: ChannelKind,
   ) => Result<readonly Uint8Array[], SealRefusal>;
+  readonly sealCompressed: (
+    compressed: CompressedMessage,
+  ) => Result<readonly Uint8Array[], SealRefusal>;
   readonly open: (frame: Uint8Array) => Result<ChannelMessage | null, ChannelBreak>;
+  readonly allowMessagesUpTo: (bytes: number) => void;
+}
+
+export interface CompressedMessage {
+  readonly kind: ChannelKind;
+  readonly bytes: Uint8Array;
 }
 
 export const NONCE_BYTES = 12;
@@ -39,14 +48,28 @@ export const MAX_SEALED_FRAME_BYTES = FRAME_HEADER_BYTES + CHANNEL_CHUNK_BYTES +
 const COUNTER_OFFSET = NONCE_BYTES - BigUint64Array.BYTES_PER_ELEMENT;
 const LAST_FRAME_BIT = 1;
 const PLAN_KEY_BIT = 2;
-const KNOWN_HEADER_BITS = LAST_FRAME_BIT | PLAN_KEY_BIT;
+const IDENTITY_BIT = 4;
+const KIND_BITS = PLAN_KEY_BIT | IDENTITY_BIT;
+const KNOWN_HEADER_BITS = LAST_FRAME_BIT | KIND_BITS;
+const KIND_OF_BITS: ReadonlyMap<number, ChannelKind> = new Map([
+  [0, 'plan'],
+  [PLAN_KEY_BIT, 'planKey'],
+  [IDENTITY_BIT, 'identity'],
+]);
+const BITS_OF_KIND: Readonly<Record<ChannelKind, number>> = {
+  plan: 0,
+  planKey: PLAN_KEY_BIT,
+  identity: IDENTITY_BIT,
+};
 
-/** Opens an encrypted channel over the keys of a handshake: each message is compressed, cut into frames of one mebibyte at most telling its kind, sealed with a counter as nonce, so that a frame changed, lost, repeated or reordered breaks the channel. */
+/** Opens an encrypted channel over the keys of a handshake: each message is compressed, cut into frames of one mebibyte telling its kind and sealed with a counter as nonce, a frame changed, lost, repeated or reordered, or too large, breaking it. */
 export function openSecureChannel(
   keys: SessionKeys,
   aead: Aead,
   compression: Compressor,
+  messageLimit = MAX_COLLABORATION_MESSAGE_BYTES,
 ): SecureChannel {
+  let limit = messageLimit;
   let sent = 0;
   let received = 0;
   let broken = false;
@@ -66,32 +89,38 @@ export function openSecureChannel(
     parts = [];
     partBytes = 0;
     partKind = null;
-    const message = compression.decompress(joined, MAX_COLLABORATION_MESSAGE_BYTES);
+    const message = compression.decompress(joined, limit);
     if (message.ok) {
       return success({ kind, message: message.value });
     }
     return breakWith(message.error === 'OUTPUT_TOO_LARGE' ? 'TOO_LARGE' : 'INVALID_CONTENT');
   };
+  /** Cuts a compressed message into frames and seals each with the next counter, refusing once the counter would run out. */
+  const sealFrames = ({
+    kind,
+    bytes,
+  }: CompressedMessage): Result<readonly Uint8Array[], SealRefusal> => {
+    const chunks = chunksOf(bytes);
+    if (sent + chunks.length > MAX_CHANNEL_FRAMES) {
+      return failure('WORN_OUT');
+    }
+    return success(
+      chunks.map((chunk, index) => {
+        const plain = new Uint8Array(FRAME_HEADER_BYTES + chunk.length);
+        plain[0] = headerOf(kind, index === chunks.length - 1);
+        plain.set(chunk, FRAME_HEADER_BYTES);
+        const frame = aead.seal(keys.send, nonceOf(sent), plain);
+        sent += 1;
+        return frame;
+      }),
+    );
+  };
   return {
     seal: (message, kind) => {
-      if (message.length > MAX_COLLABORATION_MESSAGE_BYTES) {
-        return failure('TOO_LARGE');
-      }
-      const chunks = chunksOf(compression.compress(message));
-      if (sent + chunks.length > MAX_CHANNEL_FRAMES) {
-        return failure('WORN_OUT');
-      }
-      return success(
-        chunks.map((chunk, index) => {
-          const plain = new Uint8Array(FRAME_HEADER_BYTES + chunk.length);
-          plain[0] = headerOf(kind, index === chunks.length - 1);
-          plain.set(chunk, FRAME_HEADER_BYTES);
-          const frame = aead.seal(keys.send, nonceOf(sent), plain);
-          sent += 1;
-          return frame;
-        }),
-      );
+      const compressed = compressMessage(message, kind, compression);
+      return compressed.ok ? sealFrames(compressed.value) : compressed;
     },
+    sealCompressed: (compressed) => sealFrames(compressed),
     open: (frame) => {
       if (broken) {
         return failure('BROKEN');
@@ -105,27 +134,47 @@ export function openSecureChannel(
           : aead.open(keys.receive, nonceOf(received), frame);
       received += 1;
       const header = plain?.[0];
-      if (plain === null || header === undefined || (header & ~KNOWN_HEADER_BITS) !== 0) {
+      const kind = header === undefined ? undefined : KIND_OF_BITS.get(header & KIND_BITS);
+      if (
+        plain === null ||
+        header === undefined ||
+        (header & ~KNOWN_HEADER_BITS) !== 0 ||
+        kind === undefined
+      ) {
         return breakWith('TAMPERED');
       }
-      const kind: ChannelKind = (header & PLAN_KEY_BIT) === 0 ? 'plan' : 'planKey';
       if (partKind !== null && partKind !== kind) {
         return breakWith('TAMPERED');
       }
       partKind = kind;
       partBytes += plain.length - FRAME_HEADER_BYTES;
-      if (partBytes > MAX_CHANNEL_COMPRESSED_BYTES) {
+      if (partBytes > Math.min(MAX_CHANNEL_COMPRESSED_BYTES, limit + CHANNEL_CHUNK_BYTES)) {
         return breakWith('TOO_LARGE');
       }
       parts.push(plain.subarray(FRAME_HEADER_BYTES));
       return (header & LAST_FRAME_BIT) === 0 ? success(null) : finish(kind);
     },
+    allowMessagesUpTo: (bytes) => {
+      limit = Math.max(limit, Math.min(bytes, MAX_COLLABORATION_MESSAGE_BYTES));
+    },
   };
+}
+
+/** Compresses a message once, so that it can be sealed for several channels, refusing a message above the limit. */
+export function compressMessage(
+  message: Uint8Array,
+  kind: ChannelKind,
+  compression: Compressor,
+): Result<CompressedMessage, 'TOO_LARGE'> {
+  if (message.length > MAX_COLLABORATION_MESSAGE_BYTES) {
+    return failure('TOO_LARGE');
+  }
+  return success({ kind, bytes: compression.compress(message) });
 }
 
 /** Writes the header of a frame: the kind of its message and whether it is the last frame of it. */
 function headerOf(kind: ChannelKind, isLast: boolean): number {
-  return (kind === 'planKey' ? PLAN_KEY_BIT : 0) | (isLast ? LAST_FRAME_BIT : 0);
+  return BITS_OF_KIND[kind] | (isLast ? LAST_FRAME_BIT : 0);
 }
 
 /** Builds the nonce of a frame from its number, the two directions never sharing a key. */

@@ -102,6 +102,10 @@ async function renderJoined(canEdit = false) {
     kind: 'hostMessage',
     message: encodeMessage({ kind: 'update', update: Uint8Array.of(0, 0) }),
   });
+  collaboration.listener?.({
+    kind: 'hostMessage',
+    message: encodeMessage({ kind: 'stateVector', vector: Uint8Array.of(0) }),
+  });
   await settle();
   await settle();
   const root = render(App, { app });
@@ -193,6 +197,10 @@ describe('the chip of the connection', () => {
       kind: 'hostMessage',
       message: encodeMessage({ kind: 'update', update: Uint8Array.of(0, 0) }),
     });
+    collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'stateVector', vector: Uint8Array.of(0) }),
+    });
     await settle();
     await settle();
     update();
@@ -229,7 +237,7 @@ describe('the chip of the connection', () => {
     expect(textsOf(single(root, 'header.toolbar'), '.label')).toEqual([TEXT.offlineKeptApart]);
   });
 
-  it('says when the connection to the host is lost, the plan staying open', async () => {
+  it('says when and why the connection to the host is lost, the plan staying open', async () => {
     const { root, app, control } = await renderJoined();
     control.collaboration.listener?.({ kind: 'ended', reason: 'BROKEN' });
     update();
@@ -241,7 +249,7 @@ describe('the chip of the connection', () => {
     ]).toEqual(['Thesis', [TEXT.connectionLost], null, 0]);
     click(button(root, TEXT.connectionLost));
     expect(textsOf(root, '[role="menuitem"]')).toEqual([
-      'Leave the shared plan The connection to Camille ended. The plan stays open on this computer.',
+      'Leave the shared plan The connection to Camille broke: what came through it was not what Tasklace expects. The plan stays open on this computer.',
     ]);
   });
 });

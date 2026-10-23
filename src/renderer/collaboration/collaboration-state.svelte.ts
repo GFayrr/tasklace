@@ -1,4 +1,5 @@
-import { SvelteMap } from 'svelte/reactivity';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+import { PRESENCE_SHARE_MILLISECONDS } from '../../core/limits';
 import {
   encodeMessage,
   readMessage,
@@ -44,6 +45,8 @@ export type CollaborationBridge = Pick<
   | 'joinPlan'
   | 'findPlans'
   | 'dropPeer'
+  | 'allowPeerToEdit'
+  | 'forgetGuests'
   | 'copyJoinCode'
   | 'findNextHost'
   | 'keepOwnChanges'
@@ -59,8 +62,9 @@ export interface CollaborationContext {
   readonly openShared: (state: Uint8Array) => Promise<boolean>;
   readonly repaired: (repairs: readonly SharedRepair[]) => void;
   readonly hostChanged: (left: string | null, next: string | null) => void;
-  readonly ownChangesKept: (kept: Result<string, FileFailure>) => void;
+  readonly ownChangesKept: (kept: Result<KeptOwnChanges, FileFailure>) => void;
   readonly selectedTaskId: () => TaskId | null;
+  readonly shareLater?: (share: () => void) => void;
 }
 
 export type CollaborationMode =
@@ -68,6 +72,11 @@ export type CollaborationMode =
   | { readonly kind: 'hosting'; readonly sharing: Sharing }
   | { readonly kind: 'joining' }
   | { readonly kind: 'guest'; readonly connection: GuestConnection };
+
+export interface KeptOwnChanges {
+  readonly planName: string;
+  readonly localCopySaved: boolean;
+}
 
 export type GuestConnection = 'connected' | 'reconnecting' | 'offline' | 'lost';
 
@@ -77,11 +86,17 @@ export const EMPTY_STATE_VECTOR = Uint8Array.of(0);
 
 const NOBODY_PLACED: ReadonlyMap<TaskId, readonly Participant[]> = new Map();
 
+/** Shares the list of people a moment later, once for all the presences that arrive meanwhile. */
+function shareAfterAMoment(share: () => void): void {
+  setTimeout(share, PRESENCE_SHARE_MILLISECONDS);
+}
+
 interface Hosting {
   readonly host: Host;
   readonly peers: Map<number, ParticipantId>;
   readonly participantsByPeer: Map<ParticipantId, number>;
   readonly joinedAt: Map<ParticipantId, Date>;
+  readonly admitted: Set<ParticipantId>;
 }
 
 /** Holds what the page shares or joined: the mode, the people in the plan and the plans nearby, linking the host or guest of the shared plan to the open session and the messages the main process carries, so that the interface only reads it and calls its actions. */
@@ -102,6 +117,9 @@ export class CollaborationState {
   #guest: Guest | null = null;
   #waitingRoster: CollaborationMessage | null = null;
   #openingShared = false;
+  #lastUpdate: Uint8Array | null = null;
+  #starting = false;
+  #generation = 0;
   #presenceQueued = false;
   #hostThatLeft: string | null = null;
   #keepingChanges = false;
@@ -226,8 +244,17 @@ export class CollaborationState {
     if (name === null) {
       return { ok: false, error: { code: 'NO_NAME' } };
     }
+    if (this.#starting) {
+      return { ok: false, error: { code: 'ALREADY_SHARING' } };
+    }
     const hostId = requireParticipantId(this.#context.createId());
+    this.#starting = true;
+    const generation = this.#generation;
     const shared = await this.#context.bridge.sharePlan(session.project().name, name, hostId);
+    if (generation !== this.#generation) {
+      return { ok: false, error: { code: 'CANCELLED' } };
+    }
+    this.#starting = false;
     if (!shared.ok) {
       return shared;
     }
@@ -259,11 +286,26 @@ export class CollaborationState {
         report: (event) => {
           this.#report(event);
         },
+        shareLater: this.#context.shareLater ?? shareAfterAMoment,
+        broadcast: (to, message) => {
+          const peers = to.flatMap((id) => {
+            const peer = this.#hosting?.participantsByPeer.get(id);
+            return peer === undefined ? [] : [peer];
+          });
+          if (peers.length > 0) {
+            this.#context.bridge.sendToCollaboration(peers, encodeMessage(message));
+          }
+        },
       }),
       peers: new SvelteMap(),
       participantsByPeer: new SvelteMap(),
       joinedAt: new SvelteMap(),
+      admitted: new SvelteSet(),
     };
+    const roster = hosting.host.roster();
+    for (const participant of [...roster.participants, ...roster.departed]) {
+      hosting.admitted.add(participant.id);
+    }
     this.#hosting = hosting;
     this.#me = start.hostId;
     this.#participants = hosting.host.roster().participants;
@@ -283,7 +325,13 @@ export class CollaborationState {
     }
     await this.stop();
     const participantId = requireParticipantId(this.#context.createId());
+    this.#starting = true;
+    const generation = this.#generation;
     const joined = await this.#context.bridge.joinPlan({ ...target, participantId, name });
+    if (generation !== this.#generation) {
+      return { ok: false, error: { code: 'CANCELLED' } };
+    }
+    this.#starting = false;
     if (!joined.ok) {
       return joined;
     }
@@ -295,7 +343,7 @@ export class CollaborationState {
 
   /** Stops sharing or leaves the plan joined, keeping the open project as it is. */
   async stop(): Promise<void> {
-    if (this.#mode.kind === 'idle') {
+    if (this.#mode.kind === 'idle' && !this.#starting) {
       return;
     }
     this.#forget();
@@ -308,6 +356,10 @@ export class CollaborationState {
   /** Lets a participant edit or puts it back in read only, which only the host can do. */
   setRight(id: ParticipantId, canEdit: boolean): boolean {
     const hosting = this.#hosting;
+    const peer = hosting?.participantsByPeer.get(id);
+    if (canEdit && peer !== undefined) {
+      this.#letSendChanges(peer);
+    }
     const changed = hosting?.host.setRight(id, canEdit);
     if (hosting === null || changed?.ok !== true) {
       return false;
@@ -372,10 +424,13 @@ export class CollaborationState {
     this.#guest = null;
     this.#waitingRoster = null;
     this.#openingShared = false;
+    this.#lastUpdate = null;
     this.#hostThatLeft = null;
     this.#keepingChanges = false;
     this.#participants = [];
     this.#me = null;
+    this.#starting = false;
+    this.#generation += 1;
     this.#mode = { kind: 'idle' };
   }
 
@@ -440,13 +495,12 @@ export class CollaborationState {
     this.#queuePresence();
   }
 
-  /** Follows a connection to the host lost while the main process tries to come back, the plan staying open and its changes kept here meanwhile. */
+  /** Follows a connection to the host lost while the main process tries to come back, the plan staying open and its changes kept here meanwhile, also while the page waits for the whole plan again. */
   #connectionLost(connection: 'reconnecting' | 'offline'): void {
-    const guest = this.#guest;
-    if (guest === null) {
+    if (this.#mode.kind !== 'guest') {
       return;
     }
-    guest.disconnected();
+    this.#guest?.disconnected();
     this.#mode = { kind: 'guest', connection };
   }
 
@@ -454,7 +508,11 @@ export class CollaborationState {
   async #findNextHost(): Promise<void> {
     const session = this.#context.session();
     const name = this.#settings?.name ?? null;
-    if (this.#guest === null || session === null || name === null || this.#hostThatLeft !== null) {
+    if (this.#mode.kind !== 'guest' || this.#hostThatLeft !== null) {
+      return;
+    }
+    if (session === null || name === null) {
+      this.#leaveFor('The page cannot look for the next host of the plan it joined.');
       return;
     }
     this.#hostThatLeft = this.hostName;
@@ -466,7 +524,14 @@ export class CollaborationState {
     const knownTokens = this.#participants.flatMap((participant) =>
       participant.tokenDigest === null
         ? []
-        : [{ participantId: participant.id, tokenDigest: participant.tokenDigest }],
+        : [
+            {
+              participantId: participant.id,
+              tokenDigest: participant.tokenDigest,
+              rank: participant.rank,
+              canEdit: participant.canEdit,
+            },
+          ],
     );
     const asked = await this.#context.bridge.findNextHost(
       queue,
@@ -476,7 +541,20 @@ export class CollaborationState {
     );
     if (!asked.ok) {
       console.error('The next host of the shared plan could not be looked for:', asked.error);
+      this.#leaveFor('The shared plan is left, its next host not being looked for.');
     }
+  }
+
+  /** Leaves a shared plan the page can no longer follow, logging why, showing the connection as lost and stopping what the main process still does for it. */
+  #leaveFor(why: string): void {
+    console.error(why);
+    this.#hostThatLeft = null;
+    this.#ended('HOST_LEFT');
+    void this.#context.bridge.stopCollaboration().then((stopped) => {
+      if (!stopped.ok) {
+        console.error('The shared plan could not be stopped:', stopped.error);
+      }
+    });
   }
 
   /** Hosts the plan joined once its host left and this person's turn came, with the people last known, everyone else coming back with the rank and right they had. */
@@ -486,11 +564,13 @@ export class CollaborationState {
     const name = this.#settings?.name ?? null;
     const roster = me === null ? null : takeOverRoster(rosterOf(this.#participants), me);
     if (session === null || me === null || name === null || roster === null) {
-      console.error('The page cannot host the plan it was told to host.');
+      this.#leaveFor('The page cannot host the plan it was told to host.');
       return;
     }
     this.#guest?.stop();
     this.#guest = null;
+    this.#keepingChanges = false;
+    this.#lastUpdate = null;
     this.#startHost(session, { hostId: me, name, roster }, sharing);
     this.#context.hostChanged(this.#hostThatLeft, null);
     this.#hostThatLeft = null;
@@ -508,7 +588,7 @@ export class CollaborationState {
     this.#mode = { kind: 'guest', connection: 'reconnecting' };
   }
 
-  /** Adds a guest who proved it knows the code, known by its connection before the host sends it the people in the plan, a person coming back on a new connection replacing its old one, and drops a guest the plan cannot take. */
+  /** Adds a guest who proved it knows the code, known by its connection before the host sends it the people in the plan, and drops a guest the plan cannot take, the main process having already closed the old connection of a person who came back. */
   #peerJoined(
     peer: number,
     participantId: string,
@@ -523,42 +603,69 @@ export class CollaborationState {
       this.#turnAway(peer, 'INVALID_IDENTIFIER');
       return;
     }
-    const previous = hosting.participantsByPeer.get(participantId);
-    if (previous !== undefined) {
-      this.#replaceConnection(hosting, previous, participantId);
-    }
+    hosting.admitted.add(participantId);
     hosting.peers.set(peer, participantId);
     hosting.participantsByPeer.set(participantId, peer);
+    const returning = hosting.host
+      .roster()
+      .departed.find((participant) => participant.id === participantId);
+    if (returning?.canEdit === true) {
+      this.#letSendChanges(peer);
+    }
     const joined = hosting.host.connect(participantId, name, known.endpoint, known.tokenDigest);
     if (!joined.ok) {
       hosting.peers.delete(peer);
       hosting.participantsByPeer.delete(participantId);
       this.#turnAway(peer, joined.error);
+      this.#forgetUnknown(hosting);
       return;
     }
     hosting.joinedAt.set(participantId, this.#context.now());
     this.#participants = hosting.host.roster().participants;
+    this.#forgetUnknown(hosting);
   }
 
-  /** Forgets the old connection of a person who came back on a new one, the main process having checked it is the same person, and closes it. */
-  #replaceConnection(hosting: Hosting, previous: number, id: ParticipantId): void {
-    hosting.peers.delete(previous);
-    hosting.participantsByPeer.delete(id);
-    hosting.host.disconnect(id);
-    void this.#context.bridge.dropPeer(previous);
+  /** Has the main process forget the tokens of the guests it admitted that the list of people no longer holds, present or gone, so that it never refuses newcomers once full nor forgets someone the list still knows. */
+  #forgetUnknown(hosting: Hosting): void {
+    const roster = hosting.host.roster();
+    const known = new SvelteSet([...roster.participants, ...roster.departed].map(({ id }) => id));
+    const unknown = [...hosting.admitted].filter((id) => !known.has(id));
+    if (unknown.length === 0) {
+      return;
+    }
+    unknown.forEach((id) => hosting.admitted.delete(id));
+    void this.#context.bridge.forgetGuests(unknown).then((forgotten) => {
+      if (!forgotten.ok) {
+        console.error('The guests the plan forgot could not be forgotten:', forgotten.error);
+      }
+    });
   }
 
-  /** Drops a guest the host refused, telling why in the log. */
+  /** Lets the main process take changes of any size from a guest about to be allowed to edit, before the guest learns it may, a refusal being logged. */
+  #letSendChanges(peer: number): void {
+    void this.#context.bridge.allowPeerToEdit(peer).then((allowed) => {
+      if (!allowed.ok) {
+        console.error('A guest could not be let to send its changes:', allowed.error);
+      }
+    });
+  }
+
+  /** Drops a guest the host refused, telling why in the log, and a drop the main process could not make. */
   #turnAway(peer: number, reason: string): void {
     console.warn(`A guest was turned away from the shared plan: ${reason}.`);
-    void this.#context.bridge.dropPeer(peer);
+    void this.#context.bridge.dropPeer(peer).then((dropped) => {
+      if (!dropped.ok) {
+        console.error('A guest turned away could not be dropped:', dropped.error);
+      }
+    });
   }
 
-  /** Passes a message of a guest to the host, a message that cannot be read being logged. */
+  /** Passes a message of a guest to the host, a message that cannot be read or that comes from a guest no longer in the plan being logged. */
   #fromPeer(peer: number, bytes: Uint8Array): void {
     const hosting = this.#hosting;
     const from = hosting?.peers.get(peer);
     if (hosting === null || from === undefined) {
+      console.warn('A message came from a guest no longer in the shared plan.');
       return;
     }
     const message = readMessage(bytes);
@@ -582,6 +689,7 @@ export class CollaborationState {
     hosting.joinedAt.delete(id);
     hosting.host.disconnect(id);
     this.#participants = hosting.host.roster().participants;
+    this.#forgetUnknown(hosting);
   }
 
   /** Shows the new code the host drew after too many wrong ones. */
@@ -591,7 +699,7 @@ export class CollaborationState {
     }
   }
 
-  /** Passes a message of the host to the guest, or, before the plan is open, keeps the list of people and opens the whole plan the host sent. */
+  /** Passes a message of the host to the guest, or, before the plan is open, keeps the list of people and opens the whole plan the host sent, which is the last change before the state vector that always follows it. */
   #fromHost(bytes: Uint8Array): void {
     const message = readMessage(bytes);
     if (!message.ok) {
@@ -608,15 +716,25 @@ export class CollaborationState {
       return;
     }
     const awaitsPlan = this.#mode.kind === 'joining' || this.#keepingChanges;
-    if (message.value.kind === 'update' && awaitsPlan && !this.#openingShared) {
-      void this.#openPlan(message.value.update);
+    if (!awaitsPlan || this.#openingShared) {
+      return;
+    }
+    if (message.value.kind === 'update') {
+      this.#lastUpdate = message.value.update;
+    } else if (message.value.kind === 'stateVector' && this.#lastUpdate !== null) {
+      const plan = this.#lastUpdate;
+      this.#lastUpdate = null;
+      void this.#openPlan(plan);
     }
   }
 
-  /** Opens the whole plan the host sent, leaving the plan when it cannot be opened. */
+  /** Opens the whole plan the host sent, leaving the plan when it cannot be opened, also when opening it failed unexpectedly. */
   async #openPlan(state: Uint8Array): Promise<void> {
     this.#openingShared = true;
-    const opened = await this.#context.openShared(state);
+    const opened = await this.#context.openShared(state).catch((error: unknown) => {
+      console.error('The plan the host sent could not be opened:', error);
+      return false;
+    });
     this.#keepingChanges = false;
     if (!opened) {
       this.#openingShared = false;
@@ -642,6 +760,7 @@ export class CollaborationState {
     }
     guest.stop();
     this.#guest = null;
+    this.#lastUpdate = null;
     const me = this.#me;
     this.#waitingRoster =
       me === null ? null : { kind: 'participants', you: me, participants: this.#participants };
@@ -649,7 +768,10 @@ export class CollaborationState {
       'host',
       encodeMessage({ kind: 'stateVector', vector: EMPTY_STATE_VECTOR }),
     );
-    this.#context.ownChangesKept({ ok: true, value: planName });
+    this.#context.ownChangesKept({
+      ok: true,
+      value: { planName, localCopySaved: kept.value.localCopySaved },
+    });
   }
 
   /** Tells that the connection to the host ended, keeping the plan open as it is: a plan already opened stays joined but offline, with the people last known, and an attempt to join ends. */

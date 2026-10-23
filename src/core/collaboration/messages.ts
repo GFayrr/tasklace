@@ -37,7 +37,8 @@ export type CollaborationMessage =
       readonly kind: 'participants';
       readonly you: ParticipantId;
       readonly participants: readonly Participant[];
-    };
+    }
+  | { readonly kind: 'refused' };
 
 export type MessageRefusal =
   'TOO_LARGE' | 'UNSUPPORTED_VERSION' | 'UNKNOWN_KIND' | 'INVALID_CONTENT';
@@ -49,6 +50,7 @@ const KIND_CODES = {
   update: 2,
   presence: 3,
   participants: 4,
+  refused: 5,
 } as const satisfies Readonly<Record<CollaborationMessage['kind'], number>>;
 const PRESENCE_KEYS = ['name', 'selectedTaskId'];
 const PARTICIPANTS_KEYS = ['you', 'participants'];
@@ -91,6 +93,8 @@ function contentOf(message: CollaborationMessage): Uint8Array {
       return ENCODER.encode(
         JSON.stringify({ you: message.you, participants: message.participants }),
       );
+    case 'refused':
+      return new Uint8Array();
   }
 }
 
@@ -114,6 +118,8 @@ export function readMessage(bytes: Uint8Array): Result<CollaborationMessage, Mes
       return readJsonMessage(content, readPresence);
     case KIND_CODES.participants:
       return readJsonMessage(content, readParticipants);
+    case KIND_CODES.refused:
+      return content.length === 0 ? success({ kind: 'refused' }) : failure('INVALID_CONTENT');
     default:
       return failure('UNKNOWN_KIND');
   }

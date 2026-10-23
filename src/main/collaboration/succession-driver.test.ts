@@ -99,7 +99,22 @@ describe('the search for the next host', () => {
     expect([search.timers[2]?.stopped, search.isWatching(), warnings.mock.calls]).toEqual([
       false,
       true,
-      [['This window could not host the shared plan; the next one in turn will.']],
+      [['This window could not host the shared plan; it keeps looking for the next host.']],
+    ]);
+  });
+
+  it('logs a failure while hosting on its own turn, the search going on', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const search = succession();
+    const failed = new Error('hosting broke');
+    search.host.mockImplementationOnce(() => Promise.reject(failed));
+    search.fire(15_000);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect([search.isWatching(), errors.mock.calls]).toEqual([
+      true,
+      [['This window failed while trying to host the shared plan:', failed]],
     ]);
   });
 

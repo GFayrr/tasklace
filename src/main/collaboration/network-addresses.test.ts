@@ -1,4 +1,5 @@
 import { createServer } from 'node:net';
+import { spacedClock } from '../testing/plan-host';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requireParticipantId } from '../../core/collaboration/participants';
 import { systemRandomBytes } from './aes-gcm';
@@ -40,6 +41,8 @@ async function joinWith(answers: boolean[]): Promise<{ ends: GuestEnd[]; joined:
     knownTokens: new Map(),
     startTimer: () => () => undefined,
     randomBytes: systemRandomBytes,
+    identity: null,
+    now: spacedClock(),
     events: {
       joined: () => {
         joined += 1;
@@ -47,7 +50,6 @@ async function joinWith(answers: boolean[]): Promise<{ ends: GuestEnd[]; joined:
       message: () => undefined,
       left: () => undefined,
       codeChanged: () => undefined,
-      planKeyChanged: () => undefined,
     },
   });
   if (!started.ok) {

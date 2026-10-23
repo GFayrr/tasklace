@@ -1,4 +1,4 @@
-import { mkdir, rename } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isDocumentId, type DocumentId } from '../core/shared/shared-document';
 import {
@@ -6,7 +6,10 @@ import {
   isStoredPath,
   parseStoredJson,
   readStoredText,
+  renameRetrying,
   setDamagedFileAside,
+  SYSTEM_RENAMING,
+  type Renaming,
 } from './stored-files';
 import { writeFileSafely } from './safe-write';
 import { createSerialQueue } from './serial-queue';
@@ -31,11 +34,12 @@ export function localCopyPath(folder: string, documentId: DocumentId): string | 
   return isDocumentId(documentId) ? join(folder, `${documentId}${COPY_EXTENSION}`) : null;
 }
 
-/** Moves the local copy of a document aside under a name holding the time, so that the next save does not replace the changes it holds, giving where it went, or null when there is no copy. */
+/** Moves the local copy of a document aside under a name holding the time, so that the next save does not replace the changes it holds, trying again while Windows holds the file, giving where it went, or null when there is no copy. */
 export async function setLocalCopyAside(
   folder: string,
   documentId: DocumentId,
   now: Date,
+  renaming: Renaming = SYSTEM_RENAMING,
 ): Promise<string | null> {
   const copyPath = localCopyPath(folder, documentId);
   if (copyPath === null) {
@@ -44,7 +48,7 @@ export async function setLocalCopyAside(
   const stamp = now.toISOString().replace(UNSAFE_IN_NAMES, '-');
   const asidePath = join(folder, `${documentId}${ASIDE_MARK}${stamp}${COPY_EXTENSION}`);
   try {
-    await rename(copyPath, asidePath);
+    await renameRetrying(copyPath, asidePath, renaming);
     return asidePath;
   } catch (error) {
     if (isMissingFile(error)) {

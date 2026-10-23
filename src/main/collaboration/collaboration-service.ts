@@ -9,11 +9,13 @@ import {
   type ParticipantId,
 } from '../../core/collaboration/participants';
 import { isPort } from '../../core/collaboration/ports';
+import { compressMessage } from '../../core/collaboration/secure/channel';
 import { readJoinCode } from '../../core/collaboration/secure/join-code';
 import { drawRejoinToken, type Introduction } from '../../core/collaboration/secure/link';
 import { isTokenDigest } from '../../core/collaboration/secure/token-digest';
 import {
   MAX_COLLABORATION_MESSAGE_BYTES,
+  MAX_DEPARTED_PARTICIPANTS,
   MAX_ENDPOINT_ADDRESSES,
   MAX_JOIN_RANK,
   MAX_PARTICIPANT_NAME_LENGTH,
@@ -36,11 +38,14 @@ import {
   IPC_CHANNELS,
   type BridgeResult,
   type CollaborationEvent,
+  type CollaborationTarget,
+  type KnownToken,
   type CollaborationSettings,
   type InvokeChannel,
   type JoinRequest,
   type NearbyPlan,
   type OpenedProject,
+  type Sharing,
 } from '../../preload/bridge-contract';
 import type { FileTask, ResultOfTask } from '../file-tasks';
 import { handleChannel, type ChannelHandler } from '../ipc-channels';
@@ -57,9 +62,16 @@ import {
 import { findPlans, type Mdns, type NearbyPlan as HeardPlan } from './discovery';
 import { isHostAddress } from './guest-client';
 import { isPrivateAddress } from './private-addresses';
+import { zlibCompressor } from '../zlib-compressor';
+import type { Peer } from './host-server';
 import type { StartTimer } from './secure-connection';
 import type { SuccessionCandidate } from './succession-driver';
-import { createWindowSharing, type WindowSharing, type WindowState } from './window-sharing';
+import {
+  createWindowSharing,
+  type PlanNames,
+  type WindowSharing,
+  type WindowState,
+} from './window-sharing';
 
 export interface CollaborationServices {
   readonly assertTrusted: TrustCheck;
@@ -69,11 +81,12 @@ export interface CollaborationServices {
   readonly copyText: (text: string) => Promise<void>;
   readonly addresses?: () => readonly string[];
   readonly startTimer?: StartTimer;
+  readonly now?: () => number;
 }
 
 const SETTINGS_STORE = 'collaboration-settings.json';
 const CANDIDATE_KEYS = ['participantId', 'rank', 'endpoint'];
-const INSTANCE_BYTES = 4;
+const INSTANCE_BYTES = 8;
 const HEX_BASE = 16;
 const HEX_DIGITS = 2;
 
@@ -104,8 +117,11 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
 } {
   const windows = new Map<WebContents, WindowSharing>();
   const searches = new Map<WebContents, () => void>();
+  const starting = new Set<WebContents>();
+  const generations = new WeakMap<WebContents, number>();
   const storePath = joinPath(services.userDataFolder, SETTINGS_STORE);
   const startTimer = services.startTimer ?? systemTimer;
+  const now = services.now ?? (() => Date.now());
   const addresses = services.addresses ?? (() => privateAddressesOf(networkInterfaces()));
   let mdns: { readonly mdns: Mdns; readonly destroy: () => void } | null = null;
   /** Gives the mDNS of the application, started on first use. */
@@ -128,6 +144,7 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
         tell(sender, event);
       },
       startTimer,
+      now,
       mdns: sharedMdns,
       addresses,
       instance: instanceName,
@@ -137,7 +154,10 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
   };
   /** Tells whether a window already shares, joined or looks for a host. */
   const isBusy = (sender: WebContents): boolean =>
-    (windows.get(sender)?.state().kind ?? 'idle') !== 'idle';
+    starting.has(sender) || (windows.get(sender)?.state().kind ?? 'idle') !== 'idle';
+  /** Tells whether what a window started was stopped since, by its page or its window closing. */
+  const stoppedSince = (sender: WebContents, generation: number): boolean =>
+    (generations.get(sender) ?? 0) !== generation;
   /** Builds who a window is to the others: its identifier, its name, a token of its own and where it could host the plan, with the port of the settings of this computer. */
   const identityOf = async (
     participantId: ParticipantId,
@@ -159,6 +179,8 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
   };
   /** Stops what a window shares or joined, and its search for plans nearby. */
   const stopWindow = async (sender: WebContents): Promise<void> => {
+    generations.set(sender, (generations.get(sender) ?? 0) + 1);
+    starting.delete(sender);
     searches.get(sender)?.();
     searches.delete(sender);
     const sharing = windows.get(sender);
@@ -168,6 +190,28 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
       mdns?.destroy();
       mdns = null;
     }
+  };
+  /** Hosts the plan of a window under the identity of its person, stopping the server at once when the window was stopped meanwhile. */
+  const startSharing = async (
+    sender: WebContents,
+    generation: number,
+    names: PlanNames,
+    id: ParticipantId,
+  ): Promise<BridgeResult<Sharing>> => {
+    const identity = await identityOf(id, names.hostName);
+    if (stoppedSince(sender, generation)) {
+      return failure({ code: 'CANCELLED' });
+    }
+    if (!identity.ok) {
+      return identity;
+    }
+    const sharing = windowOf(sender);
+    const hosted = await sharing.host(names, identity.value, identity.value.endpoint.port);
+    if (!stoppedSince(sender, generation)) {
+      return hosted.ok ? hosted : failure({ code: hosted.error });
+    }
+    await sharing.stop();
+    return failure({ code: 'CANCELLED' });
   };
   handle(IPC_CHANNELS.collaborationSettings, () => readSettings(storePath));
   handle(IPC_CHANNELS.saveCollaborationSettings, (_event, value) =>
@@ -179,16 +223,15 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
     if (isBusy(event.sender)) {
       return failure({ code: 'ALREADY_SHARING' });
     }
-    const identity = await identityOf(id, names.hostName);
-    if (!identity.ok) {
-      return identity;
+    starting.add(event.sender);
+    const generation = generations.get(event.sender) ?? 0;
+    try {
+      return await startSharing(event.sender, generation, names, id);
+    } finally {
+      if (!stoppedSince(event.sender, generation)) {
+        starting.delete(event.sender);
+      }
     }
-    const hosted = await windowOf(event.sender).host(
-      names,
-      identity.value,
-      identity.value.endpoint.port,
-    );
-    return hosted.ok ? hosted : failure({ code: hosted.error });
   });
   handle(IPC_CHANNELS.stopCollaboration, async (event) => {
     await stopWindow(event.sender);
@@ -202,7 +245,13 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
     if (isBusy(event.sender)) {
       return failure({ code: 'ALREADY_SHARING' });
     }
+    starting.add(event.sender);
+    const generation = generations.get(event.sender) ?? 0;
     const identity = await identityOf(requireParticipantId(request.participantId), request.name);
+    if (stoppedSince(event.sender, generation)) {
+      return failure({ code: 'CANCELLED' });
+    }
+    starting.delete(event.sender);
     if (!identity.ok) {
       return identity;
     }
@@ -256,17 +305,50 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
     }
     return success(null);
   });
-  handle(IPC_CHANNELS.dropPeer, (event, peer) => {
-    const state = windows.get(event.sender)?.state();
+  /** Finds the connection of a guest of the plan a page hosts, logging a page that names a guest not connected. */
+  const peerOf = (sender: WebContents, peer: unknown, logged: string): Peer | undefined => {
+    const state = windows.get(sender)?.state();
     const known =
       state?.kind === 'hosting' && typeof peer === 'number'
         ? state.hosting.peers.get(peer)
         : undefined;
     if (known === undefined) {
-      console.error('The page asked to drop a guest that is not connected.');
+      console.error(logged);
+    }
+    return known;
+  };
+  handle(IPC_CHANNELS.dropPeer, (event, peer) => {
+    const known = peerOf(
+      event.sender,
+      peer,
+      'The page asked to drop a guest that is not connected.',
+    );
+    if (known === undefined) {
       return failure({ code: 'TASK_FAILED' });
     }
-    known.remove();
+    known.turnAway();
+    return success(null);
+  });
+  handle(IPC_CHANNELS.forgetGuests, (event, ids) => {
+    const forgotten = readParticipantIds(ids) ?? refuseMessage();
+    const state = windows.get(event.sender)?.state();
+    if (state?.kind !== 'hosting') {
+      console.error('The page asked to forget guests without hosting a plan.');
+      return failure({ code: 'TASK_FAILED' });
+    }
+    state.hosting.server.forget(forgotten);
+    return success(null);
+  });
+  handle(IPC_CHANNELS.allowPeerToEdit, (event, peer) => {
+    const known = peerOf(
+      event.sender,
+      peer,
+      'The page asked to let a guest edit who is not connected.',
+    );
+    if (known === undefined) {
+      return failure({ code: 'TASK_FAILED' });
+    }
+    known.allowEditing();
     return success(null);
   });
   ipcMain.on(
@@ -340,20 +422,38 @@ function readSuccessionQueue(value: unknown): readonly SuccessionCandidate[] | n
   return read.length === items.length && issues.issues.length === 0 ? read : null;
 }
 
+/** Reads the identifiers of guests the page no longer knows, a list of valid identifiers no longer than the people a host remembers. */
+function readParticipantIds(value: unknown): readonly string[] | null {
+  return Array.isArray(value) &&
+    value.length <= MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS &&
+    value.every((id) => isParticipantId(id))
+    ? value
+    : null;
+}
+
 /** Reads the digests of the tokens of the people of a plan a page gives, which the next host checks the people coming back against, or null for any other shape. */
-function readKnownTokens(value: unknown): ReadonlyMap<string, string> | null {
+function readKnownTokens(value: unknown): readonly KnownToken[] | null {
   if (!Array.isArray(value) || value.length > MAX_PARTICIPANTS) {
     return null;
   }
-  const entries = value.map((item: unknown) => {
-    const participantId: unknown = Reflect.get(Object(item), 'participantId');
-    const tokenDigest: unknown = Reflect.get(Object(item), 'tokenDigest');
-    return isParticipantId(participantId) && isTokenDigest(tokenDigest)
-      ? ([participantId, tokenDigest] as const)
-      : null;
-  });
+  const entries = value.map(readKnownToken);
   const valid = entries.filter((entry) => entry !== null);
-  return valid.length === entries.length ? new Map(valid) : null;
+  return valid.length === entries.length ? valid : null;
+}
+
+/** Reads one person of a plan a page gives: its identifier, the digest of its token, its rank and whether it may edit, or null for any other shape. */
+function readKnownToken(item: unknown): KnownToken | null {
+  const participantId: unknown = Reflect.get(Object(item), 'participantId');
+  const tokenDigest: unknown = Reflect.get(Object(item), 'tokenDigest');
+  const rank: unknown = Reflect.get(Object(item), 'rank');
+  const canEdit: unknown = Reflect.get(Object(item), 'canEdit');
+  const isRank = Number.isInteger(rank) && Number(rank) >= 0 && Number(rank) <= MAX_JOIN_RANK;
+  return isParticipantId(participantId) &&
+    isTokenDigest(tokenDigest) &&
+    isRank &&
+    typeof canEdit === 'boolean'
+    ? { participantId, tokenDigest, rank: Number(rank), canEdit }
+    : null;
 }
 
 /** Reads one candidate of the queue to the next host. */
@@ -437,14 +537,51 @@ async function openShared(
 function sendFrom(sharing: WindowState | undefined, to: unknown, message: unknown): void {
   const isMessage =
     message instanceof Uint8Array && message.length <= MAX_COLLABORATION_MESSAGE_BYTES;
-  const isTarget = to === 'host' || (typeof to === 'number' && Number.isInteger(to));
-  if (!isMessage || !isTarget) {
+  if (!isMessage || !isTarget(to)) {
     console.error('The page sent a message of the shared plan of an unexpected shape.');
+    return;
+  }
+  if (typeof to !== 'number' && to !== 'host') {
+    sendToMany(sharing, to, message);
     return;
   }
   const sent = sendTo(sharing, to, message);
   if (sent !== null) {
     console.warn(`A message of the shared plan could not be sent: ${sent}.`);
+  }
+}
+
+/** Tells whether the page named the host, one guest, or a few guests at most as many as a plan holds. */
+function isTarget(to: unknown): to is CollaborationTarget {
+  return (
+    to === 'host' ||
+    isPeer(to) ||
+    (Array.isArray(to) && to.length <= MAX_PARTICIPANTS && to.every(isPeer))
+  );
+}
+
+/** Tells whether a value numbers a guest connection. */
+function isPeer(value: unknown): boolean {
+  return typeof value === 'number' && Number.isInteger(value);
+}
+
+/** Sends one message to several guests of the plan a window hosts, compressing it once and sealing it for each, logging a guest it could not reach. */
+function sendToMany(
+  sharing: WindowState | undefined,
+  peers: readonly number[],
+  message: Uint8Array,
+): void {
+  const compressed = compressMessage(message, 'plan', zlibCompressor);
+  if (!compressed.ok) {
+    console.warn(`A message of the shared plan could not be sent: ${compressed.error}.`);
+    return;
+  }
+  for (const number of peers) {
+    const peer = sharing?.kind === 'hosting' ? sharing.hosting.peers.get(number) : undefined;
+    const sent = peer?.sendCompressed(compressed.value) ?? failure('NO_SUCH_PEER');
+    if (!sent.ok) {
+      console.warn(`A message of the shared plan could not be sent: ${sent.error}.`);
+    }
   }
 }
 

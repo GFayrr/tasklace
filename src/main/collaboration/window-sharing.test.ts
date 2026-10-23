@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requireParticipantId } from '../../core/collaboration/participants';
+import { tokenDigestOf } from '../../core/collaboration/secure/link';
 import { sharingIdOf } from '../../core/collaboration/succession';
 import { MAX_PORT_ATTEMPTS } from '../../core/limits';
 import type { Introduction } from '../../core/collaboration/secure/link';
@@ -8,6 +9,9 @@ import type { CollaborationEvent } from '../../preload/bridge-contract';
 import type { AnnouncedService, Mdns } from './discovery';
 import type { StartTimer } from './secure-connection';
 import { createWindowSharing, type WindowSharing } from './window-sharing';
+import { startHostServer } from './host-server';
+import { systemRandomBytes } from './aes-gcm';
+import { spacedClock } from '../testing/plan-host';
 
 const LOOPBACK = '127.0.0.1';
 const RANGE_ATTEMPTS = 16;
@@ -190,6 +194,7 @@ function windowOn(network: ReturnType<typeof sharedNetwork>, instance: string, h
   const window = createWindowSharing({
     tell: (event) => told.push(event),
     startTimer: firstTurnsOnly,
+    now: spacedClock(),
     mdns: () => mdns,
     addresses: () => [LOOPBACK],
     instance: () => instance,
@@ -214,6 +219,77 @@ function identity(id: string, port: number): Introduction {
   };
 }
 
+/** Does what the page of a host does for a person who comes back allowed to edit: lets it send changes, then sends it a first message, once it joined again after the joins already seen. */
+async function letTheProbeIn(
+  window: WindowSharing,
+  told: readonly CollaborationEvent[],
+  seen: number,
+): Promise<void> {
+  /** Lists the joins the host told so far. */
+  const joins = () => told.filter((event) => event.kind === 'peerJoined');
+  await until(() => joins().length > seen);
+  const state = window.state();
+  const joined = joins().at(-1);
+  const peer =
+    state.kind === 'hosting' && joined?.kind === 'peerJoined'
+      ? state.hosting.peers.get(joined.peer)
+      : undefined;
+  peer?.allowEditing();
+  peer?.send(Uint8Array.of(1));
+}
+
+/** Makes Léa host a plan she took over from Camille, who left, Camille being known to her as the first host. */
+async function takenOverHost(network: ReturnType<typeof sharedNetwork>) {
+  const camille = windowOn(network, 'camille');
+  const lea = windowOn(network, 'lea', 'b');
+  const [hostPort, leaPort] = [await freePort(), await freePort()];
+  const hosted = await camille.window.host(NAMES, identity('camille', hostPort), hostPort);
+  if (!hosted.ok) {
+    throw new Error(hosted.error);
+  }
+  lea.window.join(
+    { address: LOOPBACK, port: hosted.value.port, code: hosted.value.code },
+    identity('lea', leaPort),
+  );
+  await until(() => holdsKey(lea.window));
+  network.split();
+  const known = [
+    {
+      participantId: 'camille',
+      tokenDigest: tokenDigestOf(identity('camille', hostPort).token),
+      rank: 0,
+      canEdit: true,
+    },
+  ];
+  expect(
+    lea.window.succeed([{ participantId: 'lea', rank: 1, endpoint: null }], NAMES, leaPort, known),
+  ).toBe(true);
+  await until(() => lea.kinds().includes('becameHost'));
+  await camille.window.stop();
+  const state = lea.window.state();
+  if (state.kind !== 'hosting') {
+    throw new Error('Léa does not host.');
+  }
+  return { lea, planKey: state.hosting.server.planKey() };
+}
+
+/** Announces on a half of the network a host of the plan of a key, older than anyone, at a port. */
+function announceOlder(
+  network: ReturnType<typeof sharedNetwork>,
+  planKey: Uint8Array,
+  port: number,
+  half = 'b',
+): void {
+  network
+    .view(() => half)
+    .publish({
+      name: 'Tasklace aaaa',
+      type: 'tasklace',
+      port,
+      txt: { v: '1', plan: 'Thesis', host: 'Mallory', share: sharingIdOf(planKey), rank: '0' },
+    });
+}
+
 describe('a shared plan whose host changes', () => {
   it('lets the oldest guest host once the host leaves, the other guest finding it on the network', async () => {
     const network = sharedNetwork();
@@ -235,8 +311,8 @@ describe('a shared plan whose host changes', () => {
       { participantId: 'lea', rank: 1, endpoint: { addresses: [LOOPBACK], port: leaPort } },
       { participantId: 'noah', rank: 2, endpoint: { addresses: [LOOPBACK], port: noahPort } },
     ];
-    expect(lea.window.succeed(queue, NAMES, leaPort, new Map())).toBe(true);
-    expect(noah.window.succeed(queue, NAMES, noahPort, new Map())).toBe(true);
+    expect(lea.window.succeed(queue, NAMES, leaPort, [])).toBe(true);
+    expect(noah.window.succeed(queue, NAMES, noahPort, [])).toBe(true);
     await until(() => lea.kinds().includes('becameHost') && noah.kinds().at(-1) === 'connected');
     await until(() => lea.kinds().includes('peerJoined'));
     expect([lea.window.state().kind, noah.window.state().kind]).toEqual(['hosting', 'guest']);
@@ -260,9 +336,19 @@ describe('a shared plan whose host changes', () => {
     await until(() => holdsKey(newer.window));
     network.split();
     const alone = [{ participantId: 'lea', rank: 1, endpoint: null }];
-    expect(newer.window.succeed(alone, NAMES, newerPort, new Map())).toBe(true);
+    const known = [
+      {
+        participantId: 'camille',
+        tokenDigest: tokenDigestOf(identity('camille', olderPort).token),
+        rank: 0,
+        canEdit: true,
+      },
+    ];
+    expect(newer.window.succeed(alone, NAMES, newerPort, known)).toBe(true);
     await until(() => newer.kinds().includes('becameHost'));
+    const seen = older.told.filter((event) => event.kind === 'peerJoined').length;
     network.heal();
+    await letTheProbeIn(older.window, older.told, seen);
     await until(() => newer.kinds().includes('yielded'));
     await until(
       () => newer.kinds().at(-1) === 'connected' && newer.window.state().kind === 'guest',
@@ -289,14 +375,15 @@ describe('a shared plan whose host changes', () => {
     );
     await until(() => holdsKey(lea.window));
     const later = [{ participantId: 'noah', rank: 2, endpoint: null }];
-    expect(lea.window.succeed(later, NAMES, leaPort, new Map())).toBe(true);
-    expect(lea.window.succeed(later, NAMES, leaPort, new Map())).toBe(true);
+    expect(lea.window.succeed(later, NAMES, leaPort, [])).toBe(true);
+    expect(lea.window.succeed(later, NAMES, leaPort, [])).toBe(true);
     expect(lea.window.state().kind).toBe('searching');
     await lea.window.stop();
     expect(lea.window.state().kind).toBe('idle');
     const deaf = createWindowSharing({
       tell: () => undefined,
       startTimer: firstTurnsOnly,
+      now: spacedClock(),
       mdns: () => {
         throw new Error('No multicast');
       },
@@ -309,7 +396,7 @@ describe('a shared plan whose host changes', () => {
       identity('noah', 1),
     );
     await until(() => holdsKey(deaf));
-    expect(deaf.succeed(later, NAMES, 1, new Map())).toBe(true);
+    expect(deaf.succeed(later, NAMES, 1, [])).toBe(true);
     expect(warnings.mock.calls).toEqual([
       [
         'The shared plan could not look for its next host on the network:',
@@ -340,18 +427,18 @@ describe('a shared plan whose host changes', () => {
         { address: LOOPBACK, port: hosted.value.port, code: hosted.value.code },
         identity('lea', taken.first),
       );
-      expect(lea.window.succeed([], NAMES, taken.first, new Map())).toBe(false);
+      expect(lea.window.succeed([], NAMES, taken.first, [])).toBe(false);
       await until(() => holdsKey(lea.window));
       network.split();
       const queue = [
         { participantId: 'lea', rank: 1, endpoint: null },
         { participantId: 'noah', rank: 2, endpoint: { addresses: [LOOPBACK], port: taken.first } },
       ];
-      expect(lea.window.succeed(queue, NAMES, taken.first, new Map())).toBe(true);
+      expect(lea.window.succeed(queue, NAMES, taken.first, [])).toBe(true);
       await until(() => warnings.mock.calls.length === 2);
       expect(warnings.mock.calls).toEqual([
         ['The shared plan could not be hosted here: NO_FREE_PORT.'],
-        ['This window could not host the shared plan; the next one in turn will.'],
+        ['This window could not host the shared plan; it keeps looking for the next host.'],
       ]);
       expect(lea.window.state().kind).toBe('searching');
     } finally {
@@ -359,7 +446,7 @@ describe('a shared plan whose host changes', () => {
     }
   });
 
-  it('forgets an attempt that fails while it keeps searching', async () => {
+  it('keeps an attempt that fails while it searches, to try it again later', async () => {
     const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const network = sharedNetwork();
     const camille = windowOn(network, 'camille');
@@ -376,12 +463,15 @@ describe('a shared plan whose host changes', () => {
     await until(() => holdsKey(lea.window));
     network.split();
     const queue = [
-      { participantId: 'noah', rank: 1, endpoint: { addresses: [LOOPBACK, 'a b'], port: nobody } },
+      {
+        participantId: 'noah',
+        rank: 1,
+        endpoint: { addresses: [LOOPBACK, 'a b', 'evil.example.com', '8.8.8.8'], port: nobody },
+      },
     ];
-    expect(lea.window.succeed(queue, NAMES, nobody, new Map())).toBe(true);
+    expect(lea.window.succeed(queue, NAMES, nobody, [])).toBe(true);
     const searching = lea.window.state();
     await until(() => warnings.mock.calls.length === 1);
-    await until(() => searching.kind === 'searching' && searching.attempts.size === 0);
     expect([
       warnings.mock.calls,
       searching.kind === 'searching' ? searching.attempts.size : -1,
@@ -391,7 +481,7 @@ describe('a shared plan whose host changes', () => {
           `The connection to the shared plan failed: connect ECONNREFUSED 127.0.0.1:${String(nobody)}`,
         ],
       ],
-      0,
+      1,
     ]);
     expect([lea.window.state().kind, lea.kinds()]).toEqual(['searching', ['connected']]);
   });
@@ -399,35 +489,86 @@ describe('a shared plan whose host changes', () => {
   it('keeps hosting when an announcement of the same plan with an older rank comes from someone without the key', async () => {
     const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const network = sharedNetwork();
-    const camille = windowOn(network, 'camille');
-    const [hostPort, nobody] = [await freePort(), await freePort()];
-    const hosted = await camille.window.host(NAMES, identity('camille', hostPort), hostPort);
-    if (!hosted.ok) {
-      throw new Error(hosted.error);
+    const { lea, planKey } = await takenOverHost(network);
+    const nobody = await freePort();
+    announceOlder(network, planKey, nobody);
+    const refused = `The connection to the shared plan failed: connect ECONNREFUSED 127.0.0.1:${String(nobody)}`;
+    await until(() => warnings.mock.calls.some(([text]) => text === refused));
+    expect(lea.window.state().kind).toBe('hosting');
+  });
+
+  it('keeps hosting and logs why when the older host announced refuses the key', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const network = sharedNetwork();
+    const { lea, planKey } = await takenOverHost(network);
+    const mallory = windowOn(network, 'mallory', 'b');
+    const otherPort = await freePort();
+    const other = await mallory.window.host(NAMES, identity('mallory', otherPort), otherPort);
+    if (!other.ok) {
+      throw new Error(other.error);
     }
-    const state = camille.window.state();
-    const planKey = state.kind === 'hosting' ? state.hosting.server.planKey() : new Uint8Array();
-    const forger = network.view(() => 'a');
-    forger.publish({
-      name: 'Tasklace aaaa',
-      type: 'tasklace',
-      port: nobody,
-      txt: { v: '1', plan: 'Thesis', host: 'Mallory', share: sharingIdOf(planKey), rank: '0' },
-    });
+    warnings.mockClear();
+    announceOlder(network, planKey, other.value.port);
     await until(() => warnings.mock.calls.length === 1);
-    expect([camille.window.state().kind, camille.kinds(), warnings.mock.calls]).toEqual([
+    expect([lea.window.state().kind, warnings.mock.calls]).toEqual([
       'hosting',
-      [],
-      [
-        [
-          `The connection to the shared plan failed: connect ECONNREFUSED 127.0.0.1:${String(nobody)}`,
-        ],
-      ],
+      [['An older host of the shared plan could not be joined: WRONG_KEY.']],
+    ]);
+  });
+
+  it('keeps hosting when an older host holding the key cannot prove it is an older person allowed to edit', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const network = sharedNetwork();
+    const { lea, planKey } = await takenOverHost(network);
+    const port = await freePort();
+    const impostor = await startHostServer({
+      port,
+      planKey,
+      knownTokens: new Map(),
+      identity: identity('mallory', port),
+      startTimer: firstTurnsOnly,
+      randomBytes: systemRandomBytes,
+      now: spacedClock(),
+      events: {
+        joined: (peer) => {
+          peer.allowEditing();
+          peer.send(Uint8Array.of(1));
+        },
+        message: () => undefined,
+        left: () => undefined,
+        codeChanged: () => undefined,
+      },
+    });
+    if (!impostor.ok) {
+      throw new Error(impostor.error);
+    }
+    announceOlder(network, planKey, impostor.value.port);
+    const unproven = 'An older host of the shared plan could not prove who it is.';
+    await until(() => warnings.mock.calls.some(([text]) => text === unproven));
+    expect([lea.window.state().kind, lea.kinds().includes('yielded')]).toEqual(['hosting', false]);
+    await impostor.value.close();
+  });
+
+  it('never gives way when it shared the plan first', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const network = sharedNetwork();
+    const camille = windowOn(network, 'camille');
+    const hostPort = await freePort();
+    const hosted = await camille.window.host(NAMES, identity('camille', hostPort), hostPort);
+    const state = camille.window.state();
+    if (!hosted.ok || state.kind !== 'hosting') {
+      throw new Error('Camille could not host.');
+    }
+    announceOlder(network, state.hosting.server.planKey(), hosted.value.port + 1, 'a');
+    await until(() => warnings.mock.calls.length === 1);
+    expect([camille.window.state().kind, warnings.mock.calls]).toEqual([
+      'hosting',
+      [['A host of the same plan claims to be older, but this window shared it first.']],
     ]);
   });
 
   it('refuses to look for the next host without a key of the plan', () => {
     const lone = windowOn(sharedNetwork(), 'lone');
-    expect(lone.window.succeed([], NAMES, 1, new Map())).toBe(false);
+    expect(lone.window.succeed([], NAMES, 1, [])).toBe(false);
   });
 });

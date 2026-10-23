@@ -74,6 +74,8 @@ const bridge: TasklaceBridge = {
   openSharedPlan: (state) => request(IPC_CHANNELS.openSharedPlan, state),
   findPlans: (searching) => request(IPC_CHANNELS.findPlans, searching),
   dropPeer: (peer) => request(IPC_CHANNELS.dropPeer, peer),
+  allowPeerToEdit: (peer) => request(IPC_CHANNELS.allowPeerToEdit, peer),
+  forgetGuests: (participantIds) => request(IPC_CHANNELS.forgetGuests, participantIds),
   copyJoinCode: () => request(IPC_CHANNELS.copyJoinCode),
   findNextHost: (queue, planName, hostName, knownTokens) =>
     request(IPC_CHANNELS.findNextHost, queue, planName, hostName, knownTokens),
