@@ -1,9 +1,13 @@
+import type { TokenDigest } from '../../core/collaboration/secure/token-digest';
+import type { ParticipantId } from '../../core/collaboration/participants';
 import { isPort } from '../../core/collaboration/ports';
 import {
   tokenDigestOf,
   type Introduction,
   type JoinSecret,
+  type PlanKey,
 } from '../../core/collaboration/secure/link';
+import type { JoinCode } from '../../core/collaboration/secure/join-code';
 import { isOlder } from '../../core/collaboration/roster';
 import { sharingIdOf } from '../../core/collaboration/succession';
 import { success, type Result } from '../../core/result';
@@ -27,6 +31,12 @@ export interface WindowContext {
   readonly randomBytes: (count: number) => Uint8Array;
 }
 
+export type WindowStateView =
+  | Exclude<WindowState, { readonly kind: 'searching' }>
+  | (Omit<Extract<WindowState, { readonly kind: 'searching' }>, 'attempts'> & {
+      readonly attempts: ReadonlySet<GuestSession>;
+    });
+
 export interface PlanNames {
   readonly planName: string;
   readonly hostName: string;
@@ -46,7 +56,7 @@ export type WindowState =
       readonly succession: Succession;
       readonly attempts: Set<GuestSession>;
       readonly identity: Introduction;
-      readonly planKey: Uint8Array;
+      readonly planKey: PlanKey;
     };
 
 export interface TakenOver {
@@ -55,14 +65,14 @@ export interface TakenOver {
 }
 
 export interface WindowSharing {
-  readonly state: () => WindowState;
+  readonly state: () => WindowStateView;
   readonly host: (
     names: PlanNames,
     identity: Introduction,
     port: number,
   ) => Promise<Result<Sharing, ListenFailure>>;
   readonly join: (
-    target: { address: string; port: number; code: string },
+    target: { address: string; port: number; code: JoinCode },
     identity: Introduction,
   ) => void;
   readonly succeed: (
@@ -85,8 +95,8 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
     names: PlanNames,
     options: {
       readonly port: number;
-      readonly planKey: Uint8Array | null;
-      readonly knownTokens: ReadonlyMap<string, string>;
+      readonly planKey: PlanKey | null;
+      readonly knownTokens: ReadonlyMap<ParticipantId, TokenDigest>;
       readonly identity: Introduction;
       readonly rank: number;
     },
@@ -170,7 +180,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
   };
   /** Starts a search for the next host with a key, the given queue of candidates, and the names and port this window announces if its turn comes. */
   const search = (
-    planKey: Uint8Array,
+    planKey: PlanKey,
     identity: Introduction,
     queue: readonly SuccessionCandidate[],
     hosting: {
@@ -238,7 +248,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
     probes.clear();
   };
   /** Keeps trying to join an older host of the same plan with the key while hosting, and gives way only once that host proved who it is, since anyone holding the key can announce an older rank, the guests of this window then finding it too. */
-  const giveWay = (older: NearbyPlan, planKey: Uint8Array): void => {
+  const giveWay = (older: NearbyPlan, planKey: PlanKey): void => {
     if (state.kind !== 'hosting') {
       return;
     }

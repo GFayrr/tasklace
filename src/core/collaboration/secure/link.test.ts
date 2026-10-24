@@ -1,15 +1,20 @@
+import { testJoinCode, testPlanKey, testToken } from '../../testing/secrets';
 import { describe, expect, it } from 'vitest';
 import { MAX_INTRODUCTION_BYTES } from '../../limits';
 import { failure } from '../../result';
 import { requireParticipantId } from '../participants';
 import {
   answerHostLink,
+  drawPlanKey,
   drawRejoinToken,
   encodeIntroduction,
   HELLO_BYTES,
   LINK_VERSION,
+  isRejoinToken,
   PROOF_BYTES,
   readIntroduction,
+  readPlanKey,
+  requireRejoinToken,
   PLAN_KEY_BYTES,
   REPLY_BYTES,
   startHostLink,
@@ -17,14 +22,16 @@ import {
   type JoinSecret,
 } from './link';
 
-const PLAN_KEY = Uint8Array.from({ length: PLAN_KEY_BYTES }, (_unused, index) => index);
-const SECRETS = { code: 'K7Q4MZ', planKey: PLAN_KEY };
-const TOKEN = 'ab'.repeat(32);
+const PLAN_KEY = testPlanKey(
+  Uint8Array.from({ length: PLAN_KEY_BYTES }, (_unused, index) => index),
+);
+const SECRETS = { code: testJoinCode('K7Q4MZ'), planKey: PLAN_KEY };
+const TOKEN = testToken('ab'.repeat(32));
 const ENDPOINT = { addresses: ['192.168.1.24'], port: 47_313 };
 
 /** Gives the secret of a guest who types a code. */
 function code(typed: string): JoinSecret {
-  return { kind: 'code', code: typed };
+  return { kind: 'code', code: testJoinCode(typed) };
 }
 
 /** Returns a source of random bytes that repeats a seed. */
@@ -85,7 +92,7 @@ describe('the opening of a connection', () => {
     }
     const keys = guest.finish(answered.value.confirm);
     expect(keys.ok && keys.value.send).toEqual(answered.value.keys.receive);
-    const otherKey = Uint8Array.from(PLAN_KEY).reverse();
+    const otherKey = testPlanKey(Uint8Array.from(PLAN_KEY).reverse());
     const stranger = guestOf(host.hello, { kind: 'key', key: otherKey });
     expect(host.answer(stranger.reply)).toEqual(failure('WRONG_KEY'));
     expect(stranger.finish(answered.value.confirm)).toEqual(failure('WRONG_KEY'));
@@ -168,5 +175,27 @@ describe('the opening of a connection', () => {
 
   it('draws a token of sixty-four hexadecimal digits for each guest', () => {
     expect(drawRejoinToken(() => new Uint8Array(32).fill(171))).toBe('ab'.repeat(32));
+  });
+});
+
+describe('the secrets of a shared plan', () => {
+  it('draws a key of the length of a key, reads only bytes of that length, and refuses a source of too few bytes', () => {
+    expect([
+      drawPlanKey(seeded(3)).length,
+      readPlanKey(new Uint8Array(PLAN_KEY_BYTES - 1)),
+    ]).toEqual([PLAN_KEY_BYTES, null]);
+    expect(() => drawPlanKey(() => new Uint8Array(1))).toThrow(
+      new RangeError('The random source did not give the length of a key.'),
+    );
+  });
+
+  it('takes as a token only sixty-four lowercase hexadecimal digits', () => {
+    expect([TOKEN, 'AB'.repeat(32), 'ab'.repeat(31), 42].map(isRejoinToken)).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(() => requireRejoinToken('abc')).toThrow(new TypeError('Not a token: abc'));
   });
 });

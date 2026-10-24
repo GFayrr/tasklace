@@ -1,3 +1,4 @@
+import { testJoinCode, testToken } from '../../core/testing/secrets';
 import { afterEach, describe, expect, it } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
 import { requireParticipantId } from '../../core/collaboration/participants';
@@ -61,11 +62,11 @@ function joinTeam(port: number, code: string, index: number, session: SharedSess
   client = connectAsGuest({
     address: LOOPBACK,
     port,
-    secret: { kind: 'code', code },
+    secret: { kind: 'code', code: testJoinCode(code) },
     introduction: {
       participantId,
       name: `Guest ${String(index)}`,
-      token: index.toString(16).padStart(TOKEN_HEX_DIGITS, '0'),
+      token: testToken(index.toString(16).padStart(TOKEN_HEX_DIGITS, '0')),
       endpoint: { addresses: [], port },
     },
     startTimer: noTimer,

@@ -1,3 +1,4 @@
+import { testJoinCode, testPlanKey, testToken } from '../../core/testing/secrets';
 import { describe, expect, it, vi } from 'vitest';
 import { requireParticipantId } from '../../core/collaboration/participants';
 import type { JoinSecret } from '../../core/collaboration/secure/link';
@@ -6,16 +7,16 @@ import type { CollaborationEvent } from '../../preload/bridge-contract';
 import type { GuestEnd, GuestOptions } from './guest-client';
 import { startGuestSession } from './guest-session';
 
-const KEY = new Uint8Array(32).fill(5);
+const KEY = testPlanKey(new Uint8Array(32).fill(5));
 const INTRODUCTION = {
   participantId: requireParticipantId('lea'),
   name: 'Léa',
-  token: 'ab'.repeat(32),
+  token: testToken('ab'.repeat(32)),
   endpoint: { addresses: [], port: 47_313 },
 };
 
 /** Builds a session on fake connections and timers the test drives by hand, joining with the code unless another secret is given. */
-function session(secret: JoinSecret = { kind: 'code', code: 'K7Q4MZ' }) {
+function session(secret: JoinSecret = { kind: 'code', code: testJoinCode('K7Q4MZ') }) {
   const connections: {
     secret: JoinSecret;
     events: GuestOptions['events'];
@@ -100,7 +101,7 @@ describe('a window joined to a host', () => {
     expect(guest.session.send(Uint8Array.of(2))).toEqual(success(null));
     expect([guest.connections.map((each) => each.secret), guest.told, guest.latest().sent]).toEqual(
       [
-        [{ kind: 'code', code: 'K7Q4MZ' }],
+        [{ kind: 'code', code: testJoinCode('K7Q4MZ') }],
         [{ kind: 'connected' }, { kind: 'hostMessage', message: Uint8Array.of(1) }],
         [Uint8Array.of(2)],
       ],

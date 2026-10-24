@@ -1,3 +1,4 @@
+import { testDigest, testJoinCode } from '../../../core/testing/secrets';
 import * as Y from 'yjs';
 import type { Project } from '../../../core/model/project';
 import type { PrintDocument } from '../../../core/print/print-document';
@@ -137,10 +138,10 @@ export function fakeBridge(): {
       shareResult: {
         ok: true,
         value: {
-          code: 'K7Q4MZ',
+          code: testJoinCode('K7Q4MZ'),
           port: 47_313,
           addresses: ['192.168.1.24'],
-          tokenDigest: 'd'.repeat(64),
+          tokenDigest: testDigest('d'.repeat(64)),
         },
       },
       joinResult: { ok: true, value: null },

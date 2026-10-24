@@ -1,3 +1,5 @@
+import type { PlanKey } from '../../core/collaboration/secure/link';
+import { testToken } from '../../core/testing/secrets';
 import { createServer, type Server } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requireParticipantId } from '../../core/collaboration/participants';
@@ -202,7 +204,7 @@ function identity(id: string, port: number): Introduction {
   return {
     participantId: requireParticipantId(id),
     name: id,
-    token: id.padEnd(64, '0').replace(/[^0-9a-f]/g, 'a'),
+    token: testToken(id.padEnd(64, '0').replace(/[^0-9a-f]/g, 'a')),
     endpoint: { addresses: [LOOPBACK], port },
   };
 }
@@ -243,14 +245,19 @@ async function takenOverHost(network: ReturnType<typeof sharedNetwork>) {
   network.split();
   const known = [
     {
-      participantId: 'camille',
+      participantId: requireParticipantId('camille'),
       tokenDigest: tokenDigestOf(identity('camille', hostPort).token),
       rank: 0,
       canEdit: true,
     },
   ];
   expect(
-    lea.window.succeed([{ participantId: 'lea', rank: 1, endpoint: null }], NAMES, leaPort, known),
+    lea.window.succeed(
+      [{ participantId: requireParticipantId('lea'), rank: 1, endpoint: null }],
+      NAMES,
+      leaPort,
+      known,
+    ),
   ).toBe(true);
   await until(() => lea.kinds().includes('becameHost'));
   await camille.window.stop();
@@ -264,7 +271,7 @@ async function takenOverHost(network: ReturnType<typeof sharedNetwork>) {
 /** Announces on a half of the network a host of the plan of a key, older than anyone, at a port. */
 function announceOlder(
   network: ReturnType<typeof sharedNetwork>,
-  planKey: Uint8Array,
+  planKey: PlanKey,
   port: number,
   half = 'b',
 ): void {
@@ -296,8 +303,16 @@ describe('a shared plan whose host changes', () => {
     await camille.window.stop();
     await until(() => lea.kinds().includes('hostLeft') && noah.kinds().includes('hostLeft'));
     const queue = [
-      { participantId: 'lea', rank: 1, endpoint: { addresses: [LOOPBACK], port: leaPort } },
-      { participantId: 'noah', rank: 2, endpoint: { addresses: [LOOPBACK], port: noahPort } },
+      {
+        participantId: requireParticipantId('lea'),
+        rank: 1,
+        endpoint: { addresses: [LOOPBACK], port: leaPort },
+      },
+      {
+        participantId: requireParticipantId('noah'),
+        rank: 2,
+        endpoint: { addresses: [LOOPBACK], port: noahPort },
+      },
     ];
     expect(lea.window.succeed(queue, NAMES, leaPort, [])).toBe(true);
     expect(noah.window.succeed(queue, NAMES, noahPort, [])).toBe(true);
@@ -323,10 +338,10 @@ describe('a shared plan whose host changes', () => {
     );
     await until(() => holdsKey(newer.window));
     network.split();
-    const alone = [{ participantId: 'lea', rank: 1, endpoint: null }];
+    const alone = [{ participantId: requireParticipantId('lea'), rank: 1, endpoint: null }];
     const known = [
       {
-        participantId: 'camille',
+        participantId: requireParticipantId('camille'),
         tokenDigest: tokenDigestOf(identity('camille', olderPort).token),
         rank: 0,
         canEdit: true,
@@ -362,7 +377,7 @@ describe('a shared plan whose host changes', () => {
       identity('lea', leaPort),
     );
     await until(() => holdsKey(lea.window));
-    const later = [{ participantId: 'noah', rank: 2, endpoint: null }];
+    const later = [{ participantId: requireParticipantId('noah'), rank: 2, endpoint: null }];
     expect(lea.window.succeed(later, NAMES, leaPort, [])).toBe(true);
     expect(lea.window.succeed(later, NAMES, leaPort, [])).toBe(true);
     expect(lea.window.state().kind).toBe('searching');
@@ -416,7 +431,7 @@ describe('a shared plan whose host changes', () => {
         stopping.promise = lea.window.stop();
       }
     });
-    const queue = [{ participantId: 'lea', rank: 1, endpoint: null }];
+    const queue = [{ participantId: requireParticipantId('lea'), rank: 1, endpoint: null }];
     expect(lea.window.succeed(queue, NAMES, leaPort, [])).toBe(true);
     await until(() => stopping.promise !== null);
     await stopping.promise;
@@ -455,8 +470,12 @@ describe('a shared plan whose host changes', () => {
       await until(() => holdsKey(lea.window));
       network.split();
       const queue = [
-        { participantId: 'lea', rank: 1, endpoint: null },
-        { participantId: 'noah', rank: 2, endpoint: { addresses: [LOOPBACK], port: taken.first } },
+        { participantId: requireParticipantId('lea'), rank: 1, endpoint: null },
+        {
+          participantId: requireParticipantId('noah'),
+          rank: 2,
+          endpoint: { addresses: [LOOPBACK], port: taken.first },
+        },
       ];
       expect(lea.window.succeed(queue, NAMES, taken.first, [])).toBe(true);
       await until(() => warnings.mock.calls.length === 2);
@@ -488,7 +507,7 @@ describe('a shared plan whose host changes', () => {
     network.split();
     const queue = [
       {
-        participantId: 'noah',
+        participantId: requireParticipantId('noah'),
         rank: 1,
         endpoint: { addresses: [LOOPBACK, 'a b', 'evil.example.com', '8.8.8.8'], port: nobody },
       },

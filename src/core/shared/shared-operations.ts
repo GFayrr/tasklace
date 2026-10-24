@@ -33,7 +33,7 @@ import {
 } from './project-state';
 import { blockPairKey, isKnownBlock, unitCountOf } from '../scheduling/block-links';
 import type { ProjectHeader } from './shared-document';
-import { isIdentifier } from '../identifiers';
+import { isTaskId } from '../identifiers';
 
 const CALENDAR_TASK_PATH = 'tasks.';
 export type SharedOperation =
@@ -366,7 +366,7 @@ export function taskOfCalendarIssue(issue: ValidationIssue): TaskId | null {
   const id = issue.path.startsWith(CALENDAR_TASK_PATH)
     ? issue.path.slice(CALENDAR_TASK_PATH.length)
     : null;
-  return isIdentifier(id) ? id : null;
+  return isTaskId(id) ? id : null;
 }
 
 /** Returns the first work task whose daily pattern no longer fits the calendar, as an issue, or null. */

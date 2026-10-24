@@ -120,6 +120,10 @@ describe('messages of a shared plan', () => {
   it.each([
     ['no host', ROSTER.map((item) => ({ ...item, isHost: false }))],
     ['two hosts', ROSTER.map((item) => ({ ...item, isHost: true }))],
+    [
+      'a host in read only',
+      ROSTER.map((item) => (item.isHost ? { ...item, canEdit: false } : item)),
+    ],
     ['an identifier twice', ROSTER.map((item) => ({ ...item, id: HOST }))],
     ['a rank twice', ROSTER.map((item) => ({ ...item, rank: 0 }))],
     ['a color beyond the palette', [ROSTER[0], { ...ROSTER[1], color: 8 }]],

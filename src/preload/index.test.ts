@@ -1,3 +1,5 @@
+import { requireParticipantId } from '../core/collaboration/participants';
+import { testDigest, testJoinCode } from '../core/testing/secrets';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrintDocument } from '../core/print/print-document';
 import { BRIDGE_NAME, IPC_CHANNELS, type TasklaceBridge } from './bridge-contract';
@@ -215,7 +217,7 @@ describe('the shared plan through the bridge', () => {
     const joining = {
       address: '192.168.1.24',
       port: 47_313,
-      code: 'K7Q4MZ',
+      code: testJoinCode('K7Q4MZ'),
       participantId: 'lea',
       name: 'Léa',
     };
@@ -229,7 +231,7 @@ describe('the shared plan through the bridge', () => {
     await bridge.dropPeer(2);
     await bridge.copyJoinCode();
     await bridge.findNextHost(
-      [{ participantId: 'lea', rank: 1, endpoint: null }],
+      [{ participantId: requireParticipantId('lea'), rank: 1, endpoint: null }],
       'Thesis',
       'Léa',
       [],
@@ -246,7 +248,7 @@ describe('the shared plan through the bridge', () => {
       [IPC_CHANNELS.copyJoinCode],
       [
         IPC_CHANNELS.findNextHost,
-        [{ participantId: 'lea', rank: 1, endpoint: null }],
+        [{ participantId: requireParticipantId('lea'), rank: 1, endpoint: null }],
         'Thesis',
         'Léa',
         [],
@@ -285,14 +287,14 @@ describe('the shared plan through the bridge', () => {
       {
         kind: 'peerJoined',
         peer: 1,
-        participantId: 'lea',
+        participantId: requireParticipantId('lea'),
         name: 'Léa',
         endpoint: ENDPOINT,
-        tokenDigest: 'd'.repeat(64),
+        tokenDigest: testDigest('d'.repeat(64)),
       },
       { kind: 'peerMessage', peer: 1, message: Uint8Array.of(1) },
       { kind: 'peerLeft', peer: 1 },
-      { kind: 'codeChanged', code: 'K7Q4MZ' },
+      { kind: 'codeChanged', code: testJoinCode('K7Q4MZ') },
       { kind: 'nearbyPlans', plans: [plan] },
       { kind: 'connected' },
       { kind: 'reconnecting' },
@@ -301,10 +303,10 @@ describe('the shared plan through the bridge', () => {
       {
         kind: 'becameHost',
         sharing: {
-          code: 'K7Q4MZ',
+          code: testJoinCode('K7Q4MZ'),
           port: 47_313,
           addresses: ['10.0.0.1'],
-          tokenDigest: 'd'.repeat(64),
+          tokenDigest: testDigest('d'.repeat(64)),
         },
       },
       { kind: 'offline' },
@@ -319,27 +321,41 @@ describe('the shared plan through the bridge', () => {
       {
         kind: 'peerJoined',
         peer: 1.5,
-        participantId: 'lea',
+        participantId: requireParticipantId('lea'),
         name: 'Léa',
         endpoint: ENDPOINT,
-        tokenDigest: 'd'.repeat(64),
+        tokenDigest: testDigest('d'.repeat(64)),
       },
       {
         kind: 'peerJoined',
         peer: 1,
-        participantId: 'lea',
+        participantId: requireParticipantId('lea'),
         name: 'Léa',
         endpoint: { port: 1 },
-        tokenDigest: 'd'.repeat(64),
+        tokenDigest: testDigest('d'.repeat(64)),
       },
       { kind: 'peerMessage', peer: 1, message: [1] },
       { kind: 'codeChanged', code: 1 },
+      { kind: 'codeChanged', code: 'k7q4mz' },
+      {
+        kind: 'peerJoined',
+        peer: 1,
+        participantId: 'a b',
+        name: 'Léa',
+        endpoint: ENDPOINT,
+        tokenDigest: testDigest('d'.repeat(64)),
+      },
       { kind: 'nearbyPlans', plans: [{ ...plan, addresses: [1] }] },
       { kind: 'nearbyPlans', plans: 'none' },
       { kind: 'ended', reason: 'SOMETHING' },
       {
         kind: 'becameHost',
-        sharing: { code: 'K7Q4MZ', port: 47_313, addresses: [1], tokenDigest: 'd'.repeat(64) },
+        sharing: {
+          code: testJoinCode('K7Q4MZ'),
+          port: 47_313,
+          addresses: [1],
+          tokenDigest: testDigest('d'.repeat(64)),
+        },
       },
       { kind: 'becameHost', sharing: null },
     ];

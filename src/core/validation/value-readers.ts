@@ -1,5 +1,5 @@
 import { isQuarterHours } from '../time';
-import { isIdentifier, type NewIdentifier } from '../identifiers';
+import { isDependencyId, isTagId, isTaskId } from '../identifiers';
 import type { IssueList } from './validation-issues';
 
 export interface Field {
@@ -175,18 +175,26 @@ export function readText(field: Field, issues: IssueList, maxLength: number): st
   return text;
 }
 
-/** Reads an identifier made of letters, digits, dashes and underscores. */
-export function readIdentifier(field: Field, issues: IssueList): NewIdentifier | undefined {
-  const text = readRawString(field, issues);
-  if (text === undefined) {
-    return undefined;
-  }
-  if (!isIdentifier(text)) {
-    issues.add(field.path, 'INVALID_IDENTIFIER');
-    return undefined;
-  }
-  return text;
+/** Builds a reader of one kind of identifier, made of letters, digits, dashes and underscores. */
+export function identifierReader<Id extends string>(
+  isId: (value: unknown) => value is Id,
+): (field: Field, issues: IssueList) => Id | undefined {
+  return (field, issues) => {
+    const text = readRawString(field, issues);
+    if (text === undefined) {
+      return undefined;
+    }
+    if (!isId(text)) {
+      issues.add(field.path, 'INVALID_IDENTIFIER');
+      return undefined;
+    }
+    return text;
+  };
 }
+
+export const readTaskId = identifierReader(isTaskId);
+export const readTagId = identifierReader(isTagId);
+export const readDependencyId = identifierReader(isDependencyId);
 
 /** Reads a string that must fully match a pattern and stay within a length. */
 export function readPatternString(

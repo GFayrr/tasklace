@@ -1,3 +1,4 @@
+import { testJoinCode, testPlanKey, testToken } from '../../core/testing/secrets';
 import { describe, expect, it, vi } from 'vitest';
 import { requireParticipantId } from '../../core/collaboration/participants';
 import { systemRandomBytes } from './aes-gcm';
@@ -20,14 +21,14 @@ describe('a secure connection whose channel cannot seal', () => {
     };
     const host = acceptGuest({
       ...common,
-      secrets: { code: 'K7Q4MZ', planKey: new Uint8Array(32) },
+      secrets: { code: testJoinCode('K7Q4MZ'), planKey: testPlanKey(new Uint8Array(32)) },
       wire: { send: (bytes) => toGuest.push(bytes), close: () => undefined },
       events: { message: () => undefined, planKey: null, ended: () => undefined },
       joined: () => undefined,
     });
     const guest = connectToHost({
       ...common,
-      secret: { kind: 'code', code: 'K7Q4MZ' },
+      secret: { kind: 'code', code: testJoinCode('K7Q4MZ') },
       wire: { send: (bytes) => toHost.push(bytes), close: () => undefined },
       events: {
         message: () => undefined,
@@ -37,7 +38,7 @@ describe('a secure connection whose channel cannot seal', () => {
       introduction: {
         participantId: requireParticipantId('lea'),
         name: 'Léa',
-        token: 'ab'.repeat(32),
+        token: testToken('ab'.repeat(32)),
         endpoint: { addresses: [], port: 47_313 },
       },
       opened,

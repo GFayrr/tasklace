@@ -1,3 +1,4 @@
+import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { describe, expect, it } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
 import { requireParticipantId, type Participant } from '../../core/collaboration/participants';
@@ -51,10 +52,10 @@ async function renderHosting(guestCount: number) {
     collaboration.listener?.({
       kind: 'peerJoined',
       peer: index + 1,
-      participantId: `guest${String(index)}`,
+      participantId: requireParticipantId(`guest${String(index)}`),
       name,
       endpoint: { addresses: [], port: 47_313 },
-      tokenDigest: 'd'.repeat(64),
+      tokenDigest: testDigest('d'.repeat(64)),
     });
   });
   collaboration.listener?.({
@@ -79,7 +80,7 @@ async function renderJoined(canEdit = false) {
   };
   collaboration.openSharedResult = openedProjectOf(PLAN, { fileName: '' });
   await app.collaboration.loadSettings();
-  await app.join({ address: '192.168.1.24', port: 47_313, code: 'K7Q4MZ' });
+  await app.join({ address: '192.168.1.24', port: 47_313, code: testJoinCode('K7Q4MZ') });
   const me = app.collaboration.me ?? requireParticipantId('nobody');
   const guest: Participant = {
     ...HOST,
@@ -187,7 +188,7 @@ describe('the chip of the connection', () => {
     collaboration.openSharedResult = openedProjectOf(PLAN, { fileName: '' });
     await opened.app.collaboration.loadSettings();
     const root = render(App, { app: opened.app });
-    await opened.app.join({ address: '192.168.1.24', port: 47_313, code: 'K7Q4MZ' });
+    await opened.app.join({ address: '192.168.1.24', port: 47_313, code: testJoinCode('K7Q4MZ') });
     update();
     expect(
       single(root, 'header.toolbar').querySelector('.share, [aria-haspopup="menu"].trigger'),

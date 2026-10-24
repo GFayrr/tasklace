@@ -18,7 +18,8 @@ import {
   type Introduction,
   type JoinSecret,
   type LinkRefusal,
-  PLAN_KEY_BYTES,
+  type PlanKey,
+  readPlanKey,
 } from '../../core/collaboration/secure/link';
 import { zlibCompressor } from '../zlib-compressor';
 import { MAX_COLLABORATION_MESSAGE_BYTES, MAX_HANDSHAKE_MILLISECONDS } from '../../core/limits';
@@ -38,14 +39,14 @@ export type ConnectionEnd =
 export interface ConnectionEvents {
   readonly message: (bytes: Uint8Array) => void;
   readonly ended: (reason: ConnectionEnd) => void;
-  readonly planKey: ((key: Uint8Array) => void) | null;
+  readonly planKey: ((key: PlanKey) => void) | null;
   readonly identity?: (message: Uint8Array) => void;
 }
 
 export interface SecureConnection {
   readonly receive: (bytes: Uint8Array) => void;
   readonly send: (message: Uint8Array) => Result<null, SealRefusal | 'NOT_OPEN'>;
-  readonly sendPlanKey: (key: Uint8Array) => Result<null, SealRefusal | 'NOT_OPEN'>;
+  readonly sendPlanKey: (key: PlanKey) => Result<null, SealRefusal | 'NOT_OPEN'>;
   readonly sendCompressed: (message: CompressedMessage) => Result<null, SealRefusal | 'NOT_OPEN'>;
   readonly sendIdentity: (message: Uint8Array) => Result<null, SealRefusal | 'NOT_OPEN'>;
   readonly wireClosed: () => void;
@@ -131,6 +132,20 @@ function connectionCore(common: Common) {
   };
 }
 
+/** Gives a key of the plan of the right length to a connection that expects one, ending any other connection or key as malformed. */
+function receivePlanKey(
+  message: ChannelMessage,
+  events: ConnectionEvents,
+  core: ReturnType<typeof connectionCore>,
+): void {
+  const key = message.kind === 'planKey' ? readPlanKey(message.message) : null;
+  if (key === null || events.planKey === null) {
+    core.end('MALFORMED');
+    return;
+  }
+  events.planKey(key);
+}
+
 /** Gives each complete message of the open channel to the events of the connection: a message of the plan, a key of the plan of the right length or an identity where the connection expects one, anything else ending it. */
 function openStepOf(
   core: ReturnType<typeof connectionCore>,
@@ -146,14 +161,8 @@ function openStepOf(
       events.message(message.message);
     } else if (message.kind === 'identity' && events.identity !== undefined) {
       events.identity(message.message);
-    } else if (
-      message.kind === 'planKey' &&
-      events.planKey !== null &&
-      message.message.length === PLAN_KEY_BYTES
-    ) {
-      events.planKey(message.message);
     } else {
-      core.end('MALFORMED');
+      receivePlanKey(message, events, core);
     }
   };
 }

@@ -3,14 +3,10 @@ import { join as joinPath } from 'node:path';
 import type { IpcMainEvent, WebContents } from 'electron';
 import { ipcMain } from 'electron';
 import { readEndpoint } from '../../core/collaboration/endpoint';
-import {
-  isParticipantId,
-  requireParticipantId,
-  type ParticipantId,
-} from '../../core/collaboration/participants';
+import { isParticipantId, type ParticipantId } from '../../core/collaboration/participants';
 import { isPort } from '../../core/collaboration/ports';
 import { compressMessage } from '../../core/collaboration/secure/channel';
-import { readJoinCode } from '../../core/collaboration/secure/join-code';
+import { readJoinCode, type JoinCode } from '../../core/collaboration/secure/join-code';
 import { drawRejoinToken, type Introduction } from '../../core/collaboration/secure/link';
 import { isTokenDigest } from '../../core/collaboration/secure/token-digest';
 import {
@@ -28,7 +24,7 @@ import {
   childField,
   itemField,
   readArray,
-  readIdentifier,
+  identifierReader,
   readInteger,
   readNullable,
   readRecord,
@@ -42,7 +38,6 @@ import {
   type KnownToken,
   type CollaborationSettings,
   type InvokeChannel,
-  type JoinRequest,
   type NearbyPlan,
   type OpenedProject,
   type Sharing,
@@ -70,7 +65,7 @@ import {
   createWindowSharing,
   type PlanNames,
   type WindowSharing,
-  type WindowState,
+  type WindowStateView,
 } from './window-sharing';
 
 export interface CollaborationServices {
@@ -83,6 +78,14 @@ export interface CollaborationServices {
   readonly startTimer?: StartTimer;
   readonly now?: () => number;
   readonly randomBytes?: (count: number) => Uint8Array;
+}
+
+interface CheckedJoinRequest {
+  readonly address: string;
+  readonly port: number;
+  readonly code: JoinCode;
+  readonly participantId: ParticipantId;
+  readonly name: string;
 }
 
 const SETTINGS_STORE = 'collaboration-settings.json';
@@ -250,7 +253,7 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
     }
     starting.add(event.sender);
     const generation = generations.get(event.sender) ?? 0;
-    const identity = await identityOf(requireParticipantId(request.participantId), request.name);
+    const identity = await identityOf(request.participantId, request.name);
     if (stoppedSince(event.sender, generation)) {
       return failure({ code: 'CANCELLED' });
     }
@@ -426,7 +429,7 @@ function readSuccessionQueue(value: unknown): readonly SuccessionCandidate[] | n
 }
 
 /** Reads the identifiers of guests the page no longer knows, a list of valid identifiers no longer than the people a host remembers. */
-function readParticipantIds(value: unknown): readonly string[] | null {
+function readParticipantIds(value: unknown): readonly ParticipantId[] | null {
   return Array.isArray(value) &&
     value.length <= MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS &&
     value.every((id) => isParticipantId(id))
@@ -468,7 +471,10 @@ function readCandidate(
   if (record === undefined) {
     return undefined;
   }
-  const participantId = readIdentifier(childField(record, 'participantId', field.path), issues);
+  const participantId = identifierReader(isParticipantId)(
+    childField(record, 'participantId', field.path),
+    issues,
+  );
   const rank = readInteger(childField(record, 'rank', field.path), issues, 0, MAX_JOIN_RANK);
   const endpoint = readNullable(childField(record, 'endpoint', field.path), issues, readEndpoint);
   return participantId === undefined || rank === undefined || endpoint === undefined
@@ -488,7 +494,7 @@ function nearbyPlanForPage(plan: HeardPlan): NearbyPlan {
 }
 
 /** Reads what a page asks to join: a host address and port as typed, checked later since a person may mistype them, a join code, a participant identifier and a name, or null. */
-function readJoinRequest(value: unknown): JoinRequest | null {
+function readJoinRequest(value: unknown): CheckedJoinRequest | null {
   if (typeof value !== 'object' || value === null) {
     return null;
   }
@@ -524,7 +530,7 @@ function instanceName(randomBytes: (count: number) => Uint8Array): string {
 async function openShared(
   services: CollaborationServices,
   sender: WebContents,
-  sharing: WindowState | undefined,
+  sharing: WindowStateView | undefined,
   value: unknown,
 ): Promise<BridgeResult<OpenedProject>> {
   const state = readProjectState(value) ?? refuseMessage();
@@ -537,7 +543,7 @@ async function openShared(
 }
 
 /** Sends a message of the page to a guest or to the host, logging and dropping a message of another shape, since a one-way message has nobody to refuse it to, and logging one that cannot be sent. */
-function sendFrom(sharing: WindowState | undefined, to: unknown, message: unknown): void {
+function sendFrom(sharing: WindowStateView | undefined, to: unknown, message: unknown): void {
   const isMessage =
     message instanceof Uint8Array && message.length <= MAX_COLLABORATION_MESSAGE_BYTES;
   if (!isMessage || !isTarget(to)) {
@@ -570,7 +576,7 @@ function isPeer(value: unknown): boolean {
 
 /** Sends one message to several guests of the plan a window hosts, compressing it once and sealing it for each, logging a guest it could not reach. */
 function sendToMany(
-  sharing: WindowState | undefined,
+  sharing: WindowStateView | undefined,
   peers: readonly number[],
   message: Uint8Array,
 ): void {
@@ -590,7 +596,7 @@ function sendToMany(
 
 /** Sends a message to its target, giving why it could not be sent or null. */
 function sendTo(
-  sharing: WindowState | undefined,
+  sharing: WindowStateView | undefined,
   to: number | 'host',
   message: Uint8Array,
 ): string | null {

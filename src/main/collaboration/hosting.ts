@@ -1,4 +1,10 @@
-import { tokenDigestOf, type Introduction } from '../../core/collaboration/secure/link';
+import type { TokenDigest } from '../../core/collaboration/secure/token-digest';
+import type { ParticipantId } from '../../core/collaboration/participants';
+import {
+  tokenDigestOf,
+  type Introduction,
+  type PlanKey,
+} from '../../core/collaboration/secure/link';
 import { sharingIdOf, shouldYield } from '../../core/collaboration/succession';
 import { failure, success, type Result } from '../../core/result';
 import type { CollaborationEvent } from '../../preload/bridge-contract';
@@ -8,8 +14,8 @@ import type { StartTimer } from './secure-connection';
 
 export interface HostingOptions {
   readonly port: number;
-  readonly planKey: Uint8Array | null;
-  readonly knownTokens: ReadonlyMap<string, string>;
+  readonly planKey: PlanKey | null;
+  readonly knownTokens: ReadonlyMap<ParticipantId, TokenDigest>;
   readonly identity: Introduction;
   readonly rank: number;
   readonly planName: string;
@@ -20,12 +26,12 @@ export interface HostingOptions {
   readonly randomBytes: (count: number) => Uint8Array;
   readonly mdns: () => Mdns;
   readonly tell: (event: CollaborationEvent) => void;
-  readonly olderHost: (host: NearbyPlan, planKey: Uint8Array) => void;
+  readonly olderHost: (host: NearbyPlan, planKey: PlanKey) => void;
 }
 
 export interface Hosting {
   readonly server: HostServer;
-  readonly peers: Map<number, Peer>;
+  readonly peers: ReadonlyMap<number, Peer>;
   readonly stop: () => Promise<void>;
 }
 
@@ -87,7 +93,7 @@ export async function startHosting(
 function announceSafely(
   options: HostingOptions,
   port: number,
-  planKey: Uint8Array,
+  planKey: PlanKey,
 ): () => Promise<void> {
   try {
     return announcePlan(options.mdns(), {

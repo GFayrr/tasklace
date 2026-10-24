@@ -1,3 +1,4 @@
+import { testToken } from '../../core/testing/secrets';
 import { freePort, LOOPBACK, spacedClock } from '../testing/plan-host';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requireParticipantId } from '../../core/collaboration/participants';
@@ -50,7 +51,7 @@ async function joinWith(answers: boolean[]): Promise<{ ends: GuestEnd[]; joined:
     introduction: {
       participantId: requireParticipantId('lea'),
       name: 'Léa',
-      token: 'ab'.repeat(32),
+      token: testToken('ab'.repeat(32)),
       endpoint: { addresses: [], port: 47_313 },
     },
     startTimer: () => () => undefined,

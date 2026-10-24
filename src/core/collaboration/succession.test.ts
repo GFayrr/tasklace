@@ -1,3 +1,4 @@
+import { testPlanKey } from '../testing/secrets';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { permutationOf } from '../testing/arbitraries';
@@ -76,12 +77,12 @@ describe('who takes over a plan whose host left', () => {
   });
 
   it('announces the same identifier for the same key, another for another key, without the key in it', () => {
-    const key = new Uint8Array(32).fill(1);
+    const key = testPlanKey(new Uint8Array(32).fill(1));
     const id = sharingIdOf(key);
     expect([
       id.length,
-      id === sharingIdOf(Uint8Array.from(key)),
-      id === sharingIdOf(new Uint8Array(32)),
+      id === sharingIdOf(testPlanKey(Uint8Array.from(key))),
+      id === sharingIdOf(testPlanKey(new Uint8Array(32))),
     ]).toEqual([32, true, false]);
   });
 });

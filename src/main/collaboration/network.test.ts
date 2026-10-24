@@ -1,14 +1,17 @@
+import { testJoinCode, testPlanKey, testToken } from '../../core/testing/secrets';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { freePort, LOOPBACK, spacedClock, until } from '../testing/plan-host';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
-import { requireParticipantId } from '../../core/collaboration/participants';
+import { requireParticipantId, type ParticipantId } from '../../core/collaboration/participants';
+import type { TokenDigest } from '../../core/collaboration/secure/token-digest';
 import { WRONG_CODES_BEFORE_NEW_CODE } from '../../core/collaboration/secure/join-code';
 import {
   tokenDigestOf,
   type Introduction,
   type JoinSecret,
+  type PlanKey,
 } from '../../core/collaboration/secure/link';
 import {
   MAX_DEPARTED_PARTICIPANTS,
@@ -26,10 +29,10 @@ import type { ConnectionEnd, StartTimer } from './secure-connection';
 const LEA: Introduction = {
   participantId: requireParticipantId('lea'),
   name: 'Léa',
-  token: 'ab'.repeat(32),
+  token: testToken('ab'.repeat(32)),
   endpoint: { addresses: [], port: 47_313 },
 };
-const PLAN_KEY = new Uint8Array(32).fill(7);
+const PLAN_KEY = testPlanKey(new Uint8Array(32).fill(7));
 const MANY_CONNECTIONS_TIMEOUT_MS = 60_000;
 /** Starts no timer, the tests waiting for events instead. */
 const noTimer: StartTimer = () => () => undefined;
@@ -68,8 +71,8 @@ async function portBeforeAFreeOne(): Promise<number> {
 /** Starts a host on a free port, recording everything it tells. */
 async function host(
   port?: number,
-  planKey: Uint8Array | null = null,
-  knownTokens: ReadonlyMap<string, string> = new Map(),
+  planKey: PlanKey | null = null,
+  knownTokens: ReadonlyMap<ParticipantId, TokenDigest> = new Map(),
   now: () => number = spacedClock(),
   identity: Introduction | null = null,
 ) {
@@ -109,7 +112,7 @@ function guest(port: number, secret: string | JoinSecret, introduction: Introduc
   const client = connectAsGuest({
     address: LOOPBACK,
     port,
-    secret: typeof secret === 'string' ? { kind: 'code', code: secret } : secret,
+    secret: typeof secret === 'string' ? { kind: 'code', code: testJoinCode(secret) } : secret,
     introduction,
     startTimer: noTimer,
     randomBytes: systemRandomBytes,
@@ -254,7 +257,7 @@ describe('a shared plan over the network', () => {
     await until(() => back.isOpen() && shared.joined.length === 2);
     const stranger = guest(
       shared.server.port,
-      { kind: 'key', key: new Uint8Array(32) },
+      { kind: 'key', key: testPlanKey(new Uint8Array(32)) },
       { ...LEA, participantId: requireParticipantId('noah') },
     );
     await until(() => stranger.ends.length === 1);
@@ -269,7 +272,7 @@ describe('a shared plan over the network', () => {
     await until(() => shared.left.length === 1);
     const impostor = guest(shared.server.port, shared.server.code(), {
       ...LEA,
-      token: 'cd'.repeat(32),
+      token: testToken('cd'.repeat(32)),
     });
     await until(() => impostor.ends.length === 1);
     expect([impostor.ends, shared.joined.length]).toEqual([['IDENTITY_TAKEN'], 1]);
@@ -337,13 +340,13 @@ describe('a shared plan over the network', () => {
       expect(late.ends).toEqual(['IDENTITY_TAKEN']);
       first.client.close();
       await until(() => shared.left.length === MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS + 1);
-      shared.server.forget(['p1', 'p0']);
+      shared.server.forget([requireParticipantId('p1'), requireParticipantId('p0')]);
       const newcomer = guest(shared.server.port, shared.server.code());
       await until(() => newcomer.isOpen());
-      shared.server.forget(['lea']);
+      shared.server.forget([requireParticipantId('lea')]);
       const impostor = guest(shared.server.port, shared.server.code(), {
         ...LEA,
-        token: 'cd'.repeat(32),
+        token: testToken('cd'.repeat(32)),
       });
       await until(() => impostor.ends.length === 1);
       expect(impostor.ends).toEqual(['IDENTITY_TAKEN']);
@@ -358,7 +361,7 @@ describe('a shared plan over the network', () => {
     );
     const impostor = guest(shared.server.port, shared.server.code(), {
       ...LEA,
-      token: 'cd'.repeat(32),
+      token: testToken('cd'.repeat(32)),
     });
     await until(() => impostor.ends.length === 1);
     const lea = guest(shared.server.port, shared.server.code());
@@ -481,7 +484,7 @@ describe('host addresses', () => {
       connectAsGuest({
         address: 'a b',
         port: 1,
-        secret: { kind: 'code', code: 'AAAAAA' },
+        secret: { kind: 'code', code: testJoinCode('AAAAAA') },
         introduction: LEA,
         startTimer: noTimer,
         randomBytes: systemRandomBytes,

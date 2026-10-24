@@ -3,22 +3,31 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { MAX_INTRODUCTION_BYTES, MAX_PARTICIPANT_NAME_LENGTH } from '../../limits';
 import { failure, success, type Result } from '../../result';
 import { createIssueList } from '../../validation/validation-issues';
-import { childField, readIdentifier, readRecord, readText } from '../../validation/value-readers';
+import { childField, identifierReader, readRecord, readText } from '../../validation/value-readers';
 import { parsedJson } from '../messages';
 import { readEndpoint } from '../endpoint';
 import { isParticipantId, type Endpoint, type ParticipantId } from '../participants';
 import { SESSION_ID_BYTES, SHARE_BYTES, startHandshake, type SessionKeys } from './cpace';
+import type { JoinCode } from './join-code';
+import { requireTokenDigest, type TokenDigest } from './token-digest';
 
 export type LinkRefusal =
   'MALFORMED' | 'UNSUPPORTED_VERSION' | 'INVALID_SHARE' | 'WRONG_CODE' | 'WRONG_KEY';
 
+declare const PLAN_KEY_BRAND: unique symbol;
+declare const REJOIN_TOKEN_BRAND: unique symbol;
+
+export type PlanKey = Uint8Array & { readonly [PLAN_KEY_BRAND]: true };
+
+export type RejoinToken = string & { readonly [REJOIN_TOKEN_BRAND]: true };
+
 export type JoinSecret =
-  | { readonly kind: 'code'; readonly code: string }
-  | { readonly kind: 'key'; readonly key: Uint8Array };
+  | { readonly kind: 'code'; readonly code: JoinCode }
+  | { readonly kind: 'key'; readonly key: PlanKey };
 
 export interface HostSecrets {
-  readonly code: string;
-  readonly planKey: Uint8Array;
+  readonly code: JoinCode;
+  readonly planKey: PlanKey;
 }
 
 export interface HostLink {
@@ -36,7 +45,7 @@ export interface GuestLink {
 export interface Introduction {
   readonly participantId: ParticipantId;
   readonly name: string;
-  readonly token: string;
+  readonly token: RejoinToken;
   readonly endpoint: Endpoint;
 }
 
@@ -134,13 +143,45 @@ export function answerHostLink(
 }
 
 /** Draws the token a guest shows each time it joins, so that the host knows it is the same person, written as hexadecimal digits. */
-export function drawRejoinToken(randomBytes: (count: number) => Uint8Array): string {
-  return bytesToHex(randomBytes(REJOIN_TOKEN_BYTES));
+export function drawRejoinToken(randomBytes: (count: number) => Uint8Array): RejoinToken {
+  return requireRejoinToken(bytesToHex(randomBytes(REJOIN_TOKEN_BYTES)));
+}
+
+/** Tells whether a value is a token a guest shows when it comes back: sixty-four lowercase hexadecimal digits. */
+export function isRejoinToken(value: unknown): value is RejoinToken {
+  return typeof value === 'string' && TOKEN_PATTERN.test(value);
+}
+
+/** Gives a value known to be a token, such as one just drawn, as one, throwing for any other value since only a programming error can give one. */
+export function requireRejoinToken(value: unknown): RejoinToken {
+  if (!isRejoinToken(value)) {
+    throw new TypeError(`Not a token: ${String(value)}`);
+  }
+  return value;
+}
+
+/** Draws the key of a shared plan, given to every person let in. */
+export function drawPlanKey(randomBytes: (count: number) => Uint8Array): PlanKey {
+  const key = readPlanKey(randomBytes(PLAN_KEY_BYTES));
+  if (key === null) {
+    throw new RangeError('The random source did not give the length of a key.');
+  }
+  return key;
+}
+
+/** Reads the key of a shared plan from bytes, or returns null when they do not have its length. */
+export function readPlanKey(bytes: Uint8Array): PlanKey | null {
+  return isPlanKey(bytes) ? bytes : null;
+}
+
+/** Tells whether bytes have the length of the key of a shared plan. */
+function isPlanKey(bytes: Uint8Array): bytes is PlanKey {
+  return bytes.length === PLAN_KEY_BYTES;
 }
 
 /** Gives the digest of the token of a guest, which the list of people carries so that a host taking over knows who may come back under an identifier, without the token itself. */
-export function tokenDigestOf(token: string): string {
-  return bytesToHex(sha256(ENCODER.encode(token)));
+export function tokenDigestOf(token: RejoinToken): TokenDigest {
+  return requireTokenDigest(bytesToHex(sha256(ENCODER.encode(token))));
 }
 
 /** Writes the first message a guest sends once the channel is open: who it is, the name it shows, the token that proves it is the same person when it comes back and where it could host the plan. */
@@ -159,15 +200,17 @@ export function readIntroduction(bytes: Uint8Array): Introduction | null {
   if (record === undefined) {
     return null;
   }
-  const participantId = readIdentifier(childField(record, 'participantId', ''), issues);
+  const participantId = identifierReader(isParticipantId)(
+    childField(record, 'participantId', ''),
+    issues,
+  );
   const name = readText(childField(record, 'name', ''), issues, MAX_PARTICIPANT_NAME_LENGTH);
   const token = record['token'];
   const endpoint = readEndpoint(childField(record, 'endpoint', ''), issues);
   if (
-    !isParticipantId(participantId) ||
+    participantId === undefined ||
     name === undefined ||
-    typeof token !== 'string' ||
-    !TOKEN_PATTERN.test(token) ||
+    !isRejoinToken(token) ||
     endpoint === undefined ||
     issues.issues.length > 0
   ) {

@@ -1,3 +1,5 @@
+import type { PlanKey } from '../../core/collaboration/secure/link';
+import { testJoinCode, testPlanKey, testToken } from '../../core/testing/secrets';
 import { describe, expect, it, vi } from 'vitest';
 import { requireParticipantId } from '../../core/collaboration/participants';
 import { MAX_COLLABORATION_MESSAGE_BYTES, MAX_HANDSHAKE_MILLISECONDS } from '../../core/limits';
@@ -22,11 +24,13 @@ import {
 const INTRODUCTION = {
   participantId: requireParticipantId('lea-1'),
   name: 'Léa',
-  token: 'ab'.repeat(32),
+  token: testToken('ab'.repeat(32)),
   endpoint: { addresses: [], port: 47_313 },
 };
-const PLAN_KEY = Uint8Array.from({ length: PLAN_KEY_BYTES }, (_unused, index) => index);
-const CODE: JoinSecret = { kind: 'code', code: 'K7Q4MZ' };
+const PLAN_KEY = testPlanKey(
+  Uint8Array.from({ length: PLAN_KEY_BYTES }, (_unused, index) => index),
+);
+const CODE: JoinSecret = { kind: 'code', code: testJoinCode('K7Q4MZ') };
 
 interface Side {
   readonly sent: Uint8Array[];
@@ -82,7 +86,7 @@ function pair(hostCode = 'K7Q4MZ', guestSecret: JoinSecret = CODE) {
   const joined = vi.fn();
   const opened = vi.fn();
   const host = acceptGuest({
-    secrets: { code: hostCode, planKey: PLAN_KEY },
+    secrets: { code: testJoinCode(hostCode), planKey: PLAN_KEY },
     wire: hostSide.wire,
     startTimer: timers.startTimer,
     randomBytes: systemRandomBytes,
@@ -145,7 +149,7 @@ describe('a secure connection', () => {
   });
 
   it('refuses a guest with a wrong code on the side of the host, which closes the wire', () => {
-    const net = pair('K7Q4MZ', { kind: 'code', code: 'K7Q4MA' });
+    const net = pair('K7Q4MZ', { kind: 'code', code: testJoinCode('K7Q4MA') });
     net.flush();
     expect([net.hostSide.ends, net.hostSide.closes, net.joined.mock.calls]).toEqual([
       ['WRONG_CODE'],
@@ -163,7 +167,10 @@ describe('a secure connection', () => {
     expect(net.host.sendPlanKey(PLAN_KEY)).toEqual(success(null));
     net.flush();
     expect([net.guestSide.keys, net.guestSide.messages]).toEqual([[Buffer.from(PLAN_KEY)], []]);
-    const stranger = pair('K7Q4MZ', { kind: 'key', key: Uint8Array.from(PLAN_KEY).reverse() });
+    const stranger = pair('K7Q4MZ', {
+      kind: 'key',
+      key: testPlanKey(Uint8Array.from(PLAN_KEY).reverse()),
+    });
     stranger.flush();
     expect([stranger.hostSide.ends, stranger.joined.mock.calls]).toEqual([['WRONG_KEY'], []]);
   });
@@ -265,7 +272,7 @@ describe('a secure connection', () => {
     expect([net.hostSide.ends, net.joined.mock.calls]).toEqual([['INVALID_INTRODUCTION'], []]);
     const short = pair();
     short.flush();
-    expect(short.host.sendPlanKey(Uint8Array.of(1))).toEqual(success(null));
+    expect(short.host.sendPlanKey(Uint8Array.of(1) as PlanKey)).toEqual(success(null));
     short.flush();
     expect([short.guestSide.ends, short.guestSide.keys]).toEqual([['MALFORMED'], []]);
   });

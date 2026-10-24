@@ -1,6 +1,7 @@
-import { isOneOf } from '../core/one-of';
 import { GUEST_ENDS, type CollaborationEvent, type NearbyPlan } from './bridge-contract';
 import { readEndpoint } from '../core/collaboration/endpoint';
+import { isParticipantId } from '../core/collaboration/participants';
+import { isJoinCode } from '../core/collaboration/secure/join-code';
 import { isTokenDigest } from '../core/collaboration/secure/token-digest';
 import { createIssueList } from '../core/validation/validation-issues';
 
@@ -38,7 +39,7 @@ function isEndpoint(value: unknown): boolean {
 function isSharing(value: unknown): boolean {
   const addresses = field(value, 'addresses');
   return (
-    typeof field(value, 'code') === 'string' &&
+    isJoinCode(field(value, 'code')) &&
     isTokenDigest(field(value, 'tokenDigest')) &&
     isWhole(field(value, 'port')) &&
     Array.isArray(addresses) &&
@@ -49,14 +50,14 @@ function isSharing(value: unknown): boolean {
 const EVENT_CHECKS: Readonly<Record<CollaborationEvent['kind'], (value: unknown) => boolean>> = {
   peerJoined: (value) =>
     isWhole(field(value, 'peer')) &&
-    typeof field(value, 'participantId') === 'string' &&
+    isParticipantId(field(value, 'participantId')) &&
     typeof field(value, 'name') === 'string' &&
     isEndpoint(field(value, 'endpoint')) &&
     isTokenDigest(field(value, 'tokenDigest')),
   peerMessage: (value) =>
     isWhole(field(value, 'peer')) && field(value, 'message') instanceof Uint8Array,
   peerLeft: (value) => isWhole(field(value, 'peer')),
-  codeChanged: (value) => typeof field(value, 'code') === 'string',
+  codeChanged: (value) => isJoinCode(field(value, 'code')),
   nearbyPlans: (value) => {
     const plans = field(value, 'plans');
     return Array.isArray(plans) && plans.every(isNearbyPlan);
@@ -71,24 +72,13 @@ const EVENT_CHECKS: Readonly<Record<CollaborationEvent['kind'], (value: unknown)
   ended: (value) => GUEST_END_VALUES.includes(field(value, 'reason')),
 };
 
-const EVENT_KINDS: readonly CollaborationEvent['kind'][] = [
-  'peerJoined',
-  'peerMessage',
-  'peerLeft',
-  'codeChanged',
-  'nearbyPlans',
-  'connected',
-  'reconnecting',
-  'hostLeft',
-  'becameHost',
-  'yielded',
-  'offline',
-  'hostMessage',
-  'ended',
-];
+/** Tells whether a value names a kind of event, by the table that checks each kind. */
+function isEventKind(kind: unknown): kind is CollaborationEvent['kind'] {
+  return typeof kind === 'string' && Object.hasOwn(EVENT_CHECKS, kind);
+}
 
 /** Tells whether what the main process sent about the shared plan has the shape of one of its events. */
 export function isCollaborationEvent(value: unknown): value is CollaborationEvent {
   const kind = field(value, 'kind');
-  return isOneOf(EVENT_KINDS, kind) && EVENT_CHECKS[kind](value);
+  return isEventKind(kind) && EVENT_CHECKS[kind](value);
 }

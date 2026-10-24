@@ -1,3 +1,4 @@
+import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { describe, expect, it, vi } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
 import { requireParticipantId, type Participant } from '../../core/collaboration/participants';
@@ -18,7 +19,7 @@ const HOST: Participant = {
   endpoint: null,
   tokenDigest: null,
 };
-const TARGET = { address: '192.168.1.24', port: 47_313, code: 'K7Q4MZ' };
+const TARGET = { address: '192.168.1.24', port: 47_313, code: testJoinCode('K7Q4MZ') };
 
 /** Joins the plan in a new application state, the host sending the people in it, this page in read only unless told, then the whole plan. */
 async function joinedApp(canEdit = false, fake = fakeAppContext()) {
@@ -214,7 +215,12 @@ describe('the windows of a shared plan', () => {
     ]);
     opened.control.collaboration.shareResult = {
       ok: true,
-      value: { code: 'K7Q4MZ', port: 47_313, addresses: [], tokenDigest: 'd'.repeat(64) },
+      value: {
+        code: testJoinCode('K7Q4MZ'),
+        port: 47_313,
+        addresses: [],
+        tokenDigest: testDigest('d'.repeat(64)),
+      },
     };
     await opened.app.startSharing();
     expect([opened.app.shareFailure, opened.app.collaboration.mode.kind]).toEqual([
@@ -301,7 +307,12 @@ describe('a host that changes', () => {
     await settle();
     control.collaboration.listener?.({
       kind: 'becameHost',
-      sharing: { code: 'N3WC0D', port: 47_313, addresses: [], tokenDigest: 'd'.repeat(64) },
+      sharing: {
+        code: testJoinCode('N3WC9D'),
+        port: 47_313,
+        addresses: [],
+        tokenDigest: testDigest('d'.repeat(64)),
+      },
     });
     expect(noticeTexts(app)).toEqual([
       'Camille left. You now host the plan; the others join you on their own.',

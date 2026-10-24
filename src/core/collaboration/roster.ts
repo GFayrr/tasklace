@@ -1,3 +1,4 @@
+import type { TokenDigest } from './secure/token-digest';
 import { compareStrings } from '../compare-strings';
 import { MAX_DEPARTED_PARTICIPANTS, MAX_JOIN_RANK, MAX_PARTICIPANTS } from '../limits';
 import type { TaskId } from '../model/project';
@@ -26,7 +27,7 @@ export type RosterRefusal = 'ROSTER_FULL' | 'ALREADY_IN' | 'UNKNOWN_PARTICIPANT'
 export function startRoster(
   hostId: ParticipantId,
   name: string,
-  tokenDigest: string | null,
+  tokenDigest: TokenDigest | null,
 ): Roster {
   return {
     participants: [
@@ -47,13 +48,19 @@ export function startRoster(
   };
 }
 
+/** Builds the list of a plan from the people a guest last heard of, none of them gone, the next rank following the highest one. */
+export function rosterOfKnown(participants: readonly Participant[]): Roster {
+  const highest = Math.max(0, ...participants.map((participant) => participant.rank));
+  return { participants, departed: [], nextRank: highest + 1 };
+}
+
 /** Adds a participant who just joined, in read only with a new rank and the first color nobody uses, or with the rank, right and color it had when it comes back, refusing a full list, an identifier already in it, or a list whose ranks are spent. */
 export function joinRoster(
   roster: Roster,
   id: ParticipantId,
   name: string,
   endpoint: Endpoint | null,
-  tokenDigest: string | null,
+  tokenDigest: TokenDigest | null,
 ): Result<Roster, RosterRefusal> {
   if (roster.participants.length >= MAX_PARTICIPANTS || roster.nextRank > MAX_JOIN_RANK) {
     return failure('ROSTER_FULL');

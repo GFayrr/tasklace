@@ -1,6 +1,6 @@
 import { isOneOf } from '../../core/one-of';
 import { OFFLINE_AFTER_MILLISECONDS, reconnectDelay } from '../../core/collaboration/reconnection';
-import type { Introduction, JoinSecret } from '../../core/collaboration/secure/link';
+import type { Introduction, JoinSecret, PlanKey } from '../../core/collaboration/secure/link';
 import type { CollaborationEvent } from '../../preload/bridge-contract';
 import type { GuestClient, GuestEnd, GuestOptions } from './guest-client';
 import type { StartTimer } from './secure-connection';
@@ -19,7 +19,7 @@ export interface GuestSessionOptions {
 
 export interface GuestSession {
   readonly send: GuestClient['send'];
-  readonly planKey: () => Uint8Array | null;
+  readonly planKey: () => PlanKey | null;
   readonly askIdentity: () => void;
   readonly close: () => void;
 }
@@ -40,7 +40,7 @@ const FINAL_ENDS = [
 /** Keeps a window joined to a host: joins with the code or the key, keeps the key of the plan, comes back with it after a lost connection, waiting longer each time and telling the page, until a refusal, the host leaving or the page ends it. */
 export function startGuestSession(options: GuestSessionOptions): GuestSession {
   let client: GuestClient | null = null;
-  let planKey: Uint8Array | null = options.secret.kind === 'key' ? options.secret.key : null;
+  let planKey: PlanKey | null = options.secret.kind === 'key' ? options.secret.key : null;
   let hasOpened = false;
   let isStopped = false;
   let attempts = 0;
@@ -61,7 +61,7 @@ export function startGuestSession(options: GuestSessionOptions): GuestSession {
     options.ended();
   };
   /** Waits before trying again, telling the page the first time the connection is lost and again once nobody answered for a while. */
-  const retryLater = (key: Uint8Array): void => {
+  const retryLater = (key: PlanKey): void => {
     if (stopOffline === null) {
       options.tell({ kind: 'reconnecting' });
       stopOffline = options.startTimer(OFFLINE_AFTER_MILLISECONDS, () => {

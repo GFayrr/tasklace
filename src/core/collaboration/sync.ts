@@ -1,3 +1,4 @@
+import type { TokenDigest } from './secure/token-digest';
 import * as Y from 'yjs';
 import { MAX_PENDING_UPDATE_BYTES } from '../limits';
 import type { TaskId } from '../model/project';
@@ -46,7 +47,7 @@ export interface Host {
     peer: ParticipantId,
     name: string,
     endpoint: Endpoint | null,
-    tokenDigest: string | null,
+    tokenDigest: TokenDigest | null,
   ) => Result<null, RosterRefusal>;
   readonly disconnect: (peer: ParticipantId) => void;
   readonly receive: (from: ParticipantId, message: CollaborationMessage) => void;
@@ -67,7 +68,7 @@ interface HostOptions {
   readonly session: SharedSession;
   readonly hostId: ParticipantId;
   readonly name: string;
-  readonly tokenDigest: string | null;
+  readonly tokenDigest: TokenDigest | null;
   readonly roster: Roster | null;
   readonly send: (outgoing: Outgoing) => void;
   readonly report: (event: SyncEvent) => void;

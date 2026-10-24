@@ -1,3 +1,4 @@
+import { testPlanKey, testToken } from '../../core/testing/secrets';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
@@ -29,11 +30,11 @@ import { startGuestSession } from './guest-session';
 import { startHostServer, type HostServer, type Peer } from './host-server';
 import type { StartTimer } from './secure-connection';
 
-const PLAN_KEY = new Uint8Array(32).fill(3);
+const PLAN_KEY = testPlanKey(new Uint8Array(32).fill(3));
 const LEA: Introduction = {
   participantId: requireParticipantId('lea'),
   name: 'Léa',
-  token: 'ab'.repeat(32),
+  token: testToken('ab'.repeat(32)),
   endpoint: { addresses: [], port: 47_313 },
 };
 const servers: HostServer[] = [];

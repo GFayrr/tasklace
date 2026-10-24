@@ -1,4 +1,5 @@
-import { isIdentifier } from '../identifiers';
+import type { TokenDigest } from './secure/token-digest';
+import { isIdentifierText } from '../identifiers';
 import type { TaskId } from '../model/project';
 
 declare const PARTICIPANT_ID: unique symbol;
@@ -16,7 +17,7 @@ export interface Participant {
   readonly rank: number;
   readonly selectedTaskId: TaskId | null;
   readonly endpoint: Endpoint | null;
-  readonly tokenDigest: string | null;
+  readonly tokenDigest: TokenDigest | null;
 }
 
 export interface Endpoint {
@@ -26,7 +27,7 @@ export interface Endpoint {
 
 /** Tells whether a value can identify a participant of a shared plan, with the same characters as the identifiers of a project. */
 export function isParticipantId(value: unknown): value is ParticipantId {
-  return isIdentifier(value);
+  return isIdentifierText(value);
 }
 
 /** Gives a value known to identify a participant, such as one the host just generated, as one, throwing for any other value since only a programming error can give one. */

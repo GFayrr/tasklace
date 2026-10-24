@@ -1,3 +1,5 @@
+import type { TokenDigest } from '../../core/collaboration/secure/token-digest';
+import type { ParticipantId } from '../../core/collaboration/participants';
 import { createServer, type Server } from 'node:http';
 import type { Socket } from 'node:net';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
@@ -6,13 +8,15 @@ import { MAX_SEALED_FRAME_BYTES } from '../../core/collaboration/secure/channel'
 import {
   generateJoinCode,
   WRONG_CODES_BEFORE_NEW_CODE,
+  type JoinCode,
 } from '../../core/collaboration/secure/join-code';
 import {
+  drawPlanKey,
   encodeIntroduction,
-  PLAN_KEY_BYTES,
   tokenDigestOf,
   type HostSecrets,
   type Introduction,
+  type PlanKey,
 } from '../../core/collaboration/secure/link';
 import {
   MAX_DEPARTED_PARTICIPANTS,
@@ -44,14 +48,14 @@ export interface HostServerEvents {
   readonly joined: (peer: Peer, introduction: Introduction) => void;
   readonly message: (peer: Peer, message: Uint8Array) => void;
   readonly left: (peer: Peer, reason: ConnectionEnd) => void;
-  readonly codeChanged: (code: string) => void;
+  readonly codeChanged: (code: JoinCode) => void;
 }
 
 export interface HostServer {
   readonly port: number;
-  readonly code: () => string;
-  readonly planKey: () => Uint8Array;
-  readonly forget: (ids: readonly string[]) => void;
+  readonly code: () => JoinCode;
+  readonly planKey: () => PlanKey;
+  readonly forget: (ids: readonly ParticipantId[]) => void;
   readonly close: () => Promise<void>;
 }
 
@@ -61,8 +65,8 @@ type JoinAnswer = 'admitted' | 'identityTaken' | 'closed';
 
 interface ServerOptions {
   readonly port: number;
-  readonly planKey: Uint8Array | null;
-  readonly knownTokens: ReadonlyMap<string, string>;
+  readonly planKey: PlanKey | null;
+  readonly knownTokens: ReadonlyMap<ParticipantId, TokenDigest>;
   readonly identity: Introduction | null;
   readonly events: HostServerEvents;
   readonly startTimer: StartTimer;
@@ -163,11 +167,11 @@ function listenOn(http: Server, port: number, host: string): Promise<string | nu
 /** Keeps the code and the key of the plan and counts the guests: those opening their connection, the wrong codes that draw a new code, the token digest of each identifier, known from a previous host or first seen, and the connection of each person. */
 function guestCounter(options: ServerOptions) {
   let code = generateJoinCode(options.randomBytes);
-  const planKey = options.planKey ?? options.randomBytes(PLAN_KEY_BYTES);
+  const planKey = options.planKey ?? drawPlanKey(options.randomBytes);
   let wrongCodes = 0;
   let opening = 0;
   let nextNumber = 1;
-  const tokens = new Map<string, string>(options.knownTokens);
+  const tokens = new Map<ParticipantId, TokenDigest>(options.knownTokens);
   const admitted = new Map<string, SecureConnection>();
   const admission: Admission = createAdmission(options.now);
   const editors = new WeakSet<SecureConnection>();
@@ -233,7 +237,7 @@ function guestCounter(options: ServerOptions) {
   return {
     code: () => code,
     planKey: () => planKey,
-    forget: (ids: readonly string[]): void => {
+    forget: (ids: readonly ParticipantId[]): void => {
       for (const id of ids) {
         if (!admitted.has(id)) {
           tokens.delete(id);

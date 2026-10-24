@@ -60,7 +60,7 @@ import {
   type SharedRepair,
   type SharedRepairCode,
 } from './shared-project';
-import { isIdentifier, type NewIdentifier } from '../identifiers';
+import { isDependencyId, isTagId, isTaskId } from '../identifiers';
 
 export type UpdateSource = 'local' | 'remote';
 
@@ -644,9 +644,9 @@ function readChangedItems(
   header: ProjectState['header'],
   change: ShadowChange,
 ): Result<ChangedItems, readonly ValidationIssue[]> {
-  const tasks = splitDeleted(shadow, TASKS_ROOT, change.tasks);
-  const dependencies = splitDeleted(shadow, DEPENDENCIES_ROOT, change.dependencies);
-  const tags = splitDeleted(shadow, TAGS_ROOT, change.tags);
+  const tasks = splitDeleted(shadow, TASKS_ROOT, change.tasks, isTaskId);
+  const dependencies = splitDeleted(shadow, DEPENDENCIES_ROOT, change.dependencies, isDependencyId);
+  const tags = splitDeleted(shadow, TAGS_ROOT, change.tags, isTagId);
   const unions = readItemShape(header, { tasks: tasks.present.map(viewTaskUnion) });
   if (!unions.ok) {
     return unions;
@@ -655,7 +655,7 @@ function readChangedItems(
   const visible = tasks.present.map(viewTaskFields).map((entry) => {
     const round = roundedProgress(entry);
     const roundedId = round?.['id'];
-    if (isIdentifier(roundedId)) {
+    if (isTaskId(roundedId)) {
       rounded.add(roundedId);
     }
     return round ?? entry;
@@ -680,18 +680,19 @@ function readChangedItems(
 }
 
 /** Separates the changed entries of a root that still exist from those that were deleted, a deleted key that is no identifier naming nothing the project held. */
-function splitDeleted(
+function splitDeleted<Id extends string>(
   shadow: Y.Doc,
   root: EntryRoot,
   ids: ReadonlySet<string>,
-): { readonly present: unknown[]; readonly deleted: NewIdentifier[] } {
+  isId: (value: unknown) => value is Id,
+): { readonly present: unknown[]; readonly deleted: Id[] } {
   const present: unknown[] = [];
-  const deleted: NewIdentifier[] = [];
+  const deleted: Id[] = [];
   for (const id of ids) {
     const entry = readEntry(shadow, root, id);
     if (entry !== undefined) {
       present.push(entry);
-    } else if (isIdentifier(id)) {
+    } else if (isId(id)) {
       deleted.push(id);
     }
   }

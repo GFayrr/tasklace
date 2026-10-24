@@ -1,4 +1,6 @@
-import type { Endpoint } from '../core/collaboration/participants';
+import type { Endpoint, ParticipantId } from '../core/collaboration/participants';
+import type { JoinCode } from '../core/collaboration/secure/join-code';
+import type { TokenDigest } from '../core/collaboration/secure/token-digest';
 import type { CsvWarning } from '../core/exchange/csv/csv-rows';
 import type { RegionalFormat } from '../core/exchange/csv/regional-format';
 import type { FileError, StateCheckError } from '../core/file/tasklace-file';
@@ -111,15 +113,15 @@ export interface CollaborationSettings {
 }
 
 export interface Sharing {
-  readonly code: string;
+  readonly code: JoinCode;
   readonly port: number;
   readonly addresses: readonly string[];
-  readonly tokenDigest: string;
+  readonly tokenDigest: TokenDigest;
 }
 
 export interface KnownToken {
-  readonly participantId: string;
-  readonly tokenDigest: string;
+  readonly participantId: ParticipantId;
+  readonly tokenDigest: TokenDigest;
   readonly rank: number;
   readonly canEdit: boolean;
 }
@@ -133,7 +135,7 @@ export interface JoinRequest {
 }
 
 export interface NextHostCandidate {
-  readonly participantId: string;
+  readonly participantId: ParticipantId;
   readonly rank: number;
   readonly endpoint: Endpoint | null;
 }
@@ -176,14 +178,14 @@ export type CollaborationEvent =
   | {
       readonly kind: 'peerJoined';
       readonly peer: number;
-      readonly participantId: string;
+      readonly participantId: ParticipantId;
       readonly name: string;
       readonly endpoint: Endpoint;
-      readonly tokenDigest: string;
+      readonly tokenDigest: TokenDigest;
     }
   | { readonly kind: 'peerMessage'; readonly peer: number; readonly message: Uint8Array }
   | { readonly kind: 'peerLeft'; readonly peer: number }
-  | { readonly kind: 'codeChanged'; readonly code: string }
+  | { readonly kind: 'codeChanged'; readonly code: JoinCode }
   | { readonly kind: 'nearbyPlans'; readonly plans: readonly NearbyPlan[] }
   | { readonly kind: 'connected' }
   | { readonly kind: 'hostMessage'; readonly message: Uint8Array }

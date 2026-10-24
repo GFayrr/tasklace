@@ -6,6 +6,7 @@ import {
   type CollaborationMessage,
 } from '../../core/collaboration/messages';
 import { requireParticipantId, type ParticipantId } from '../../core/collaboration/participants';
+import type { PlanKey } from '../../core/collaboration/secure/link';
 import { createHost } from '../../core/collaboration/sync';
 import type { SharedSession } from '../../core/shared/shared-session';
 import { systemRandomBytes } from '../collaboration/aes-gcm';
@@ -57,7 +58,7 @@ export function messageOf(bytes: Uint8Array): CollaborationMessage {
 /** Starts a real host server on a free port that shares a session, merging what its guests send and passing it on, each guest being let edit when told so, and recording the refusals it reports. */
 export async function startPlanHost(
   session: SharedSession,
-  options: { readonly planKey: Uint8Array | null; readonly letEdit: boolean },
+  options: { readonly planKey: PlanKey | null; readonly letEdit: boolean },
 ) {
   const peers = new Map<ParticipantId, Peer>();
   const ids = new Map<number, ParticipantId>();

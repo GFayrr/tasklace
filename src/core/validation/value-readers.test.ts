@@ -7,7 +7,7 @@ import {
   readArray,
   readBoolean,
   readEnum,
-  readIdentifier,
+  readTaskId,
   readInteger,
   readNullable,
   readPatternString,
@@ -280,10 +280,10 @@ describe('readText', () => {
   });
 });
 
-describe('readIdentifier', () => {
+describe('readTaskId', () => {
   it('accepts letters, digits, dashes and underscores', () => {
-    expect(run('Task_01-a', readIdentifier).result).toBe('Task_01-a');
-    expect(run('a'.repeat(MAX_IDENTIFIER_LENGTH), readIdentifier).issues).toEqual([]);
+    expect(run('Task_01-a', readTaskId).result).toBe('Task_01-a');
+    expect(run('a'.repeat(MAX_IDENTIFIER_LENGTH), readTaskId).issues).toEqual([]);
   });
 
   it.each([
@@ -297,15 +297,15 @@ describe('readIdentifier', () => {
     '😀',
     'a'.repeat(MAX_IDENTIFIER_LENGTH + 1),
   ])('rejects %j', (value) => {
-    expect(run(value, readIdentifier)).toEqual({
+    expect(run(value, readTaskId)).toEqual({
       result: undefined,
       issues: [{ path: PATH, code: 'INVALID_IDENTIFIER' }],
     });
   });
 
   it('rejects a missing value and other types', () => {
-    expect(codes(undefined, readIdentifier)).toEqual(['MISSING_FIELD']);
-    expect(codes(12, readIdentifier)).toEqual(['WRONG_TYPE']);
+    expect(codes(undefined, readTaskId)).toEqual(['MISSING_FIELD']);
+    expect(codes(12, readTaskId)).toEqual(['WRONG_TYPE']);
   });
 });
 

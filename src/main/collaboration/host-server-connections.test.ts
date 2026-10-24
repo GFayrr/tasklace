@@ -1,3 +1,4 @@
+import { testToken } from '../../core/testing/secrets';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { requireParticipantId } from '../../core/collaboration/participants';
@@ -27,7 +28,7 @@ function person(id: string): Introduction {
   return {
     participantId: requireParticipantId(id),
     name: id,
-    token: id.padEnd(64, '0'),
+    token: testToken(id.padEnd(64, '0')),
     endpoint: { addresses: [], port: 47_313 },
   };
 }

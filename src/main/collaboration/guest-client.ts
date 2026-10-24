@@ -6,6 +6,7 @@ import {
   readIntroduction,
   type Introduction,
   type JoinSecret,
+  type PlanKey,
 } from '../../core/collaboration/secure/link';
 import { isPort } from '../../core/collaboration/ports';
 import { MAX_HANDSHAKE_MILLISECONDS } from '../../core/limits';
@@ -48,7 +49,7 @@ export interface GuestOptions {
   readonly events: {
     readonly opened: () => void;
     readonly message: (message: Uint8Array) => void;
-    readonly planKey: (key: Uint8Array) => void;
+    readonly planKey: (key: PlanKey) => void;
     readonly identity?: (host: Introduction | null) => void;
     readonly ended: (reason: GuestEnd) => void;
   };

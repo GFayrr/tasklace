@@ -1,3 +1,5 @@
+import { requireParticipantId } from '../../core/collaboration/participants';
+import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { project, workTask } from '../../core/testing/project-builder';
 import type { CollaborationSettings } from '../../preload/bridge-contract';
@@ -151,7 +153,12 @@ describe('sharing the open plan', () => {
     const { root, control } = await renderApp({ name: 'Camille', firewallNoticeSeen: true });
     control.collaboration.shareResult = {
       ok: true,
-      value: { code: 'K7Q4MZ', port: 47_314, addresses: [], tokenDigest: 'd'.repeat(64) },
+      value: {
+        code: testJoinCode('K7Q4MZ'),
+        port: 47_314,
+        addresses: [],
+        tokenDigest: testDigest('d'.repeat(64)),
+      },
     };
     await clickAndSettle(button(root, TEXT.share));
     expect(textsOf(shareWindow(root), '.code-part .message, .code-part .hint')).toEqual([
@@ -166,10 +173,10 @@ describe('sharing the open plan', () => {
     control.collaboration.listener?.({
       kind: 'peerJoined',
       peer: 1,
-      participantId: 'lea',
+      participantId: requireParticipantId('lea'),
       name: 'Léa',
       endpoint: { addresses: [], port: 47_313 },
-      tokenDigest: 'd'.repeat(64),
+      tokenDigest: testDigest('d'.repeat(64)),
     });
     update();
     const dialog = shareWindow(root);
@@ -204,10 +211,10 @@ describe('sharing the open plan', () => {
     control.collaboration.listener?.({
       kind: 'peerJoined',
       peer: 1,
-      participantId: 'lea',
+      participantId: requireParticipantId('lea'),
       name: 'Léa',
       endpoint: { addresses: [], port: 47_313 },
-      tokenDigest: 'd'.repeat(64),
+      tokenDigest: testDigest('d'.repeat(64)),
     });
     update();
     const dialog = shareWindow(root);

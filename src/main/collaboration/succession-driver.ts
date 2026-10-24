@@ -1,17 +1,18 @@
+import type { ParticipantId } from '../../core/collaboration/participants';
 import { SUCCESSION_TURN_MILLISECONDS } from '../../core/collaboration/succession';
 import type { Endpoint } from '../../core/collaboration/participants';
 import type { NearbyPlan } from './discovery';
 import type { StartTimer } from './secure-connection';
 
 export interface SuccessionCandidate {
-  readonly participantId: string;
+  readonly participantId: ParticipantId;
   readonly rank: number;
   readonly endpoint: Endpoint | null;
 }
 
 export interface SuccessionOptions {
   readonly queue: readonly SuccessionCandidate[];
-  readonly me: string;
+  readonly me: ParticipantId;
   readonly sharingId: string;
   readonly startTimer: StartTimer;
   readonly watchHosts: (heard: (plans: readonly NearbyPlan[]) => void) => () => void;

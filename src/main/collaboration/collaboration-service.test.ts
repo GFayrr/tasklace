@@ -1,3 +1,5 @@
+import { requireParticipantId } from '../../core/collaboration/participants';
+import { testDigest, testJoinCode, testPlanKey, testToken } from '../../core/testing/secrets';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -32,7 +34,9 @@ vi.mock('../project-files', () => ({
 }));
 
 const ipcMain = electronIpcMain as unknown as FakeIpcMain;
-const KNOWN = [{ participantId: 'lea', tokenDigest: 'e'.repeat(64), rank: 1, canEdit: true }];
+const KNOWN = [
+  { participantId: 'lea', tokenDigest: testDigest('e'.repeat(64)), rank: 1, canEdit: true },
+];
 const draws: Uint8Array[] = [];
 
 /** A fake page that records the events the main process sends it. */
@@ -206,7 +210,7 @@ describe('the collaboration service', () => {
     const joining = invoke(page, IPC_CHANNELS.joinPlan, {
       address: LOOPBACK,
       port: 47_313,
-      code: 'K7Q4MZ',
+      code: testJoinCode('K7Q4MZ'),
       participantId: 'lea',
       name: 'Léa',
     });
@@ -260,7 +264,7 @@ describe('the collaboration service', () => {
     const joining = {
       address: LOOPBACK,
       port: 1,
-      code: 'K7Q4MZ',
+      code: testJoinCode('K7Q4MZ'),
       participantId: 'lea',
       name: 'Léa',
     };
@@ -291,7 +295,7 @@ describe('the collaboration service', () => {
       true,
       generateJoinCode(() => code ?? new Uint8Array()),
       ['192.168.1.24'],
-      tokenDigestOf(bytesToHex(hostToken ?? new Uint8Array())),
+      tokenDigestOf(testToken(bytesToHex(hostToken ?? new Uint8Array()))),
     ]);
     expect(mdnsFake.record.published).toEqual([
       {
@@ -302,7 +306,7 @@ describe('the collaboration service', () => {
           v: '1',
           plan: 'Thesis',
           host: 'Camille',
-          share: sharingIdOf(planKey ?? new Uint8Array()),
+          share: sharingIdOf(testPlanKey(planKey ?? new Uint8Array())),
           rank: '0',
         },
       },
@@ -331,10 +335,10 @@ describe('the collaboration service', () => {
         {
           kind: 'peerJoined',
           peer: 1,
-          participantId: 'lea',
+          participantId: requireParticipantId('lea'),
           name: 'Léa',
           endpoint: { addresses: ['192.168.1.24'], port: shared.value.port },
-          tokenDigest: tokenDigestOf(guestToken),
+          tokenDigest: tokenDigestOf(testToken(guestToken)),
         },
       ],
       [{ kind: 'connected' }],
@@ -468,7 +472,13 @@ describe('the collaboration service', () => {
     await expect(invoke(page, IPC_CHANNELS.sharePlan, 'Thesis', 7)).rejects.toThrow(
       'Request refused',
     );
-    const valid = { address: LOOPBACK, port: 1, code: 'K7Q4MZ', participantId: 'lea', name: 'Léa' };
+    const valid = {
+      address: LOOPBACK,
+      port: 1,
+      code: testJoinCode('K7Q4MZ'),
+      participantId: 'lea',
+      name: 'Léa',
+    };
     for (const request of [
       null,
       { ...valid, address: 7 },
@@ -485,7 +495,13 @@ describe('the collaboration service', () => {
 
   it('tells a page that the address or the port typed cannot name a host, without joining', async () => {
     const page = new FakePage();
-    const valid = { address: LOOPBACK, port: 1, code: 'K7Q4MZ', participantId: 'lea', name: 'Léa' };
+    const valid = {
+      address: LOOPBACK,
+      port: 1,
+      code: testJoinCode('K7Q4MZ'),
+      participantId: 'lea',
+      name: 'Léa',
+    };
     for (const request of [
       { ...valid, address: 'a b' },
       { ...valid, port: 0 },
@@ -512,7 +528,7 @@ describe('the collaboration service', () => {
     await invoke(page, IPC_CHANNELS.joinPlan, {
       address: LOOPBACK,
       port: await freePort(),
-      code: 'K7Q4MZ',
+      code: testJoinCode('K7Q4MZ'),
       participantId: 'lea',
       name: 'Léa',
     });
@@ -559,7 +575,7 @@ describe('the collaboration service', () => {
     expect(mdnsFake.record.browsersStopped).toBe(1);
     page.destroyed = true;
     mdnsFake.record.listeners.get('up')?.({
-      name: 'x',
+      name: requireParticipantId('x'),
       fqdn: 'two',
       port: 1,
       addresses: ['10.0.0.1'],
@@ -613,8 +629,12 @@ describe('the collaboration service', () => {
     const guest = new FakePage();
     const shared = (await shareFrom(host)) as { ok: true; value: { code: string; port: number } };
     const queue = [
-      { participantId: 'lea', rank: 1, endpoint: { addresses: ['192.168.1.24'], port: 47_313 } },
-      { participantId: 'noah', rank: 2, endpoint: null },
+      {
+        participantId: requireParticipantId('lea'),
+        rank: 1,
+        endpoint: { addresses: ['192.168.1.24'], port: 47_313 },
+      },
+      { participantId: requireParticipantId('noah'), rank: 2, endpoint: null },
     ];
     expect(await invoke(guest, IPC_CHANNELS.findNextHost, queue, 'Thesis', 'Léa', KNOWN)).toEqual({
       ok: false,
@@ -623,9 +643,9 @@ describe('the collaboration service', () => {
     for (const invalid of [
       null,
       [{ participantId: 'a b', rank: 1, endpoint: null }],
-      [{ participantId: 'lea', rank: -1, endpoint: null }],
-      [{ participantId: 'lea', rank: 1, endpoint: { port: 1 } }],
-      [{ participantId: 'lea', rank: 1 }],
+      [{ participantId: requireParticipantId('lea'), rank: -1, endpoint: null }],
+      [{ participantId: requireParticipantId('lea'), rank: 1, endpoint: { port: 1 } }],
+      [{ participantId: requireParticipantId('lea'), rank: 1 }],
       [7],
     ]) {
       await expect(
@@ -638,9 +658,9 @@ describe('the collaboration service', () => {
     for (const tokens of [
       null,
       [{ participantId: 'lea', tokenDigest: 'x', rank: 1, canEdit: true }],
-      [{ participantId: 'a b', tokenDigest: 'e'.repeat(64), rank: 1, canEdit: true }],
-      [{ participantId: 'lea', tokenDigest: 'e'.repeat(64), rank: -1, canEdit: true }],
-      [{ participantId: 'lea', tokenDigest: 'e'.repeat(64), rank: 1, canEdit: 'yes' }],
+      [{ participantId: 'a b', tokenDigest: testDigest('e'.repeat(64)), rank: 1, canEdit: true }],
+      [{ participantId: 'lea', tokenDigest: testDigest('e'.repeat(64)), rank: -1, canEdit: true }],
+      [{ participantId: 'lea', tokenDigest: testDigest('e'.repeat(64)), rank: 1, canEdit: 'yes' }],
     ]) {
       await expect(
         invoke(guest, IPC_CHANNELS.findNextHost, queue, 'Thesis', 'Léa', tokens),

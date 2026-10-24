@@ -1,3 +1,4 @@
+import { testToken } from '../../core/testing/secrets';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requireParticipantId } from '../../core/collaboration/participants';
 import type { Introduction } from '../../core/collaboration/secure/link';
@@ -22,7 +23,7 @@ vi.mock('./secure-connection', async (importOriginal) => {
 const LEA: Introduction = {
   participantId: requireParticipantId('lea'),
   name: 'Léa',
-  token: 'ab'.repeat(32),
+  token: testToken('ab'.repeat(32)),
   endpoint: { addresses: [], port: 47_313 },
 };
 /** Starts no timer, the test waiting for events instead. */

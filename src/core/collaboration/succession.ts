@@ -1,5 +1,6 @@
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import type { PlanKey } from './secure/link';
 import type { Participant, ParticipantId } from './participants';
 import { isOlder, type RankedId } from './roster';
 
@@ -27,7 +28,7 @@ export function shouldYield(me: RankedId, other: RankedId): boolean {
 }
 
 /** Gives the identifier a host announces for its plan on the network: a digest of the key of the plan, which tells the people holding the key which announcement is theirs without revealing the key. */
-export function sharingIdOf(planKey: Uint8Array): string {
+export function sharingIdOf(planKey: PlanKey): string {
   const input = new Uint8Array(SHARING_ID_DOMAIN.length + planKey.length);
   input.set(SHARING_ID_DOMAIN);
   input.set(planKey, SHARING_ID_DOMAIN.length);

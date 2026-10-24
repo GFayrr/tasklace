@@ -294,7 +294,7 @@ export class AppState {
       repaired: (repairs) => {
         this.#notifyRepairs(repairs);
       },
-      hostChanged: (left, next) => {
+      hostChanged: ({ left, next }) => {
         this.#tellHostChanged(left, next);
       },
       ownChangesKept: (kept) => {
