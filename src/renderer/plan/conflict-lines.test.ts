@@ -7,11 +7,22 @@ import {
   project,
   scheduleOrThrow,
   workTask,
+  testId,
 } from '../../core/testing/project-builder';
 import { conflictLines, dateConflictLines } from './conflict-lines';
 
-const ALICE: Tag = { id: 'alice', name: 'Alice', color: '#4a3aa7', representsPersonOrTeam: true };
-const NEAR: Tag = { id: 'near', name: 'Near', color: '#4a3aa8', representsPersonOrTeam: true };
+const ALICE: Tag = {
+  id: testId('alice'),
+  name: 'Alice',
+  color: '#4a3aa7',
+  representsPersonOrTeam: true,
+};
+const NEAR: Tag = {
+  id: testId('near'),
+  name: 'Near',
+  color: '#4a3aa8',
+  representsPersonOrTeam: true,
+};
 const PLAN = project(
   [
     workTask('a', { name: 'Interviews', tagId: 'near' }),
@@ -68,7 +79,7 @@ describe('dateConflictLines', () => {
 
   it('describes each date a task misses with its name, its end and the date', () => {
     const schedule = scheduleOrThrow(LATE);
-    const end = schedule.placements.get('a')?.end;
+    const end = schedule.placements.get(testId('a'))?.end;
     expect(end).toBe(at(2026, 9, 28, 17));
     expect(dateConflictLines(schedule, LATE)).toEqual([
       {
@@ -126,7 +137,7 @@ describe('dateConflictLines', () => {
         ...LATE,
         tasks: [
           WRITING,
-          { id: 'm', kind: 'summary', name: 'Defense', parentId: null, sortKey: 'm' },
+          { id: testId('m'), kind: 'summary', name: 'Defense', parentId: null, sortKey: 'm' },
         ],
       }),
     ).toThrow('The task m has no date for its conflict MUST_FINISH_ON_NOT_MET.');

@@ -10,7 +10,15 @@ import {
   projectArbitrary,
   richProjectArbitrary,
 } from '../testing/project-arbitrary';
-import { link, milestone, project, splitTask, summary, workTask } from '../testing/project-builder';
+import {
+  link,
+  milestone,
+  project,
+  splitTask,
+  summary,
+  workTask,
+  testId,
+} from '../testing/project-builder';
 import { END_PROJECT_HOUR, MIN_PROJECT_HOUR } from '../time';
 import { createIssueList, type ValidationIssue } from '../validation/validation-issues';
 import { readText } from '../validation/value-readers';
@@ -31,8 +39,8 @@ const SAMPLE_PROJECT: Project = project(
     summary('phase', { name: 'Phase 1 — 設計' }),
     workTask('a', {
       name: 'Rédiger « la note » 📝',
-      parentId: 'phase',
-      tagId: 'design',
+      parentId: testId('phase'),
+      tagId: testId('design'),
       progressPercent: 30,
       hoursPerDay: 3,
       dailyStartHour: 14,
@@ -53,7 +61,9 @@ const SAMPLE_PROJECT: Project = project(
   [link('a', 'b', 'finishToStart', 2), link('b', 'm', 'startToFinish', -1)],
   {
     name: 'Sample',
-    tags: [{ id: 'design', name: 'Design', color: '#336699', representsPersonOrTeam: true }],
+    tags: [
+      { id: testId('design'), name: 'Design', color: '#336699', representsPersonOrTeam: true },
+    ],
     calendar: {
       workingWeekdays: [0, 1, 6],
       workingTimeRanges: [{ startHour: 0, endHour: 24 }],
@@ -121,7 +131,7 @@ describe('exportProjectJson', () => {
     const [phase, first, second] = content['tasks'] as Data[];
     expect(phase).toEqual({
       kind: 'summary',
-      id: 'phase',
+      id: testId('phase'),
       name: 'Phase 1 — 設計',
       parentId: null,
       sortKey: 'phase',
@@ -210,7 +220,12 @@ describe('project JSON: baseline', () => {
     const baseline = {
       takenAt: at(2026, 9, 27, 18),
       entries: [
-        { taskId: 'a', start: at(2026, 10, 1, 9), end: at(2026, 10, 2, 17), durationHours: 14 },
+        {
+          taskId: testId('a'),
+          start: at(2026, 10, 1, 9),
+          end: at(2026, 10, 2, 17),
+          durationHours: 14,
+        },
       ],
     };
     const input = { ...SAMPLE_PROJECT, baseline };
@@ -218,7 +233,12 @@ describe('project JSON: baseline', () => {
     expect((JSON.parse(text) as { project: Data }).project['baseline']).toEqual({
       takenAt: '2026-09-27T18:00',
       entries: [
-        { taskId: 'a', start: '2026-10-01T09:00', end: '2026-10-02T17:00', durationHours: 14 },
+        {
+          taskId: testId('a'),
+          start: '2026-10-01T09:00',
+          end: '2026-10-02T17:00',
+          durationHours: 14,
+        },
       ],
     });
     expect(importProjectJson(text)).toEqual({ ok: true, value: input });
@@ -474,7 +494,7 @@ describe('importProjectJson: values', () => {
 const MAX_GENERATED_TAGS = 12;
 
 const tagArbitrary = fc.record({
-  id: fc.stringMatching(/^[A-Za-z0-9_-]{1,64}$/),
+  id: fc.stringMatching(/^[A-Za-z0-9_-]{1,64}$/).map(testId),
   name: fc
     .string({ unit: 'grapheme', minLength: 1, maxLength: MAX_TAG_NAME_LENGTH })
     .filter(
@@ -503,7 +523,7 @@ function enrichProject(input: Project): fc.Arbitrary<Project> {
     selector: (tag) => tag.id,
   });
   return tags.chain((generatedTags) => {
-    const tagIds = [...generatedTags.map((tag) => tag.id), 'unknown-tag'];
+    const tagIds = [...generatedTags.map((tag) => tag.id), testId('unknown-tag')];
     const tasks = fc.tuple(
       ...input.tasks.map((task): fc.Arbitrary<Task> => {
         if (task.kind === 'summary') {

@@ -1,4 +1,4 @@
-import type { Dependency, Tag, Task, TaskSegment } from '../../model/project';
+import type { Dependency, Tag, TagId, Task, TaskId, TaskSegment } from '../../model/project';
 import { failure, success, type Result } from '../../result';
 import { shortestLink } from '../../scheduling/block-links';
 import { spreadKeys } from '../../shared/fractional-index';
@@ -16,6 +16,7 @@ import {
   type PredecessorReference,
   type WbsNumber,
 } from './task-notations';
+import { requireIdentifier } from '../../identifiers';
 
 export interface PlannedTask {
   readonly row: ParsedRow;
@@ -37,19 +38,19 @@ export interface TaskPlan {
 interface NumberedRow {
   readonly row: ParsedRow;
   readonly wbs: WbsNumber;
-  readonly id: string;
+  readonly id: TaskId;
 }
 
 interface Hierarchy {
   readonly numbered: readonly NumberedRow[];
-  readonly idByWbs: ReadonlyMap<WbsNumber, string>;
+  readonly idByWbs: ReadonlyMap<WbsNumber, TaskId>;
   readonly parents: ReadonlySet<WbsNumber | null>;
 }
 
 interface TaskLinks {
-  readonly parentId: string | null;
+  readonly parentId: TaskId | null;
   readonly sortKey: string;
-  readonly tagId: string | null;
+  readonly tagId: TagId | null;
 }
 
 type PlannedKind = Task['kind'];
@@ -72,7 +73,7 @@ export function planTasks(
   }
   const sortKeys = sortKeysByWbs(hierarchy.numbered);
   const tags: PlannedItem<Tag>[] = [];
-  const tagIdByName = new Map<string, string>();
+  const tagIdByName = new Map<string, TagId>();
   const tasks = hierarchy.numbered.map((numbered) => {
     const kind = kindOf(numbered.row, hierarchy.parents.has(numbered.wbs), issues, warnings);
     const links = {
@@ -96,10 +97,10 @@ export function planTasks(
 function resolveHierarchy(rows: readonly ParsedRow[], issues: IssueList): Hierarchy | null {
   const hasWbs = rows.some((row) => row.wbs !== null);
   const numbered: NumberedRow[] = [];
-  const idByWbs = new Map<WbsNumber, string>();
+  const idByWbs = new Map<WbsNumber, TaskId>();
   rows.forEach((row, index) => {
     const wbs = hasWbs ? row.wbs : String(index + 1);
-    const id = `${TASK_ID_PREFIX}${String(index + 1)}`;
+    const id = requireIdentifier(`${TASK_ID_PREFIX}${String(index + 1)}`);
     if (wbs === null) {
       issues.add(rowPath(row.rowNumber, 'wbs'), 'MISSING_FIELD');
     } else if (idByWbs.has(wbs)) {
@@ -117,7 +118,7 @@ function resolveHierarchy(rows: readonly ParsedRow[], issues: IssueList): Hierar
 }
 
 /** Gives every task a sort key following its WBS number, so that siblings keep the order the table numbers them in. */
-function sortKeysByWbs(numbered: readonly NumberedRow[]): Map<string, string> {
+function sortKeysByWbs(numbered: readonly NumberedRow[]): Map<TaskId, string> {
   const ranked = [...numbered].sort((left, right) => compareWbsNumbers(left.wbs, right.wbs));
   const keys = spreadKeys(ranked.length);
   return new Map(ranked.map(({ id }, index) => [id, keys[index] ?? '']));
@@ -188,9 +189,9 @@ function checkBlocksMatchDuration(
 /** Returns the identifier of the parent of a row, reporting a WBS number whose parent is not in the table. */
 function parentIdOf(
   numbered: NumberedRow,
-  idByWbs: ReadonlyMap<WbsNumber, string>,
+  idByWbs: ReadonlyMap<WbsNumber, TaskId>,
   issues: IssueList,
-): string | null {
+): TaskId | null {
   const parent = parentWbsNumber(numbered.wbs);
   if (parent === null) {
     return null;
@@ -207,8 +208,8 @@ function parentIdOf(
 function tagIdOf(
   row: ParsedRow,
   tags: PlannedItem<Tag>[],
-  tagIdByName: Map<string, string>,
-): string | null {
+  tagIdByName: Map<string, TagId>,
+): TagId | null {
   const name = row.tagName;
   if (name === null) {
     return null;
@@ -217,7 +218,7 @@ function tagIdOf(
   if (known !== undefined) {
     return known;
   }
-  const id = `${TAG_ID_PREFIX}${String(tags.length + 1)}`;
+  const id = requireIdentifier(`${TAG_ID_PREFIX}${String(tags.length + 1)}`);
   const color = nextPaletteColor(tags.length);
   tagIdByName.set(name, id);
   tags.push({
@@ -255,13 +256,13 @@ function taskOf(numbered: NumberedRow, kind: PlannedKind, links: TaskLinks): Tas
 /** Builds the dependencies of every row from its predecessors and its block waits, ignoring those of summaries, and reports WBS numbers that name no row. */
 function planDependencies(
   { numbered, idByWbs }: Hierarchy,
-  summaryIds: ReadonlySet<string>,
+  summaryIds: ReadonlySet<TaskId>,
   issues: IssueList,
 ): PlannedItem<Dependency>[] {
   const dependencies: PlannedItem<Dependency>[] = [];
   /** Adds a link read from a cell, numbered in the order the cells are read. */
   const add = (row: ParsedRow, column: CsvColumn, link: Omit<Dependency, 'id'>): void => {
-    const id = `${DEPENDENCY_ID_PREFIX}${String(dependencies.length + 1)}`;
+    const id = requireIdentifier(`${DEPENDENCY_ID_PREFIX}${String(dependencies.length + 1)}`);
     dependencies.push({ item: { id, ...link }, rowNumber: row.rowNumber, column });
   };
   const wanted = numbered.flatMap((numberedRow) =>
@@ -307,7 +308,7 @@ function wantedLinksOf({ row, id }: NumberedRow, isSummary: boolean) {
 /** Finds the task a predecessor names, reporting a WBS number that names no row. */
 function resolveReference(
   { wbs, block, type, lagHours }: PredecessorReference,
-  idByWbs: ReadonlyMap<WbsNumber, string>,
+  idByWbs: ReadonlyMap<WbsNumber, TaskId>,
   path: string,
   issues: IssueList,
 ): Pick<Dependency, 'predecessorId' | 'predecessorBlock' | 'type' | 'lagHours'> | null {

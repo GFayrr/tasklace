@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AppState } from '../app/app-state.svelte';
 import { project } from '../../core/testing/project-builder';
-import { fakeAppContext, openedProjectOf, settle } from '../app/testing/fake-app-context';
+import * as Y from 'yjs';
+import { createSharedDocument } from '../../core/shared/shared-document';
+import {
+  fakeAppContext,
+  OPENED_DOCUMENT_ID,
+  openedProjectOf,
+  settle,
+} from '../app/testing/fake-app-context';
 import english from '../locales/en.json';
 import ClosePrompt from './ClosePrompt.svelte';
 import Notices from './Notices.svelte';
@@ -154,6 +161,42 @@ describe('ClosePrompt', () => {
     );
     click(button(root, english.closePrompt.closeAnyway));
     expect(await closing).toBe(true);
+  });
+
+  it('asks whether to add the changes kept on this computer, naming the file, and adds them', async () => {
+    const { context, control } = fakeAppContext();
+    const app = new AppState(context);
+    const plan = project([], [], { name: 'Plan' });
+    const document = createSharedDocument(plan, OPENED_DOCUMENT_ID);
+    const state = Y.encodeStateAsUpdate(document);
+    document.getMap('project').set('name', 'Plan, kept here');
+    control.openResult = openedProjectOf(plan, {
+      state,
+      localChanges: Y.encodeStateAsUpdate(document),
+    });
+    const root = render(ClosePrompt, { app });
+    const opening = app.open();
+    await settle();
+    update();
+    expect([
+      single(root, 'h2').textContent,
+      single(root, 'p').textContent,
+      [...root.querySelectorAll('button')].map((each) => [
+        each.textContent.trim(),
+        each.classList.contains('primary'),
+      ]),
+    ]).toEqual([
+      english.closePrompt.localChangesTitle,
+      'This computer kept changes to “Plan.tasklace” that the file does not have, for example because they could not be written to it. Add them to the plan, or open the file as it is and keep them aside on this computer.',
+      [
+        [english.closePrompt.cancel, false],
+        [english.closePrompt.openAlone, false],
+        [english.closePrompt.addThem, true],
+      ],
+    ]);
+    click(button(root, english.closePrompt.addThem));
+    await opening;
+    expect(app.project?.name).toBe('Plan, kept here');
   });
 
   it('cancels when the prompt is dismissed with Escape', async () => {

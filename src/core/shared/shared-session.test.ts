@@ -3,7 +3,9 @@ import fc from 'fast-check';
 import * as Y from 'yjs';
 import { compareStrings } from '../compare-strings';
 import { MAX_HIERARCHY_DEPTH, MAX_TAGS } from '../limits';
-import type { DependencyType, Project, Tag, Task } from '../model/project';
+import type { WorkingCalendar } from '../model/calendar';
+import type { DependencyType, Project, Tag, Task, TaskId } from '../model/project';
+import { dayIndexOf, MONDAY, WEEKDAYS } from '../time';
 import { CONVERGENCE_TEST_TIMEOUT_MS, PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { hideListContent } from '../testing/hidden-list-content';
 import {
@@ -11,9 +13,11 @@ import {
   milestone,
   project,
   summary,
+  PROJECT_START,
   workTask,
   TEST_DOCUMENT_ID,
   segmentsOrThrow,
+  testId,
 } from '../testing/project-builder';
 import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
 import { applyOperation, taskOfCalendarIssue, type SharedOperation } from './shared-operations';
@@ -21,21 +25,26 @@ import { applySharedChange, mergeSharedUpdate, readSharedProject } from './share
 import { openSharedSession, type SharedSession, sessionDocument } from './shared-session';
 
 const DESIGN: Tag = {
-  id: 'design',
+  id: testId('design'),
   name: 'Design',
   color: '#336699',
   representsPersonOrTeam: false,
 };
-const ALICE: Tag = { id: 'alice', name: 'Alice', color: '#aa5500', representsPersonOrTeam: true };
+const ALICE: Tag = {
+  id: testId('alice'),
+  name: 'Alice',
+  color: '#aa5500',
+  representsPersonOrTeam: true,
+};
 const MORNING_ONLY = [{ startHour: 9, endHour: 12 }];
 const FULL_DAY = [{ startHour: 0, endHour: 24 }];
 
 const BASE_PROJECT: Project = project(
   [
     summary('s1'),
-    summary('s2', { parentId: 's1' }),
-    workTask('a', { parentId: 's1', tagId: 'design' }),
-    workTask('b', { parentId: 's2' }),
+    summary('s2', { parentId: testId('s1') }),
+    workTask('a', { parentId: testId('s1'), tagId: testId('design') }),
+    workTask('b', { parentId: testId('s2') }),
     workTask('c'),
     milestone('m'),
   ],
@@ -84,7 +93,7 @@ function applyBoth(session: SharedSession, operation: SharedOperation): boolean 
 }
 
 /** Returns the shared entry of a task, failing the test when it is missing. */
-function entryOf(document: Y.Doc, id: string): Y.Map<unknown> {
+function entryOf(document: Y.Doc, id: TaskId): Y.Map<unknown> {
   const entry = document.getMap(TASKS_ROOT).get(id);
   if (!(entry instanceof Y.Map)) {
     throw new Error(`Missing task ${id}`);
@@ -140,13 +149,13 @@ describe('shared session', () => {
     const imported = createSharedDocument(
       {
         ...BASE_PROJECT,
-        tasks: [...BASE_PROJECT.tasks, workTask('lost', { tagId: 'deleted' })],
+        tasks: [...BASE_PROJECT.tasks, workTask('lost', { tagId: testId('deleted') })],
       },
       TEST_DOCUMENT_ID,
     );
     const session = openSharedSession(imported);
     expect(session.ok && session.value.openingRepairs).toEqual([
-      { code: 'TAG_CLEARED', id: 'lost' },
+      { code: 'TAG_CLEARED', id: testId('lost') },
     ]);
     expect(
       session.ok && session.value.project().tasks.find((task) => task.id === 'lost'),
@@ -160,7 +169,10 @@ describe('shared session', () => {
       throw new Error('Missing session');
     }
     expect(
-      applyBoth(session.value, { type: 'putTask', task: workTask('c', { tagId: 'unknown' }) }),
+      applyBoth(session.value, {
+        type: 'putTask',
+        task: workTask('c', { tagId: testId('unknown') }),
+      }),
     ).toBe(true);
     expect(session.value.project().tasks.find((task) => task.id === 'c')).toMatchObject({
       tagId: null,
@@ -186,16 +198,25 @@ describe('shared session', () => {
   it.each<[string, SharedOperation]>([
     ['a cycle', { type: 'putDependency', dependency: link('m', 'a') }],
     ['a summary dependency', { type: 'putDependency', dependency: link('s1', 'c') }],
-    ['a duplicate pair', { type: 'putDependency', dependency: { ...link('a', 'b'), id: 'again' } }],
+    [
+      'a duplicate pair',
+      { type: 'putDependency', dependency: { ...link('a', 'b'), id: testId('again') } },
+    ],
     ['a dependency to nothing', { type: 'putDependency', dependency: link('a', 'gone') }],
-    ['a parent that is not a summary', { type: 'putTask', task: workTask('c', { parentId: 'a' }) }],
-    ['a loop in the tree', { type: 'putTask', task: summary('s1', { parentId: 's2' }) }],
-    ['a summary with dependencies', { type: 'putTask', task: summary('a', { parentId: 's1' }) }],
-    ['a task with children', { type: 'putTask', task: workTask('s2', { parentId: 's1' }) }],
+    [
+      'a parent that is not a summary',
+      { type: 'putTask', task: workTask('c', { parentId: testId('a') }) },
+    ],
+    ['a loop in the tree', { type: 'putTask', task: summary('s1', { parentId: testId('s2') }) }],
+    [
+      'a summary with dependencies',
+      { type: 'putTask', task: summary('a', { parentId: testId('s1') }) },
+    ],
+    ['a task with children', { type: 'putTask', task: workTask('s2', { parentId: testId('s1') }) }],
     ['too many hours per day', { type: 'putTask', task: workTask('c', { hoursPerDay: 9 }) }],
     ['an invalid field', { type: 'putTask', task: workTask('c', { progressPercent: 101 }) }],
     ['a partial milestone', { type: 'putTask', task: milestone('m', { progressPercent: 40 }) }],
-    ['removing a parent alone', { type: 'removeTasks', ids: ['s2'] }],
+    ['removing a parent alone', { type: 'removeTasks', ids: [testId('s2')] }],
     [
       'a calendar too short for a task',
       {
@@ -229,8 +250,10 @@ describe('shared session', () => {
     if (session === undefined) {
       throw new Error('Missing session');
     }
-    expect(applyBoth(session, { type: 'removeTasks', ids: ['s2', 'b'] })).toBe(true);
-    expect(applyBoth(session, { type: 'removeTag', id: 'design' })).toBe(true);
+    expect(applyBoth(session, { type: 'removeTasks', ids: [testId('s2'), testId('b')] })).toBe(
+      true,
+    );
+    expect(applyBoth(session, { type: 'removeTag', id: testId('design') })).toBe(true);
     expect(session.project().dependencies).toEqual([]);
     expect(session.project().tasks.find((task) => task.id === 'a')).toMatchObject({ tagId: null });
   });
@@ -253,6 +276,25 @@ describe('the reach of a shared session', () => {
     stop();
     expect(alice.apply({ type: 'updateProject', fields: { name: 'Unfollowed' } }).ok).toBe(true);
     expect(changes).toBe(2);
+  });
+
+  it('gives the bytes of each change with its source, merged updates being remote and every other change local, until it is no longer followed', () => {
+    const [alice, bob] = openSessions(project([workTask('a')]), 2);
+    if (alice === undefined || bob === undefined) {
+      throw new Error('Missing participant');
+    }
+    const seen: string[] = [];
+    const stop = alice.onUpdate((update, source) => {
+      seen.push(source);
+      expect(update.length).toBeGreaterThan(0);
+    });
+    expect(alice.apply({ type: 'updateProject', fields: { name: 'Local' } }).ok).toBe(true);
+    expect(alice.history.undo().ok).toBe(true);
+    expect(bob.apply({ type: 'updateProject', fields: { name: 'Received' } }).ok).toBe(true);
+    expect(alice.merge(bob.encodeState(alice.encodeStateVector())).ok).toBe(true);
+    stop();
+    expect(alice.apply({ type: 'updateProject', fields: { name: 'Unfollowed' } }).ok).toBe(true);
+    expect(seen).toEqual(['local', 'local', 'remote']);
   });
 
   it('encodes its whole state, or only what a state vector lacks, as its document does', () => {
@@ -296,7 +338,7 @@ describe('shared session edge cases', () => {
     ],
     [
       'a tag with an invalid color',
-      { type: 'putTag', tag: { ...DESIGN, id: 'red', color: 'red' } },
+      { type: 'putTag', tag: { ...DESIGN, id: testId('red'), color: 'red' } },
     ],
   ])('refuses %s with the location of the item', (_label, operation) => {
     const session = openOne();
@@ -309,10 +351,12 @@ describe('shared session edge cases', () => {
   it('refuses a tag beyond the limit', () => {
     const tags = Array.from({ length: MAX_TAGS }, (_unused, index) => ({
       ...DESIGN,
-      id: `t${String(index)}`,
+      id: testId(`t${String(index)}`),
     }));
     const session = openOne({ ...BASE_PROJECT, tags: [...tags] });
-    expect(applyBoth(session, { type: 'putTag', tag: { ...DESIGN, id: 'one-more' } })).toBe(false);
+    expect(applyBoth(session, { type: 'putTag', tag: { ...DESIGN, id: testId('one-more') } })).toBe(
+      false,
+    );
   });
 
   it('refuses to nest a tree deeper than the limit, even through the tasks under a moved summary', () => {
@@ -322,18 +366,18 @@ describe('shared session edge cases', () => {
       }),
     );
     const session = openOne(
-      project([...chain, summary('top'), summary('under', { parentId: 'top' })]),
+      project([...chain, summary('top'), summary('under', { parentId: testId('top') })]),
     );
     expect(
       applyBoth(session, {
         type: 'putTask',
-        task: workTask('leaf', { parentId: `d${String(MAX_HIERARCHY_DEPTH - 1)}` }),
+        task: workTask('leaf', { parentId: testId(`d${String(MAX_HIERARCHY_DEPTH - 1)}`) }),
       }),
     ).toBe(false);
     expect(
       applyBoth(session, {
         type: 'putTask',
-        task: summary('top', { parentId: `d${String(MAX_HIERARCHY_DEPTH - 2)}` }),
+        task: summary('top', { parentId: testId(`d${String(MAX_HIERARCHY_DEPTH - 2)}`) }),
       }),
     ).toBe(false);
   });
@@ -343,7 +387,7 @@ describe('shared session edge cases', () => {
     expect(
       applyBoth(session, {
         type: 'putDependency',
-        dependency: { ...link('a', 'b'), predecessorId: 'b', successorId: 'm' },
+        dependency: { ...link('a', 'b'), predecessorId: testId('b'), successorId: testId('m') },
       }),
     ).toBe(false);
     expect(session.project().dependencies.find((dependency) => dependency.id === 'a-b')).toEqual(
@@ -405,7 +449,7 @@ describe('shared session edge cases', () => {
   it.each<[string, (malicious: Y.Doc) => Y.Map<unknown>]>([
     ['a root', (malicious) => malicious.getMap(TASKS_ROOT)],
     ['the project', (malicious) => malicious.getMap('project')],
-    ['an entry', (malicious) => entryOf(malicious, 'a')],
+    ['an entry', (malicious) => entryOf(malicious, testId('a'))],
   ])('refuses list content hidden in %s through the fast path', (_label, target) => {
     const [source, victim] = openSessions(BASE_PROJECT, 2);
     if (source === undefined || victim === undefined) {
@@ -459,10 +503,10 @@ describe('shared session edge cases', () => {
     expect(
       applyBoth(right, {
         type: 'putTask',
-        task: workTask('b', { parentId: 's2', hoursPerDay: 6, tagId: 'alice' }),
+        task: workTask('b', { parentId: testId('s2'), hoursPerDay: 6, tagId: testId('alice') }),
       }),
     ).toBe(true);
-    expect(applyBoth(left, { type: 'removeTag', id: 'alice' })).toBe(true);
+    expect(applyBoth(left, { type: 'removeTag', id: testId('alice') })).toBe(true);
     expect(syncBoth(right, left)).toBe(true);
     syncBoth(left, right);
     expect(readSharedData(sessionDocument(left))).toEqual(readSharedData(sessionDocument(right)));
@@ -496,6 +540,15 @@ type OperationShape =
   | { readonly type: 'putTag'; readonly id: string }
   | { readonly type: 'removeTag'; readonly id: string }
   | { readonly type: 'day'; readonly fullDay: boolean }
+  | {
+      readonly type: 'range';
+      readonly index: number;
+      readonly start: number;
+      readonly hours: number;
+      readonly replace: boolean;
+    }
+  | { readonly type: 'weekday'; readonly day: number }
+  | { readonly type: 'period'; readonly day: number; readonly remove: boolean }
   | { readonly type: 'name'; readonly name: string };
 
 type Step =
@@ -556,6 +609,19 @@ const operationArbitrary: fc.Arbitrary<OperationShape> = fc.oneof(
   fc.record({ type: fc.constant('putTag' as const), id: tagId }),
   fc.record({ type: fc.constant('removeTag' as const), id: tagId }),
   fc.record({ type: fc.constant('day' as const), fullDay: fc.boolean() }),
+  fc.record({
+    type: fc.constant('range' as const),
+    index: position,
+    start: fc.integer({ min: 0, max: 20 }),
+    hours: fc.integer({ min: 1, max: 4 }),
+    replace: fc.boolean(),
+  }),
+  fc.record({ type: fc.constant('weekday' as const), day: fc.integer({ min: 0, max: 6 }) }),
+  fc.record({
+    type: fc.constant('period' as const),
+    day: fc.integer({ min: 0, max: 30 }),
+    remove: fc.boolean(),
+  }),
   fc.record({ type: fc.constant('name' as const), name: fc.constantFrom('Plan', 'Projet', '') }),
 );
 
@@ -625,7 +691,10 @@ function toOperation(shape: OperationShape, current: Project, newId: string): Sh
     case 'tag':
       return task === undefined || task.kind === 'summary'
         ? noOperation()
-        : { type: 'putTask', task: { ...task, tagId: shape.tag } };
+        : {
+            type: 'putTask',
+            task: { ...task, tagId: shape.tag === null ? null : testId(shape.tag) },
+          };
     case 'parent':
       return task === undefined
         ? noOperation()
@@ -658,7 +727,7 @@ function toOperation(shape: OperationShape, current: Project, newId: string): Sh
             type: 'putDependency',
             dependency: {
               ...link(from.id, to.id, shape.kind),
-              id: newId,
+              id: testId(newId),
               predecessorBlock: shape.fromBlock,
               successorBlock: shape.toBlock,
             },
@@ -685,12 +754,12 @@ function toOperation(shape: OperationShape, current: Project, newId: string): Sh
         type: 'removeDependency',
         id:
           current.dependencies[shape.index % Math.max(current.dependencies.length, 1)]?.id ??
-          'none',
+          testId('none'),
       };
     case 'putTag':
-      return { type: 'putTag', tag: { ...DESIGN, id: shape.id, name: shape.id } };
+      return { type: 'putTag', tag: { ...DESIGN, id: testId(shape.id), name: shape.id } };
     case 'removeTag':
-      return { type: 'removeTag', id: shape.id };
+      return { type: 'removeTag', id: testId(shape.id) };
     case 'day':
       return {
         type: 'updateProject',
@@ -701,14 +770,57 @@ function toOperation(shape: OperationShape, current: Project, newId: string): Sh
           },
         },
       };
+    case 'range':
+    case 'weekday':
+    case 'period':
+      return { type: 'updateProject', fields: { calendar: changedCalendar(shape, current) } };
     case 'name':
       return { type: 'updateProject', fields: { name: shape.name } };
   }
 }
 
+/** Adds, replaces or removes one range of working hours, working day or period off of a calendar, as people do from the settings. */
+function changedCalendar(
+  shape: Extract<OperationShape, { readonly type: 'range' | 'weekday' | 'period' }>,
+  current: Project,
+): WorkingCalendar {
+  const calendar = current.calendar;
+  switch (shape.type) {
+    case 'range': {
+      const ranges = calendar.workingTimeRanges;
+      const range = { startHour: shape.start, endHour: shape.start + shape.hours };
+      const at = shape.index % ranges.length;
+      return {
+        ...calendar,
+        workingTimeRanges: shape.replace
+          ? ranges.map((existing, index) => (index === at ? range : existing))
+          : [...ranges, range],
+      };
+    }
+    case 'weekday': {
+      const days = calendar.workingWeekdays;
+      const day = WEEKDAYS[shape.day] ?? MONDAY;
+      return {
+        ...calendar,
+        workingWeekdays: days.includes(day)
+          ? days.filter((existing) => existing !== day)
+          : [...days, day],
+      };
+    }
+    case 'period': {
+      const day = dayIndexOf(PROJECT_START) + shape.day;
+      const others = calendar.nonWorkingPeriods.filter((period) => period.firstDay !== day);
+      return {
+        ...calendar,
+        nonWorkingPeriods: shape.remove ? others : [...others, { firstDay: day, lastDay: day }],
+      };
+    }
+  }
+}
+
 /** Returns an operation that changes nothing. */
 function noOperation(): SharedOperation {
-  return { type: 'removeDependency', id: 'none' };
+  return { type: 'removeDependency', id: testId('none') };
 }
 
 /** Converts a task to another kind, keeping its identifier, name, parent, order and tag. */

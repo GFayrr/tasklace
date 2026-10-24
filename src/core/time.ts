@@ -1,8 +1,8 @@
 import { MAX_PROJECT_YEAR, MIN_PROJECT_YEAR } from './limits';
 import { failure, success, type Result } from './result';
 
-export type ProjectHour = number;
-export type DayIndex = number;
+export type ProjectHour = number & { readonly unit?: 'projectHour' };
+export type DayIndex = number & { readonly unit?: 'dayIndex' };
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export interface CivilDateTime {

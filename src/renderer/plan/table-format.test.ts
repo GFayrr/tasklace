@@ -8,6 +8,7 @@ import {
   scheduleOrThrow,
   summary,
   workTask,
+  testId,
 } from '../../core/testing/project-builder';
 import { loadMessages } from '../i18n/messages';
 import { at } from '../../core/testing/civil-time';
@@ -18,6 +19,7 @@ import {
   taskCells,
   varianceCell,
 } from './table-format';
+import type { TaskId } from '../../core/model/project';
 
 const messages = await loadMessages('en');
 const FORMATTERS = createTableFormatters('en-US');
@@ -25,9 +27,9 @@ const CALENDAR = compileOrThrow(TEST_CALENDAR);
 const PLAN = project(
   [
     summary('s'),
-    workTask('a', { parentId: 's', progressPercent: 40 }),
+    workTask('a', { parentId: testId('s'), progressPercent: 40 }),
     workTask('b', {
-      parentId: 's',
+      parentId: testId('s'),
       segments: [{ durationHours: 14, gapDaysBefore: 0, startNoEarlierThan: null }],
     }),
     milestone('m'),
@@ -37,7 +39,7 @@ const PLAN = project(
 const SCHEDULE = scheduleOrThrow(PLAN);
 
 /** Returns the task of the sample plan with an identifier. */
-function taskOf(id: string) {
+function taskOf(id: TaskId) {
   const task = PLAN.tasks.find((candidate) => candidate.id === id);
   if (task === undefined) {
     throw new Error(id);
@@ -47,7 +49,7 @@ function taskOf(id: string) {
 
 describe('taskCells', () => {
   it('writes the hours, dates and progress of a work task with ISO dates the same on every computer and regional numbers', () => {
-    expect(taskCells(taskOf('a'), SCHEDULE, CALENDAR, FORMATTERS, messages)).toEqual({
+    expect(taskCells(taskOf(testId('a')), SCHEDULE, CALENDAR, FORMATTERS, messages)).toEqual({
       duration: '7 h',
       start: '2026-09-28 09:00',
       end: '2026-09-28 17:00',
@@ -56,7 +58,7 @@ describe('taskCells', () => {
   });
 
   it('gives a summary the working hours between its dates and its weighted progress', () => {
-    expect(taskCells(taskOf('s'), SCHEDULE, CALENDAR, FORMATTERS, messages)).toEqual({
+    expect(taskCells(taskOf(testId('s')), SCHEDULE, CALENDAR, FORMATTERS, messages)).toEqual({
       duration: '21 h',
       start: '2026-09-28 09:00',
       end: '2026-09-30 17:00',
@@ -65,17 +67,17 @@ describe('taskCells', () => {
   });
 
   it('gives a milestone no duration, and leaves dates empty until the schedule is known', () => {
-    expect(taskCells(taskOf('m'), null, CALENDAR, FORMATTERS, messages)).toEqual({
+    expect(taskCells(taskOf(testId('m')), null, CALENDAR, FORMATTERS, messages)).toEqual({
       duration: '0 h',
       start: '',
       end: '',
       progress: '0%',
     });
-    expect(taskCells(taskOf('s'), null, null, FORMATTERS, messages).start).toBe('');
+    expect(taskCells(taskOf(testId('s')), null, null, FORMATTERS, messages).start).toBe('');
   });
 
   it('leaves the duration of a summary empty without a calendar', () => {
-    expect(taskCells(taskOf('s'), SCHEDULE, null, FORMATTERS, messages)).toEqual({
+    expect(taskCells(taskOf(testId('s')), SCHEDULE, null, FORMATTERS, messages)).toEqual({
       duration: '',
       start: '2026-09-28 09:00',
       end: '2026-09-30 17:00',
@@ -86,8 +88,8 @@ describe('taskCells', () => {
   it('gives a summary of key dates alone the progress of its milestones, and an empty summary no cells', () => {
     const keyDates = project([
       summary('k'),
-      milestone('x', { parentId: 'k', progressPercent: 100 }),
-      milestone('y', { parentId: 'k' }),
+      milestone('x', { parentId: testId('k'), progressPercent: 100 }),
+      milestone('y', { parentId: testId('k') }),
       summary('e'),
     ]);
     const [withMilestones, , , empty] = keyDates.tasks;
@@ -156,19 +158,19 @@ describe('dateConflictTitles', () => {
     const titles = dateConflictTitles(
       [
         {
-          conflict: { code: 'DEADLINE_MISSED', taskId: 'a' },
+          conflict: { code: 'DEADLINE_MISSED', taskId: testId('a') },
           taskName: 'A',
           end,
           date: at(2026, 10, 23, 12),
         },
         {
-          conflict: { code: 'MUST_FINISH_ON_NOT_MET', taskId: 'a' },
+          conflict: { code: 'MUST_FINISH_ON_NOT_MET', taskId: testId('a') },
           taskName: 'A',
           end,
           date: at(2026, 10, 23, 10),
         },
         {
-          conflict: { code: 'MUST_FINISH_ON_NOT_MET', taskId: 'b' },
+          conflict: { code: 'MUST_FINISH_ON_NOT_MET', taskId: testId('b') },
           taskName: 'B',
           end,
           date: at(2026, 10, 23, 9),
@@ -190,22 +192,22 @@ describe('dateConflictTitles', () => {
 
 describe('varianceCell', () => {
   /** Builds a baseline entry for a task of the sample plan with a frozen end. */
-  const frozen = (taskId: string, end: number) => ({
+  const frozen = (taskId: TaskId, end: number) => ({
     taskId,
     start: end - 7,
     end,
     durationHours: 7,
   });
   /** Returns the variance cell of a task whose baseline ends at a given hour. */
-  const cellOf = (id: string, end: number) =>
+  const cellOf = (id: TaskId, end: number) =>
     varianceCell(taskOf(id), frozen(id, end), SCHEDULE, CALENDAR, FORMATTERS, messages);
 
   it('counts in working days how far each task now ends from the baseline, with its sign', () => {
     expect([
-      cellOf('b', at(2026, 9, 28, 17)),
-      cellOf('a', at(2026, 9, 29, 17)),
-      cellOf('m', at(2026, 9, 30, 17)),
-      cellOf('s', at(2026, 9, 30, 12)),
+      cellOf(testId('b'), at(2026, 9, 28, 17)),
+      cellOf(testId('a'), at(2026, 9, 29, 17)),
+      cellOf(testId('m'), at(2026, 9, 30, 17)),
+      cellOf(testId('s'), at(2026, 9, 30, 12)),
     ]).toEqual([
       { text: '+2 d', kind: 'behind' },
       { text: '\u22121 d', kind: 'ahead' },
@@ -215,12 +217,14 @@ describe('varianceCell', () => {
   });
 
   it('writes a dash for a task not in the baseline or a summary without dates, nothing until its dates are known and a question mark when the gap cannot be counted', () => {
-    expect(varianceCell(taskOf('a'), undefined, SCHEDULE, CALENDAR, FORMATTERS, messages)).toEqual({
+    expect(
+      varianceCell(taskOf(testId('a')), undefined, SCHEDULE, CALENDAR, FORMATTERS, messages),
+    ).toEqual({
       text: '\u2014',
       kind: 'notInBaseline',
     });
-    const entry = frozen('a', at(2026, 9, 29, 17));
-    expect(varianceCell(taskOf('a'), entry, null, CALENDAR, FORMATTERS, messages)).toEqual({
+    const entry = frozen(testId('a'), at(2026, 9, 29, 17));
+    expect(varianceCell(taskOf(testId('a')), entry, null, CALENDAR, FORMATTERS, messages)).toEqual({
       text: '',
       kind: 'pending',
     });
@@ -231,14 +235,14 @@ describe('varianceCell', () => {
     expect(
       varianceCell(summary('empty'), entry, scheduleOrThrow(empty), CALENDAR, FORMATTERS, messages),
     ).toEqual({ text: '\u2014', kind: 'noDates' });
-    expect(varianceCell(taskOf('a'), entry, SCHEDULE, null, FORMATTERS, messages)).toEqual({
+    expect(varianceCell(taskOf(testId('a')), entry, SCHEDULE, null, FORMATTERS, messages)).toEqual({
       text: '?',
       kind: 'unknown',
     });
     expect(
       varianceCell(
-        taskOf('a'),
-        frozen('a', Number.MAX_SAFE_INTEGER),
+        taskOf(testId('a')),
+        frozen(testId('a'), Number.MAX_SAFE_INTEGER),
         SCHEDULE,
         CALENDAR,
         FORMATTERS,
@@ -248,7 +252,10 @@ describe('varianceCell', () => {
   });
 
   it('shows a gap of an hour late or early as a quarter of a day, never as on time', () => {
-    expect([cellOf('a', at(2026, 9, 28, 16)), cellOf('a', at(2026, 9, 29, 9) + 0.5)]).toEqual([
+    expect([
+      cellOf(testId('a'), at(2026, 9, 28, 16)),
+      cellOf(testId('a'), at(2026, 9, 29, 9) + 0.5),
+    ]).toEqual([
       { text: '+0.25 d', kind: 'behind' },
       { text: '\u22120.25 d', kind: 'ahead' },
     ]);

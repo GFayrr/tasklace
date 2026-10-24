@@ -17,6 +17,7 @@
   } from '../plan/cell-editing';
   import { groupIncoming, predecessorText, type PlanRow } from '../plan/plan-outline';
   import { failure } from '../../core/result';
+  import { valueAt } from '../../core/table-value';
   import { isPickerRefusal, PICKER_BOUNDS } from '../plan/table-dates';
   import { createMomentFormatter } from '../i18n/format';
   import {
@@ -30,6 +31,8 @@
   import { indentTask, moveTask, outdentTask } from '../plan/task-commands';
   import { ROW_HEIGHT } from '../plan/timeline-geometry';
   import { visibleRows } from '../plan/timeline-painter';
+  import { initialsOf } from '../collaboration/collaboration-text';
+  import { personColorOf } from '../theme/person-colors';
   import Icon from './Icon.svelte';
   import TagPicker from './TagPicker.svelte';
 
@@ -447,7 +450,7 @@
   {#if editing?.column === 'tag' && editing.anchor !== null}
     <TagPicker
       tags={tagChoices}
-      value={editing.initial === '' ? null : editing.initial}
+      value={tagChoices.find((tag) => tag.id === editing?.initial)?.id ?? null}
       anchor={editing.anchor}
       label={fillMessage(text.editCell, { column: text.tag, name: editingName })}
       noTag={text.noTag}
@@ -472,6 +475,7 @@
         {@const selected = row.task.id === app.selectedTaskId}
         {@const rowFloat = floatCells(floats?.get(row.task.id), formatters, app.messages)}
         {@const lateTitle = lateTitles.get(row.task.id)}
+        {@const people = app.collaboration.presence.get(row.task.id) ?? []}
         <div
           class="row"
           class:selected
@@ -487,7 +491,11 @@
             tabindex="-1"
             onpointerdown={(event) => {
               clickCell(event, row.task.id, null);
-            }}>{row.wbs}</span
+            }}
+            >{#if people.length > 0}<span
+                class="presence-mark"
+                style:background-color={personColorOf(valueAt(people, 0).color)}
+              ></span>{/if}{row.wbs}</span
           >
           {#each EDITABLE_COLUMNS as column (column)}
             {@const isEditing = editing?.taskId === row.task.id && editing.column === column}
@@ -555,6 +563,15 @@
                   <span class="swatch" style:background={tagOf(row.task)?.color}></span>
                 {/if}
                 <span class="label">{values[column]}</span>
+                {#if column === 'name'}
+                  {#each people as person (person.id)}
+                    <span
+                      class="presence"
+                      style:background-color={personColorOf(person.color)}
+                      title={person.name}>{initialsOf(person.name, app.locale)}</span
+                    >
+                  {/each}
+                {/if}
                 {#if isDateColumn(column) && row.task.kind !== 'summary'}
                   <button
                     type="button"
@@ -717,6 +734,25 @@
 
   .rows .row.selected {
     background: var(--color-selection);
+  }
+
+  .presence-mark {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+  }
+
+  .presence {
+    flex-shrink: 0;
+    margin-left: 6px;
+    padding: 0 6px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 16px;
+    color: var(--color-action-text);
+    border-radius: 999px;
   }
 
   .rows .row.selected .wbs {

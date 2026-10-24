@@ -3,7 +3,7 @@ import type { Project } from '../../core/model/project';
 import { pageSizeOf } from '../../core/print/paper';
 import { printCostOf, type PrintCost } from '../../core/print/print-cost';
 import { compileOrThrow } from '../../core/testing/civil-time';
-import { project, scheduleOrThrow, workTask } from '../../core/testing/project-builder';
+import { project, scheduleOrThrow, workTask, testId } from '../../core/testing/project-builder';
 import { loadMessages } from '../i18n/messages';
 import { SAND_GRAPHITE } from '../theme/sand-graphite';
 import { buildPrintDocument, type PrintSettings, type PrintSource } from './print-pages';
@@ -33,8 +33,8 @@ const CHARACTER_WIDTH = 5;
 const TASK_COUNT = 60;
 const EXPECTED_TILES = 3_054;
 const TAGS = [
-  { id: 'design', name: 'Design', color: '#2A78D6', representsPersonOrTeam: false },
-  { id: 'near', name: 'Near', color: '#2A78D7', representsPersonOrTeam: false },
+  { id: testId('design'), name: 'Design', color: '#2A78D6', representsPersonOrTeam: false },
+  { id: testId('near'), name: 'Near', color: '#2A78D7', representsPersonOrTeam: false },
 ];
 const SETTINGS: PrintSettings = {
   paper: 'a4',

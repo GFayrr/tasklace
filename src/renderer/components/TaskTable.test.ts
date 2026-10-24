@@ -1,8 +1,8 @@
 import { tick } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
-import type { Project } from '../../core/model/project';
+import type { Project, TaskId, TagId } from '../../core/model/project';
 import { at } from '../../core/testing/civil-time';
-import { milestone, project, summary, workTask } from '../../core/testing/project-builder';
+import { milestone, project, summary, workTask, testId } from '../../core/testing/project-builder';
 import { AppState } from '../app/app-state.svelte';
 import { fakeAppContext, openedProjectOf, settle } from '../app/testing/fake-app-context';
 import english from '../locales/en.json';
@@ -10,12 +10,17 @@ import { createTableFormatters } from '../plan/table-format';
 import TaskTable from './TaskTable.svelte';
 import { button, click, press, render, single, update } from './testing/render';
 
-const DESIGN = { id: 'design', name: 'Design', color: '#3366AA', representsPersonOrTeam: false };
+const DESIGN = {
+  id: testId('design'),
+  name: 'Design',
+  color: '#3366AA',
+  representsPersonOrTeam: false,
+};
 const PLAN: Project = project(
   [
     summary('s', { sortKey: 'a', name: 'Study' }),
-    workTask('a', { parentId: 's', sortKey: 'a', name: 'Read' }),
-    workTask('b', { parentId: 's', sortKey: 'b', name: 'Write', tagId: 'design' }),
+    workTask('a', { parentId: testId('s'), sortKey: 'a', name: 'Read' }),
+    workTask('b', { parentId: testId('s'), sortKey: 'b', name: 'Write', tagId: testId('design') }),
     milestone('m', { sortKey: 'b', name: 'Hand in' }),
   ],
   [],
@@ -42,7 +47,7 @@ async function renderTable() {
 }
 
 /** Returns the text of the cells of the row of a task, by column. */
-function rowTexts(root: HTMLElement, taskId: string): string[] {
+function rowTexts(root: HTMLElement, taskId: TaskId): string[] {
   const cell = single(root, `#cell-${taskId}-name`);
   const row = cell.closest('[role="row"]');
   return [...(row?.querySelectorAll('[role="gridcell"]') ?? [])].map((each) =>
@@ -58,7 +63,7 @@ function editor(root: HTMLElement): HTMLInputElement {
 describe('TaskTable', () => {
   it('shows every task with its number, values and ISO dates, and a row to add a task', async () => {
     const { root } = await renderTable();
-    expect(rowTexts(root, 'a')).toEqual([
+    expect(rowTexts(root, testId('a'))).toEqual([
       '1.1',
       'Read',
       '7 h',
@@ -68,8 +73,8 @@ describe('TaskTable', () => {
       '',
       '',
     ]);
-    expect(rowTexts(root, 'b')[7]).toBe('Design');
-    expect(rowTexts(root, 's')[0]).toBe('1');
+    expect(rowTexts(root, testId('b'))[7]).toBe('Design');
+    expect(rowTexts(root, testId('s'))[0]).toBe('1');
     expect(button(root, english.table.addTask).disabled).toBe(false);
   });
 
@@ -97,7 +102,7 @@ describe('TaskTable', () => {
 
   it('edits a cell from Enter, applies it with Enter and goes to the next row', async () => {
     const { app, root, grid } = await renderTable();
-    app.select('a');
+    app.select(testId('a'));
     update();
     press(grid, 'Enter');
     await tick();
@@ -114,7 +119,7 @@ describe('TaskTable', () => {
 
   it('starts editing with a typed character, cancels with Escape, and goes across with Tab', async () => {
     const { app, root, grid } = await renderTable();
-    app.select('a');
+    app.select(testId('a'));
     update();
     press(grid, 'x');
     await tick();
@@ -149,7 +154,7 @@ describe('TaskTable', () => {
 
   it('opens the editor a new task asks for', async () => {
     const { app, root } = await renderTable();
-    app.select('a');
+    app.select(testId('a'));
     app.addTask();
     await settle();
     update();
@@ -159,7 +164,7 @@ describe('TaskTable', () => {
 
   it('runs the task shortcuts of the keyboard', async () => {
     const { app, root, grid } = await renderTable();
-    app.select('m');
+    app.select(testId('m'));
     update();
     press(grid, 'ArrowRight', { altKey: true, shiftKey: true });
     await settle();
@@ -190,18 +195,18 @@ describe('TaskTable', () => {
     const { app, root, grid } = await renderTable();
     click(button(root, 'Collapse Study'));
     expect(root.querySelector('#cell-a-name')).toBeNull();
-    app.select('s');
+    app.select(testId('s'));
     update();
     press(grid, 'ArrowRight', { altKey: true });
     expect(root.querySelector('#cell-a-name')).not.toBeNull();
     expect(press(grid, 'ArrowLeft', { altKey: true })).toBe(false);
-    expect(app.collapsed.has('s')).toBe(true);
+    expect(app.collapsed.has(testId('s'))).toBe(true);
     expect(root.querySelector('#cell-a-name')).toBeNull();
   });
 
   it('keeps the plan as it is when folding from the keyboard a task that is not a summary', async () => {
     const { app, root, grid } = await renderTable();
-    app.select('a');
+    app.select(testId('a'));
     update();
     const before = app.project;
     expect(press(grid, 'ArrowLeft', { altKey: true })).toBe(false);
@@ -220,7 +225,7 @@ describe('TaskTable', () => {
 
   it('chooses a tag from its list, placed under the cell once it is in view', async () => {
     const { app, root, grid } = await renderTable();
-    app.select('a');
+    app.select(testId('a'));
     update();
     for (let step = 0; step < 6; step += 1) {
       press(grid, 'ArrowRight');
@@ -234,7 +239,9 @@ describe('TaskTable', () => {
     press(list, 'ArrowDown');
     press(list, 'Enter');
     await settle();
-    expect(app.project?.tasks.find((task) => task.id === 'a')).toMatchObject({ tagId: 'design' });
+    expect(app.project?.tasks.find((task) => task.id === 'a')).toMatchObject({
+      tagId: testId('design'),
+    });
     press(grid, 'Enter');
     await tick();
     update();
@@ -249,19 +256,19 @@ describe('TaskTable', () => {
   it('lists the tags by name in the order of the language, whatever their order in the project', async () => {
     const { app, root, grid } = await renderTable();
     /** Builds a tag with an identifier and a name. */
-    const tagOf = (id: string, name: string) => ({ ...DESIGN, id, name });
+    const tagOf = (id: TagId, name: string) => ({ ...DESIGN, id, name });
     expect(
       app.tryEdit(() => ({
         ok: true,
         value: [
-          { type: 'putTag', tag: tagOf('z', 'Zeta') },
-          { type: 'putTag', tag: tagOf('e', 'éclair') },
-          { type: 'putTag', tag: tagOf('b', 'beta') },
+          { type: 'putTag', tag: tagOf(testId('z'), 'Zeta') },
+          { type: 'putTag', tag: tagOf(testId('e'), 'éclair') },
+          { type: 'putTag', tag: tagOf(testId('b'), 'beta') },
         ],
       })),
     ).toBeNull();
     await settle();
-    app.select('a');
+    app.select(testId('a'));
     update();
     for (let step = 0; step < 6; step += 1) {
       press(grid, 'ArrowRight');
@@ -301,7 +308,7 @@ describe('TaskTable', () => {
         throw refusal;
       },
     });
-    app.select('b');
+    app.select(testId('b'));
     update();
     expect(grid.getAttribute('aria-activedescendant')).toBe('cell-b-start');
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -341,7 +348,7 @@ describe('TaskTable', () => {
         throw failure;
       },
     });
-    app.select('b');
+    app.select(testId('b'));
     update();
     for (let step = 0; step < 3; step += 1) {
       press(grid, 'ArrowRight');
@@ -396,7 +403,7 @@ describe('TaskTable edge cases', () => {
     update();
     expect(root.querySelector('input.editor')).toBeNull();
     expect(single(root, '#cell-s-start').querySelector('button')).toBeNull();
-    app.select('s');
+    app.select(testId('s'));
     update();
     single(root, '#cell-s-start').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     update();
@@ -419,7 +426,7 @@ describe('TaskTable edge cases', () => {
 
   it('keeps the editor open for other keys, and lets a click inside it place the caret', async () => {
     const { app, root, grid } = await renderTable();
-    app.select('a');
+    app.select(testId('a'));
     update();
     press(grid, 'Enter');
     await tick();
@@ -443,7 +450,7 @@ describe('TaskTable edge cases', () => {
     await app.open();
     expect(app.schedule).toBeNull();
     update();
-    app.select('b');
+    app.select(testId('b'));
     update();
     press(grid, 'ArrowDown', { altKey: true });
     expect(picker.value).toBe('');
@@ -451,7 +458,7 @@ describe('TaskTable edge cases', () => {
 
   it('keeps the tag of a task chosen again, and removes it with No tag', async () => {
     const { app, root, grid } = await renderTable();
-    app.select('b');
+    app.select(testId('b'));
     update();
     for (let step = 0; step < 6; step += 1) {
       press(grid, 'ArrowRight');

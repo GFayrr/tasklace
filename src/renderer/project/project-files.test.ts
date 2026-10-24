@@ -16,6 +16,7 @@ import {
   issuesOf,
   type ProjectBridge,
   type ProjectFiles,
+  type LocalChangesChoice,
   type ProjectFilesListener,
   type SaveStatus,
 } from './project-files';
@@ -36,6 +37,7 @@ const QUIET: ProjectFilesListener = {
   saveStatus: () => undefined,
   localCopyFailed: () => undefined,
   fileActionRunning: () => undefined,
+  chooseLocalChanges: () => Promise.reject(new Error('No question was expected')),
 };
 
 /** Returns a listener doing nothing but what a test gives it. */
@@ -54,6 +56,7 @@ function fakeBridge(
   const events: string[] = [];
   const adopted: string[] = [];
   const adoption = { result: { ok: true, value: null } as BridgeResult<null> };
+  const aside = { result: { ok: true, value: null } as BridgeResult<null> };
   /** Creates a fake save of the bridge that records what was saved and with which suggested name. */
   const record = (as: boolean) => (state: Uint8Array, name?: string) => {
     const document = new Y.Doc();
@@ -73,6 +76,15 @@ function fakeBridge(
     },
     openRecentProject: () => Promise.resolve(openResult),
     importProject: () => Promise.resolve(openResult),
+    openSharedPlan: () => Promise.resolve(openResult),
+    openKeptChanges: () => {
+      events.push('openKept');
+      return Promise.resolve(openResult);
+    },
+    setLocalCopyAside: (documentId) => {
+      events.push(`setAside ${documentId}`);
+      return Promise.resolve(aside.result);
+    },
     adoptProject: (documentId) => {
       adopted.push(documentId);
       events.push('adopt');
@@ -91,7 +103,7 @@ function fakeBridge(
     },
     exportLighterPdf: () => Promise.resolve({ ok: true, value: { fileName: 'lighter.pdf' } }),
   };
-  return { bridge, saves, suggestedNames, events, adopted, adoption };
+  return { bridge, saves, suggestedNames, events, adopted, adoption, aside };
 }
 
 /** Returns an opened project answer for a document. */
@@ -99,7 +111,7 @@ function openedOf(documentId: DocumentId): BridgeResult<OpenedProject> {
   const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, documentId));
   return {
     ok: true,
-    value: { state, documentId, fileName: 'Plan.tasklace', warnings: [] },
+    value: { state, documentId, fileName: 'Plan.tasklace', warnings: [], localChanges: null },
   };
 }
 
@@ -204,7 +216,7 @@ describe('createProjectFiles', () => {
     expect(events).toEqual(['adopt', 'save', 'open', 'adopt']);
   });
 
-  it('refuses a second file action while one is running, and accepts one again once it ends', async () => {
+  it('refuses a second file action while one is running, opening a plan the host sent once it ends, and accepts one again', async () => {
     let finish: (result: BridgeResult<OpenedProject>) => void = () => undefined;
     const slow = new Promise<BridgeResult<OpenedProject>>((resolve) => {
       finish = resolve;
@@ -229,7 +241,10 @@ describe('createProjectFiles', () => {
     expect(events).toEqual(before);
     expect(await files.discardHeldPdf()).toEqual({ ok: true, value: null });
     expect(events).toEqual([...before, 'discard']);
+    const shared = files.openShared(Uint8Array.of(0, 0));
+    await settle();
     finish(openedOf(OTHER_ID));
+    expect((await shared).ok).toBe(true);
     expect((await first).ok).toBe(true);
     expect(await files.exportFile('csv', 'a', 'Plan')).toEqual({
       ok: true,
@@ -357,6 +372,17 @@ describe('createProjectFiles', () => {
     expect(saves).toEqual([{ as: true, documentId: OTHER_ID }]);
   });
 
+  it('opens the changes kept apart as a project with its file', async () => {
+    const { bridge, events } = fakeBridge(openedOf(OTHER_ID));
+    const files = createProjectFiles(bridge, QUIET, manualTimer());
+    const opened = await files.openKept();
+    expect([opened.ok && opened.value.session.documentId, files.hasFile(), events]).toEqual([
+      OTHER_ID,
+      true,
+      ['openKept', 'adopt'],
+    ]);
+  });
+
   it('keeps changes marked unsaved when they come during a save or when the user cancels', async () => {
     const statuses: SaveStatus[] = [];
     let finish: (result: BridgeResult<SavedProject>) => void = () => undefined;
@@ -416,6 +442,7 @@ describe('createProjectFiles', () => {
         documentId: OTHER_ID,
         fileName: 'Plan.tasklace',
         warnings: [],
+        localChanges: null,
       },
     } as const;
     const { bridge } = fakeBridge(unreadable);
@@ -478,6 +505,7 @@ describe('createProjectFiles', () => {
         documentId: TEST_DOCUMENT_ID,
         fileName: 'Plan.tasklace',
         warnings: [],
+        localChanges: null,
       },
     });
     const files = createProjectFiles(bridge, QUIET, manualTimer());
@@ -535,6 +563,7 @@ describe('createProjectFiles', () => {
         documentId: TEST_DOCUMENT_ID,
         fileName: 'Plan.tasklace',
         warnings: [],
+        localChanges: null,
       },
     });
     const files = createProjectFiles(bridge, QUIET, manualTimer());
@@ -610,5 +639,125 @@ describe('issuesOf', () => {
     expect(issuesOf({ code: 'WRITE_FAILED' })).toEqual([]);
     expect(issuesOf({ code: 'BUSY' })).toEqual([]);
     expect(issuesOf({ code: 'UNSAVED_PROJECT', cause: null })).toEqual([]);
+  });
+});
+
+describe('a file whose local copy holds changes it lacks', () => {
+  /** Answers like the main process opening a file whose local copy renamed the plan, or held the given bytes. */
+  const withLocalChanges = (changes?: Uint8Array): BridgeResult<OpenedProject> => {
+    const document = createSharedDocument(SAMPLE, OTHER_ID);
+    const state = Y.encodeStateAsUpdate(document);
+    document.getMap('project').set('name', 'From the copy');
+    return {
+      ok: true,
+      value: {
+        state,
+        documentId: OTHER_ID,
+        fileName: 'Plan.tasklace',
+        warnings: [],
+        localChanges: changes ?? Y.encodeStateAsUpdate(document),
+      },
+    };
+  };
+
+  /** Opens such a file, answering the question with a choice and recording the file names asked about. */
+  const openAnswering = async (
+    choice: LocalChangesChoice,
+    changes?: Uint8Array,
+    asideResult: BridgeResult<null> = { ok: true, value: null },
+  ) => {
+    const fake = fakeBridge(withLocalChanges(changes));
+    fake.aside.result = asideResult;
+    const asked: string[] = [];
+    const statuses: SaveStatus[] = [];
+    const files = createProjectFiles(
+      fake.bridge,
+      listening({
+        chooseLocalChanges: (fileName) => {
+          asked.push(fileName);
+          return Promise.resolve(choice);
+        },
+        saveStatus: (status) => statuses.push(status),
+      }),
+      manualTimer(),
+    );
+    const opened = await files.open();
+    return { ...fake, files, opened, asked, statuses };
+  };
+
+  it('adds the changes once the project is adopted, which then waits to be saved', async () => {
+    const { opened, asked, events, statuses } = await openAnswering('add');
+    expect([
+      asked,
+      events,
+      opened.ok && opened.value.localChanges,
+      opened.ok && opened.value.session.project().name,
+      statuses.at(-1),
+    ]).toEqual([
+      ['Plan.tasklace'],
+      ['open', 'adopt'],
+      { kind: 'added', repairs: [] },
+      'From the copy',
+      'unsaved',
+    ]);
+  });
+
+  it('sets the copy aside before adopting the file alone', async () => {
+    const { opened, events } = await openAnswering('alone');
+    expect([
+      events,
+      opened.ok && opened.value.localChanges,
+      opened.ok && opened.value.session.project().name,
+    ]).toEqual([[`open`, `setAside ${OTHER_ID}`, 'adopt'], { kind: 'setAside' }, SAMPLE.name]);
+  });
+
+  it('opens nothing when the user cancels, or when the copy cannot be set aside', async () => {
+    const canceled = await openAnswering('cancel');
+    const refused = await openAnswering('alone', undefined, {
+      ok: false,
+      error: { code: 'WRITE_FAILED' },
+    });
+    expect([
+      canceled.opened,
+      canceled.events,
+      refused.opened,
+      refused.events,
+      refused.files.session(),
+    ]).toEqual([
+      { ok: false, error: { code: 'CANCELLED' } },
+      ['open'],
+      { ok: false, error: { code: 'WRITE_FAILED' } },
+      ['open', `setAside ${OTHER_ID}`],
+      null,
+    ]);
+  });
+
+  it('sets the copy aside when its changes cannot be added, telling whether it could, and logs why', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const broken = Uint8Array.of(255, 255, 255);
+    const kept = await openAnswering('add', broken);
+    const lost = await openAnswering('add', broken, { ok: false, error: { code: 'WRITE_FAILED' } });
+    expect([
+      kept.events,
+      kept.opened.ok && kept.opened.value.localChanges,
+      lost.opened.ok && lost.opened.value.localChanges,
+      errors.mock.calls.map((call): unknown => call[0]),
+    ]).toEqual([
+      ['open', 'adopt', `setAside ${OTHER_ID}`],
+      { kind: 'notAdded', setAside: true },
+      { kind: 'notAdded', setAside: false },
+      [
+        'The changes kept on this computer could not be added:',
+        'The changes kept on this computer could not be added:',
+      ],
+    ]);
+    errors.mockRestore();
+  });
+
+  it('asks nothing for a file without such changes', async () => {
+    const { bridge } = fakeBridge(openedOf(OTHER_ID));
+    const files = createProjectFiles(bridge, QUIET, manualTimer());
+    const opened = await files.open();
+    expect(opened.ok && opened.value.localChanges).toEqual({ kind: 'none' });
   });
 });

@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Project } from '../../core/model/project';
+import type { Project, TaskId } from '../../core/model/project';
 import { at } from '../../core/testing/civil-time';
-import { link, milestone, project, summary, workTask } from '../../core/testing/project-builder';
+import {
+  link,
+  milestone,
+  project,
+  summary,
+  workTask,
+  testId,
+} from '../../core/testing/project-builder';
 import { AppState } from '../app/app-state.svelte';
 import { fakeAppContext, openedProjectOf, settle } from '../app/testing/fake-app-context';
 import { createMomentFormatter } from '../i18n/format';
@@ -27,7 +34,12 @@ const HOURS_SHOWN_BEFORE = 48;
 const PLAN: Project = project(
   [
     summary('s', { name: 'Study', sortKey: 'a' }),
-    workTask('writing', { name: 'Writing', parentId: 's', sortKey: 'a', deadline: DEADLINE }),
+    workTask('writing', {
+      name: 'Writing',
+      parentId: testId('s'),
+      sortKey: 'a',
+      deadline: DEADLINE,
+    }),
     milestone('defense', {
       name: 'Defense',
       sortKey: 'b',
@@ -128,7 +140,7 @@ describe('the dates tasks do not meet', () => {
 
   it('lead to the task when a line is clicked, scrolling the timeline to its end', async () => {
     const { app, root, scroller } = await renderPlan();
-    app.setSummaryOpen('s', false);
+    app.setSummaryOpen(testId('s'), false);
     click(button(root, STATUS.conflicts.other.replace('{count}', '2')));
     update();
     const writing = [...root.querySelectorAll<HTMLElement>('#conflict-list .conflict')][0];
@@ -137,20 +149,25 @@ describe('the dates tasks do not meet', () => {
     }
     click(writing);
     update();
-    expect([app.selectedTaskId, app.collapsed.has('s')]).toEqual(['writing', false]);
+    expect([app.selectedTaskId, app.collapsed.has(testId('s'))]).toEqual(['writing', false]);
     expect(scroller.scrollLeft).toBe(xOf(frameOf(app), WRITING_END - HOURS_SHOWN_BEFORE));
     expect(app.revealRequest).toBeNull();
   });
 
   it('list the people and teams first, each part with its title', async () => {
-    const alice = { id: 'alice', name: 'Alice', color: '#4a3aa7', representsPersonOrTeam: true };
+    const alice = {
+      id: testId('alice'),
+      name: 'Alice',
+      color: '#4a3aa7',
+      representsPersonOrTeam: true,
+    };
     const busy: Project = {
       ...PLAN,
       tags: [alice],
       tasks: [
         ...PLAN.tasks,
-        workTask('one', { name: 'One', sortKey: 'd', tagId: 'alice' }),
-        workTask('two', { name: 'Two', sortKey: 'e', tagId: 'alice' }),
+        workTask('one', { name: 'One', sortKey: 'd', tagId: testId('alice') }),
+        workTask('two', { name: 'Two', sortKey: 'e', tagId: testId('alice') }),
       ],
     };
     const { root } = await renderPlan(busy);
@@ -229,7 +246,7 @@ describe('the dates tasks do not meet', () => {
     };
     const { app, root } = await renderPlan(both);
     const moment = createMomentFormatter(app.locale);
-    const end = app.schedule?.placements.get('both')?.end ?? Number.NaN;
+    const end = app.schedule?.placements.get(testId('both'))?.end ?? Number.NaN;
     click(button(root, STATUS.conflicts.other.replace('{count}', '4')));
     update();
     expect(
@@ -252,7 +269,7 @@ describe('the dates tasks do not meet', () => {
     const { app } = await renderPlan();
     const frame = frameOf(app);
     /** Returns the top of the row of a task on the timeline. */
-    const rowTop = (id: string) => (app.outline.rowIndexById.get(id) ?? -1) * ROW_HEIGHT;
+    const rowTop = (id: TaskId) => (app.outline.rowIndexById.get(id) ?? -1) * ROW_HEIGHT;
     /** Lists the places where deadline marks are drawn in these calls. */
     const marksOf = (calls: ReturnType<typeof drawFrames>) =>
       calls
@@ -271,18 +288,21 @@ describe('the dates tasks do not meet', () => {
       );
     const drawn = drawFrames();
     expect(marksOf(drawn)).toEqual([
-      [xOf(frame, DEADLINE) - 1, rowTop('writing') + 2, SAND_GRAPHITE.error],
-      [xOf(frame, DEFENSE_DEADLINE) - 1, rowTop('defense') + 2, SAND_GRAPHITE.action],
+      [xOf(frame, DEADLINE) - 1, rowTop(testId('writing')) + 2, SAND_GRAPHITE.error],
+      [xOf(frame, DEFENSE_DEADLINE) - 1, rowTop(testId('defense')) + 2, SAND_GRAPHITE.action],
     ]);
     expect(redStrokes(drawn)).toHaveLength(2);
-    const defenseX = xOf(frame, app.schedule?.placements.get('defense')?.start ?? Number.NaN);
+    const defenseX = xOf(
+      frame,
+      app.schedule?.placements.get(testId('defense'))?.start ?? Number.NaN,
+    );
     const reach = MILESTONE_SIZE / 2 + 2;
     expect(
       drawn.some(
         (call) =>
           call.name === 'moveTo' &&
           call.args[0] === defenseX &&
-          call.args[1] === rowTop('defense') + ROW_HEIGHT / 2 - reach,
+          call.args[1] === rowTop(testId('defense')) + ROW_HEIGHT / 2 - reach,
       ),
     ).toBe(true);
     await toggleDateConstraints(app);
@@ -307,7 +327,7 @@ describe('the dates tasks do not meet', () => {
 
 describe('the date constraints of the details panel', () => {
   /** Renders the details panel over the plan and opens it on a task. */
-  async function detailsOf(id: string, plan: Project = PLAN) {
+  async function detailsOf(id: TaskId, plan: Project = PLAN) {
     const fake = fakeAppContext();
     const app = new AppState(fake.context);
     fake.control.openResult = openedProjectOf(plan);
@@ -336,13 +356,13 @@ describe('the date constraints of the details panel', () => {
   }
 
   it('shows both dates of a task or a milestone in their own frame', async () => {
-    const { root } = await detailsOf('writing');
+    const { root } = await detailsOf(testId('writing'));
     expect(single(root, 'fieldset.constraints legend').textContent).toBe(DETAILS.dateConstraints);
     expect(constraintFields(root)).toEqual({
       [DETAILS.mustFinishOn]: '',
       [DETAILS.deadline]: '2026-09-28T12:00',
     });
-    const milestonePanel = await detailsOf('defense');
+    const milestonePanel = await detailsOf(testId('defense'));
     expect(constraintFields(milestonePanel.root)).toEqual({
       [DETAILS.mustFinishOn]: '2026-09-28T10:00',
       [DETAILS.deadline]: '2027-01-15T09:00',
@@ -350,7 +370,7 @@ describe('the date constraints of the details panel', () => {
   });
 
   it('saves the date a task must finish on from the panel', async () => {
-    const { app, root } = await detailsOf('free');
+    const { app, root } = await detailsOf(testId('free'));
     const input = [...root.querySelectorAll('fieldset.constraints label')]
       .find((label) => label.querySelector('span')?.textContent === DETAILS.mustFinishOn)
       ?.querySelector('input');
@@ -371,8 +391,10 @@ describe('the date constraints of the details panel', () => {
   });
 
   it('hides the frame for a summary and while date constraints are turned off', async () => {
-    expect((await detailsOf('s')).root.querySelector('fieldset.constraints')).toBeNull();
+    expect((await detailsOf(testId('s'))).root.querySelector('fieldset.constraints')).toBeNull();
     const off = { ...PLAN, options: { ...PLAN.options, dateConstraintsEnabled: false } };
-    expect((await detailsOf('writing', off)).root.querySelector('fieldset.constraints')).toBeNull();
+    expect(
+      (await detailsOf(testId('writing'), off)).root.querySelector('fieldset.constraints'),
+    ).toBeNull();
   });
 });

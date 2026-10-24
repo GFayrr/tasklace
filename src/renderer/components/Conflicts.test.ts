@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Project, Tag } from '../../core/model/project';
 import { at } from '../../core/testing/civil-time';
-import { project, summary, workTask } from '../../core/testing/project-builder';
+import { project, summary, workTask, testId } from '../../core/testing/project-builder';
 import { HOURS_PER_DAY } from '../../core/time';
 import { AppState } from '../app/app-state.svelte';
 import { fakeAppContext, openedProjectOf, settle } from '../app/testing/fake-app-context';
@@ -17,7 +17,12 @@ const TEXT = english.status;
 const TODAY = new Date(2026, 8, 28, 10);
 const FILLERS = 30;
 const SCROLLER_HEIGHT = 340;
-const ALICE: Tag = { id: 'alice', name: 'Alice', color: '#4a3aa7', representsPersonOrTeam: true };
+const ALICE: Tag = {
+  id: testId('alice'),
+  name: 'Alice',
+  color: '#4a3aa7',
+  representsPersonOrTeam: true,
+};
 const LATER = at(2026, 10, 19, 9);
 const PLAN: Project = project(
   [
@@ -108,7 +113,7 @@ describe('the conflicts of people and teams', () => {
       throw new Error('No conflict');
     }
     expect(app.selectedTaskId).toBe('analysis');
-    const row = app.outline.rowIndexById.get('analysis') ?? -1;
+    const row = app.outline.rowIndexById.get(testId('analysis')) ?? -1;
     expect(row).toBe(FILLERS + 1);
     expect(scroller.scrollTop).toBe((row + 1) * ROW_HEIGHT - SCROLLER_HEIGHT);
     const frame = timelineFrame(
@@ -143,20 +148,20 @@ describe('the conflicts of people and teams', () => {
       ],
     };
     const { app, root, scroller } = await renderConflicts(hidden);
-    app.setSummaryOpen('group', false);
+    app.setSummaryOpen(testId('group'), false);
     update();
-    expect(app.outline.rowIndexById.has('analysis')).toBe(false);
+    expect(app.outline.rowIndexById.has(testId('analysis'))).toBe(false);
     click(button(root, TEXT.conflicts.one.replace('{count}', '1')));
     update();
     click(single(root, '#conflict-list .conflict'));
     update();
-    const row = app.outline.rowIndexById.get('analysis') ?? -1;
+    const row = app.outline.rowIndexById.get(testId('analysis')) ?? -1;
     expect(row).toBe(FILLERS + 2);
     expect(scroller.scrollTop).toBe((row + 1) * ROW_HEIGHT - SCROLLER_HEIGHT);
   });
 
   it('count several conflicts in the plural, explain them, and give the focus back when the list closes', async () => {
-    const bruno: Tag = { ...ALICE, id: 'bruno', name: 'Bruno', color: '#4a3aa8' };
+    const bruno: Tag = { ...ALICE, id: testId('bruno'), name: 'Bruno', color: '#4a3aa8' };
     const two: Project = {
       ...PLAN,
       tags: [ALICE, bruno],

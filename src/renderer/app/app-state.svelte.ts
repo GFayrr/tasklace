@@ -36,7 +36,13 @@ import type { TagConflict } from '../../core/tags/tag-conflicts';
 import type { PrintDocument } from '../../core/print/print-document';
 import type { ProjectHour } from '../../core/time';
 import { deadlinesOf } from '../plan/timeline-geometry';
-import type { ExchangeKind, RecentProject, TasklaceBridge } from '../../preload/bridge-contract';
+import type {
+  ExchangeKind,
+  FileFailure,
+  RecentProject,
+  TasklaceBridge,
+} from '../../preload/bridge-contract';
+import { ownCopyName } from '../../core/collaboration/own-copy';
 import { createDayFormatter } from '../i18n/format';
 import {
   countMessage,
@@ -81,12 +87,20 @@ import {
   type OpenedSession,
   type ProjectFiles,
   type SaveStatus,
+  type LocalChangesChoice,
+  type LocalChangesOutcome,
 } from '../project/project-files';
 import type { ZoomLevel } from '../plan/time-scale';
 import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
 import type { Theme } from '../theme/theme';
 import { SettingsPanel } from './settings-panel.svelte';
+import {
+  CollaborationState,
+  type CollaborationFailure,
+  type KeptOwnChanges,
+} from '../collaboration/collaboration-state.svelte';
 import type { Command } from './shortcuts';
+import type { NewIdentifier } from '../../core/identifiers';
 
 export type NoticeKind = 'error' | 'warning' | 'info';
 
@@ -94,8 +108,17 @@ export type CloseChoice = 'save' | 'discard' | 'cancel';
 
 export type DrawingPart = 'timeline' | 'patterns';
 
+export type CollaborationWindow = 'share' | 'join';
+
+export interface KeptChanges {
+  readonly planName: string;
+  readonly copyName: string;
+}
+
 type CloseQuestion =
-  { readonly reason: 'unsaved' } | { readonly reason: 'saveFailed'; readonly detail: string };
+  | { readonly reason: 'unsaved' }
+  | { readonly reason: 'saveFailed'; readonly detail: string }
+  | { readonly reason: 'localChanges'; readonly fileName: string };
 
 export type ClosePrompt = CloseQuestion & { readonly answer: (choice: CloseChoice) => void };
 
@@ -108,6 +131,12 @@ interface StartMove {
   readonly base: Schedule;
   readonly project: Project | null;
 }
+
+const LOCAL_CHANGES_CHOICES: Readonly<Record<CloseChoice, LocalChangesChoice>> = {
+  save: 'add',
+  discard: 'alone',
+  cancel: 'cancel',
+};
 
 const DAILY_WINDOW_CODES: readonly ValidationIssueCode[] = [
   'INVALID_HOURS_PER_DAY',
@@ -167,7 +196,7 @@ export interface AppContext {
   readonly messages: Messages;
   readonly locale: string;
   readonly createScheduler: (listener: ScheduleListener) => Scheduler;
-  readonly createId: () => string;
+  readonly createId: () => NewIdentifier;
   readonly now: () => Date;
   readonly theme: Theme;
 }
@@ -196,8 +225,12 @@ export class AppState {
   readonly settings = new SettingsPanel(() => {
     this.#startMove = null;
   });
+  readonly collaboration: CollaborationState;
   #closePrompt = $state.raw<ClosePrompt | null>(null);
   #pdfExport = $state.raw<PdfExportOpening | null>(null);
+  #collaborationWindow = $state<CollaborationWindow | null>(null);
+  #keptChanges = $state.raw<KeptChanges | null>(null);
+  #shareFailure = $state.raw<CollaborationFailure | null>(null);
   #fileActionRunning = $state(false);
   #report = $state.raw<Report | null>(null);
   #lastQuestion: Promise<unknown> = Promise.resolve();
@@ -249,6 +282,25 @@ export class AppState {
       fileActionRunning: (running) => {
         this.#fileActionRunning = running;
       },
+      chooseLocalChanges: async (fileName) =>
+        LOCAL_CHANGES_CHOICES[await this.#ask({ reason: 'localChanges', fileName })],
+    });
+    this.collaboration = new CollaborationState({
+      bridge: context.bridge,
+      createId: context.createId,
+      now: context.now,
+      session: () => this.#session,
+      openShared: async (state) => (await this.#load(this.#files.openShared(state))) !== null,
+      repaired: (repairs) => {
+        this.#notifyRepairs(repairs);
+      },
+      hostChanged: ({ left, next }) => {
+        this.#tellHostChanged(left, next);
+      },
+      ownChangesKept: (kept) => {
+        this.#ownChangesKept(kept);
+      },
+      selectedTaskId: () => this.#selectedTaskId,
     });
     this.#scheduler = context.createScheduler({
       scheduled: (result, project) => {
@@ -280,6 +332,7 @@ export class AppState {
       throw new Error(`The task ${id} to select is not in the project.`);
     }
     this.#selectedTaskId = id;
+    this.collaboration.selectionChanged();
   }
 
   /** Returns the task whose details panel is open, or null. */
@@ -545,6 +598,18 @@ export class AppState {
     }
   }
 
+  /** Joins a shared plan with its code once the user agreed about the open project, the plan opening when the host sent it, and returns why it could not be joined, or null. */
+  async join(target: {
+    readonly address: string;
+    readonly port: number;
+    readonly code: string;
+  }): Promise<Result<null, CollaborationFailure> | null> {
+    if (!(await this.#readyToReplace())) {
+      return null;
+    }
+    return this.collaboration.join(target);
+  }
+
   /** Asks for a project file and opens it. */
   async open(): Promise<void> {
     if (await this.#readyToReplace()) {
@@ -660,7 +725,7 @@ export class AppState {
     if (session === null || trimmed === '' || trimmed === this.project?.name) {
       return false;
     }
-    if (this.#refuseWhileFileActionRuns()) {
+    if (this.#refuseWhileFileActionRuns() || this.#refuseInReadOnly()) {
       return false;
     }
     const renamed = session.apply({ type: 'updateProject', fields: { name: trimmed } });
@@ -760,6 +825,115 @@ export class AppState {
     }
     this.#pdfExport = null;
     this.#discardHeldPdf();
+  }
+
+  /** Returns the window of the shared plan that is open, sharing or joining, or null. */
+  get collaborationWindow(): CollaborationWindow | null {
+    return this.#collaborationWindow;
+  }
+
+  /** Returns why the open plan could not be shared the latest time, or null. */
+  get shareFailure(): CollaborationFailure | null {
+    return this.#shareFailure;
+  }
+
+  /** Opens the window that shares the open project, sharing it at once when this person already gave a name and saw the word about the network. */
+  async openShare(): Promise<void> {
+    if (this.project === null || !(await this.#settingsRead())) {
+      return;
+    }
+    this.#shareFailure = null;
+    this.#collaborationWindow = 'share';
+    const settings = this.collaboration.settings;
+    const ready = settings?.name !== null && settings?.firewallNoticeSeen === true;
+    if (this.collaboration.mode.kind === 'idle' && ready) {
+      await this.startSharing();
+    }
+  }
+
+  /** Shares the open project, keeping why it could not be shared for the window. */
+  async startSharing(): Promise<void> {
+    this.#shareFailure = null;
+    const shared = await this.collaboration.share();
+    this.#shareFailure = shared.ok ? null : shared.error;
+  }
+
+  /** Opens the window that joins a shared plan and starts looking for the plans shared nearby. */
+  async openJoin(): Promise<void> {
+    if (!(await this.#settingsRead())) {
+      return;
+    }
+    this.#collaborationWindow = 'join';
+    await this.collaboration.findPlans(true);
+  }
+
+  /** Closes the window of the shared plan and, for the join window, stops looking for plans nearby and gives up a join still in progress. */
+  closeCollaborationWindow(): void {
+    const closed = this.#collaborationWindow;
+    this.#collaborationWindow = null;
+    if (closed !== 'join') {
+      return;
+    }
+    void this.collaboration.findPlans(false);
+    if (this.collaboration.mode.kind === 'joining') {
+      void this.collaboration.stop();
+    }
+  }
+
+  /** Returns the changes made in read only away from the host that were just kept in a plan of their own, for the window that tells it, or null. */
+  get keptChanges(): KeptChanges | null {
+    return this.#keptChanges;
+  }
+
+  /** Closes the window that tells where the changes made in read only were kept. */
+  closeKeptChanges(): void {
+    this.#keptChanges = null;
+  }
+
+  /** Opens the plan that keeps the changes made in read only, once the user agreed about the shared plan open now, which this leaves. */
+  async openKeptChanges(): Promise<void> {
+    this.#keptChanges = null;
+    if (await this.#readyToReplace()) {
+      await this.#load(this.#files.openKept());
+    }
+  }
+
+  /** Tells the person where the changes they made in read only away from the host are kept, warning when their local copy could not be written, or that they could not be kept apart and stay only in the plan open here. */
+  #ownChangesKept(kept: Result<KeptOwnChanges, FileFailure>): void {
+    const text = this.messages.collaboration;
+    if (!kept.ok) {
+      this.#notify('error', text.ownChangesNotKept, null, true);
+      return;
+    }
+    if (!kept.value.localCopySaved) {
+      this.#notify('warning', this.messages.notices.localCopyFailed);
+    }
+    this.#keptChanges = {
+      planName: kept.value.planName,
+      copyName: ownCopyName(kept.value.planName, text.ownCopyName),
+    };
+  }
+
+  /** Tells the person that the host of the shared plan left and who hosts it now, this person or another. */
+  #tellHostChanged(left: string | null, next: string | null): void {
+    const text = this.messages.collaboration;
+    const leaving = left ?? text.theHost;
+    this.#notify(
+      'info',
+      next === null
+        ? fillMessage(text.youHostNow, { left: leaving })
+        : fillMessage(text.hostChanged, { left: leaving, next }),
+    );
+  }
+
+  /** Reads the settings of this computer about shared plans unless read already, telling a failure to read them. */
+  async #settingsRead(): Promise<boolean> {
+    if (this.collaboration.settings !== null) {
+      return true;
+    }
+    const read = await this.collaboration.loadSettings();
+    this.#showResult(read);
+    return read.ok;
   }
 
   /** Asks the main process to forget the PDF it kept back for this window, logging a failure since nothing else waits for it. */
@@ -896,6 +1070,10 @@ export class AppState {
     if (this.#fileActionRunning) {
       return this.messages.fileErrors.BUSY;
     }
+    const readOnly = this.#readOnlyRefusal();
+    if (readOnly !== null) {
+      return readOnly;
+    }
     const context = this.#editContext(project);
     if (context === null) {
       return editErrorMessage(this.messages, 'NOT_POSSIBLE');
@@ -994,7 +1172,7 @@ export class AppState {
 
   /** Undoes the latest local change, unless a file action runs. */
   undo(): void {
-    if (this.#refuseWhileFileActionRuns()) {
+    if (this.#refuseWhileFileActionRuns() || this.#refuseInReadOnly()) {
       return;
     }
     this.settings.restart();
@@ -1003,11 +1181,31 @@ export class AppState {
 
   /** Redoes the latest undone change, unless a file action runs. */
   redo(): void {
-    if (this.#refuseWhileFileActionRuns()) {
+    if (this.#refuseWhileFileActionRuns() || this.#refuseInReadOnly()) {
       return;
     }
     this.settings.restart();
     this.#showHistoryStep(this.#session?.history.redo(), this.messages.notices.redoFailed);
+  }
+
+  /** Returns why the plan cannot change while this person is in read only in a shared plan, naming the host who can let them edit, or null. */
+  #readOnlyRefusal(): string | null {
+    if (!this.collaboration.isReadOnly) {
+      return null;
+    }
+    const host = this.collaboration.hostName;
+    return host === null
+      ? this.messages.collaboration.readOnlyWithoutHost
+      : fillMessage(this.messages.collaboration.readOnly, { host });
+  }
+
+  /** Tells the user that the plan cannot change while they are in read only in a shared plan, telling whether they are. */
+  #refuseInReadOnly(): boolean {
+    const refusal = this.#readOnlyRefusal();
+    if (refusal !== null) {
+      this.#notify('error', refusal);
+    }
+    return refusal !== null;
   }
 
   /** Tells the user that the project cannot change while a file action runs, telling whether one runs. */
@@ -1097,8 +1295,21 @@ export class AppState {
       );
     }
     this.#notifyRepairs(opened.value.session.openingRepairs);
+    this.#tellLocalChanges(opened.value.localChanges);
     await this.loadRecentProjects();
     return opened.value;
+  }
+
+  /** Tells what became of the changes the local copy of an opened file held: added, with the repairs they needed, or not added and set aside, or not even set aside. */
+  #tellLocalChanges(outcome: LocalChangesOutcome): void {
+    const text = this.messages.notices;
+    if (outcome.kind === 'added') {
+      this.#notify('info', text.localChangesAdded);
+      this.#notifyRepairs(outcome.repairs);
+    } else if (outcome.kind === 'notAdded') {
+      const body = outcome.setAside ? text.localChangesNotAdded : text.localChangesLost;
+      this.#notify('error', body, null, true);
+    }
   }
 
   /** Returns what the editing commands need to know about the open project, or null, logged, when its calendar cannot be compiled, which the validation of every project rules out. */
@@ -1134,6 +1345,8 @@ export class AppState {
     this.#collapsed = NOTHING_COLLAPSED;
     this.#openedCount += 1;
     this.#stopFollowing = session.onChange(this.#queueRefresh);
+    this.collaboration.attached(session);
+    this.closeCollaborationWindow();
     this.#refresh();
   }
 

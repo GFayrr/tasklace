@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { compileCalendar } from '../calendar/compile-calendar';
 import { computeTaskSlots } from '../calendar/task-slots';
 import { countWorkingHours, lastWorkingHourEnd, shiftWorkingHours } from '../calendar/working-time';
-import type { Project, Task, TaskSegment } from '../model/project';
+import type { Project, Task, TaskSegment, TaskId } from '../model/project';
 import { permutationOf, PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
 import { richProjectArbitrary } from '../testing/project-arbitrary';
-import { link, project, workTask } from '../testing/project-builder';
+import { link, project, workTask, testId } from '../testing/project-builder';
 import { constrainsSuccessorStart, dependencyAnchor } from './forward-pass';
 import { scheduleProject, type Schedule, type SchedulingFailure } from './schedule-project';
 import { computePlacementSlots, type Placement } from './task-placement';
@@ -27,7 +27,7 @@ function isBeyondHorizon(failure: SchedulingFailure): boolean {
 }
 
 /** Returns the placement of a task, failing the property when it is missing. */
-function placementOf(schedule: Schedule, id: string): Placement {
+function placementOf(schedule: Schedule, id: TaskId): Placement {
   const placement = schedule.placements.get(id);
   if (placement === undefined) {
     throw new Error(`No placement for ${id}`);
@@ -59,7 +59,7 @@ function segmentOf(task: Extract<Task, { kind: 'task' }>, index: number): TaskSe
 }
 
 /** Returns the tasks and milestones under a summary, at any depth. */
-function leavesOf(project: Project, id: string): Task[] {
+function leavesOf(project: Project, id: TaskId): Task[] {
   return project.tasks
     .filter((task) => task.parentId === id)
     .flatMap((child) => (child.kind === 'summary' ? leavesOf(project, child.id) : [child]));
@@ -446,12 +446,15 @@ describe('a generated project whose latest dates fall before the supported years
     };
     const schedule = scheduled(counterexample);
     expect([
-      schedule.floats?.get('a')?.totalFloatHours,
-      schedule.floats?.get('b')?.totalFloatHours,
+      schedule.floats?.get(testId('a'))?.totalFloatHours,
+      schedule.floats?.get(testId('b'))?.totalFloatHours,
     ]).toEqual([null, -83]);
     expect(isBeyondHorizon({ kind: 'startDate' })).toBe(false);
     expect(
-      isBeyondHorizon({ kind: 'task', error: { code: 'BEYOND_PLANNING_HORIZON', taskId: 'a' } }),
+      isBeyondHorizon({
+        kind: 'task',
+        error: { code: 'BEYOND_PLANNING_HORIZON', taskId: testId('a') },
+      }),
     ).toBe(true);
   });
 });

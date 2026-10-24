@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Project } from '../../core/model/project';
-import { milestone, project, summary, workTask } from '../../core/testing/project-builder';
+import type { Project, TagId } from '../../core/model/project';
+import { milestone, project, summary, workTask, testId } from '../../core/testing/project-builder';
 import { AppState } from '../app/app-state.svelte';
 import { fakeAppContext, openedProjectOf, settle } from '../app/testing/fake-app-context';
 import english from '../locales/en.json';
@@ -11,13 +11,13 @@ import Welcome from './Welcome.svelte';
 import { button, click, nth, press, render, single, update } from './testing/render';
 
 const TAGS = [
-  { id: 'z', name: 'Writing', color: '#3366AA', representsPersonOrTeam: false },
-  { id: 'a', name: 'Design', color: '#AA6633', representsPersonOrTeam: false },
+  { id: testId('z'), name: 'Writing', color: '#3366AA', representsPersonOrTeam: false },
+  { id: testId('a'), name: 'Design', color: '#AA6633', representsPersonOrTeam: false },
 ];
 const PLAN: Project = project(
   [
     summary('s', { sortKey: 'a' }),
-    workTask('a', { parentId: 's' }),
+    workTask('a', { parentId: testId('s') }),
     milestone('m', { sortKey: 'b' }),
   ],
   [],
@@ -92,6 +92,15 @@ describe('Welcome', () => {
     expect(control.imports).toEqual(['csv', 'json']);
   });
 
+  it('opens the window that joins a shared plan', async () => {
+    const { context } = fakeAppContext();
+    const app = new AppState(context);
+    const root = render(Welcome, { app });
+    click(nth(root, '.action', 3));
+    await settle();
+    expect(app.collaborationWindow).toBe('join');
+  });
+
   it('lists the recent projects with their folder, and opens one', async () => {
     const { context, control } = fakeAppContext();
     const app = new AppState(context);
@@ -115,7 +124,7 @@ describe('Welcome', () => {
 
 describe('TagPicker', () => {
   /** Renders the picker over a cell, recording what it chooses and whether it gave up. */
-  function renderPicker(value: string | null) {
+  function renderPicker(value: TagId | null) {
     const choose = vi.fn();
     const cancel = vi.fn();
     const anchor = { left: 10, bottom: 30, width: 120 } as DOMRect;
@@ -132,7 +141,7 @@ describe('TagPicker', () => {
   }
 
   it('opens under its cell, focused, on the current tag', () => {
-    const { list } = renderPicker('a');
+    const { list } = renderPicker(testId('a'));
     expect(document.activeElement).toBe(list);
     expect(list.style.left).toBe('10px');
     expect(list.style.top).toBe('32px');
@@ -153,7 +162,7 @@ describe('TagPicker', () => {
   });
 
   it('chooses with a click, follows the pointer, and gives up with Escape, Tab or a click elsewhere', () => {
-    const { root, list, choose, cancel } = renderPicker('z');
+    const { root, list, choose, cancel } = renderPicker(testId('z'));
     const option = nth(root, '[role="option"]', 0);
     option.dispatchEvent(new PointerEvent('pointerenter'));
     update();
@@ -204,7 +213,7 @@ describe('Toolbar', () => {
     const root = render(Toolbar, { app });
     const details = button(root, english.tasks.details);
     expect(details.disabled).toBe(true);
-    app.select('a');
+    app.select(testId('a'));
     update();
     expect(details.disabled).toBe(false);
     click(details);

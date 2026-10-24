@@ -1,17 +1,28 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Tag } from '../../core/model/project';
-import { project, scheduleOrThrow, summary, workTask } from '../../core/testing/project-builder';
+import {
+  project,
+  scheduleOrThrow,
+  summary,
+  workTask,
+  testId,
+} from '../../core/testing/project-builder';
 import { removeTag, setTagRepresentsPerson } from '../plan/tag-commands';
 import english from '../locales/en.json';
 import { AppState } from './app-state.svelte';
 import { fakeAppContext, openedAppOf, openedProjectOf, settle } from './testing/fake-app-context';
 
-const ALICE: Tag = { id: 'alice', name: 'Alice', color: '#4a3aa7', representsPersonOrTeam: true };
+const ALICE: Tag = {
+  id: testId('alice'),
+  name: 'Alice',
+  color: '#4a3aa7',
+  representsPersonOrTeam: true,
+};
 const PLAN = project(
   [
     summary('s', { sortKey: 'a' }),
-    workTask('interviews', { parentId: 's', tagId: 'alice', sortKey: 'a' }),
-    workTask('analysis', { tagId: 'alice', sortKey: 'b' }),
+    workTask('interviews', { parentId: testId('s'), tagId: testId('alice'), sortKey: 'a' }),
+    workTask('analysis', { tagId: testId('alice'), sortKey: 'b' }),
   ],
   [],
   { tags: [ALICE] },
@@ -32,9 +43,9 @@ describe('the list of conflicts', () => {
     app.toggleConflicts();
     expect(app.conflictsOpen).toBe(false);
     app.toggleConflicts();
-    expect(app.editSettings((context) => setTagRepresentsPerson(context, 'alice', false))).toBe(
-      null,
-    );
+    expect(
+      app.editSettings((context) => setTagRepresentsPerson(context, testId('alice'), false)),
+    ).toBe(null);
     await settle();
     expect(app.conflictsOpen).toBe(false);
     app.toggleConflicts();
@@ -43,15 +54,15 @@ describe('the list of conflicts', () => {
 
   it('shows a conflict by selecting its first task, opening its summary and asking to show its start', async () => {
     const { app } = await openedApp();
-    app.setSummaryOpen('s', false);
+    app.setSummaryOpen(testId('s'), false);
     const conflict = app.schedule?.tagConflicts.conflicts[0];
     if (conflict === undefined) {
       throw new Error('No conflict');
     }
     expect(conflict.taskIds).toEqual(['analysis', 'interviews']);
-    app.showConflict({ ...conflict, taskIds: ['interviews', 'analysis'] });
-    expect([app.selectedTaskId, app.collapsed.has('s')]).toEqual(['interviews', false]);
-    expect(app.revealRequest).toEqual({ taskId: 'interviews', hour: conflict.start });
+    app.showConflict({ ...conflict, taskIds: [testId('interviews'), testId('analysis')] });
+    expect([app.selectedTaskId, app.collapsed.has(testId('s'))]).toEqual(['interviews', false]);
+    expect(app.revealRequest).toEqual({ taskId: testId('interviews'), hour: conflict.start });
     app.takeRevealRequest();
     app.showConflict({ ...conflict, taskIds: [] });
     expect([app.selectedTaskId, app.revealRequest]).toEqual(['interviews', null]);
@@ -78,7 +89,7 @@ describe('the list of conflicts', () => {
       ['Alice', ['analysis', 'interviews']],
     ]);
     scheduler.automatic = false;
-    expect(app.editSettings((context) => removeTag(context, 'alice'))).toBeNull();
+    expect(app.editSettings((context) => removeTag(context, testId('alice')))).toBeNull();
     await settle();
     expect(app.project?.tags).toEqual([]);
     expect(app.conflictLines).toEqual(before);
@@ -95,14 +106,14 @@ describe('the list of conflicts', () => {
     const { app } = await openedApp();
     app.toggleConflicts();
     expect(app.conflictsOpen).toBe(true);
-    expect(app.editSettings((context) => setTagRepresentsPerson(context, 'alice', false))).toBe(
-      null,
-    );
+    expect(
+      app.editSettings((context) => setTagRepresentsPerson(context, testId('alice'), false)),
+    ).toBe(null);
     await settle();
     expect(app.conflictsOpen).toBe(false);
-    expect(app.editSettings((context) => setTagRepresentsPerson(context, 'alice', true))).toBe(
-      null,
-    );
+    expect(
+      app.editSettings((context) => setTagRepresentsPerson(context, testId('alice'), true)),
+    ).toBe(null);
     await settle();
     expect([app.conflictLines.length, app.conflictsOpen]).toEqual([1, false]);
   });
@@ -114,16 +125,16 @@ describe('the list of conflicts', () => {
       throw new Error('No conflict');
     }
     scheduler.automatic = false;
-    app.select('analysis');
+    app.select(testId('analysis'));
     app.deleteSelected();
     await settle();
     app.showConflict(conflict);
     expect([app.selectedTaskId, app.revealRequest]).toEqual([
       'interviews',
-      { taskId: 'interviews', hour: conflict.start },
+      { taskId: testId('interviews'), hour: conflict.start },
     ]);
     app.takeRevealRequest();
-    app.showConflict({ ...conflict, taskIds: ['analysis'] });
+    app.showConflict({ ...conflict, taskIds: [testId('analysis')] });
     expect([app.selectedTaskId, app.revealRequest]).toEqual(['interviews', null]);
     expect(app.notices.map((notice) => [notice.kind, notice.text])).toEqual([
       ['warning', english.editErrors.SCHEDULE_PENDING],
@@ -137,7 +148,7 @@ describe('the list of conflicts', () => {
       throw new Error('No project');
     }
     const schedule = scheduleOrThrow(opened);
-    const conflict = { tagId: 'ghost', start: 0, end: 1, taskIds: ['analysis'] };
+    const conflict = { tagId: testId('ghost'), start: 0, end: 1, taskIds: [testId('analysis')] };
     const broken = {
       ...schedule,
       tagConflicts: { ...schedule.tagConflicts, conflicts: [conflict] },
@@ -162,7 +173,7 @@ describe('the list of conflicts', () => {
 
   it('shows nothing without a project', () => {
     const app = new AppState(fakeAppContext().context);
-    app.showConflict({ tagId: 'alice', start: 0, end: 1, taskIds: ['a'] });
+    app.showConflict({ tagId: testId('alice'), start: 0, end: 1, taskIds: [testId('a')] });
     expect([app.selectedTaskId, app.revealRequest]).toEqual([null, null]);
   });
 });

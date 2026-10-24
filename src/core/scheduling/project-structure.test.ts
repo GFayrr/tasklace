@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_DEPENDENCIES, MAX_HIERARCHY_DEPTH, MAX_LAG_HOURS, MAX_TASKS } from '../limits';
 import type { Dependency, Task } from '../model/project';
-import { link, milestone, summary, workTask } from '../testing/project-builder';
+import { link, milestone, summary, workTask, testId } from '../testing/project-builder';
 import { analyzeProjectStructure, findNewDependencyErrors } from './project-structure';
 
 /** Returns the error codes found in a project, or an empty list when it is valid. */
@@ -26,8 +26,8 @@ describe('analyzeProjectStructure', () => {
   it('accepts a valid tree with dependencies between tasks and milestones', () => {
     const tasks = [
       summary('phase'),
-      workTask('a', { parentId: 'phase' }),
-      workTask('b', { parentId: 'phase' }),
+      workTask('a', { parentId: testId('phase') }),
+      workTask('b', { parentId: testId('phase') }),
       milestone('m'),
     ];
     expect(errorCodes(tasks, [link('a', 'b'), link('b', 'm')])).toEqual([]);
@@ -49,15 +49,15 @@ describe('analyzeProjectStructure', () => {
 
   it.each<[string, Task[], string]>([
     ['duplicated task identifiers', [workTask('a'), workTask('a')], 'DUPLICATE_TASK_ID'],
-    ['an unknown parent', [workTask('a', { parentId: 'ghost' })], 'UNKNOWN_PARENT'],
+    ['an unknown parent', [workTask('a', { parentId: testId('ghost') })], 'UNKNOWN_PARENT'],
     [
       'a parent that is not a summary',
-      [workTask('a'), workTask('b', { parentId: 'a' })],
+      [workTask('a'), workTask('b', { parentId: testId('a') })],
       'PARENT_NOT_SUMMARY',
     ],
     [
       'a parent that is a milestone',
-      [milestone('m'), workTask('b', { parentId: 'm' })],
+      [milestone('m'), workTask('b', { parentId: testId('m') })],
       'PARENT_NOT_SUMMARY',
     ],
   ])('rejects %s', (_label, tasks, code) => {
@@ -65,11 +65,14 @@ describe('analyzeProjectStructure', () => {
   });
 
   it('rejects a summary that is its own parent', () => {
-    expect(errorCodes([summary('s', { parentId: 's' })])).toEqual(['HIERARCHY_CYCLE']);
+    expect(errorCodes([summary('s', { parentId: testId('s') })])).toEqual(['HIERARCHY_CYCLE']);
   });
 
   it('rejects a loop of summaries', () => {
-    const tasks = [summary('a', { parentId: 'b' }), summary('b', { parentId: 'a' })];
+    const tasks = [
+      summary('a', { parentId: testId('b') }),
+      summary('b', { parentId: testId('a') }),
+    ];
     expect(errorCodes(tasks)).toEqual(['HIERARCHY_CYCLE', 'HIERARCHY_CYCLE']);
   });
 
@@ -86,12 +89,12 @@ describe('analyzeProjectStructure', () => {
     ['a dependency to a summary', [link('a', 'phase')], 'SUMMARY_DEPENDENCY'],
     [
       'two dependencies between the same tasks',
-      [link('a', 'b'), { ...link('a', 'b', 'startToStart'), id: 'other' }],
+      [link('a', 'b'), { ...link('a', 'b', 'startToStart'), id: testId('other') }],
       'DUPLICATE_DEPENDENCY',
     ],
     [
       'duplicated dependency identifiers',
-      [link('a', 'b'), { ...link('b', 'm'), id: 'a-b' }],
+      [link('a', 'b'), { ...link('b', 'm'), id: testId('a-b') }],
       'DUPLICATE_DEPENDENCY_ID',
     ],
     [
@@ -136,8 +139,8 @@ describe('analyzeProjectStructure', () => {
       dependencies: [link('a', 'b'), link('b', 'a')],
     });
     expect(!result.ok && result.error).toEqual([
-      { code: 'DEPENDENCY_CYCLE', list: 'tasks', index: 0, taskId: 'a' },
-      { code: 'DEPENDENCY_CYCLE', list: 'tasks', index: 1, taskId: 'b' },
+      { code: 'DEPENDENCY_CYCLE', list: 'tasks', index: 0, taskId: testId('a') },
+      { code: 'DEPENDENCY_CYCLE', list: 'tasks', index: 1, taskId: testId('b') },
     ]);
   });
 
@@ -206,7 +209,7 @@ describe('findNewDependencyErrors', () => {
   it('refuses a second dependency between the same tasks', () => {
     const errors = findNewDependencyErrors(current, {
       ...link('a', 'b', 'finishToFinish'),
-      id: 'x',
+      id: testId('x'),
     });
     expect(errors).toEqual([
       { code: 'DUPLICATE_DEPENDENCY', list: 'dependencies', index: 2, dependencyId: 'x' },

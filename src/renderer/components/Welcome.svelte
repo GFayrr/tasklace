@@ -31,6 +31,10 @@
         <span class="label">{text.welcome.import}</span>
         <span class="hint">{text.welcome.importHint}</span>
       </button>
+      <button type="button" class="action" onclick={() => app.openJoin()}>
+        <span class="label">{text.welcome.join}</span>
+        <span class="hint">{text.welcome.joinHint}</span>
+      </button>
     </div>
     {#if choosingImport}
       <div class="import-kinds" id="import-kinds">
@@ -93,7 +97,7 @@
 
   .actions {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-3);
   }
 

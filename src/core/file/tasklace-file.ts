@@ -1,7 +1,13 @@
 import * as Y from 'yjs';
 import { MAX_FILE_BYTES, MAX_UNCOMPRESSED_BYTES } from '../limits';
 import { failure, success, type Result } from '../result';
-import { DOCUMENT_ID_KEY, readDocumentId, type DocumentId } from '../shared/shared-document';
+import {
+  createSharedDocument,
+  DOCUMENT_ID_KEY,
+  readDocumentId,
+  type DocumentId,
+} from '../shared/shared-document';
+import type { Project } from '../model/project';
 import { validateSharedDocument } from '../shared/shared-project';
 import type { ValidationIssue } from '../validation/validation-issues';
 import { crc32 } from './crc32';
@@ -47,6 +53,7 @@ interface ValidatedFile {
   readonly state: Uint8Array;
   readonly document: Y.Doc;
   readonly documentId: DocumentId;
+  readonly project: Project;
 }
 
 /** Writes a shared document as a .tasklace file: a header holding the uncompressed size and a checksum of everything after it, then the compressed Yjs state. */
@@ -112,10 +119,58 @@ function readValidatedFile(
     return header;
   }
   const state = decompressPayload(file, header.value, compressor);
-  if (!state.ok) {
-    return state;
+  return state.ok ? validatedState(state.value) : state;
+}
+
+/** Reads an untrusted Yjs state received from a shared plan with the checks of a file once decompressed: its size, its decoding, its project and its document identifier. */
+export function readSharedState(
+  state: Uint8Array,
+): Result<{ readonly state: Uint8Array; readonly documentId: DocumentId }, FileError> {
+  const read = checkedSharedState(state);
+  return read.ok ? success({ state: read.value.state, documentId: read.value.documentId }) : read;
+}
+
+/** Reads the state of a shared plan received from another process or the network within the size of an uncompressed file, refusing an empty one, then decodes and checks it as the content of a file. */
+function checkedSharedState(state: Uint8Array): Result<ValidatedFile, FileError> {
+  if (state.length > MAX_UNCOMPRESSED_BYTES) {
+    return failure({ code: 'TOO_LARGE' });
   }
-  const document = decodeState(state.value);
+  if (state.length === 0) {
+    return failure({ code: 'INVALID_CONTENT' });
+  }
+  return validatedState(state);
+}
+
+/** Makes a separate plan from the state of a shared plan, read as untrusted like a file: the same project named after it under another document identifier, with a history of its own, as a file ready to write. */
+export function copySharedState(
+  state: Uint8Array,
+  copy: { readonly nameOf: (planName: string) => string; readonly documentId: DocumentId },
+  compressor: Compressor,
+): Result<Uint8Array, FileError> {
+  const read = checkedSharedState(state);
+  if (!read.ok) {
+    return read;
+  }
+  const { project } = read.value;
+  const renamed = createSharedDocument(
+    { ...project, name: copy.nameOf(project.name) },
+    copy.documentId,
+  );
+  return success(encodeTasklaceFile(renamed, compressor));
+}
+
+/** Tells whether a checked state holds changes another checked state of the same plan lacks, deletions included, by the snapshot of the other before and after the state is added to it. */
+export function holdsChangesMissingFrom(state: Uint8Array, other: Uint8Array): boolean {
+  const document = new Y.Doc();
+  Y.applyUpdate(document, other);
+  const before = Y.snapshot(document);
+  Y.applyUpdate(document, state);
+  return !Y.equalSnapshots(before, Y.snapshot(document));
+}
+
+/** Decodes a decompressed Yjs state and checks the project it holds and its document identifier. */
+function validatedState(state: Uint8Array): Result<ValidatedFile, FileError> {
+  const document = decodeState(state);
   if (!document.ok) {
     return document;
   }
@@ -129,7 +184,7 @@ function readValidatedFile(
         code: 'INVALID_PROJECT',
         issues: [{ path: DOCUMENT_ID_KEY, code: 'MISSING_FIELD' }],
       })
-    : success({ state: state.value, document: document.value, documentId });
+    : success({ state, document: document.value, documentId, project: project.value });
 }
 
 /** Checks the size, signature, version, flags and checksum of a file and returns the uncompressed size it declares. */

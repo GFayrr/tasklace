@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Tag } from '../model/project';
+import type { Tag, TagId } from '../model/project';
 import { colorDistance, SIMULATED_VISIONS } from './color-vision';
 import {
   NORMAL_VISION_MIN_DISTANCE,
@@ -9,9 +9,10 @@ import {
   computeTagAppearances,
 } from './tag-appearance';
 import { TAG_PALETTE, createDefaultTags, nextPaletteColor } from './tag-palette';
+import { testId } from '../testing/project-builder';
 
 /** Builds a category tag with a given color. */
-function tag(id: string, color: string): Tag {
+function tag(id: TagId, color: string): Tag {
   return { id, name: id, color, representsPersonOrTeam: false };
 }
 
@@ -60,7 +61,9 @@ describe('TAG_PALETTE', () => {
     ]);
     expect(
       confused.map(([color, next]) =>
-        appearancesOf([tag('a', color), tag('b', next)]).map((appearance) => appearance.pattern),
+        appearancesOf([tag(testId('a'), color), tag(testId('b'), next)]).map(
+          (appearance) => appearance.pattern,
+        ),
       ),
     ).toEqual(confused.map(() => [null, TAG_PATTERNS[0]]));
   });
@@ -69,13 +72,33 @@ describe('TAG_PALETTE', () => {
 describe('createDefaultTags and nextPaletteColor', () => {
   it('creates the five default categories with the first palette colors', () => {
     let counter = 0;
-    const tags = createDefaultTags(() => `tag-${String((counter += 1))}`);
+    const tags = createDefaultTags(() => testId(`tag-${String((counter += 1))}`));
     expect(tags).toEqual([
-      { id: 'tag-1', name: 'Design', color: TAG_PALETTE[0], representsPersonOrTeam: false },
-      { id: 'tag-2', name: 'Development', color: TAG_PALETTE[1], representsPersonOrTeam: false },
-      { id: 'tag-3', name: 'Testing', color: TAG_PALETTE[2], representsPersonOrTeam: false },
-      { id: 'tag-4', name: 'Deployment', color: TAG_PALETTE[3], representsPersonOrTeam: false },
-      { id: 'tag-5', name: 'Documentation', color: TAG_PALETTE[4], representsPersonOrTeam: false },
+      { id: testId('tag-1'), name: 'Design', color: TAG_PALETTE[0], representsPersonOrTeam: false },
+      {
+        id: testId('tag-2'),
+        name: 'Development',
+        color: TAG_PALETTE[1],
+        representsPersonOrTeam: false,
+      },
+      {
+        id: testId('tag-3'),
+        name: 'Testing',
+        color: TAG_PALETTE[2],
+        representsPersonOrTeam: false,
+      },
+      {
+        id: testId('tag-4'),
+        name: 'Deployment',
+        color: TAG_PALETTE[3],
+        representsPersonOrTeam: false,
+      },
+      {
+        id: testId('tag-5'),
+        name: 'Documentation',
+        color: TAG_PALETTE[4],
+        representsPersonOrTeam: false,
+      },
     ]);
   });
 
@@ -126,12 +149,14 @@ describe('areConfusable', () => {
 
 describe('computeTagAppearances', () => {
   it('gives no pattern to tags that are easy to tell apart', () => {
-    const appearances = appearancesOf([tag('a', '#2a78d6'), tag('b', '#eda100')]);
+    const appearances = appearancesOf([tag(testId('a'), '#2a78d6'), tag(testId('b'), '#eda100')]);
     expect(appearances.map((appearance) => appearance.pattern)).toEqual([null, null]);
   });
 
   it('adds patterns to look-alike colors, in tag order, then flags the ones left over', () => {
-    const tags = Array.from({ length: 8 }, (_value, index) => tag(`t${String(index)}`, '#2a78d6'));
+    const tags = Array.from({ length: 8 }, (_value, index) =>
+      tag(testId(`t${String(index)}`), '#2a78d6'),
+    );
     const appearances = appearancesOf(tags);
     expect(appearances.map((appearance) => appearance.pattern)).toEqual([
       null,
@@ -152,10 +177,10 @@ describe('computeTagAppearances', () => {
 
   it('reuses patterns between tags that do not look alike', () => {
     const appearances = appearancesOf([
-      tag('blue1', '#2a78d6'),
-      tag('blue2', '#2a78d6'),
-      tag('yellow1', '#eda100'),
-      tag('yellow2', '#eda100'),
+      tag(testId('blue1'), '#2a78d6'),
+      tag(testId('blue2'), '#2a78d6'),
+      tag(testId('yellow1'), '#eda100'),
+      tag(testId('yellow2'), '#eda100'),
     ]);
     expect(appearances.map((appearance) => appearance.pattern)).toEqual([
       null,
@@ -166,13 +191,16 @@ describe('computeTagAppearances', () => {
   });
 
   it('gives a pattern to every tag when patterns are always shown', () => {
-    const appearances = appearancesOf([tag('a', '#2a78d6'), tag('b', '#eda100')], true);
+    const appearances = appearancesOf(
+      [tag(testId('a'), '#2a78d6'), tag(testId('b'), '#eda100')],
+      true,
+    );
     expect(appearances.map((appearance) => appearance.pattern)).toEqual(['diagonal', 'diagonal']);
   });
 
   it('keeps every tag color and identifier', () => {
-    expect(appearancesOf([tag('a', '#ABCDEF')])).toEqual([
-      { tagId: 'a', color: '#ABCDEF', pattern: null, isDistinguishable: true },
+    expect(appearancesOf([tag(testId('a'), '#ABCDEF')])).toEqual([
+      { tagId: testId('a'), color: '#ABCDEF', pattern: null, isDistinguishable: true },
     ]);
   });
 
@@ -182,14 +210,14 @@ describe('computeTagAppearances', () => {
 
   it('rejects malformed colors and names every faulty tag', () => {
     const result = computeTagAppearances(
-      [tag('ok', '#123456'), tag('named', 'red'), tag('short', '#123')],
+      [tag(testId('ok'), '#123456'), tag(testId('named'), 'red'), tag(testId('short'), '#123')],
       false,
     );
     expect(result).toEqual({
       ok: false,
       error: [
-        { code: 'INVALID_TAG_COLOR', tagId: 'named' },
-        { code: 'INVALID_TAG_COLOR', tagId: 'short' },
+        { code: 'INVALID_TAG_COLOR', tagId: testId('named') },
+        { code: 'INVALID_TAG_COLOR', tagId: testId('short') },
       ],
     });
   });

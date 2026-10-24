@@ -1,3 +1,4 @@
+import { canonicalCalendar } from '../calendar/canonical-calendar';
 import { compileCalendar } from '../calendar/compile-calendar';
 import { computeDailyWindow } from '../calendar/task-slots';
 import { MAX_DEPENDENCIES, MAX_HIERARCHY_DEPTH, MAX_TAGS, MAX_TASKS } from '../limits';
@@ -32,6 +33,7 @@ import {
 } from './project-state';
 import { blockPairKey, isKnownBlock, unitCountOf } from '../scheduling/block-links';
 import type { ProjectHeader } from './shared-document';
+import { isTaskId } from '../identifiers';
 
 const CALENDAR_TASK_PATH = 'tasks.';
 export type SharedOperation =
@@ -345,7 +347,12 @@ function updateProjectChecked(state: ProjectState, fields: Partial<ProjectHeader
     return failure(requireIssues(read.error));
   }
   const previous = state.header;
-  state.header = { ...read.value, baseline: header.baseline };
+  state.header = {
+    ...read.value,
+    calendar:
+      fields.calendar === undefined ? read.value.calendar : canonicalCalendar(read.value.calendar),
+    baseline: header.baseline,
+  };
   const problem = fields.calendar === undefined ? null : findCalendarProblem(state);
   if (problem !== null) {
     state.header = previous;
@@ -356,9 +363,10 @@ function updateProjectChecked(state: ProjectState, fields: Partial<ProjectHeader
 
 /** Returns the task a refused change of the calendar is about, or null when the issue is about no task. */
 export function taskOfCalendarIssue(issue: ValidationIssue): TaskId | null {
-  return issue.path.startsWith(CALENDAR_TASK_PATH)
+  const id = issue.path.startsWith(CALENDAR_TASK_PATH)
     ? issue.path.slice(CALENDAR_TASK_PATH.length)
     : null;
+  return isTaskId(id) ? id : null;
 }
 
 /** Returns the first work task whose daily pattern no longer fits the calendar, as an issue, or null. */

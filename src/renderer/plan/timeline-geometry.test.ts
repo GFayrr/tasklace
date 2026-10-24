@@ -9,6 +9,7 @@ import {
   splitTask,
   summary,
   workTask,
+  testId,
 } from '../../core/testing/project-builder';
 import { at, format } from '../../core/testing/civil-time';
 import { buildPlanOutline } from './plan-outline';
@@ -26,18 +27,19 @@ import {
   xOf,
   type RowShape,
 } from './timeline-geometry';
+import type { TaskId } from '../../core/model/project';
 
 const PLAN = project(
   [
     summary('s', { sortKey: 'a' }),
-    workTask('a', { parentId: 's', sortKey: 'a', progressPercent: 50 }),
+    workTask('a', { parentId: testId('s'), sortKey: 'a', progressPercent: 50 }),
     splitTask(
       'b',
       [
         [7, 0],
         [7, 2],
       ],
-      { parentId: 's', sortKey: 'b', progressPercent: 75 },
+      { parentId: testId('s'), sortKey: 'b', progressPercent: 75 },
     ),
     milestone('m', { sortKey: 'b' }),
   ],
@@ -48,7 +50,7 @@ const OUTLINE = buildPlanOutline(PLAN.tasks, new Set());
 const FRAME = timelineFrame(PLAN.startDate, SCHEDULE, PROJECT_START, 1, []);
 
 /** Returns the shape of the row showing a task. */
-function shapeOf(id: string): RowShape {
+function shapeOf(id: TaskId): RowShape {
   const index = OUTLINE.rowIndexById.get(id) ?? -1;
   const row = OUTLINE.rows[index];
   const shape = row === undefined ? null : rowShape(row, index, SCHEDULE, FRAME);
@@ -114,7 +116,7 @@ describe('timelineFrame with deadlines', () => {
 describe('rows without dates', () => {
   it('draws nothing for a task or summary the schedule does not place', () => {
     const empty = { ...SCHEDULE, placements: new Map(), summaries: new Map() };
-    for (const id of ['s', 'a']) {
+    for (const id of [testId('s'), testId('a')]) {
       const index = OUTLINE.rowIndexById.get(id) ?? -1;
       const row = OUTLINE.rows[index];
       if (row === undefined) {
@@ -127,12 +129,12 @@ describe('rows without dates', () => {
 
 describe('rowShape', () => {
   it('draws a work task block by block, filling its progress in order by duration', () => {
-    const shape = shapeOf('b');
+    const shape = shapeOf(testId('b'));
     expect(shape.kind).toBe('task');
     if (shape.kind !== 'task') {
       return;
     }
-    const placement = SCHEDULE.placements.get('b');
+    const placement = SCHEDULE.placements.get(testId('b'));
     expect(shape.segments.map((segment) => segment.x)).toEqual(
       placement?.segments.map((segment) => xOf(FRAME, segment.start)),
     );
@@ -142,32 +144,32 @@ describe('rowShape', () => {
   });
 
   it('draws a milestone at its date and a summary over its children', () => {
-    const milestoneShape = shapeOf('m');
+    const milestoneShape = shapeOf(testId('m'));
     expect(milestoneShape).toMatchObject({
       kind: 'milestone',
-      x: xOf(FRAME, SCHEDULE.placements.get('m')?.start ?? 0),
+      x: xOf(FRAME, SCHEDULE.placements.get(testId('m'))?.start ?? 0),
     });
-    const summaryShape = shapeOf('s');
+    const summaryShape = shapeOf(testId('s'));
     expect(summaryShape).toMatchObject({
       kind: 'summary',
-      start: xOf(FRAME, SCHEDULE.placements.get('a')?.start ?? 0),
-      end: xOf(FRAME, SCHEDULE.placements.get('b')?.end ?? 0),
+      start: xOf(FRAME, SCHEDULE.placements.get(testId('a'))?.start ?? 0),
+      end: xOf(FRAME, SCHEDULE.placements.get(testId('b'))?.end ?? 0),
     });
   });
 });
 
 describe('dependencyArrow', () => {
   it('goes from the end of the predecessor to the start of the successor', () => {
-    const from = shapeOf('a');
-    const to = shapeOf('b');
+    const from = shapeOf(testId('a'));
+    const to = shapeOf(testId('b'));
     const points = dependencyArrow(link('a', 'b'), from, to);
     expect(points[0]).toEqual({ x: from.kind === 'task' ? from.end : 0, y: rowMiddle(from.row) });
     expect(points.at(-1)).toEqual({ x: to.kind === 'task' ? to.start : 0, y: rowMiddle(to.row) });
   });
 
   it('goes around the bars when the successor starts before the predecessor ends', () => {
-    const from = shapeOf('b');
-    const to = shapeOf('a');
+    const from = shapeOf(testId('b'));
+    const to = shapeOf(testId('a'));
     const points = dependencyArrow(link('b', 'a', 'startToStart'), to, from);
     expect(points).toHaveLength(4);
     const backwards = dependencyArrow(link('b', 'a'), from, to);
@@ -177,24 +179,24 @@ describe('dependencyArrow', () => {
   });
 
   it('leaves the end of the block a link names, and enters the start of a named block', () => {
-    const from = shapeOf('b');
-    const to = shapeOf('m');
+    const from = shapeOf(testId('b'));
+    const to = shapeOf(testId('m'));
     const [first, second] = from.kind === 'task' ? from.segments : [];
     const leaving = dependencyArrow(blockLink('b', 'm', { from: 0 }), from, to);
     expect(leaving[0]?.x).toBe((first?.x ?? 0) + (first?.width ?? 0));
-    const entering = dependencyArrow(blockLink('a', 'b', { to: 1 }), shapeOf('a'), from);
+    const entering = dependencyArrow(blockLink('a', 'b', { to: 1 }), shapeOf(testId('a')), from);
     expect(entering.at(-1)?.x).toBe(second?.x);
   });
 
   it('falls back on the edge of the whole bar for a block the shape does not show', () => {
-    const from = shapeOf('b');
-    const points = dependencyArrow(blockLink('b', 'm', { from: 7 }), from, shapeOf('m'));
+    const from = shapeOf(testId('b'));
+    const points = dependencyArrow(blockLink('b', 'm', { from: 7 }), from, shapeOf(testId('m')));
     expect(points[0]?.x).toBe(from.kind === 'task' ? from.end : 0);
   });
 
   it('enters the end of the successor for finish-to-finish links', () => {
-    const from = shapeOf('a');
-    const to = shapeOf('m');
+    const from = shapeOf(testId('a'));
+    const to = shapeOf(testId('m'));
     const points = dependencyArrow(link('a', 'm', 'finishToFinish'), from, to);
     expect(points.at(-1)?.x).toBe(to.kind === 'milestone' ? to.x + 8 : 0);
   });
@@ -217,12 +219,27 @@ describe('baselineMarks', () => {
     const baseline = {
       takenAt: at(2026, 9, 30, 9),
       entries: [
-        { taskId: 'm', start: at(2026, 10, 5, 9), end: at(2026, 10, 5, 9), durationHours: 0 },
-        { taskId: 'a', start: at(2026, 10, 1, 9), end: at(2026, 10, 2, 17), durationHours: 14 },
-        { taskId: 'gone', start: at(2026, 9, 1, 9), end: at(2027, 6, 1, 17), durationHours: 7 },
+        {
+          taskId: testId('m'),
+          start: at(2026, 10, 5, 9),
+          end: at(2026, 10, 5, 9),
+          durationHours: 0,
+        },
+        {
+          taskId: testId('a'),
+          start: at(2026, 10, 1, 9),
+          end: at(2026, 10, 2, 17),
+          durationHours: 14,
+        },
+        {
+          taskId: testId('gone'),
+          start: at(2026, 9, 1, 9),
+          end: at(2027, 6, 1, 17),
+          durationHours: 7,
+        },
       ],
     };
-    const kept = new Set(['a', 'm', 'new']);
+    const kept = new Set<TaskId>([testId('a'), testId('m'), testId('new')]);
     expect(baselineMarks(baseline, (id) => kept.has(id))).toEqual([
       at(2026, 10, 1, 9),
       at(2026, 10, 5, 9),

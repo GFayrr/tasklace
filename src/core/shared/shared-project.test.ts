@@ -2,7 +2,8 @@ import { MAX_TAGS } from '../limits';
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import * as Y from 'yjs';
-import type { DependencyType, Project, Tag, Task } from '../model/project';
+import type { DependencyType, Project, Tag, Task, TaskId, TagId } from '../model/project';
+import { canonicalCalendar } from '../calendar/canonical-calendar';
 import { compareStrings } from '../compare-strings';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { at } from '../testing/civil-time';
@@ -15,11 +16,15 @@ import {
   summary,
   workTask,
   TEST_DOCUMENT_ID,
+  testId,
 } from '../testing/project-builder';
 import {
   createSharedDocument,
   readSharedData,
+  PERIODS_ROOT,
   TASKS_ROOT,
+  TIME_RANGES_ROOT,
+  WEEKDAYS_ROOT,
   requireDocumentId,
 } from './shared-document';
 import {
@@ -31,21 +36,26 @@ import {
 } from './shared-project';
 
 const DESIGN: Tag = {
-  id: 'design',
+  id: testId('design'),
   name: 'Design',
   color: '#336699',
   representsPersonOrTeam: false,
 };
-const ALICE: Tag = { id: 'alice', name: 'Alice', color: '#aa5500', representsPersonOrTeam: true };
+const ALICE: Tag = {
+  id: testId('alice'),
+  name: 'Alice',
+  color: '#aa5500',
+  representsPersonOrTeam: true,
+};
 const MORNING_ONLY = [{ startHour: 9, endHour: 12 }];
 const FULL_DAY = [{ startHour: 0, endHour: 24 }];
 
 const BASE_PROJECT: Project = project(
   [
     summary('s1'),
-    summary('s2', { parentId: 's1' }),
-    workTask('a', { parentId: 's1', tagId: 'design' }),
-    workTask('b', { parentId: 's2' }),
+    summary('s2', { parentId: testId('s1') }),
+    workTask('a', { parentId: testId('s1'), tagId: testId('design') }),
+    workTask('b', { parentId: testId('s2') }),
     workTask('c'),
     milestone('m'),
   ],
@@ -104,7 +114,7 @@ function change(peer: Y.Doc, update: (current: Project) => Project): void {
 }
 
 /** Replaces one task of a project by the result of a function. */
-function mapTask(current: Project, id: string, update: (task: Task) => Task): Project {
+function mapTask(current: Project, id: TaskId, update: (task: Task) => Task): Project {
   return { ...current, tasks: current.tasks.map((task) => (task.id === id ? update(task) : task)) };
 }
 
@@ -136,7 +146,12 @@ describe('shared document', () => {
     const baseline = {
       takenAt: at(2026, 9, 27, 10),
       entries: [
-        { taskId: 'a', start: at(2026, 9, 28, 9), end: at(2026, 9, 28, 17), durationHours: 7 },
+        {
+          taskId: testId('a'),
+          start: at(2026, 9, 28, 9),
+          end: at(2026, 9, 28, 17),
+          durationHours: 7,
+        },
       ],
     };
     const input = { ...BASE_PROJECT, baseline };
@@ -160,7 +175,7 @@ describe('shared document', () => {
         const read = projectOf(createSharedDocument(input, TEST_DOCUMENT_ID));
         expect(byId(read.tasks)).toEqual(byId(input.tasks));
         expect(byId(read.dependencies)).toEqual(byId(input.dependencies));
-        expect(read.calendar).toEqual(input.calendar);
+        expect(read.calendar).toEqual(canonicalCalendar(input.calendar));
       }),
     );
   });
@@ -198,7 +213,7 @@ describe('shared document', () => {
       throw new Error('Missing participant');
     }
     change(peer, (current) => ({
-      ...mapTask(current, 'c', (task) => summary(task.id, { name: task.name })),
+      ...mapTask(current, testId('c'), (task) => summary(task.id, { name: task.name })),
     }));
     const entry = peer.getMap(TASKS_ROOT).get('c');
     expect(entry instanceof Y.Map && entry.has('segments')).toBe(true);
@@ -213,7 +228,7 @@ describe('merging concurrent changes', () => {
       (current) => ({ ...current, dependencies: [...current.dependencies, link('c', 'm')] }),
       (current) => ({ ...current, dependencies: [...current.dependencies, link('m', 'c')] }),
     );
-    expect(result.repairs).toEqual([{ code: 'DEPENDENCY_REMOVED', id: 'm-c' }]);
+    expect(result.repairs).toEqual([{ code: 'DEPENDENCY_REMOVED', id: testId('m-c') }]);
     expect(result.project.dependencies.map((dependency) => dependency.id).sort()).toEqual([
       'a-b',
       'b-m',
@@ -225,10 +240,10 @@ describe('merging concurrent changes', () => {
     const base = project([summary('p'), summary('q')]);
     const result = mergeConcurrent(
       base,
-      (current) => mapTask(current, 'p', (task) => ({ ...task, parentId: 'q' })),
-      (current) => mapTask(current, 'q', (task) => ({ ...task, parentId: 'p' })),
+      (current) => mapTask(current, testId('p'), (task) => ({ ...task, parentId: testId('q') })),
+      (current) => mapTask(current, testId('q'), (task) => ({ ...task, parentId: testId('p') })),
     );
-    expect(result.repairs).toEqual([{ code: 'MOVED_TO_ROOT', id: 'p' }]);
+    expect(result.repairs).toEqual([{ code: 'MOVED_TO_ROOT', id: testId('p') }]);
     expect(byId(result.project.tasks).map((task) => task.parentId)).toEqual([null, 'p']);
   });
 
@@ -236,9 +251,9 @@ describe('merging concurrent changes', () => {
     const result = mergeConcurrent(
       BASE_PROJECT,
       (current) => ({ ...current, tags: [DESIGN] }),
-      (current) => mapTask(current, 'c', (task) => ({ ...task, tagId: 'alice' })),
+      (current) => mapTask(current, testId('c'), (task) => ({ ...task, tagId: testId('alice') })),
     );
-    expect(result.repairs).toEqual([{ code: 'TAG_CLEARED', id: 'c' }]);
+    expect(result.repairs).toEqual([{ code: 'TAG_CLEARED', id: testId('c') }]);
   });
 
   it('moves to the root a task placed under a summary deleted at the same time', () => {
@@ -250,9 +265,9 @@ describe('merging concurrent changes', () => {
           .filter((task) => task.id !== 's2')
           .map((task) => (task.parentId === 's2' ? { ...task, parentId: null } : task)),
       }),
-      (current) => mapTask(current, 'c', (task) => ({ ...task, parentId: 's2' })),
+      (current) => mapTask(current, testId('c'), (task) => ({ ...task, parentId: testId('s2') })),
     );
-    expect(result.repairs).toEqual([{ code: 'MOVED_TO_ROOT', id: 'c' }]);
+    expect(result.repairs).toEqual([{ code: 'MOVED_TO_ROOT', id: testId('c') }]);
   });
 
   it('fits hours per day to a working day shortened at the same time', () => {
@@ -262,18 +277,18 @@ describe('merging concurrent changes', () => {
         ...current,
         calendar: { ...current.calendar, workingTimeRanges: MORNING_ONLY },
       }),
-      (current) => mapTask(current, 'c', (task) => ({ ...task, hoursPerDay: 6 })),
+      (current) => mapTask(current, testId('c'), (task) => ({ ...task, hoursPerDay: 6 })),
     );
-    expect(result.repairs).toEqual([{ code: 'HOURS_PER_DAY_REDUCED', id: 'c' }]);
+    expect(result.repairs).toEqual([{ code: 'HOURS_PER_DAY_REDUCED', id: testId('c') }]);
   });
 
   it('rounds the progress of a task that became a milestone while its progress changed', () => {
     const result = mergeConcurrent(
       BASE_PROJECT,
-      (current) => mapTask(current, 'c', () => milestone('c')),
-      (current) => mapTask(current, 'c', (task) => ({ ...task, progressPercent: 70 })),
+      (current) => mapTask(current, testId('c'), () => milestone('c')),
+      (current) => mapTask(current, testId('c'), (task) => ({ ...task, progressPercent: 70 })),
     );
-    expect(result.repairs).toEqual([{ code: 'MILESTONE_PROGRESS_ROUNDED', id: 'c' }]);
+    expect(result.repairs).toEqual([{ code: 'MILESTONE_PROGRESS_ROUNDED', id: testId('c') }]);
     expect(result.project.tasks.find((task) => task.id === 'c')).toEqual(
       milestone('c', { progressPercent: 100 }),
     );
@@ -282,10 +297,10 @@ describe('merging concurrent changes', () => {
   it('removes a dependency added to a task that became a summary at the same time', () => {
     const result = mergeConcurrent(
       BASE_PROJECT,
-      (current) => mapTask(current, 'c', () => summary('c')),
+      (current) => mapTask(current, testId('c'), () => summary('c')),
       (current) => ({ ...current, dependencies: [...current.dependencies, link('c', 'm')] }),
     );
-    expect(result.repairs).toEqual([{ code: 'DEPENDENCY_REMOVED', id: 'c-m' }]);
+    expect(result.repairs).toEqual([{ code: 'DEPENDENCY_REMOVED', id: testId('c-m') }]);
   });
 });
 
@@ -352,7 +367,7 @@ describe('merging untrusted updates', () => {
 });
 
 /** Returns the shared entry of a task in a participant's document, failing the test when it is missing. */
-function taskEntry(peer: Y.Doc, id: string): Y.Map<unknown> {
+function taskEntry(peer: Y.Doc, id: TaskId): Y.Map<unknown> {
   const entry = peer.getMap(TASKS_ROOT).get(id);
   if (!(entry instanceof Y.Map)) {
     throw new Error(`Missing task ${id}`);
@@ -378,25 +393,60 @@ const OTHER_DOCUMENT_ID = requireDocumentId('00000000-0000-4000-8000-00000000000
 
 describe('merging updates that break the shared schema', () => {
   it.each<[string, (malicious: Y.Doc) => void]>([
-    ['an unknown field on a task', (malicious) => taskEntry(malicious, 'a').set('junk', 'x')],
+    [
+      'an unknown field on a task',
+      (malicious) => taskEntry(malicious, testId('a')).set('junk', 'x'),
+    ],
     [
       'an invalid hidden field',
-      (malicious) => taskEntry(malicious, 'm').set('segments', 'garbage'),
+      (malicious) => taskEntry(malicious, testId('m')).set('segments', 'garbage'),
     ],
     [
       'a missing hidden field',
       (malicious) => {
-        taskEntry(malicious, 'm').delete('segments');
+        taskEntry(malicious, testId('m')).delete('segments');
       },
     ],
-    ['an identifier inside an entry', (malicious) => taskEntry(malicious, 'a').set('id', 'b')],
+    [
+      'an identifier inside an entry',
+      (malicious) => taskEntry(malicious, testId('a')).set('id', 'b'),
+    ],
     ['an unknown project field', (malicious) => malicious.getMap('project').set('extra', 1)],
     ['an unknown root', (malicious) => malicious.getMap('other').set('x', 1)],
+    [
+      'a calendar key not written exactly',
+      (malicious) => malicious.getMap(TIME_RANGES_ROOT).set('09,12', true),
+    ],
+    [
+      'a calendar entry not marked present',
+      (malicious) => malicious.getMap(WEEKDAYS_ROOT).set('6', 1),
+    ],
+    [
+      'a shared type in the calendar',
+      (malicious) => malicious.getMap(PERIODS_ROOT).set('20000,20000', new Y.Map()),
+    ],
+    [
+      'a weekday that does not exist',
+      (malicious) => malicious.getMap(WEEKDAYS_ROOT).set('7', true),
+    ],
+    [
+      'list content in the calendar',
+      (malicious) => {
+        hideListContent(malicious.getMap(WEEKDAYS_ROOT));
+      },
+    ],
+    [
+      'the calendar as a project field',
+      (malicious) => malicious.getMap('project').set('workingWeekdays', [1]),
+    ],
     [
       'an entry that is not a map',
       (malicious) => malicious.getMap(TASKS_ROOT).set('z', { kind: 'task' }),
     ],
-    ['a nested shared type', (malicious) => taskEntry(malicious, 'a').set('name', new Y.Text('a'))],
+    [
+      'a nested shared type',
+      (malicious) => taskEntry(malicious, testId('a')).set('name', new Y.Text('a')),
+    ],
     [
       'another document identifier',
       (malicious) => malicious.getMap('project').set('documentId', OTHER_DOCUMENT_ID),
@@ -426,7 +476,7 @@ describe('merging updates that break the shared schema', () => {
     [
       'list content in an entry',
       (malicious) => {
-        hideListContent(taskEntry(malicious, 'a'));
+        hideListContent(taskEntry(malicious, testId('a')));
       },
     ],
   ])('refuses %s and leaves the document untouched', (_label, tamper) => {
@@ -445,9 +495,9 @@ describe('merging updates that break the shared schema', () => {
       throw new Error('Missing participant');
     }
     mergeTampered(honest, victim, (malicious) =>
-      taskEntry(malicious, 'm').set('segments', 'garbage'),
+      taskEntry(malicious, testId('m')).set('segments', 'garbage'),
     );
-    change(honest, (current) => mapTask(current, 'm', () => workTask('m')));
+    change(honest, (current) => mapTask(current, testId('m'), () => workTask('m')));
     expect(sync(honest, victim)).toEqual([]);
     syncAll([honest, victim]);
     expect(readSharedData(honest)).toEqual(readSharedData(victim));
@@ -462,7 +512,7 @@ describe('merging within limits and budgets', () => {
     const tags = (prefix: string): Tag[] =>
       Array.from({ length: perSide }, (_unused, position) => ({
         ...DESIGN,
-        id: `${prefix}${String(position).padStart(3, '0')}`,
+        id: testId(`${prefix}${String(position).padStart(3, '0')}`),
       }));
     const [left, right] = createPeers(project([workTask('a')]), 2);
     if (left === undefined || right === undefined) {
@@ -525,13 +575,13 @@ describe('merging within limits and budgets', () => {
       change(left, (current) => ({
         ...current,
         tasks: current.tasks.map((task) =>
-          task.id.startsWith('p') ? { ...task, parentId: `q${task.id.slice(1)}` } : task,
+          task.id.startsWith('p') ? { ...task, parentId: testId(`q${task.id.slice(1)}`) } : task,
         ),
       }));
       change(right, (current) => ({
         ...current,
         tasks: current.tasks.map((task) =>
-          task.id.startsWith('q') ? { ...task, parentId: `p${task.id.slice(1)}` } : task,
+          task.id.startsWith('q') ? { ...task, parentId: testId(`p${task.id.slice(1)}`) } : task,
         ),
       }));
       return mergeSharedUpdate(right, Y.encodeStateAsUpdate(left, Y.encodeStateVector(right)));
@@ -585,7 +635,9 @@ describe('merging interrupted and concurrent updates', () => {
         ...current,
         dependencies: [...current.dependencies, link(second, first)],
       }));
-      expect(sync(left, right)).toEqual([{ code: 'DEPENDENCY_REMOVED', id: `${second}-${first}` }]);
+      expect(sync(left, right)).toEqual([
+        { code: 'DEPENDENCY_REMOVED', id: testId(`${second}-${first}`) },
+      ]);
       syncAll([left, right]);
     }
     expect([left.clientID, right.clientID]).toEqual(identities);
@@ -622,9 +674,9 @@ describe('merging interrupted and concurrent updates', () => {
         calendar: { ...current.calendar, workingTimeRanges: MORNING_ONLY },
       }),
       (current) =>
-        mapTask(current, 'c', (task) => ({ ...task, hoursPerDay: 2, dailyStartHour: 14 })),
+        mapTask(current, testId('c'), (task) => ({ ...task, hoursPerDay: 2, dailyStartHour: 14 })),
     );
-    expect(result.repairs).toEqual([{ code: 'DAILY_START_HOUR_CLEARED', id: 'c' }]);
+    expect(result.repairs).toEqual([{ code: 'DAILY_START_HOUR_CLEARED', id: testId('c') }]);
   });
 
   it.each([
@@ -635,8 +687,9 @@ describe('merging interrupted and concurrent updates', () => {
   ])('rounds a progress of %i to %i when the task became a milestone', (progress, rounded) => {
     const result = mergeConcurrent(
       BASE_PROJECT,
-      (current) => mapTask(current, 'c', () => milestone('c')),
-      (current) => mapTask(current, 'c', (task) => ({ ...task, progressPercent: progress })),
+      (current) => mapTask(current, testId('c'), () => milestone('c')),
+      (current) =>
+        mapTask(current, testId('c'), (task) => ({ ...task, progressPercent: progress })),
     );
     expect(result.project.tasks.find((task) => task.id === 'c')).toEqual(
       milestone('c', { progressPercent: rounded }),
@@ -784,7 +837,7 @@ function toChange(operation: Operation, newId: string): (current: Project) => Pr
     const pick = (position: number): Task | undefined =>
       tasks[position % Math.max(tasks.length, 1)];
     /** Picks a tag by a generated position, or null for no tag. */
-    const tagId = (position: number | null): string | null =>
+    const tagId = (position: number | null): TagId | null =>
       position === null ? null : (byId(current.tags)[position]?.id ?? null);
     switch (operation.type) {
       case 'addLink': {
@@ -796,7 +849,7 @@ function toChange(operation: Operation, newId: string): (current: Project) => Pr
               ...current,
               dependencies: [
                 ...current.dependencies,
-                { ...link(from.id, to.id, operation.kind), id: newId },
+                { ...link(from.id, to.id, operation.kind), id: testId(newId) },
               ],
             };
       }
@@ -891,7 +944,7 @@ function convertTask(current: Project, task: Task | undefined, kind: Task['kind'
 }
 
 /** Deletes a task with its dependencies, moving its children to the root. */
-function deleteTask(current: Project, id: string | undefined): Project {
+function deleteTask(current: Project, id: TaskId | undefined): Project {
   return {
     ...current,
     tasks: current.tasks

@@ -10,7 +10,14 @@ import { formatBlocks, parseBlocks, parsePredecessors } from './exchange/csv/tas
 import { exportProjectJson, importProjectJson } from './exchange/project-json';
 import { unwrap } from './testing/arbitraries';
 import { at, compileOrThrow } from './testing/civil-time';
-import { link, project, scheduleOrThrow, splitTask, workTask } from './testing/project-builder';
+import {
+  link,
+  project,
+  scheduleOrThrow,
+  splitTask,
+  workTask,
+  testId,
+} from './testing/project-builder';
 import { TEST_CALENDAR } from './testing/test-calendar';
 import { fromProjectHour, isProjectHour, toProjectHour } from './time';
 
@@ -106,11 +113,11 @@ describe('quarter hours in schedules and exchanges', () => {
 
   it('schedules a quarter-hour task and a half-hour lag', () => {
     const schedule = scheduleOrThrow(plan);
-    expect(schedule.placements.get('a')).toMatchObject({
+    expect(schedule.placements.get(testId('a'))).toMatchObject({
       start: at(2026, 9, 28, 9),
       end: at(2026, 9, 28, 9) + 0.25,
     });
-    expect(schedule.placements.get('b')?.start).toBe(at(2026, 9, 28, 9) + 0.75);
+    expect(schedule.placements.get(testId('b'))?.start).toBe(at(2026, 9, 28, 9) + 0.75);
   });
 
   it('keeps quarter hours through JSON', () => {
@@ -156,16 +163,21 @@ describe('quarter hours in schedules and exchanges', () => {
 
 describe('quarter hours in person or team conflicts', () => {
   it('finds the exact quarter hours two tasks of the same person share', () => {
-    const alex = { id: 'alex', name: 'Alex', color: '#1baf7a', representsPersonOrTeam: true };
+    const alex = {
+      id: testId('alex'),
+      name: 'Alex',
+      color: '#1baf7a',
+      representsPersonOrTeam: true,
+    };
     const plan = project(
       [
         workTask('a', {
-          tagId: 'alex',
+          tagId: testId('alex'),
           segments: [{ durationHours: 0.5, gapDaysBefore: 0, startNoEarlierThan: null }],
           startNoEarlierThan: at(2026, 9, 28, 10),
         }),
         workTask('b', {
-          tagId: 'alex',
+          tagId: testId('alex'),
           segments: [{ durationHours: 0.5, gapDaysBefore: 0, startNoEarlierThan: null }],
           startNoEarlierThan: at(2026, 9, 28, 10) + 0.25,
         }),
@@ -175,7 +187,7 @@ describe('quarter hours in person or team conflicts', () => {
     );
     expect(scheduleOrThrow(plan).tagConflicts.conflicts).toEqual([
       {
-        tagId: 'alex',
+        tagId: testId('alex'),
         start: at(2026, 9, 28, 10) + 0.25,
         end: at(2026, 9, 28, 10) + 0.5,
         taskIds: ['a', 'b'],

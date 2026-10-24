@@ -12,9 +12,10 @@
     readonly cancel: string;
     readonly confirmed: () => void;
     readonly dismissed: () => void;
+    readonly main?: 'confirm' | 'cancel';
   }
 
-  let { question, titleId, cancel, confirmed, dismissed }: Props = $props();
+  let { question, titleId, cancel, confirmed, dismissed, main = 'confirm' }: Props = $props();
 
   const HISTORY_KEYS: ReadonlySet<string> = new Set(['z', 'y']);
 
@@ -57,10 +58,15 @@
     <h3 id={titleId}>{question.title}</h3>
     <p>{question.body}</p>
     <div class="actions">
-      <button type="button" class="button" onclick={dismissed}>{cancel}</button>
+      <button type="button" class={['button', { primary: main === 'cancel' }]} onclick={dismissed}
+        >{cancel}</button
+      >
       <button
         type="button"
-        class={['button', { primary: !question.danger, danger: question.danger }]}
+        class={[
+          'button',
+          { primary: main === 'confirm' && !question.danger, danger: question.danger },
+        ]}
         onclick={confirmed}>{question.confirm}</button
       >
     </div>

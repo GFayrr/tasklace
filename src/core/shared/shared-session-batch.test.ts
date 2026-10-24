@@ -3,7 +3,14 @@ import fc from 'fast-check';
 import * as Y from 'yjs';
 import type { Project } from '../model/project';
 import type { DependencyType } from '../model/project';
-import { link, project, summary, TEST_DOCUMENT_ID, workTask } from '../testing/project-builder';
+import {
+  link,
+  project,
+  summary,
+  TEST_DOCUMENT_ID,
+  workTask,
+  testId,
+} from '../testing/project-builder';
 import { readSharedData } from './shared-document';
 import { createSharedDocument } from './shared-document';
 import { applyOperation, type SharedOperation } from './shared-operations';
@@ -39,10 +46,10 @@ describe('grouped operations', () => {
   it('turns a task into a summary holding the next one, in a single change and a single undo step', () => {
     const session = openOn(BASE);
     const operations: SharedOperation[] = [
-      { type: 'removeDependency', id: 'a-b' },
-      { type: 'removeDependency', id: 'b-c' },
+      { type: 'removeDependency', id: testId('a-b') },
+      { type: 'removeDependency', id: testId('b-c') },
       { type: 'putTask', task: summary('b') },
-      { type: 'putTask', task: workTask('c', { parentId: 'b' }) },
+      { type: 'putTask', task: workTask('c', { parentId: testId('b') }) },
     ];
     let transactions = 0;
     sessionDocument(session).on('afterTransaction', () => {
@@ -63,9 +70,9 @@ describe('grouped operations', () => {
     const before = Y.encodeStateAsUpdate(sessionDocument(session));
     const refused = session.applyAll([
       { type: 'updateProject', fields: { name: 'Renamed' } },
-      { type: 'removeDependency', id: 'a-b' },
+      { type: 'removeDependency', id: testId('a-b') },
       { type: 'putDependency', dependency: link('c', 'a') },
-      { type: 'putDependency', dependency: { ...link('a', 'c'), id: 'loop' } },
+      { type: 'putDependency', dependency: { ...link('a', 'c'), id: testId('loop') } },
     ]);
     expect(refused).toEqual({
       ok: false,
@@ -74,7 +81,7 @@ describe('grouped operations', () => {
     expect(Y.encodeStateAsUpdate(sessionDocument(session))).toEqual(before);
     expect(session.project()).toEqual(BASE);
     expect(session.history.canUndo()).toBe(false);
-    expect(session.apply({ type: 'removeDependency', id: 'a-b' }).ok).toBe(true);
+    expect(session.apply({ type: 'removeDependency', id: testId('a-b') }).ok).toBe(true);
     expect(session.project().dependencies).toEqual([link('b', 'c')]);
   });
 
@@ -96,11 +103,11 @@ const operationArbitrary: fc.Arbitrary<SharedOperation> = fc.oneof(
     )
     .map(([from, to, type, lag]): SharedOperation => ({
       type: 'putDependency',
-      dependency: { ...link(from, to, type, lag), id: `${from}${to}` },
+      dependency: { ...link(from, to, type, lag), id: testId(`${from}${to}`) },
     })),
   fc
     .constantFrom('a-b', 'b-c', 'ab', 'bc', 'ca')
-    .map((id): SharedOperation => ({ type: 'removeDependency', id })),
+    .map((id): SharedOperation => ({ type: 'removeDependency', id: testId(id) })),
   fc
     .string({ maxLength: 4 })
     .map((name): SharedOperation => ({ type: 'updateProject', fields: { name } })),

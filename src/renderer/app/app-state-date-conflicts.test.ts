@@ -8,6 +8,7 @@ import {
   scheduleOrThrow,
   summary,
   workTask,
+  testId,
 } from '../../core/testing/project-builder';
 import english from '../locales/en.json';
 import { toggleProjectOption } from '../plan/project-commands';
@@ -15,7 +16,12 @@ import { draftFromTask } from '../plan/task-details';
 import { AppState } from './app-state.svelte';
 import { fakeAppContext, openedAppOf, settle } from './testing/fake-app-context';
 
-const ALICE: Tag = { id: 'alice', name: 'Alice', color: '#4a3aa7', representsPersonOrTeam: true };
+const ALICE: Tag = {
+  id: testId('alice'),
+  name: 'Alice',
+  color: '#4a3aa7',
+  representsPersonOrTeam: true,
+};
 const OPTIONS = {
   criticalPathEnabled: false,
   dateConstraintsEnabled: true,
@@ -27,13 +33,13 @@ const PLAN = project(
     summary('s', { sortKey: 'a' }),
     workTask('writing', {
       name: 'Writing',
-      parentId: 's',
+      parentId: testId('s'),
       sortKey: 'a',
       deadline: at(2026, 9, 28, 12),
     }),
     milestone('defense', { name: 'Defense', sortKey: 'b', mustFinishOn: at(2026, 9, 28, 10) }),
-    workTask('free', { name: 'Free', sortKey: 'c', tagId: 'alice' }),
-    workTask('busy', { name: 'Busy', sortKey: 'd', tagId: 'alice' }),
+    workTask('free', { name: 'Free', sortKey: 'c', tagId: testId('alice') }),
+    workTask('busy', { name: 'Busy', sortKey: 'd', tagId: testId('alice') }),
   ],
   [link('writing', 'defense')],
   { tags: [ALICE], options: OPTIONS },
@@ -50,13 +56,13 @@ describe('date conflicts in the application state', () => {
     const { app } = await openedApp();
     expect(app.dateConflictLines).toEqual([
       {
-        conflict: { code: 'DEADLINE_MISSED', taskId: 'writing' },
+        conflict: { code: 'DEADLINE_MISSED', taskId: testId('writing') },
         taskName: 'Writing',
         end: WRITING_END,
         date: at(2026, 9, 28, 12),
       },
       {
-        conflict: { code: 'MUST_FINISH_ON_NOT_MET', taskId: 'defense' },
+        conflict: { code: 'MUST_FINISH_ON_NOT_MET', taskId: testId('defense') },
         taskName: 'Defense',
         end: WRITING_END,
         date: at(2026, 9, 28, 10),
@@ -76,7 +82,7 @@ describe('date conflicts in the application state', () => {
     expect(app.conflictCount).toBe(1);
     app.undo();
     await settle();
-    app.select('busy');
+    app.select(testId('busy'));
     app.deleteSelected();
     await settle();
     expect([app.conflictLines, app.conflictCount]).toEqual([[], 2]);
@@ -98,7 +104,7 @@ describe('date conflicts in the application state', () => {
     const schedule = scheduleOrThrow(opened);
     const broken = {
       ...schedule,
-      conflicts: [{ code: 'DEADLINE_MISSED' as const, taskId: 'ghost' }],
+      conflicts: [{ code: 'DEADLINE_MISSED' as const, taskId: testId('ghost') }],
     };
     app.toggleConflicts();
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -121,14 +127,14 @@ describe('date conflicts in the application state', () => {
 
   it('shows a date conflict by selecting its task, opening its summary and asking to show its end', async () => {
     const { app } = await openedApp();
-    app.setSummaryOpen('s', false);
+    app.setSummaryOpen(testId('s'), false);
     const line = app.dateConflictLines[0];
     if (line === undefined) {
       throw new Error('No date conflict');
     }
     app.showDateConflict(line);
-    expect([app.selectedTaskId, app.collapsed.has('s')]).toEqual(['writing', false]);
-    expect(app.revealRequest).toEqual({ taskId: 'writing', hour: WRITING_END });
+    expect([app.selectedTaskId, app.collapsed.has(testId('s'))]).toEqual(['writing', false]);
+    expect(app.revealRequest).toEqual({ taskId: testId('writing'), hour: WRITING_END });
   });
 
   it('asks to wait when the task of a date conflict was deleted meanwhile', async () => {
@@ -138,7 +144,7 @@ describe('date conflicts in the application state', () => {
       throw new Error('No date conflict');
     }
     scheduler.automatic = false;
-    app.select('defense');
+    app.select(testId('defense'));
     app.deleteSelected();
     await settle();
     app.takeRevealRequest();
@@ -155,12 +161,12 @@ describe('date conflicts in the application state', () => {
     if (task === undefined) {
       throw new Error('Missing task');
     }
-    const draft = draftFromTask(task, () => '', app.detailsBasis('free'));
+    const draft = draftFromTask(task, () => '', app.detailsBasis(testId('free')));
     expect(
       app.editSettings((context) => toggleProjectOption(context, 'dateConstraintsEnabled')),
     ).toBeNull();
     await settle();
-    app.openDetails('free');
+    app.openDetails(testId('free'));
     expect(app.saveDetails({ ...draft, deadline: '2026-10-02T15:00' })).toBe(
       english.editErrors.TASK_CHANGED,
     );
@@ -173,8 +179,8 @@ describe('date conflicts in the application state', () => {
     if (task === undefined) {
       throw new Error('Missing task');
     }
-    const draft = draftFromTask(task, () => '', app.detailsBasis('free'));
-    app.openDetails('free');
+    const draft = draftFromTask(task, () => '', app.detailsBasis(testId('free')));
+    app.openDetails(testId('free'));
     expect(app.saveDetails({ ...draft, deadline: 'soon' })).toBe(
       english.editErrors.INVALID_DEADLINE,
     );
@@ -189,8 +195,8 @@ describe('date conflicts in the application state', () => {
     if (saved === undefined) {
       throw new Error('Missing task');
     }
-    app.openDetails('free');
-    const hidden = draftFromTask(saved, () => '', app.detailsBasis('free'));
+    app.openDetails(testId('free'));
+    const hidden = draftFromTask(saved, () => '', app.detailsBasis(testId('free')));
     expect(app.saveDetails({ ...hidden, deadline: '', name: 'Kept' })).toBeNull();
     await settle();
     expect(app.project?.tasks.find((candidate) => candidate.id === 'free')).toMatchObject({

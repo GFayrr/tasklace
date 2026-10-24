@@ -8,6 +8,7 @@
     readonly label: string;
     readonly run: () => void;
   }
+  import ConnectionChip from './ConnectionChip.svelte';
   import MenuButton, { type MenuItem } from './MenuButton.svelte';
 
   let { app }: { app: AppState } = $props();
@@ -20,6 +21,7 @@
   });
   const openItems: readonly MenuItem[] = $derived([
     { key: 'open', label: text.toolbar.openFile, select: () => void app.open() },
+    { key: 'join', label: text.toolbar.joinPlan, select: () => void app.openJoin() },
     ...app.recentProjects.map((recent, index) => ({
       key: `recent-${String(index)}`,
       label: recent.name,
@@ -127,13 +129,14 @@
     />
     <button
       type="button"
-      class="button"
+      class="icon-button"
+      aria-label={text.settings.open}
+      title={text.settings.open}
       onclick={() => {
         app.openSettings();
       }}
     >
       <Icon name="gear" />
-      <span>{text.settings.open}</span>
     </button>
     <span class="status" class:failed={app.saveStatus === 'failed'} role="status">
       {#if app.saveStatus === 'failed'}
@@ -205,6 +208,7 @@
   <button type="button" class="button" class:primary={!app.hasFile} onclick={() => app.save()}>
     {text.toolbar.save}
   </button>
+  <ConnectionChip {app} />
 </header>
 
 <style>

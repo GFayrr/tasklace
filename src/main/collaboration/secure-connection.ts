@@ -1,0 +1,272 @@
+import {
+  compressMessage,
+  openSecureChannel,
+  type CompressedMessage,
+  type ChannelBreak,
+  type ChannelKind,
+  type ChannelMessage,
+  type SealRefusal,
+  type SecureChannel,
+} from '../../core/collaboration/secure/channel';
+import type { SessionKeys } from '../../core/collaboration/secure/cpace';
+import {
+  answerHostLink,
+  encodeIntroduction,
+  readIntroduction,
+  startHostLink,
+  type HostSecrets,
+  type Introduction,
+  type JoinSecret,
+  type LinkRefusal,
+  type PlanKey,
+  readPlanKey,
+} from '../../core/collaboration/secure/link';
+import { zlibCompressor } from '../zlib-compressor';
+import { MAX_COLLABORATION_MESSAGE_BYTES, MAX_HANDSHAKE_MILLISECONDS } from '../../core/limits';
+import { failure, success, type Result } from '../../core/result';
+import { aesGcm } from './aes-gcm';
+
+export interface Wire {
+  readonly send: (bytes: Uint8Array) => void;
+  readonly close: (reason: ConnectionEnd) => void;
+}
+
+export type StartTimer = (milliseconds: number, onEnd: () => void) => () => void;
+
+export type ConnectionEnd =
+  LinkRefusal | ChannelBreak | 'TIMEOUT' | 'INVALID_INTRODUCTION' | 'WIRE_CLOSED' | 'CLOSED';
+
+export interface ConnectionEvents {
+  readonly message: (bytes: Uint8Array) => void;
+  readonly ended: (reason: ConnectionEnd) => void;
+  readonly planKey: ((key: PlanKey) => void) | null;
+  readonly identity?: (message: Uint8Array) => void;
+}
+
+export interface SecureConnection {
+  readonly receive: (bytes: Uint8Array) => void;
+  readonly send: (message: Uint8Array) => Result<null, SealRefusal | 'NOT_OPEN'>;
+  readonly sendPlanKey: (key: PlanKey) => Result<null, SealRefusal | 'NOT_OPEN'>;
+  readonly sendCompressed: (message: CompressedMessage) => Result<null, SealRefusal | 'NOT_OPEN'>;
+  readonly sendIdentity: (message: Uint8Array) => Result<null, SealRefusal | 'NOT_OPEN'>;
+  readonly wireClosed: () => void;
+  readonly close: () => void;
+  readonly allowLargeMessages: () => void;
+}
+
+interface Common {
+  readonly wire: Wire;
+  readonly messageLimit?: number;
+  readonly startTimer: StartTimer;
+  readonly events: ConnectionEvents;
+  readonly randomBytes: (count: number) => Uint8Array;
+}
+
+type Step = (bytes: Uint8Array) => void;
+
+/** Holds what both ends of a connection share: the channel once open, the limit on the time to open it, and an end that happens once. */
+function connectionCore(common: Common) {
+  let channel: SecureChannel | null = null;
+  let isOver = false;
+  const stopTimer = common.startTimer(MAX_HANDSHAKE_MILLISECONDS, () => {
+    end('TIMEOUT');
+  });
+  /** Ends the connection once, closing the wire unless it already closed. */
+  const end = (reason: ConnectionEnd): void => {
+    if (isOver) {
+      return;
+    }
+    isOver = true;
+    channel = null;
+    stopTimer();
+    if (reason !== 'WIRE_CLOSED') {
+      common.wire.close(reason);
+    }
+    common.events.ended(reason);
+  };
+  /** Seals a compressed message on the channel and sends its frames, giving why it could not. */
+  const sendSealed = (
+    open: SecureChannel,
+    compressed: CompressedMessage,
+  ): Result<null, SealRefusal> => {
+    const frames = open.sealCompressed(compressed);
+    if (!frames.ok) {
+      return frames;
+    }
+    frames.value.forEach((frame) => {
+      common.wire.send(frame);
+    });
+    return success(null);
+  };
+  return {
+    end,
+    isOver: () => isOver,
+    open: (keys: SessionKeys): SecureChannel => {
+      channel = openSecureChannel(keys, aesGcm, zlibCompressor, common.messageLimit);
+      return channel;
+    },
+    allowLargeMessages: () => {
+      channel?.allowMessagesUpTo(MAX_COLLABORATION_MESSAGE_BYTES);
+    },
+    opened: () => {
+      stopTimer();
+    },
+    seal: (message: Uint8Array, kind: ChannelKind): Result<null, SealRefusal | 'NOT_OPEN'> => {
+      if (channel === null) {
+        return failure('NOT_OPEN');
+      }
+      const compressed = compressMessage(message, kind, zlibCompressor);
+      return compressed.ok ? sendSealed(channel, compressed.value) : compressed;
+    },
+    sealCompressed: (compressed: CompressedMessage): Result<null, SealRefusal | 'NOT_OPEN'> =>
+      channel === null ? failure('NOT_OPEN') : sendSealed(channel, compressed),
+    /** Opens one frame of the channel, ending the connection when the channel breaks, and gives the message it completes, if any. */
+    openFrame: (open: SecureChannel, bytes: Uint8Array): ChannelMessage | null => {
+      const opened = open.open(bytes);
+      if (!opened.ok) {
+        end(opened.error);
+        return null;
+      }
+      return opened.value;
+    },
+  };
+}
+
+/** Gives a key of the plan of the right length to a connection that expects one, ending any other connection or key as malformed. */
+function receivePlanKey(
+  message: ChannelMessage,
+  events: ConnectionEvents,
+  core: ReturnType<typeof connectionCore>,
+): void {
+  const key = message.kind === 'planKey' ? readPlanKey(message.message) : null;
+  if (key === null || events.planKey === null) {
+    core.end('MALFORMED');
+    return;
+  }
+  events.planKey(key);
+}
+
+/** Gives each complete message of the open channel to the events of the connection: a message of the plan, a key of the plan of the right length or an identity where the connection expects one, anything else ending it. */
+function openStepOf(
+  core: ReturnType<typeof connectionCore>,
+  channel: SecureChannel,
+  events: ConnectionEvents,
+): Step {
+  return (bytes) => {
+    const message = core.openFrame(channel, bytes);
+    if (message === null) {
+      return;
+    }
+    if (message.kind === 'plan') {
+      events.message(message.message);
+    } else if (message.kind === 'identity' && events.identity !== undefined) {
+      events.identity(message.message);
+    } else {
+      receivePlanKey(message, events, core);
+    }
+  };
+}
+
+/** Builds the connection object from its current step, ignoring anything once it is over. */
+function connectionOf(
+  core: ReturnType<typeof connectionCore>,
+  current: () => Step,
+): SecureConnection {
+  return {
+    receive: (bytes) => {
+      if (!core.isOver()) {
+        current()(bytes);
+      }
+    },
+    send: (message) => core.seal(message, 'plan'),
+    sendPlanKey: (key) => core.seal(key, 'planKey'),
+    sendCompressed: core.sealCompressed,
+    sendIdentity: (message) => core.seal(message, 'identity'),
+    wireClosed: () => {
+      core.end('WIRE_CLOSED');
+    },
+    close: () => {
+      core.end('CLOSED');
+    },
+    allowLargeMessages: core.allowLargeMessages,
+  };
+}
+
+/** Accepts a guest on the side of the host: sends the hello, checks the proof of the code or of the key of the plan, then waits for the introduction before telling who joined, a wrong code being told apart so that the host can count it. */
+export function acceptGuest(
+  common: Common & {
+    readonly secrets: HostSecrets;
+    readonly joined: (introduction: Introduction) => void;
+  },
+): SecureConnection {
+  const core = connectionCore(common);
+  const link = startHostLink(common.secrets, common.randomBytes);
+  /** Reads the introduction of the guest, the first message of the channel. */
+  const introductionStepOf =
+    (channel: SecureChannel): Step =>
+    (bytes) => {
+      const message = core.openFrame(channel, bytes);
+      if (message === null) {
+        return;
+      }
+      const introduction = message.kind === 'plan' ? readIntroduction(message.message) : null;
+      if (introduction === null) {
+        core.end('INVALID_INTRODUCTION');
+        return;
+      }
+      step = openStepOf(core, channel, common.events);
+      core.opened();
+      common.joined(introduction);
+    };
+  /** Checks the share and the proof of the guest and answers with the proof of the host. */
+  const replyStep: Step = (bytes) => {
+    const answered = link.answer(bytes);
+    if (!answered.ok) {
+      core.end(answered.error);
+      return;
+    }
+    step = introductionStepOf(core.open(answered.value.keys));
+    common.wire.send(answered.value.confirm);
+  };
+  let step = replyStep;
+  common.wire.send(link.hello);
+  return connectionOf(core, () => step);
+}
+
+/** Joins a host on the side of a guest with the join code or the key of the plan: answers its hello, checks its proof, then introduces the guest on the open channel. */
+export function connectToHost(
+  common: Common & {
+    readonly secret: JoinSecret;
+    readonly introduction: Introduction;
+    readonly opened: () => void;
+  },
+): SecureConnection {
+  const core = connectionCore(common);
+  /** Answers the hello of the host with the share and the proof of the guest. */
+  const helloStep: Step = (bytes) => {
+    const guest = answerHostLink(bytes, common.secret, common.randomBytes);
+    if (!guest.ok) {
+      core.end(guest.error);
+      return;
+    }
+    step = (confirm) => {
+      const keys = guest.value.finish(confirm);
+      if (!keys.ok) {
+        core.end(keys.error);
+        return;
+      }
+      const channel = core.open(keys.value);
+      step = openStepOf(core, channel, common.events);
+      core.opened();
+      const introduced = core.seal(encodeIntroduction(common.introduction), 'plan');
+      if (!introduced.ok) {
+        core.end(introduced.error === 'NOT_OPEN' ? 'BROKEN' : introduced.error);
+        return;
+      }
+      common.opened();
+    };
+    common.wire.send(guest.value.reply);
+  };
+  let step = helloStep;
+  return connectionOf(core, () => step);
+}

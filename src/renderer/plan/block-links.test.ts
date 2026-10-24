@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Dependency } from '../../core/model/project';
-import { blockLink, project, splitTask, workTask } from '../../core/testing/project-builder';
+import {
+  blockLink,
+  project,
+  splitTask,
+  workTask,
+  testId,
+} from '../../core/testing/project-builder';
 import { relinkBlocks } from './block-links';
 
 const DEV = splitTask('dev', [
@@ -11,24 +17,24 @@ const DEV = splitTask('dev', [
 /** Relinks the blocks of the split task of a project whose only block left is its first one. */
 function keepFirstBlock(links: readonly Dependency[]) {
   const plan = project([DEV, workTask('x')], links);
-  return relinkBlocks(plan, 'dev', (block) => (block === 0 ? 0 : null), 1);
+  return relinkBlocks(plan, testId('dev'), (block) => (block === 0 ? 0 : null), 1);
 }
 
 describe('relinkBlocks', () => {
   it('merges a block link into the same whole-task link without losing anything', () => {
     const whole = blockLink('dev', 'x', {});
-    const fromFirst = { ...blockLink('dev', 'x', { from: 0 }), id: 'dev_0-x' };
+    const fromFirst = { ...blockLink('dev', 'x', { from: 0 }), id: testId('dev_0-x') };
     const relinked = keepFirstBlock([whole, fromFirst]);
     expect(relinked.losesLink).toBe(false);
-    expect(relinked.operations).toEqual([{ type: 'removeDependency', id: 'dev_0-x' }]);
+    expect(relinked.operations).toEqual([{ type: 'removeDependency', id: testId('dev_0-x') }]);
     expect(relinked.links).toEqual([whole]);
   });
 
   it('tells that merging loses a link of another delay or another type', () => {
     const whole = blockLink('dev', 'x', {});
-    const otherLag = { ...blockLink('dev', 'x', { from: 0 }), id: 'lag', lagHours: 2 };
+    const otherLag = { ...blockLink('dev', 'x', { from: 0 }), id: testId('lag'), lagHours: 2 };
     expect(keepFirstBlock([whole, otherLag]).losesLink).toBe(true);
-    const otherType = { ...blockLink('dev', 'x', { from: 0 }, 'startToStart'), id: 'type' };
+    const otherType = { ...blockLink('dev', 'x', { from: 0 }, 'startToStart'), id: testId('type') };
     expect(keepFirstBlock([whole, otherType]).losesLink).toBe(true);
   });
 

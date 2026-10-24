@@ -1,13 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { open, rename, rm } from 'node:fs/promises';
+import { open, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import { renameRetrying, SYSTEM_RENAMING, type Renaming } from './stored-files';
 
 /** Writes content to a file without ever leaving it half written: into a temporary file beside it, forced to disk, then renamed over it, the temporary file being removed on failure, a failed removal only logged. */
-export async function writeFileSafely(path: string, content: Uint8Array | string): Promise<void> {
+export async function writeFileSafely(
+  path: string,
+  content: Uint8Array | string,
+  renaming: Renaming = SYSTEM_RENAMING,
+): Promise<void> {
   const temporary = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
   try {
     await writeAndSync(temporary, content);
-    await rename(temporary, path);
+    await renameRetrying(temporary, path, renaming);
   } catch (error) {
     await rm(temporary, { force: true }).catch((removal: unknown) => {
       console.error(`The temporary file ${temporary} could not be removed:`, removal);

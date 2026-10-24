@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Project } from '../../core/model/project';
+import type { Project, TaskId } from '../../core/model/project';
 import { at } from '../../core/testing/civil-time';
 import { scheduleProject } from '../../core/scheduling/schedule-project';
-import { project, workTask } from '../../core/testing/project-builder';
+import { project, workTask, testId } from '../../core/testing/project-builder';
+import { encodeMessage, type CollaborationMessage } from '../../core/collaboration/messages';
+import { requireParticipantId, type Participant } from '../../core/collaboration/participants';
 import type { BridgeResult, OpenedProject } from '../../preload/bridge-contract';
 import { AppState } from '../app/app-state.svelte';
 import english from '../locales/en.json';
@@ -20,7 +22,7 @@ import {
 } from '../plan/timeline-geometry';
 import { SAND_GRAPHITE } from '../theme/sand-graphite';
 import App from './App.svelte';
-import { press, render, single, update } from './testing/render';
+import { button, click, press, render, single, update } from './testing/render';
 import { drawFrames, pointer, refuseDrawingContexts, resize } from './testing/timeline-environment';
 
 const PLAN: Project = project(
@@ -75,7 +77,7 @@ describe('App', () => {
   it('commits the cell being edited before a file shortcut, so that the save holds the typed value', async () => {
     const { app, root, control } = await renderApp(true);
     const grid = single(root, '[role="grid"]');
-    app.select('a');
+    app.select(testId('a'));
     update();
     press(grid, 'Enter');
     await settle();
@@ -119,7 +121,7 @@ describe('App', () => {
 
   it('leaves the shortcuts alone while a dialog is open', async () => {
     const { app, control } = await renderApp(true);
-    app.openDetails('a');
+    app.openDetails(testId('a'));
     update();
     press(window, 'o', { ctrlKey: true });
     app.closeDetails();
@@ -128,6 +130,112 @@ describe('App', () => {
     press(window, 'o', { ctrlKey: true });
     await settle();
     expect(control.calls.filter((call) => call === 'openProject')).toHaveLength(1);
+  });
+});
+
+describe('the window that tells where changes made in read only are kept', () => {
+  /** Renders the interface after this person, in read only, changed the joined plan away from the host and came back. */
+  async function keptApp() {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    const { collaboration } = fake.control;
+    collaboration.settingsResult = {
+      ok: true,
+      value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true },
+    };
+    collaboration.openSharedResult = openedProjectOf(PLAN, { fileName: '' });
+    await app.collaboration.loadSettings();
+    await app.join({ address: '192.168.1.24', port: 47_313, code: 'K7Q4MZ' });
+    const me = app.collaboration.me ?? requireParticipantId('lea');
+    const host: Participant = {
+      id: requireParticipantId('camille'),
+      name: 'Camille',
+      color: 0,
+      canEdit: true,
+      isHost: true,
+      rank: 0,
+      selectedTaskId: null,
+      endpoint: null,
+      tokenDigest: null,
+    };
+    const lea: Participant = {
+      ...host,
+      id: me,
+      name: 'Léa',
+      canEdit: false,
+      isHost: false,
+      rank: 1,
+    };
+    /** Gives the page a message of the host. */
+    const fromHost = (message: CollaborationMessage): void => {
+      collaboration.listener?.({ kind: 'hostMessage', message: encodeMessage(message) });
+    };
+    collaboration.listener?.({ kind: 'connected' });
+    fromHost({ kind: 'participants', you: me, participants: [host, lea] });
+    fromHost({ kind: 'update', update: Uint8Array.of(0, 0) });
+    fromHost({ kind: 'stateVector', vector: Uint8Array.of(0) });
+    await settle();
+    await settle();
+    collaboration.listener?.({ kind: 'reconnecting' });
+    app.rename('Mine');
+    collaboration.listener?.({ kind: 'connected' });
+    fromHost({ kind: 'stateVector', vector: Uint8Array.of(0) });
+    await settle();
+    fromHost({ kind: 'update', update: Uint8Array.of(0, 0) });
+    fromHost({ kind: 'stateVector', vector: Uint8Array.of(0) });
+    await settle();
+    await settle();
+    const root = render(App, { app });
+    return { app, root, ...fake };
+  }
+
+  /** Returns the open window that tells where the changes are kept. */
+  function keptWindow(root: ParentNode): HTMLDialogElement {
+    const dialog = single(root, 'dialog[aria-labelledby="kept-changes-title"]');
+    if (!(dialog instanceof HTMLDialogElement)) {
+      throw new Error('Not a dialog');
+    }
+    return dialog;
+  }
+
+  it('names the plan and its copy, with “OK” as the main button, and closes on “OK”', async () => {
+    const { app, root } = await keptApp();
+    const dialog = keptWindow(root);
+    expect([
+      dialog.open,
+      single(dialog, 'h3').textContent,
+      single(dialog, 'p').textContent,
+      [...dialog.querySelectorAll('button')].map((each) => [
+        each.textContent.trim(),
+        each.classList.contains('primary'),
+      ]),
+    ]).toEqual([
+      true,
+      english.collaboration.keptTitle,
+      'You changed the plan while you were away, but you are in read only in “Mine”, so your changes cannot be shared. They are kept in a separate plan, “Mine (my changes)”, on this computer. You now see the shared plan again.',
+      [
+        ['OK', true],
+        ['Open my changes', false],
+      ],
+    ]);
+    click(button(dialog, 'OK'));
+    expect([app.keptChanges, dialog.open]).toEqual([null, false]);
+  });
+
+  it('opens the changes kept, leaving the shared plan, and ignores the shortcuts while it is open', async () => {
+    const { app, root, control } = await keptApp();
+    press(window, 'o', { ctrlKey: true });
+    control.collaboration.openKeptResult = openedProjectOf({ ...PLAN, name: 'Mine (my changes)' });
+    click(button(keptWindow(root), 'Open my changes'));
+    await settle();
+    app.closePrompt?.answer('discard');
+    await settle();
+    await settle();
+    expect([
+      control.calls.filter((call) => call === 'openProject'),
+      app.project?.name,
+      app.keptChanges,
+    ]).toEqual([[], 'Mine (my changes)', null]);
   });
 });
 
@@ -165,7 +273,7 @@ describe('Workspace', () => {
   function shapeIn(
     app: AppState,
     frame: TimelineFrame,
-    id: string,
+    id: TaskId,
   ): Extract<RowShape, { kind: 'task' }> {
     const index = app.outline.rowIndexById.get(id) ?? -1;
     const row = app.outline.rows[index];
@@ -242,7 +350,7 @@ describe('Workspace', () => {
   it('shows the project from two days before its start, and moves a dragged bar by whole days', async () => {
     const { app, scroller, frame, scrollLeft } = await renderSized();
     expect(scroller.scrollLeft).toBe(scrollLeft);
-    const shape = shapeIn(app, frame, 'b');
+    const shape = shapeIn(app, frame, testId('b'));
     const middle = shape.row * ROW_HEIGHT + ROW_HEIGHT / 2;
     const x = shape.start + 4 - scrollLeft;
     pointer(scroller, 'pointerdown', x, middle);
@@ -256,7 +364,7 @@ describe('Workspace', () => {
 
   it('stretches a bar to change its duration, and links a task dragged from its handle', async () => {
     const { app, scroller, frame, scrollLeft } = await renderSized();
-    const shape = shapeIn(app, frame, 'a');
+    const shape = shapeIn(app, frame, testId('a'));
     const middle = shape.row * ROW_HEIGHT + ROW_HEIGHT / 2;
     pointer(scroller, 'pointerdown', shape.end - 1 - scrollLeft, middle);
     pointer(scroller, 'pointermove', shape.end + 24 * pixelsPerHour('day') - scrollLeft, middle);
@@ -265,20 +373,22 @@ describe('Workspace', () => {
     expect(app.project?.tasks.find((task) => task.id === 'a')).toMatchObject({
       segments: [{ durationHours: 14 }],
     });
-    const stretched = shapeIn(app, frame, 'a');
-    const target = shapeIn(app, frame, 'b');
+    const stretched = shapeIn(app, frame, testId('a'));
+    const target = shapeIn(app, frame, testId('b'));
     const handleX = stretched.end + LINK_HANDLE_GAP - scrollLeft;
     const targetMiddle = target.row * ROW_HEIGHT + ROW_HEIGHT / 2;
     pointer(scroller, 'pointerdown', handleX, middle);
     pointer(scroller, 'pointermove', target.start + 5 - scrollLeft, targetMiddle);
     pointer(scroller, 'pointerup', target.start + 5 - scrollLeft, targetMiddle);
     await settle();
-    expect(app.project?.dependencies).toMatchObject([{ predecessorId: 'a', successorId: 'b' }]);
+    expect(app.project?.dependencies).toMatchObject([
+      { predecessorId: testId('a'), successorId: testId('b') },
+    ]);
   });
 
   it('refuses to move or stretch a bar while the dates shown are older than the latest change, then accepts once they are updated', async () => {
     const { app, scroller, frame, scrollLeft, scheduler } = await renderSized();
-    const shape = shapeIn(app, frame, 'b');
+    const shape = shapeIn(app, frame, testId('b'));
     const before = app.project?.tasks.find((task) => task.id === 'b');
     scheduler.automatic = false;
     expect(app.rename('Renamed')).toBe(true);
@@ -324,7 +434,7 @@ describe('Workspace', () => {
     const { app, root, scroller } = await renderSized();
     resize(scroller, 800, ROW_HEIGHT);
     const grid = single(root, '[role="grid"]');
-    app.select('a');
+    app.select(testId('a'));
     update();
     press(grid, 'ArrowDown');
     expect(scroller.scrollTop).toBe(ROW_HEIGHT);

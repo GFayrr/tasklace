@@ -1,11 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { at } from '../../core/testing/civil-time';
-import { project, scheduleOrThrow, summary, workTask } from '../../core/testing/project-builder';
+import {
+  project,
+  scheduleOrThrow,
+  summary,
+  workTask,
+  testId,
+} from '../../core/testing/project-builder';
 import english from '../locales/en.json';
 import { toggleProjectOption } from '../plan/project-commands';
 import { setDuration } from '../plan/task-commands';
 import { AppState } from './app-state.svelte';
 import { fakeAppContext, openedAppOf, openedProjectOf, settle } from './testing/fake-app-context';
+import type { TaskId } from '../../core/model/project';
 
 const NOW = new Date(2026, 9, 6, 10, 40);
 const PLAN = project(
@@ -47,17 +54,17 @@ describe('the baseline in the application state', () => {
     await settle();
     const schedule = scheduleOrThrow(PLAN);
     /** Returns the baseline entry the schedule gives a task. */
-    const entry = (id: string) => {
+    const entry = (id: TaskId) => {
       const placement = schedule.placements.get(id);
       return { taskId: id, start: placement?.start, end: placement?.end, durationHours: 7 };
     };
     expect(app.project?.baseline).toEqual({
       takenAt: at(2026, 10, 6, 10) + 0.5,
-      entries: [entry('a'), entry('b')],
+      entries: [entry(testId('a')), entry(testId('b'))],
     });
     expect([...(app.shownBaseline?.entries() ?? [])]).toEqual([
-      ['a', entry('a')],
-      ['b', entry('b')],
+      ['a', entry(testId('a'))],
+      ['b', entry(testId('b'))],
     ]);
     expect(app.notices).toEqual([]);
   });
@@ -139,8 +146,8 @@ describe('the baseline in the application state', () => {
         [
           'Tasks could not be frozen in the baseline:',
           [
-            { taskId: 'a', reason: 'NO_DATES' },
-            { taskId: 'b', reason: 'NO_DATES' },
+            { taskId: testId('a'), reason: 'NO_DATES' },
+            { taskId: testId('b'), reason: 'NO_DATES' },
           ],
         ],
       ]);
@@ -161,13 +168,13 @@ describe('the baseline in the application state', () => {
     expect(app.setBaseline()).toBeNull();
     await settle();
     const first = app.project?.baseline;
-    expect(app.edit((context) => setDuration(context, 'b', '14'))).toBe(true);
+    expect(app.edit((context) => setDuration(context, testId('b'), '14'))).toBe(true);
     await settle();
     expect(app.setBaseline()).toBeNull();
     await settle();
-    const later = scheduleOrThrow(app.project ?? PLAN).placements.get('b');
+    const later = scheduleOrThrow(app.project ?? PLAN).placements.get(testId('b'));
     expect(app.project?.baseline?.entries.find((entry) => entry.taskId === 'b')).toEqual({
-      taskId: 'b',
+      taskId: testId('b'),
       start: later?.start,
       end: later?.end,
       durationHours: 14,

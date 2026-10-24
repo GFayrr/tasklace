@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { failure } from '../../core/result';
+  import { valueAt } from '../../core/table-value';
   import type { Project, TaskId } from '../../core/model/project';
   import type { AppState, DrawingPart } from '../app/app-state.svelte';
   import { createTableFormatters } from '../plan/table-format';
@@ -33,6 +34,7 @@
   import { baselineMarks, ROW_HEIGHT, timelineFrame, xOf } from '../plan/timeline-geometry';
   import { tagStylesOf } from '../plan/tag-styles';
   import { localQuarterOf } from '../project/new-project';
+  import { personColorOf } from '../theme/person-colors';
   import { pixels } from './css-length';
   import TaskTable from './TaskTable.svelte';
   import Timeline from './Timeline.svelte';
@@ -97,6 +99,14 @@
   const formatters = $derived(createTableFormatters(app.locale));
   const labels = $derived(createScaleLabels(app.locale));
   const shownWidth = $derived(clampTableWidth(tableWidth, containerWidth));
+  const presence = $derived(
+    new Map(
+      [...app.collaboration.presence].map(([taskId, people]) => [
+        taskId,
+        personColorOf(valueAt(people, 0).color),
+      ]),
+    ),
+  );
   const scene = $derived({
     frame,
     zoom: app.zoom,
@@ -112,6 +122,7 @@
     deadlines,
     baseline,
     selectedTaskId: app.selectedTaskId,
+    presence,
     today,
     showFloatLines: true,
   });

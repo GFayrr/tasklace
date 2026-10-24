@@ -4,21 +4,36 @@ import {
   MAX_DEPENDENCIES,
   MAX_HIERARCHY_DEPTH,
   MAX_MERGE_REPAIR_ROUNDS,
+  MAX_NON_WORKING_PERIODS,
   MAX_TAGS,
   MAX_TASKS,
+  MAX_WORKING_TIME_RANGES,
 } from '../limits';
+import { DEFAULT_CALENDAR } from '../calendar/default-calendar';
+import { TEST_CALENDAR } from '../testing/test-calendar';
+import { dayIndexOf, MONDAY, QUARTER_HOUR, TUESDAY } from '../time';
 import type { Dependency, Project, Tag, Task } from '../model/project';
 import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
-import { link, milestone, project, summary, workTask } from '../testing/project-builder';
+import {
+  link,
+  milestone,
+  project,
+  PROJECT_START,
+  summary,
+  workTask,
+  testId,
+} from '../testing/project-builder';
 import { readProject, STORED_VALUE_CODEC } from '../validation/read-project';
 import { repairProject } from './repair-project';
 
 const DESIGN: Tag = {
-  id: 'design',
+  id: testId('design'),
   name: 'Design',
   color: '#336699',
   representsPersonOrTeam: false,
 };
+
+const TEST_FIRST_DAY = dayIndexOf(PROJECT_START);
 
 /** Repairs a project built from tasks, dependencies and optional project overrides, failing the test when the repair is refused. */
 function repair(
@@ -37,7 +52,7 @@ function isValid(input: Project): boolean {
 describe('repairProject', () => {
   it('leaves a valid project unchanged', () => {
     const valid = project(
-      [summary('s'), workTask('a', { parentId: 's' }), milestone('m')],
+      [summary('s'), workTask('a', { parentId: testId('s') }), milestone('m')],
       [link('a', 'm')],
     );
     expect(repairProject(valid)).toEqual({ ok: true, value: { project: valid, repairs: [] } });
@@ -45,13 +60,13 @@ describe('repairProject', () => {
 
   it('clears the tag of tasks pointing at a deleted tag', () => {
     const result = repair(
-      [workTask('a', { tagId: 'gone' }), workTask('b', { tagId: 'design' })],
+      [workTask('a', { tagId: testId('gone') }), workTask('b', { tagId: testId('design') })],
       [],
       {
         tags: [DESIGN],
       },
     );
-    expect(result.repairs).toEqual([{ code: 'TAG_CLEARED', id: 'a' }]);
+    expect(result.repairs).toEqual([{ code: 'TAG_CLEARED', id: testId('a') }]);
     expect(result.project.tasks.map((task) => task.kind !== 'summary' && task.tagId)).toEqual([
       null,
       'design',
@@ -60,26 +75,26 @@ describe('repairProject', () => {
 
   it('moves to the root the tasks whose parent was deleted or is no longer a summary', () => {
     const result = repair([
-      workTask('a', { parentId: 'gone' }),
+      workTask('a', { parentId: testId('gone') }),
       workTask('b'),
-      workTask('c', { parentId: 'b' }),
+      workTask('c', { parentId: testId('b') }),
     ]);
     expect(result.repairs).toEqual([
-      { code: 'MOVED_TO_ROOT', id: 'a' },
-      { code: 'MOVED_TO_ROOT', id: 'c' },
+      { code: 'MOVED_TO_ROOT', id: testId('a') },
+      { code: 'MOVED_TO_ROOT', id: testId('c') },
     ]);
     expect(isValid(result.project)).toBe(true);
   });
 
   it('breaks a hierarchy loop by moving its task with the smallest identifier to the root', () => {
     const result = repair([
-      summary('q', { parentId: 'p' }),
-      summary('p', { parentId: 'q' }),
-      summary('self', { parentId: 'self' }),
+      summary('q', { parentId: testId('p') }),
+      summary('p', { parentId: testId('q') }),
+      summary('self', { parentId: testId('self') }),
     ]);
     expect(result.repairs).toEqual([
-      { code: 'MOVED_TO_ROOT', id: 'p' },
-      { code: 'MOVED_TO_ROOT', id: 'self' },
+      { code: 'MOVED_TO_ROOT', id: testId('p') },
+      { code: 'MOVED_TO_ROOT', id: testId('self') },
     ]);
     expect(isValid(result.project)).toBe(true);
   });
@@ -92,7 +107,7 @@ describe('repairProject', () => {
     );
     const result = repair(chain);
     expect(result.repairs).toEqual([
-      { code: 'MOVED_TO_ROOT', id: `s${String(MAX_HIERARCHY_DEPTH)}` },
+      { code: 'MOVED_TO_ROOT', id: testId(`s${String(MAX_HIERARCHY_DEPTH)}`) },
     ]);
     expect(isValid(result.project)).toBe(true);
   });
@@ -110,11 +125,11 @@ describe('repairProject', () => {
     const result = repair(
       [workTask('a'), workTask('b')],
       [
-        { ...link('a', 'b'), id: 'z' },
-        { ...link('a', 'b', 'startToStart'), id: 'k' },
+        { ...link('a', 'b'), id: testId('z') },
+        { ...link('a', 'b', 'startToStart'), id: testId('k') },
       ],
     );
-    expect(result.repairs).toEqual([{ code: 'DEPENDENCY_REMOVED', id: 'z' }]);
+    expect(result.repairs).toEqual([{ code: 'DEPENDENCY_REMOVED', id: testId('z') }]);
     expect(result.project.dependencies.map((dependency) => dependency.id)).toEqual(['k']);
   });
 
@@ -131,8 +146,8 @@ describe('repairProject', () => {
       ],
     );
     expect(result.repairs).toEqual([
-      { code: 'DEPENDENCY_REMOVED', id: 'c-a' },
-      { code: 'DEPENDENCY_REMOVED', id: 'e-d' },
+      { code: 'DEPENDENCY_REMOVED', id: testId('c-a') },
+      { code: 'DEPENDENCY_REMOVED', id: testId('e-d') },
     ]);
     expect(isValid(result.project)).toBe(true);
   });
@@ -141,12 +156,12 @@ describe('repairProject', () => {
     const result = repair(
       [workTask('a'), workTask('b'), workTask('c')],
       [
-        { ...link('a', 'b'), id: 'k' },
-        { ...link('b', 'c'), id: 'z' },
-        { ...link('c', 'a'), id: 'm' },
+        { ...link('a', 'b'), id: testId('k') },
+        { ...link('b', 'c'), id: testId('z') },
+        { ...link('c', 'a'), id: testId('m') },
       ],
     );
-    expect(result.repairs).toEqual([{ code: 'DEPENDENCY_REMOVED', id: 'z' }]);
+    expect(result.repairs).toEqual([{ code: 'DEPENDENCY_REMOVED', id: testId('z') }]);
     expect(result.project.dependencies.map((dependency) => dependency.id).sort()).toEqual([
       'k',
       'm',
@@ -160,16 +175,84 @@ describe('repairProject', () => {
       workTask('c', { hoursPerDay: 3, dailyStartHour: 14 }),
     ]);
     expect(result.repairs).toEqual([
-      { code: 'HOURS_PER_DAY_REDUCED', id: 'a' },
-      { code: 'DAILY_START_HOUR_CLEARED', id: 'b' },
+      { code: 'HOURS_PER_DAY_REDUCED', id: testId('a') },
+      { code: 'DAILY_START_HOUR_CLEARED', id: testId('b') },
     ]);
     expect(isValid(result.project)).toBe(true);
   });
 
   it('leaves daily patterns alone when the calendar itself is invalid', () => {
-    const calendar = { workingWeekdays: [], workingTimeRanges: [], nonWorkingPeriods: [] };
+    const calendar = { ...TEST_CALENDAR, workingTimeRanges: [{ startHour: 10, endHour: 9 }] };
     const result = repair([workTask('a', { hoursPerDay: 10 })], [], { calendar });
     expect(result.repairs).toEqual([]);
+  });
+
+  it('puts back the default working days and hours when changes made at the same time left none', () => {
+    const calendar = { workingWeekdays: [], workingTimeRanges: [], nonWorkingPeriods: [] };
+    const result = repair([], [], { calendar });
+    expect(result).toEqual({
+      project: project([], [], {
+        calendar: { ...DEFAULT_CALENDAR, nonWorkingPeriods: [] },
+      }),
+      repairs: [
+        { code: 'WORKING_DAYS_RESTORED', id: '' },
+        { code: 'WORKING_HOURS_RESTORED', id: '' },
+      ],
+    });
+  });
+
+  it('removes the time ranges that overlap an earlier one, whatever their order', () => {
+    const calendar = {
+      workingWeekdays: [TUESDAY, MONDAY],
+      workingTimeRanges: [
+        { startHour: 13, endHour: 17 },
+        { startHour: 10, endHour: 14 },
+        { startHour: 8, endHour: 12 },
+      ],
+      nonWorkingPeriods: [],
+    };
+    const result = repair([], [], { calendar });
+    expect(result.project.calendar).toEqual({
+      workingWeekdays: [MONDAY, TUESDAY],
+      workingTimeRanges: [
+        { startHour: 8, endHour: 12 },
+        { startHour: 13, endHour: 17 },
+      ],
+      nonWorkingPeriods: [],
+    });
+    expect(result.repairs).toEqual([{ code: 'WORKING_HOURS_REMOVED', id: '10,14' }]);
+    expect(isValid(result.project)).toBe(true);
+  });
+
+  it('removes the latest time ranges and periods off beyond their limits', () => {
+    const ranges = Array.from({ length: MAX_WORKING_TIME_RANGES + 1 }, (_unused, index) => ({
+      startHour: index,
+      endHour: index + QUARTER_HOUR,
+    }));
+    const periods = Array.from({ length: MAX_NON_WORKING_PERIODS + 1 }, (_unused, index) => ({
+      firstDay: TEST_FIRST_DAY + 2 * index,
+      lastDay: TEST_FIRST_DAY + 2 * index,
+    }));
+    const lastPeriodDay = TEST_FIRST_DAY + 2 * MAX_NON_WORKING_PERIODS;
+    const result = repair([], [], {
+      calendar: {
+        ...TEST_CALENDAR,
+        workingTimeRanges: ranges.toReversed(),
+        nonWorkingPeriods: periods.toReversed(),
+      },
+    });
+    expect(result.project.calendar).toEqual({
+      ...TEST_CALENDAR,
+      workingTimeRanges: ranges.slice(0, MAX_WORKING_TIME_RANGES),
+      nonWorkingPeriods: periods.slice(0, MAX_NON_WORKING_PERIODS),
+    });
+    expect(result.repairs).toEqual([
+      { code: 'WORKING_HOURS_REMOVED', id: `${String(MAX_WORKING_TIME_RANGES)},24.25` },
+      {
+        code: 'NON_WORKING_PERIOD_REMOVED',
+        id: `${String(lastPeriodDay)},${String(lastPeriodDay)}`,
+      },
+    ]);
   });
 
   it('repairs what the removal of tasks beyond the limit leaves behind', () => {
@@ -177,13 +260,13 @@ describe('repairProject', () => {
       milestone(`a${String(index).padStart(6, '0')}`),
     );
     const result = repair(
-      [...fillers, summary('z1'), workTask('z2', { parentId: 'z1' })],
+      [...fillers, summary('z1'), workTask('z2', { parentId: testId('z1') })],
       [link('a000000', 'z2')],
     );
     expect(result.repairs).toEqual([
-      { code: 'TASK_REMOVED', id: 'z1' },
-      { code: 'TASK_REMOVED', id: 'z2' },
-      { code: 'DEPENDENCY_REMOVED', id: 'a000000-z2' },
+      { code: 'TASK_REMOVED', id: testId('z1') },
+      { code: 'TASK_REMOVED', id: testId('z2') },
+      { code: 'DEPENDENCY_REMOVED', id: testId('a000000-z2') },
     ]);
     expect(isValid(result.project)).toBe(true);
   });
@@ -191,12 +274,12 @@ describe('repairProject', () => {
   it('keeps the dependencies with the smallest identifiers beyond the limit', () => {
     const dependencies = Array.from({ length: MAX_DEPENDENCIES + 1 }, (_unused, index) => ({
       ...link('a', 'b'),
-      id: `d${String(index).padStart(6, '0')}`,
+      id: testId(`d${String(index).padStart(6, '0')}`),
     }));
     const result = repair([workTask('a'), workTask('b')], dependencies);
     expect(result.repairs[0]).toEqual({
       code: 'DEPENDENCY_REMOVED',
-      id: `d${String(MAX_DEPENDENCIES).padStart(6, '0')}`,
+      id: testId(`d${String(MAX_DEPENDENCIES).padStart(6, '0')}`),
     });
     expect(result.project.dependencies.map((dependency) => dependency.id)).toEqual(['d000000']);
   });
@@ -207,13 +290,13 @@ describe('repairProject', () => {
     );
     const tags = Array.from({ length: MAX_TAGS + 1 }, (_unused, index) => ({
       ...DESIGN,
-      id: `t${String(index).padStart(3, '0')}`,
+      id: testId(`t${String(index).padStart(3, '0')}`),
     }));
     const result = repair(tasks, [], { tags });
     expect(result.repairs).toEqual([
-      { code: 'TASK_REMOVED', id: `m${String(MAX_TASKS).padStart(6, '0')}` },
-      { code: 'TASK_REMOVED', id: `m${String(MAX_TASKS + 1).padStart(6, '0')}` },
-      { code: 'TAG_REMOVED', id: `t${String(MAX_TAGS)}` },
+      { code: 'TASK_REMOVED', id: testId(`m${String(MAX_TASKS).padStart(6, '0')}`) },
+      { code: 'TASK_REMOVED', id: testId(`m${String(MAX_TASKS + 1).padStart(6, '0')}`) },
+      { code: 'TAG_REMOVED', id: testId(`t${String(MAX_TAGS)}`) },
     ]);
     expect(result.project.tasks).toHaveLength(MAX_TASKS);
   });
@@ -270,7 +353,7 @@ const brokenProjectArbitrary = fc
           });
     });
     const dependencies = [...new Map(links.map((item) => [item.id, item])).values()].map(
-      (item) => ({ ...link(item.from, item.to), id: item.id }),
+      (item) => ({ ...link(item.from, item.to), id: testId(item.id) }),
     );
     return project(tasks, dependencies, { tags: [DESIGN] });
   });

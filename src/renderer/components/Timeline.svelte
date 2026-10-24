@@ -143,6 +143,12 @@
     }
   }
 
+  $effect(() => () => {
+    if (frameRequest !== 0) {
+      cancelAnimationFrame(frameRequest);
+    }
+  });
+
   $effect(() => {
     next = {
       scene: { ...scene, preview },
@@ -185,16 +191,23 @@
     };
   }
 
-  /** Follows the size of the scrolling area, which is the size of the drawing. */
+  /** Follows the size of the scrolling area, which is the size of the drawing, reading it at the next frame so that the page does not change its layout while the browser reports sizes, which it would take for an endless loop. */
   function followSize(element: HTMLDivElement): () => void {
+    let frame: number | null = null;
     const observer = new ResizeObserver(() => {
-      width = element.clientWidth;
-      height = element.clientHeight;
-      resized(width, height);
+      frame ??= requestAnimationFrame(() => {
+        frame = null;
+        width = element.clientWidth;
+        height = element.clientHeight;
+        resized(width, height);
+      });
     });
     observer.observe(element);
     return () => {
       observer.disconnect();
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+      }
     };
   }
 

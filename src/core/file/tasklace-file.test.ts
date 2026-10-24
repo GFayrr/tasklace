@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import * as Y from 'yjs';
+import { canonicalCalendar } from '../calendar/canonical-calendar';
 import { compareStrings } from '../compare-strings';
 import { MAX_FILE_BYTES, MAX_TAGS, MAX_UNCOMPRESSED_BYTES } from '../limits';
 import type { Project } from '../model/project';
 import { failure, success } from '../result';
 import {
   createSharedDocument,
+  readDocumentId,
   readSharedData,
   TAGS_ROOT,
   TASKS_ROOT,
@@ -25,13 +27,17 @@ import {
   summary,
   workTask,
   TEST_DOCUMENT_ID,
+  testId,
 } from '../testing/project-builder';
 import { crc32 } from './crc32';
 import {
   checkStateToSave,
+  copySharedState,
+  holdsChangesMissingFrom,
   encodeTasklaceFile,
   encodeTasklaceState,
   HEADER_BYTES,
+  readSharedState,
   readTasklaceDocument,
   readTasklaceFile,
   type Compressor,
@@ -69,11 +75,18 @@ const SAMPLE: Project = project(
   ],
   [link('a', 'b'), link('b', 'm')],
   {
-    tags: [{ id: 'design', name: 'Design', color: '#336699', representsPersonOrTeam: true }],
+    tags: [
+      { id: testId('design'), name: 'Design', color: '#336699', representsPersonOrTeam: true },
+    ],
     baseline: {
       takenAt: at(2026, 9, 27, 10),
       entries: [
-        { taskId: 'a', start: at(2026, 9, 28, 9), end: at(2026, 9, 28, 17), durationHours: 7 },
+        {
+          taskId: testId('a'),
+          start: at(2026, 9, 28, 9),
+          end: at(2026, 9, 28, 17),
+          durationHours: 7,
+        },
       ],
     },
   },
@@ -153,13 +166,14 @@ function tampered(change: (document: Y.Doc) => void): Uint8Array {
   return encodeTasklaceFile(document, storingCompressor);
 }
 
-/** Sorts the lists of a project by identifier. */
+/** Sorts the lists of a project by identifier and writes its calendar as a shared document holds it. */
 function sorted(input: Project): Project {
   /** Returns items ordered by identifier. */
   const byId = <T extends { readonly id: string }>(items: readonly T[]): T[] =>
     [...items].sort((left, right) => compareStrings(left.id, right.id));
   return {
     ...input,
+    calendar: canonicalCalendar(input.calendar),
     tasks: byId(input.tasks),
     dependencies: byId(input.dependencies),
     tags: byId(input.tags),
@@ -546,5 +560,115 @@ describe('checking a state before saving it', () => {
     expect(checkStateToSave(Y.encodeStateAsUpdate(document), TEST_DOCUMENT_ID)).toEqual(
       failure({ code: 'INVALID_STATE', issues: [{ path: 'name', code: 'EMPTY_TEXT' }] }),
     );
+  });
+});
+
+describe('reading a state received from a shared plan', () => {
+  it('gives back the state and its document identifier when it holds a valid project', () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    expect(readSharedState(state)).toEqual(success({ state, documentId: TEST_DOCUMENT_ID }));
+  });
+
+  it('refuses an empty state, one above the limit and one that cannot be decoded', () => {
+    expect(readSharedState(new Uint8Array())).toEqual(failure({ code: 'INVALID_CONTENT' }));
+    expect(readSharedState({ length: MAX_UNCOMPRESSED_BYTES + 1 } as Uint8Array)).toEqual(
+      failure({ code: 'TOO_LARGE' }),
+    );
+    const broken = readSharedState(Uint8Array.from([255, 255, 255, 1]));
+    expect(broken.ok ? null : broken.error.code).toBe('INVALID_CONTENT');
+  });
+
+  it('refuses a state holding an invalid project, with its problems', () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    document.getMap('project').set('name', '');
+    expect(readSharedState(Y.encodeStateAsUpdate(document))).toEqual(
+      failure({ code: 'INVALID_PROJECT', issues: [{ path: 'name', code: 'EMPTY_TEXT' }] }),
+    );
+  });
+});
+
+describe('copySharedState', () => {
+  const COPY_ID = requireDocumentId('22222222-2222-4222-8222-222222222222');
+
+  it('makes a separate plan of the same project under another name and identifier, which opens like any file', () => {
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const copied = copySharedState(
+      state,
+      { nameOf: (name) => `${name} (my changes)`, documentId: COPY_ID },
+      storingCompressor,
+    );
+    if (!copied.ok) {
+      throw new Error(copied.error.code);
+    }
+    const document = readTasklaceFile(copied.value, storingCompressor);
+    if (!document.ok) {
+      throw new Error(document.error.code);
+    }
+    const project = readSharedProject(document.value);
+    expect([readDocumentId(document.value), project.ok ? sorted(project.value) : project]).toEqual([
+      COPY_ID,
+      sorted({ ...SAMPLE, name: `${SAMPLE.name} (my changes)` }),
+    ]);
+  });
+
+  it('refuses a state it would refuse as the content of a file', () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    document.getMap('project').set('name', '');
+    const copy = { nameOf: () => 'Copy', documentId: COPY_ID };
+    expect([
+      copySharedState(new Uint8Array(), copy, storingCompressor),
+      copySharedState(Y.encodeStateAsUpdate(document), copy, storingCompressor),
+    ]).toEqual([
+      failure({ code: 'INVALID_CONTENT' }),
+      failure({ code: 'INVALID_PROJECT', issues: [{ path: 'name', code: 'EMPTY_TEXT' }] }),
+    ]);
+  });
+});
+
+describe('holdsChangesMissingFrom', () => {
+  /** Gives the state of a document after a change made in a copy of another state. */
+  const changed = (state: Uint8Array, change: (document: Y.Doc) => void): Uint8Array => {
+    const document = new Y.Doc();
+    Y.applyUpdate(document, state);
+    change(document);
+    return Y.encodeStateAsUpdate(document);
+  };
+  const base = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+
+  it('finds an added or changed value, and a deletion, which leaves the state vector as it is', () => {
+    const renamed = changed(base, (document) => {
+      document.getMap('project').set('name', 'Renamed');
+    });
+    const tag = SAMPLE.tags[0]?.id ?? '';
+    const deleted = changed(base, (document) => {
+      document.getMap(TAGS_ROOT).delete(tag);
+    });
+    expect([
+      holdsChangesMissingFrom(renamed, base),
+      holdsChangesMissingFrom(deleted, base),
+      Y.encodeStateVector(documentOf(deleted)),
+    ]).toEqual([true, true, Y.encodeStateVector(documentOf(base))]);
+  });
+
+  it('finds nothing in the same state, nor in an older one whose changes the other already holds', () => {
+    const newer = changed(base, (document) => {
+      document.getMap('project').set('name', 'Renamed');
+    });
+    expect([holdsChangesMissingFrom(base, base), holdsChangesMissingFrom(base, newer)]).toEqual([
+      false,
+      false,
+    ]);
+  });
+  it('finds the changes of a copy and a file that each changed apart from the other', () => {
+    const copy = changed(base, (document) => {
+      document.getMap('project').set('name', 'Renamed in the copy');
+    });
+    const file = changed(base, (document) => {
+      document.getMap('project').set('criticalPathEnabled', true);
+    });
+    expect([holdsChangesMissingFrom(copy, file), holdsChangesMissingFrom(file, copy)]).toEqual([
+      true,
+      true,
+    ]);
   });
 });

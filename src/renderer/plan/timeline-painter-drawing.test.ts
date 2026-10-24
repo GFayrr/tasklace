@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Project } from '../../core/model/project';
+import type { Project, TaskId } from '../../core/model/project';
 import { at, compileOrThrow } from '../../core/testing/civil-time';
 import type { ProjectHour } from '../../core/time';
 import {
@@ -10,6 +10,7 @@ import {
   splitTask,
   summary,
   workTask,
+  testId,
 } from '../../core/testing/project-builder';
 import { SAND_GRAPHITE } from '../theme/sand-graphite';
 import { buildPlanOutline } from './plan-outline';
@@ -37,22 +38,32 @@ import {
 
 const THEME = SAND_GRAPHITE;
 const STRIPES = { kind: 'stripes' } as unknown as CanvasPattern;
-const DESIGN = { id: 'design', name: 'Design', color: '#3366AA', representsPersonOrTeam: true };
-const NEAR = { id: 'near', name: 'Near', color: '#3366AB', representsPersonOrTeam: false };
+const DESIGN = {
+  id: testId('design'),
+  name: 'Design',
+  color: '#3366AA',
+  representsPersonOrTeam: true,
+};
+const NEAR = { id: testId('near'), name: 'Near', color: '#3366AB', representsPersonOrTeam: false };
 const PLAN: Project = project(
   [
     summary('s', { sortKey: 'a' }),
-    workTask('a', { parentId: 's', sortKey: 'a', progressPercent: 50, tagId: 'design' }),
+    workTask('a', {
+      parentId: testId('s'),
+      sortKey: 'a',
+      progressPercent: 50,
+      tagId: testId('design'),
+    }),
     splitTask(
       'b',
       [
         [7, 0],
         [7, 2],
       ],
-      { parentId: 's', sortKey: 'b', tagId: 'near' },
+      { parentId: testId('s'), sortKey: 'b', tagId: testId('near') },
     ),
     workTask('c', { sortKey: 'b' }),
-    milestone('m', { sortKey: 'c', tagId: 'design' }),
+    milestone('m', { sortKey: 'c', tagId: testId('design') }),
     milestone('n', { sortKey: 'd' }),
     workTask('w', {
       sortKey: 'e',
@@ -85,6 +96,7 @@ function sceneOf(overrides: Partial<TimelineScene> = {}): TimelineScene {
     deadlines: null,
     baseline: null,
     selectedTaskId: null,
+    presence: new Map(),
     today: at(2026, 9, 30, 12),
     showFloatLines: true,
     preview: null,
@@ -101,7 +113,7 @@ function paintBody(overrides: Partial<TimelineScene> = {}, viewport = VIEWPORT):
 }
 
 /** Returns the shape of the row of a task in the sample plan. */
-function shapeOf(id: string): RowShape {
+function shapeOf(id: TaskId): RowShape {
   const index = OUTLINE.rowIndexById.get(id) ?? -1;
   const row = OUTLINE.rows[index];
   const shape = row === undefined ? null : rowShape(row, index, SCHEDULE, FRAME);
@@ -112,7 +124,7 @@ function shapeOf(id: string): RowShape {
 }
 
 /** Returns the shape of a task or milestone, failing the test for a summary. */
-function placedShapeOf(id: string): PlacedShape {
+function placedShapeOf(id: TaskId): PlacedShape {
   const shape = shapeOf(id);
   if (shape.kind === 'summary') {
     throw new Error(`${id} is a summary`);
@@ -121,7 +133,7 @@ function placedShapeOf(id: string): PlacedShape {
 }
 
 /** Returns the work task shape of a task, failing the test for another kind. */
-function taskShapeOf(id: string): Extract<RowShape, { kind: 'task' }> {
+function taskShapeOf(id: TaskId): Extract<RowShape, { kind: 'task' }> {
   const shape = shapeOf(id);
   if (shape.kind !== 'task') {
     throw new Error(`${id} is not a work task`);
@@ -151,15 +163,38 @@ describe('paintTimelineBody', () => {
   });
 
   it('highlights the row of the selected task and draws a handle for each of its link ends', () => {
-    const row = OUTLINE.rowIndexById.get('b') ?? -1;
-    const calls = paintBody({ selectedTaskId: 'b' });
+    const row = OUTLINE.rowIndexById.get(testId('b')) ?? -1;
+    const calls = paintBody({ selectedTaskId: testId('b') });
     expect(filledAt(calls, row * ROW_HEIGHT, THEME.selection)).toBe(true);
-    expect(callsOf(calls, 'arc')).toHaveLength(linkHandles(shapeOf('b')).length);
+    expect(callsOf(calls, 'arc')).toHaveLength(linkHandles(shapeOf(testId('b'))).length);
+  });
+
+  it('draws a faint band with thin edges across the visible rows another person is on, and none for a row out of view', () => {
+    const row = OUTLINE.rowIndexById.get(testId('b')) ?? -1;
+    const presence = new Map([
+      [testId('b'), '#1F5FA8'],
+      [testId('gone'), '#8A3A8F'],
+    ]);
+    const band = callsOf(paintBody({ presence }), 'fillRect')
+      .filter((call) => call.fillStyle === '#edf2f8' || call.fillStyle === '#84a7cf')
+      .map((call) => [call.fillStyle, ...call.args]);
+    const top = row * ROW_HEIGHT;
+    expect(band).toEqual([
+      ['#edf2f8', 0, top, VIEWPORT.width, ROW_HEIGHT - 1],
+      ['#84a7cf', 0, top, VIEWPORT.width, 1],
+      ['#84a7cf', 0, top + ROW_HEIGHT - 2, VIEWPORT.width, 1],
+    ]);
+    const below = { ...VIEWPORT, top: (row + 1) * ROW_HEIGHT };
+    expect(
+      callsOf(paintBody({ presence }, below), 'fillRect').filter(
+        (call) => call.fillStyle === '#edf2f8',
+      ),
+    ).toEqual([]);
   });
 
   it('draws no handle for a selected summary, and no selection for a task out of the plan', () => {
-    expect(callsOf(paintBody({ selectedTaskId: 's' }), 'arc')).toEqual([]);
-    const calls = paintBody({ selectedTaskId: 'gone' });
+    expect(callsOf(paintBody({ selectedTaskId: testId('s') }), 'arc')).toEqual([]);
+    const calls = paintBody({ selectedTaskId: testId('gone') });
     expect(callsOf(calls, 'fillRect').some((call) => call.fillStyle === THEME.selection)).toBe(
       false,
     );
@@ -167,18 +202,18 @@ describe('paintTimelineBody', () => {
 
   it('fills a bar with its tag color up to its progress, on its pale color, with its pattern', () => {
     const calls = paintBody();
-    const shape = taskShapeOf('a');
+    const shape = taskShapeOf(testId('a'));
     const barTop = shape.row * ROW_HEIGHT + (ROW_HEIGHT - BAR_HEIGHT) / 2;
     const fills = callsOf(calls, 'fillRect').filter((call) => call.args[1] === barTop);
     expect(fills.map((call) => call.fillStyle)).toEqual([paleColor(DESIGN.color), DESIGN.color]);
-    const near = taskShapeOf('b');
+    const near = taskShapeOf(testId('b'));
     const nearTop = near.row * ROW_HEIGHT + (ROW_HEIGHT - BAR_HEIGHT) / 2;
     expect(filledAt(calls, nearTop, STRIPES)).toBe(true);
   });
 
   it('draws a bar without tag in the bar color, a milestone without tag in the text color, and the ends of a summary in the secondary text color', () => {
     const calls = paintBody();
-    const plain = taskShapeOf('c');
+    const plain = taskShapeOf(testId('c'));
     const plainTop = plain.row * ROW_HEIGHT + (ROW_HEIGHT - BAR_HEIGHT) / 2;
     expect(filledAt(calls, plainTop, paleColor(THEME.bar))).toBe(true);
     const diamonds = callsOf(calls, 'closePath').map((call) => call.fillStyle);
@@ -186,7 +221,7 @@ describe('paintTimelineBody', () => {
   });
 
   it('outlines the bars of a task in a conflict with the error color', () => {
-    const outlined = paintBody({ conflictTaskIds: new Set(['a']) });
+    const outlined = paintBody({ conflictTaskIds: new Set([testId('a')]) });
     const strokes = callsOf(outlined, 'stroke').filter(
       (call) => call.strokeStyle === THEME.error && call.lineWidth === 2,
     );
@@ -196,11 +231,11 @@ describe('paintTimelineBody', () => {
   });
 
   it('outlines a milestone that misses one of its dates with the error color', () => {
-    const shape = placedShapeOf('n');
+    const shape = placedShapeOf(testId('n'));
     const x = shape.kind === 'milestone' ? shape.x : Number.NaN;
     const middle = shape.row * ROW_HEIGHT + ROW_HEIGHT / 2;
     const reach = MILESTONE_SIZE / 2 + 2;
-    const calls = paintBody({ conflictTaskIds: new Set(['n']) });
+    const calls = paintBody({ conflictTaskIds: new Set([testId('n')]) });
     const outline = callsOf(calls, 'stroke').filter(
       (call) => call.strokeStyle === THEME.error && call.lineWidth === 2,
     );
@@ -238,17 +273,17 @@ describe('paintTimelineBody', () => {
     const outline = buildPlanOutline(dated.tasks, new Set());
     const scene = { rows: outline.rows, rowIndexById: outline.rowIndexById };
     /** Returns where the deadline mark of a task is drawn and its color. */
-    const lineOf = (id: string, deadline: ProjectHour, color: string) => {
+    const lineOf = (id: TaskId, deadline: ProjectHour, color: string) => {
       const top = (outline.rowIndexById.get(id) ?? -1) * ROW_HEIGHT;
       return { x: xOf(FRAME, deadline), top, color };
     };
     const marks = [
-      lineOf('c', at(2026, 10, 1, 12), THEME.action),
-      lineOf('n', at(2026, 10, 5, 9), THEME.error),
+      lineOf(testId('c'), at(2026, 10, 1, 12), THEME.action),
+      lineOf(testId('n'), at(2026, 10, 5, 9), THEME.error),
     ];
     const calls = paintBody({
       ...scene,
-      deadlines: { missedTaskIds: new Set(['n']) },
+      deadlines: { missedTaskIds: new Set([testId('n')]) },
     });
     /** Tells whether a drawing call draws a deadline mark. */
     const isMark = (call: CanvasCall) =>
@@ -276,8 +311,8 @@ describe('paintTimelineBody', () => {
     const lastBar = calls.findLastIndex((call) => call.name === 'stroke');
     expect(calls.findIndex(isMark)).toBeGreaterThan(lastBar);
     const below = paintBody(
-      { ...scene, deadlines: { missedTaskIds: new Set(['n']) } },
-      { ...VIEWPORT, top: (outline.rowIndexById.get('c') ?? -1) * ROW_HEIGHT + ROW_HEIGHT },
+      { ...scene, deadlines: { missedTaskIds: new Set([testId('n')]) } },
+      { ...VIEWPORT, top: (outline.rowIndexById.get(testId('c')) ?? -1) * ROW_HEIGHT + ROW_HEIGHT },
     );
     expect(
       callsOf(below, 'fillRect')
@@ -295,15 +330,28 @@ describe('paintTimelineBody', () => {
   it('draws the baseline of each visible task as a thin pale bar at the top of its row, and a hollow diamond for a frozen instant', () => {
     const entries = new Map([
       [
-        'c',
-        { taskId: 'c', start: at(2026, 9, 29, 9), end: at(2026, 9, 30, 17), durationHours: 14 },
+        testId('c'),
+        {
+          taskId: testId('c'),
+          start: at(2026, 9, 29, 9),
+          end: at(2026, 9, 30, 17),
+          durationHours: 14,
+        },
       ],
-      ['n', { taskId: 'n', start: at(2026, 10, 1, 9), end: at(2026, 10, 1, 9), durationHours: 0 }],
+      [
+        testId('n'),
+        {
+          taskId: testId('n'),
+          start: at(2026, 10, 1, 9),
+          end: at(2026, 10, 1, 9),
+          durationHours: 0,
+        },
+      ],
     ]);
     /** Returns the top of the row of a task on the timeline. */
-    const rowTop = (id: string) => (OUTLINE.rowIndexById.get(id) ?? -1) * ROW_HEIGHT;
+    const rowTop = (id: TaskId) => (OUTLINE.rowIndexById.get(id) ?? -1) * ROW_HEIGHT;
     /** Returns the top of the ghost bar of a task on the timeline. */
-    const ghostTop = (id: string) => rowTop(id) + 2;
+    const ghostTop = (id: TaskId) => rowTop(id) + 2;
     const pale = paleColor(THEME.textSecondary);
     const calls = paintBody({ baseline: entries });
     const ghosts = callsOf(calls, 'fillRect').filter(
@@ -312,13 +360,13 @@ describe('paintTimelineBody', () => {
     expect(ghosts.map((call) => call.args)).toEqual([
       [
         xOf(FRAME, at(2026, 9, 29, 9)),
-        ghostTop('c'),
+        ghostTop(testId('c')),
         xOf(FRAME, at(2026, 9, 30, 17)) - xOf(FRAME, at(2026, 9, 29, 9)),
         3,
       ],
     ]);
     const x = xOf(FRAME, at(2026, 10, 1, 9));
-    const middle = ghostTop('n') + 1.5;
+    const middle = ghostTop(testId('n')) + 1.5;
     const start = calls.findIndex(
       (call) => call.name === 'moveTo' && call.args[0] === x && call.args[1] === middle - 3,
     );
@@ -351,11 +399,17 @@ describe('paintTimelineBody', () => {
   it('draws a ghost at least two pixels wide, and only for the visible rows', () => {
     const instant = at(2026, 9, 29, 9);
     const entries = new Map([
-      ['a', { taskId: 'a', start: instant, end: instant + 0.25, durationHours: 0.25 }],
-      ['w', { taskId: 'w', start: instant, end: instant + 1, durationHours: 1 }],
+      [
+        testId('a'),
+        { taskId: testId('a'), start: instant, end: instant + 0.25, durationHours: 0.25 },
+      ],
+      [testId('w'), { taskId: testId('w'), start: instant, end: instant + 1, durationHours: 1 }],
     ]);
     const pale = paleColor(THEME.textSecondary);
-    const below = { ...VIEWPORT, top: ((OUTLINE.rowIndexById.get('a') ?? -1) + 1) * ROW_HEIGHT };
+    const below = {
+      ...VIEWPORT,
+      top: ((OUTLINE.rowIndexById.get(testId('a')) ?? -1) + 1) * ROW_HEIGHT,
+    };
     /** Lists the left edges of the ghost bars drawn in a viewport. */
     const ghosts = (viewport: Viewport) =>
       callsOf(paintBody({ baseline: entries }, viewport), 'fillRect')
@@ -391,8 +445,8 @@ describe('paintTimelineBody', () => {
     ]);
     expect(criticalBlocks).toBe(1);
     expect(marks).toHaveLength(criticalBlocks);
-    const c = taskShapeOf('c');
-    const cFloat = floats.get('c');
+    const c = taskShapeOf(testId('c'));
+    const cFloat = floats.get(testId('c'));
     expect(cFloat?.isCritical).toBe(false);
     const dashed = callsOf(calls, 'stroke').filter((call) => call.lineDash.join() === '4,3');
     const slipping = [...floats.values()].filter(
@@ -402,7 +456,7 @@ describe('paintTimelineBody', () => {
     expect(dashed.map((call) => [call.strokeStyle, call.lineWidth])).toEqual(
       slipping.map(() => [THEME.textSecondary, 1.5]),
     );
-    const middle = (OUTLINE.rowIndexById.get('c') ?? -1) * ROW_HEIGHT + ROW_HEIGHT / 2;
+    const middle = (OUTLINE.rowIndexById.get(testId('c')) ?? -1) * ROW_HEIGHT + ROW_HEIGHT / 2;
     const cEnd = (c.segments.at(-1)?.x ?? 0) + (c.segments.at(-1)?.width ?? 0);
     expect(
       callsOf(calls, 'moveTo').some((call) => call.args[0] === cEnd && call.args[1] === middle),
@@ -436,15 +490,15 @@ describe('paintTimelineBody', () => {
   });
 
   it('underlines a critical milestone across its diamond', () => {
-    const m = placedShapeOf('m');
+    const m = placedShapeOf(testId('m'));
     const floats = new Map([
       [
-        'm',
+        testId('m'),
         { lateStart: 0, lateFinish: 0, totalFloatHours: 0, freeFloatHours: 0, isCritical: true },
       ],
     ]);
     const calls = paintBody({ schedule: { ...SCHEDULE, floats } });
-    const top = (OUTLINE.rowIndexById.get('m') ?? -1) * ROW_HEIGHT;
+    const top = (OUTLINE.rowIndexById.get(testId('m')) ?? -1) * ROW_HEIGHT;
     expect(
       callsOf(calls, 'fillRect')
         .filter((call) => call.fillStyle === THEME.action && call.args[3] === 3)
@@ -472,9 +526,9 @@ describe('paintTimelineBody', () => {
       freeFloatHours: null,
       isCritical: true,
     } as const;
-    const floats = new Map([['c', unknown]]);
+    const floats = new Map([[testId('c'), unknown]]);
     const calls = paintBody({ schedule: { ...schedule, floats } });
-    const c = taskShapeOf('c');
+    const c = taskShapeOf(testId('c'));
     expect(
       callsOf(calls, 'fillRect')
         .filter((call) => call.fillStyle === THEME.action && call.args[3] === 3)
@@ -507,7 +561,7 @@ describe('paintTimelineBody', () => {
   });
 
   it('draws the summary as a bar in the text color', () => {
-    const shape = shapeOf('s');
+    const shape = shapeOf(testId('s'));
     const calls = paintBody();
     expect(
       callsOf(calls, 'fillRect').some(
@@ -535,7 +589,7 @@ describe('paintTimelineBody', () => {
   it('skips the links and bars of rows out of view, and links to tasks out of the plan', () => {
     const lastRow = OUTLINE.rows.length - 1;
     const bottom = { ...VIEWPORT, top: lastRow * ROW_HEIGHT, height: ROW_HEIGHT };
-    const [first] = dependencyArrow(link('a', 'b'), shapeOf('a'), shapeOf('b'));
+    const [first] = dependencyArrow(link('a', 'b'), shapeOf(testId('a')), shapeOf(testId('b')));
     const calls = paintBody({ dependencies: [...PLAN.dependencies, link('a', 'gone')] }, bottom);
     expect(
       callsOf(calls, 'moveTo').some(
@@ -557,7 +611,7 @@ describe('paintTimelineBody', () => {
 
   it('draws a block without calendar as a single part', () => {
     const calls = paintBody({ calendar: null });
-    const shape = taskShapeOf('w');
+    const shape = taskShapeOf(testId('w'));
     const barTop = shape.row * ROW_HEIGHT + (ROW_HEIGHT - BAR_HEIGHT) / 2;
     const parts = callsOf(calls, 'roundRect').filter((call) => call.args[1] === barTop);
     expect(parts.map((call) => call.args[0])).toEqual([shape.start]);
@@ -565,7 +619,7 @@ describe('paintTimelineBody', () => {
 
   it('draws a block over a weekend as two parts joined by a thin pale band', () => {
     const calls = paintBody();
-    const shape = taskShapeOf('w');
+    const shape = taskShapeOf(testId('w'));
     const top = shape.row * ROW_HEIGHT;
     const barTop = top + (ROW_HEIGHT - BAR_HEIGHT) / 2;
     expect(callsOf(calls, 'roundRect').filter((call) => call.args[1] === barTop)).toHaveLength(2);
@@ -603,7 +657,7 @@ describe('drag previews', () => {
   }
 
   it('outlines where a moved or stretched bar would go', () => {
-    const shape = taskShapeOf('c');
+    const shape = taskShapeOf(testId('c'));
     for (const preview of [
       { kind: 'move', shape, offset: 40, block: null },
       { kind: 'stretch', shape, offset: -10 },
@@ -617,19 +671,24 @@ describe('drag previews', () => {
   });
 
   it('outlines where a moved milestone would go', () => {
-    const moved = dashed({ kind: 'move', shape: placedShapeOf('m'), offset: 12, block: null });
+    const moved = dashed({
+      kind: 'move',
+      shape: placedShapeOf(testId('m')),
+      offset: 12,
+      block: null,
+    });
     expect(callsOf(moved, 'closePath')).toHaveLength(1);
     expect(callsOf(moved, 'strokeRect')).toEqual([]);
   });
 
   it('draws a dragged link to the pointer, framing the row and block it would be dropped on', () => {
-    const target = taskShapeOf('b');
+    const target = taskShapeOf(testId('b'));
     const calls = dashed({
       kind: 'link',
-      shape: placedShapeOf('c'),
+      shape: placedShapeOf(testId('c')),
       block: null,
       pointer: { x: 300, y: 50 },
-      target: { row: target.row, end: { taskId: 'b', block: 1 } },
+      target: { row: target.row, end: { taskId: testId('b'), block: 1 } },
     });
     expect(
       callsOf(calls, 'lineTo').some((call) => call.args[0] === 300 && call.args[1] === 50),
@@ -642,15 +701,15 @@ describe('drag previews', () => {
   it('frames only the row of a dragged link over a task without that block, and nothing without a row', () => {
     const over = dashed({
       kind: 'link',
-      shape: placedShapeOf('c'),
+      shape: placedShapeOf(testId('c')),
       block: null,
       pointer: { x: 10, y: 10 },
-      target: { row: shapeOf('m').row, end: { taskId: 'm', block: 0 } },
+      target: { row: shapeOf(testId('m')).row, end: { taskId: testId('m'), block: 0 } },
     });
     expect(callsOf(over, 'strokeRect')).toHaveLength(1);
     const nowhere = dashed({
       kind: 'link',
-      shape: placedShapeOf('c'),
+      shape: placedShapeOf(testId('c')),
       block: null,
       pointer: { x: 10, y: 10 },
       target: null,

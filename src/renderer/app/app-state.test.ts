@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Project } from '../../core/model/project';
+import type { Project, TaskId } from '../../core/model/project';
 import type { BridgeResult, ExportedFile, OpenedProject } from '../../preload/bridge-contract';
 import { scheduleProject } from '../../core/scheduling/schedule-project';
 import { at } from '../../core/testing/civil-time';
@@ -10,6 +10,7 @@ import {
   splitTask,
   summary,
   workTask,
+  testId,
 } from '../../core/testing/project-builder';
 import english from '../locales/en.json';
 import { issueText } from '../i18n/issue-text';
@@ -23,7 +24,7 @@ import { fakeAppContext, openedProjectOf, settle } from './testing/fake-app-cont
 const PLAN: Project = project(
   [
     summary('s', { sortKey: 'a' }),
-    workTask('a', { parentId: 's' }),
+    workTask('a', { parentId: testId('s') }),
     milestone('m', { sortKey: 'b' }),
   ],
   [],
@@ -411,7 +412,7 @@ describe('saving and exporting', () => {
       await app.exportFile('csv');
       expect(logged).toHaveBeenLastCalledWith('The schedule could not be computed:', {
         kind: 'task',
-        error: { code: 'BEYOND_PLANNING_HORIZON', taskId: 'long' },
+        error: { code: 'BEYOND_PLANNING_HORIZON', taskId: testId('long') },
       });
     } finally {
       logged.mockRestore();
@@ -471,10 +472,10 @@ describe('editing', () => {
     const { app } = await withOpenPlan();
     expect(app.edit(() => ({ ok: false, error: 'INVALID_DATE' }))).toBe(false);
     expect(noticeTexts(app)).toEqual([english.editErrors.INVALID_DATE]);
-    const unnamed = { ...workTask('a', { parentId: 's' }), name: '' };
+    const unnamed = { ...workTask('a', { parentId: testId('s') }), name: '' };
     expect(app.edit(() => ({ ok: true, value: [{ type: 'putTask', task: unnamed }] }))).toBe(false);
     expect(noticeTexts(app)).toEqual([english.editErrors.INVALID_DATE, english.issues.EMPTY_TEXT]);
-    expect(app.edit((context) => setStart(context, 'a', '2026-09-29 10:00'))).toBe(true);
+    expect(app.edit((context) => setStart(context, testId('a'), '2026-09-29 10:00'))).toBe(true);
     expect(app.project?.tasks.find((task) => task.id === 'a')).toMatchObject({
       startNoEarlierThan: at(2026, 9, 29, 10),
     });
@@ -483,10 +484,10 @@ describe('editing', () => {
 
   it('selects only a task the project has, and answers each request once', async () => {
     const { app } = await withOpenPlan();
-    app.select('a');
+    app.select(testId('a'));
     expect(app.selectedTaskId).toBe('a');
     expect(() => {
-      app.select('gone');
+      app.select(testId('gone'));
     }).toThrow('The task gone to select is not in the project.');
     app.select(null);
     expect(app.selectedTaskId).toBeNull();
@@ -500,7 +501,7 @@ describe('editing', () => {
 
   it('explains a value the project refuses with the problem found, not with the help to write it', async () => {
     const { app } = await withOpenPlan();
-    const tooLong = workTask('a', { parentId: 's', hoursPerDay: 12 });
+    const tooLong = workTask('a', { parentId: testId('s'), hoursPerDay: 12 });
     expect(app.tryEdit(() => ({ ok: true, value: [{ type: 'putTask', task: tooLong }] }))).toBe(
       english.issues.INVALID_HOURS_PER_DAY,
     );
@@ -509,7 +510,7 @@ describe('editing', () => {
 
   it('moves the project start back for a task placed before it, and says so', async () => {
     const { app } = await withOpenPlan();
-    expect(app.edit((context) => setStart(context, 'a', '2026-09-21 09:00'))).toBe(true);
+    expect(app.edit((context) => setStart(context, testId('a'), '2026-09-21 09:00'))).toBe(true);
     expect(app.project?.startDate).toBe(at(2026, 9, 21));
     expect(noticeTexts(app)).toEqual([
       'The project now starts on Sep 21, 2026, so that this task can start earlier.',
@@ -518,13 +519,13 @@ describe('editing', () => {
 
   it('adds a task after the selected one, selects it and asks to edit its name', async () => {
     const { app } = await withOpenPlan();
-    app.select('a');
+    app.select(testId('a'));
     app.addTask();
     expect(app.selectedTaskId).toBe('id1');
-    expect(app.editRequest).toEqual({ taskId: 'id1', column: 'name' });
+    expect(app.editRequest).toEqual({ taskId: testId('id1'), column: 'name' });
     expect(app.project?.tasks.find((task) => task.id === 'id1')).toMatchObject({
       name: english.table.newTask,
-      parentId: 's',
+      parentId: testId('s'),
     });
     const empty = createApp();
     empty.app.addTask();
@@ -535,7 +536,7 @@ describe('editing', () => {
     const { app } = await withOpenPlan();
     app.deleteSelected();
     expect(app.project?.tasks).toHaveLength(3);
-    app.select('s');
+    app.select(testId('s'));
     app.deleteSelected();
     expect(app.project?.tasks.map((task) => task.id)).toEqual(['m']);
     expect(app.selectedTaskId).toBe('m');
@@ -549,7 +550,7 @@ describe('editing', () => {
     const build = vi.fn(() => ({ ok: true, value: [] }) as const);
     app.editSelected(build);
     expect(build).not.toHaveBeenCalled();
-    app.select('a');
+    app.select(testId('a'));
     app.editSelected(build);
     expect(build).toHaveBeenCalledWith(expect.anything(), 'a');
   });
@@ -572,16 +573,16 @@ describe('editing', () => {
 
   it('opens and closes summaries, from the keyboard only for summaries', async () => {
     const { app } = await withOpenPlan();
-    app.setSummaryOpen('s', false);
-    expect(app.collapsed.has('s')).toBe(true);
-    app.setSummaryOpen('s', false);
-    expect(app.collapsed.has('s')).toBe(true);
-    app.setSummaryOpen('s', true);
-    expect(app.collapsed.has('s')).toBe(false);
-    app.setSummaryOpen('a', false);
-    expect(app.collapsed.has('a')).toBe(false);
-    app.toggleSummary('s');
-    expect(app.collapsed.has('s')).toBe(true);
+    app.setSummaryOpen(testId('s'), false);
+    expect(app.collapsed.has(testId('s'))).toBe(true);
+    app.setSummaryOpen(testId('s'), false);
+    expect(app.collapsed.has(testId('s'))).toBe(true);
+    app.setSummaryOpen(testId('s'), true);
+    expect(app.collapsed.has(testId('s'))).toBe(false);
+    app.setSummaryOpen(testId('a'), false);
+    expect(app.collapsed.has(testId('a'))).toBe(false);
+    app.toggleSummary(testId('s'));
+    expect(app.collapsed.has(testId('s'))).toBe(true);
   });
 
   it('runs the keyboard commands', async () => {
@@ -615,16 +616,16 @@ describe('the details panel', () => {
     const { app } = await withOpenPlan();
     app.openDetails();
     expect(app.detailsTaskId).toBeNull();
-    app.openDetails('a');
+    app.openDetails(testId('a'));
     expect([app.selectedTaskId, app.detailsTaskId]).toEqual(['a', 'a']);
   });
 
   it('describes what a block waits for and what the panel was opened on', async () => {
     const { app } = await withOpenPlan();
-    expect(app.blockWaitText('a', 0)).toBe('');
-    expect(app.detailsBasis('a')).not.toBe('');
+    expect(app.blockWaitText(testId('a'), 0)).toBe('');
+    expect(app.detailsBasis(testId('a'))).not.toBe('');
     const empty = createApp();
-    expect(empty.app.detailsBasis('a')).toBe('');
+    expect(empty.app.detailsBasis(testId('a'))).toBe('');
   });
 });
 
@@ -724,7 +725,7 @@ describe('schedules and messages', () => {
 
   it('names the tasks adjusted when a project is opened', async () => {
     const { app, control } = createApp();
-    const withMissingTag = project([workTask('a', { name: 'Write', tagId: 'gone' })], [], {
+    const withMissingTag = project([workTask('a', { name: 'Write', tagId: testId('gone') })], [], {
       name: 'Plan',
     });
     control.openResult = openedProjectOf(withMissingTag);
@@ -766,7 +767,7 @@ describe('saving the details panel', () => {
   );
 
   /** Opens the split plan with the details panel of a task open, and returns its draft. */
-  async function detailsOf(id: string) {
+  async function detailsOf(id: TaskId) {
     const created = createApp();
     created.control.openResult = openedProjectOf(SPLIT_PLAN);
     await created.app.open();
@@ -784,7 +785,7 @@ describe('saving the details panel', () => {
   }
 
   it('applies the panel to its task and closes it', async () => {
-    const { app, draft } = await detailsOf('a');
+    const { app, draft } = await detailsOf(testId('a'));
     expect(app.saveDetails({ ...draft, name: 'Write' })).toBeNull();
     await settle();
     expect(app.detailsTaskId).toBeNull();
@@ -792,7 +793,7 @@ describe('saving the details panel', () => {
   });
 
   it('keeps the panel open with the reason when a field cannot be read', async () => {
-    const { app, draft } = await detailsOf('a');
+    const { app, draft } = await detailsOf(testId('a'));
     expect(app.saveDetails({ ...draft, progress: 'half' })).toBe(
       english.editErrors.INVALID_PROGRESS,
     );
@@ -800,16 +801,16 @@ describe('saving the details panel', () => {
   });
 
   it('refuses a panel whose task changed or disappeared meanwhile', async () => {
-    const { app, draft } = await detailsOf('a');
+    const { app, draft } = await detailsOf(testId('a'));
     expect(app.saveDetails({ ...draft, basis: 'older' })).toBe(english.editErrors.TASK_CHANGED);
-    expect(app.edit((context) => deleteTasks(context, ['a']))).toBe(true);
+    expect(app.edit((context) => deleteTasks(context, [testId('a')]))).toBe(true);
     await settle();
     expect(app.detailsTaskId).toBeNull();
     expect(app.saveDetails(draft)).toBe(english.editErrors.NOT_POSSIBLE);
   });
 
   it('names the block whose start date cannot be read, or whose wait names nothing', async () => {
-    const { app, draft } = await detailsOf('b');
+    const { app, draft } = await detailsOf(testId('b'));
     const [first, second] = draft.blocks;
     if (first === undefined || second === undefined) {
       throw new Error('Missing block');
@@ -868,10 +869,10 @@ describe('one file action at a time', () => {
     await settle();
     expect(app.fileActionRunning).toBe(true);
     const before = app.project;
-    expect(app.tryEdit((edit) => setStart(edit, 'a', '2026-09-29 10:00'))).toBe(
+    expect(app.tryEdit((edit) => setStart(edit, testId('a'), '2026-09-29 10:00'))).toBe(
       english.fileErrors.BUSY,
     );
-    app.select('a');
+    app.select(testId('a'));
     app.addTask();
     app.deleteSelected();
     expect(app.rename('During')).toBe(false);
@@ -1079,7 +1080,7 @@ describe('the state without a project', () => {
     const { app } = createApp();
     expect(app.outline.rows).toEqual([]);
     expect(app.calendar).toBeNull();
-    expect(app.blockWaitText('a', 1)).toBe('');
+    expect(app.blockWaitText(testId('a'), 1)).toBe('');
   });
 });
 

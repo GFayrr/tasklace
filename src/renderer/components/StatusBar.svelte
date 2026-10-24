@@ -5,10 +5,13 @@
   import { tagsByName } from '../plan/tag-commands';
   import { tagStylesOf } from '../plan/tag-styles';
   import Icon from './Icon.svelte';
+  import PeopleFaces from './PeopleFaces.svelte';
   import TagSwatch from './TagSwatch.svelte';
   import { ZOOM_LEVELS } from '../plan/time-scale';
 
   let { app }: { app: AppState } = $props();
+
+  const FACES_SHOWN = 5;
   const text = $derived(app.messages);
   const formatDay = $derived(createDayFormatter(app.locale));
   const tags = $derived(tagsByName(app.project?.tags ?? [], app.locale));
@@ -17,6 +20,25 @@
   const showsDeadlines = $derived(app.shownDeadlines.length > 0);
   const taskCount = $derived(
     countMessage(text.status.tasks, app.project?.tasks.length ?? 0, app.locale),
+  );
+  const collaboration = $derived(app.collaboration);
+  const mode = $derived(collaboration.mode);
+  const away = $derived(
+    mode.kind === 'guest' && mode.connection !== 'connected' ? mode.connection : null,
+  );
+  const awayTexts = $derived({
+    reconnecting: text.collaboration.reconnectingShort,
+    offline: text.collaboration.offlineShort,
+    lost: text.collaboration.connectionLost,
+  });
+  const names = $derived(
+    new Intl.ListFormat(app.locale, { type: 'unit', style: 'short' }).format(
+      collaboration.participants.map((person) =>
+        person.isHost
+          ? fillMessage(text.collaboration.hostName, { name: person.name })
+          : person.name,
+      ),
+    ),
   );
   const span = $derived.by(() => {
     const found = app.schedule === null ? null : projectSpan(app.schedule);
@@ -73,6 +95,29 @@
     </button>
   {/if}
   <div class="spacer"></div>
+  {#if mode.kind === 'guest' && collaboration.isReadOnly}
+    <span class="read-only">
+      <span class="badge"><Icon name="eye" />{text.collaboration.readOnlyRight}</span>
+      <span class="hint"
+        >{fillMessage(text.collaboration.canLetYouEdit, {
+          host: collaboration.hostName ?? text.collaboration.theHost,
+        })}</span
+      >
+    </span>
+  {/if}
+  {#if away !== null}
+    <span class={['badge', away]}><Icon name="alert" />{awayTexts[away]}</span>
+  {:else if mode.kind === 'hosting' || mode.kind === 'guest'}
+    <div class="people" role="group" aria-label={text.collaboration.peopleLabel}>
+      <PeopleFaces
+        people={collaboration.participants}
+        locale={app.locale}
+        limit={FACES_SHOWN}
+        more={text.collaboration.moreFaces}
+      />
+      <span class="names">{names}</span>
+    </div>
+  {/if}
   <span class="summary">
     <span>{taskCount}</span>
     {#if span !== null}
@@ -222,6 +267,61 @@
 
   .spacer {
     flex-grow: 1;
+  }
+
+  .people {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .names {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--color-text-secondary);
+  }
+
+  .read-only {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    white-space: nowrap;
+  }
+
+  .hint {
+    color: var(--color-text-secondary);
+  }
+
+  .badge {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 1px 9px;
+    font-weight: 500;
+    white-space: nowrap;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+  }
+
+  .badge :global(.icon) {
+    width: 14px;
+    height: 14px;
+  }
+
+  .badge.lost,
+  .badge.reconnecting {
+    color: var(--color-warning);
+    border-color: currentColor;
+  }
+
+  .badge.offline {
+    color: var(--color-text-secondary);
   }
   .zoom {
     flex-shrink: 0;

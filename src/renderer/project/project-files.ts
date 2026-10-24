@@ -21,6 +21,7 @@ import {
 } from '../../preload/bridge-contract';
 import type { ValidationIssue } from '../../core/validation/validation-issues';
 import type { Result } from '../../core/result';
+import type { SharedRepair } from '../../core/shared/shared-project';
 import { createAutosave, type Timer } from './autosave';
 
 export type ProjectBridge = Pick<
@@ -37,6 +38,9 @@ export type ProjectBridge = Pick<
   | 'saveHeldPdf'
   | 'exportLighterPdf'
   | 'discardHeldPdf'
+  | 'openSharedPlan'
+  | 'openKeptChanges'
+  | 'setLocalCopyAside'
 >;
 
 export type ActionFailure =
@@ -59,10 +63,19 @@ function carriesIssues(failure: ActionFailure): failure is IssueFailure {
   return codes.includes(failure.code);
 }
 
+export type LocalChangesChoice = 'add' | 'alone' | 'cancel';
+
+export type LocalChangesOutcome =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'added'; readonly repairs: readonly SharedRepair[] }
+  | { readonly kind: 'setAside' }
+  | { readonly kind: 'notAdded'; readonly setAside: boolean };
+
 export interface OpenedSession {
   readonly session: SharedSession;
   readonly fileName: string;
   readonly warnings: readonly ImportWarning[];
+  readonly localChanges: LocalChangesOutcome;
 }
 
 export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'failed';
@@ -72,6 +85,7 @@ export interface ProjectFilesListener {
   readonly saveStatus: (status: SaveStatus) => void;
   readonly localCopyFailed: () => void;
   readonly fileActionRunning: (running: boolean) => void;
+  readonly chooseLocalChanges: (fileName: string) => Promise<LocalChangesChoice>;
 }
 
 export interface ProjectFiles {
@@ -81,6 +95,8 @@ export interface ProjectFiles {
   readonly open: () => Promise<ActionResult<OpenedSession>>;
   readonly openRecent: (index: number) => Promise<ActionResult<OpenedSession>>;
   readonly importFile: (kind: ExchangeKind) => Promise<ActionResult<OpenedSession>>;
+  readonly openShared: (state: Uint8Array) => Promise<ActionResult<OpenedSession>>;
+  readonly openKept: () => Promise<ActionResult<OpenedSession>>;
   readonly save: () => Promise<ActionResult<SavedProject>>;
   readonly saveAs: () => Promise<ActionResult<SavedProject>>;
   readonly exportFile: (
@@ -122,6 +138,7 @@ export function createProjectFiles(
   let current: Current | null = null;
   let changeCount = 0;
   let busy = false;
+  let running: Promise<unknown> = Promise.resolve();
   let lastSave: Promise<unknown> = Promise.resolve();
   /** Sends the latest state of the project to be saved after the saves already sent, one at a time. */
   const sendSave = (
@@ -175,12 +192,24 @@ export function createProjectFiles(
     }
     busy = true;
     listener.fileActionRunning(true);
+    const run = action();
+    running = run.then(
+      () => undefined,
+      () => undefined,
+    );
     try {
-      return await action();
+      return await run;
     } finally {
       busy = false;
       listener.fileActionRunning(false);
     }
+  };
+  /** Runs a file action once the one under way ends, for an action the person did not ask for and that cannot be refused, such as opening the plan a host sent. */
+  const onceFree = async <T>(action: () => Promise<ActionResult<T>>): Promise<ActionResult<T>> => {
+    while (busy) {
+      await running;
+    }
+    return exclusive(action);
   };
   /** Finishes the pending save of the open project before another one replaces it, telling why when it fails. */
   const saveBeforeSwitching = async (): Promise<ActionResult<null>> => {
@@ -224,12 +253,42 @@ export function createProjectFiles(
     if (!read.ok) {
       return read;
     }
+    const { fileName, warnings, localChanges } = opened.value;
+    const choice = localChanges === null ? null : await listener.chooseLocalChanges(fileName);
+    if (choice === 'cancel') {
+      return { ok: false, error: { code: 'CANCELLED' } };
+    }
+    if (choice === 'alone') {
+      const aside = await bridge.setLocalCopyAside(read.value.documentId);
+      if (!aside.ok) {
+        return aside;
+      }
+    }
     const session = await adopt(read.value, hasFile);
     if (!session.ok) {
       return session;
     }
-    const { fileName, warnings } = opened.value;
-    return { ok: true, value: { session: session.value, fileName, warnings } };
+    const outcome: LocalChangesOutcome =
+      localChanges !== null && choice === 'add'
+        ? await addLocalChanges(session.value, localChanges)
+        : { kind: choice === 'alone' ? 'setAside' : 'none' };
+    return {
+      ok: true,
+      value: { session: session.value, fileName, warnings, localChanges: outcome },
+    };
+  };
+  /** Adds to an adopted project the changes its local copy holds, setting the copy aside when they cannot be added so that the next save does not replace them. */
+  const addLocalChanges = async (
+    session: SharedSession,
+    changes: Uint8Array,
+  ): Promise<LocalChangesOutcome> => {
+    const merged = session.merge(changes);
+    if (merged.ok) {
+      return { kind: 'added', repairs: merged.value };
+    }
+    console.error('The changes kept on this computer could not be added:', merged.error);
+    const aside = await bridge.setLocalCopyAside(session.documentId);
+    return { kind: 'notAdded', setAside: aside.ok };
   };
   /** Creates a new project under the identifier the main process gives, after saving the open one, and adopts it. */
   const create = async (project: Project): Promise<ActionResult<SharedSession>> => {
@@ -264,6 +323,8 @@ export function createProjectFiles(
     open: () => exclusive(() => load(bridge.openProject, true)),
     openRecent: (index) => exclusive(() => load(() => bridge.openRecentProject(index), true)),
     importFile: (kind) => exclusive(() => load(() => bridge.importProject(kind), false)),
+    openShared: (state) => onceFree(() => load(() => bridge.openSharedPlan(state), false)),
+    openKept: () => exclusive(() => load(bridge.openKeptChanges, true)),
     save: () =>
       exclusive(() => (current?.hasFile === true ? trackSave(bridge.saveProject) : saveAs())),
     saveAs: () => exclusive(saveAs),

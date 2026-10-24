@@ -1,5 +1,18 @@
-import type { Dependency, DependencyType, Project, Tag, Task } from '../../src/core/model/project';
-import { milestone, project, splitTask, workTask } from '../../src/core/testing/project-builder';
+import type {
+  Dependency,
+  DependencyType,
+  Project,
+  Tag,
+  Task,
+  TaskId,
+} from '../../src/core/model/project';
+import {
+  milestone,
+  project,
+  splitTask,
+  workTask,
+  testId,
+} from '../../src/core/testing/project-builder';
 import { createRandom } from './random';
 
 export const LARGE_PROJECT_TASK_COUNT = 10_000;
@@ -12,7 +25,7 @@ export const LARGE_PROJECT_SEED = 20_260_928;
 const MAX_ATTEMPTS_PER_DEPENDENCY = 10;
 const PERSON_COUNT = 20;
 const PERSON_TAGS: Tag[] = Array.from({ length: PERSON_COUNT }, (_value, index) => ({
-  id: `person${String(index)}`,
+  id: testId(`person${String(index)}`),
   name: `Person ${String(index)}`,
   color: '#2a78d6',
   representsPersonOrTeam: true,
@@ -32,7 +45,7 @@ export function buildLargeProject(
   const random = createRandom(seed);
   const dependencyCount = taskCount * DEPENDENCIES_PER_TASK;
   /** Returns the identifier of the task at an index. */
-  const idOf = (index: number): string => `t${String(index)}`;
+  const idOf = (index: number): TaskId => testId(`t${String(index)}`);
   /** Returns the tag of the person given the task at an index. */
   const tagOf = (index: number): string => `person${String(index % PERSON_COUNT)}`;
   const tasks: Task[] = Array.from({ length: taskCount }, (_value, index) => {
@@ -63,7 +76,7 @@ export function buildLargeProject(
     }
     const from = Math.floor(random() * (taskCount - 1));
     const to = Math.min(taskCount - 1, from + 1 + Math.floor(random() * MAX_LINK_DISTANCE));
-    const id = `${idOf(from)}-${idOf(to)}`;
+    const id = testId(`${idOf(from)}-${idOf(to)}`);
     const type = LINK_TYPES[Math.floor(random() * LINK_TYPES.length)] ?? 'finishToStart';
     dependencies.set(id, {
       id,

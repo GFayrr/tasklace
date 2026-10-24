@@ -8,7 +8,8 @@ interface ObservedElement {
 }
 
 const observed: ObservedElement[] = [];
-const frames: FrameRequestCallback[] = [];
+const frames = new Map<number, FrameRequestCallback>();
+let nextFrame = 1;
 let calls: CanvasCall[] = [];
 let read = 0;
 let withContext = true;
@@ -50,8 +51,13 @@ class ManualResizeObserver {
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', ManualResizeObserver);
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
-    frames.push(callback);
-    return frames.length;
+    const id = nextFrame;
+    nextFrame += 1;
+    frames.set(id, callback);
+    return id;
+  });
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+    frames.delete(id);
   });
   const canvas = recordingCanvas();
   calls = canvas.calls;
@@ -68,7 +74,7 @@ beforeEach(() => {
 
 afterEach(() => {
   observed.length = 0;
-  frames.length = 0;
+  frames.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -80,6 +86,13 @@ export function refuseDrawingContexts(): void {
 
 /** Gives an element a size, as the layout of a real page would, and tells its observers. */
 export function resize(element: HTMLElement, width: number, height: number): void {
+  reportSize(element, width, height);
+  runFrames();
+  flushSync();
+}
+
+/** Tells the observers of an element its new size as the browser does, before the next frame. */
+export function reportSize(element: HTMLElement, width: number, height: number): void {
   Object.defineProperty(element, 'clientWidth', { configurable: true, value: width });
   Object.defineProperty(element, 'clientHeight', { configurable: true, value: height });
   const entry = {
@@ -89,14 +102,20 @@ export function resize(element: HTMLElement, width: number, height: number): voi
   for (const watch of observed.filter((each) => each.element === element)) {
     watch.callback([entry], {} as ResizeObserver);
   }
-  flushSync();
+}
+
+/** Runs the frames asked so far, those they ask in turn waiting for the next time. */
+function runFrames(): void {
+  const waiting = [...frames.values()];
+  frames.clear();
+  for (const frame of waiting) {
+    frame(0);
+  }
 }
 
 /** Draws the frames asked so far, returning the drawing calls made since the previous time. */
 export function drawFrames(): CanvasCall[] {
-  for (const frame of frames.splice(0)) {
-    frame(0);
-  }
+  runFrames();
   const made = calls.slice(read);
   read = calls.length;
   return made;

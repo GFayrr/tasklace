@@ -3,7 +3,7 @@ import * as Y from 'yjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { hideListContent } from '../testing/hidden-list-content';
-import type { Project, Tag } from '../model/project';
+import type { Project, Tag, TaskId } from '../model/project';
 import {
   link,
   milestone,
@@ -12,13 +12,17 @@ import {
   summary,
   TEST_DOCUMENT_ID,
   workTask,
+  testId,
 } from '../testing/project-builder';
 import type { SharedOperation } from './shared-operations';
 import {
   createSharedDocument,
   PROJECT_ROOT,
   readSharedData,
+  PERIODS_ROOT,
   TASKS_ROOT,
+  TIME_RANGES_ROOT,
+  WEEKDAYS_ROOT,
   requireDocumentId,
 } from './shared-document';
 import { mergeSharedUpdate, readSharedProject } from './shared-project';
@@ -44,7 +48,7 @@ const SAMPLE = project([workTask('a'), workTask('b')]);
 const MORNING_ONLY = [{ startHour: 9, endHour: 12 }];
 const OTHER_DOCUMENT_ID = requireDocumentId('00000000-0000-4000-8000-000000000002');
 const DESIGN: Tag = {
-  id: 'design',
+  id: testId('design'),
   name: 'Design',
   color: '#336699',
   representsPersonOrTeam: false,
@@ -55,7 +59,7 @@ afterEach(() => {
 });
 
 /** Returns the shared entry of a task, failing the test when it is missing. */
-function taskEntry(document: Y.Doc, id: string): Y.Map<unknown> {
+function taskEntry(document: Y.Doc, id: TaskId): Y.Map<unknown> {
   const entry = document.getMap(TASKS_ROOT).get(id);
   if (!(entry instanceof Y.Map)) {
     throw new Error(`Missing task ${id}`);
@@ -74,7 +78,7 @@ function tamperedUpdate(origin: Y.Doc, tamper: (malicious: Y.Doc) => void): Uint
 }
 
 /** Returns the update a peer sends after renaming a task. */
-function renameUpdate(peer: SharedSession, id: string, name: string): Uint8Array {
+function renameUpdate(peer: SharedSession, id: TaskId, name: string): Uint8Array {
   const before = Y.encodeStateVector(sessionDocument(peer));
   const applied = peer.apply({ type: 'putTask', task: workTask(id, { name }) });
   if (!applied.ok) {
@@ -87,17 +91,55 @@ describe('a session receiving updates from the network', () => {
   it.each<[string, (malicious: Y.Doc) => void]>([
     ['an unknown root', (malicious) => malicious.getMap('other').set('x', 1)],
     ['an entry that is not a map', (malicious) => malicious.getMap(TASKS_ROOT).set('z', 1)],
-    ['an unknown field on a task', (malicious) => taskEntry(malicious, 'a').set('junk', 'x')],
-    ['a nested shared type', (malicious) => taskEntry(malicious, 'a').set('name', new Y.Text('a'))],
-    ['an invalid hidden field', (malicious) => taskEntry(malicious, 'a').set('segments', 'x')],
+    [
+      'an unknown field on a task',
+      (malicious) => taskEntry(malicious, testId('a')).set('junk', 'x'),
+    ],
+    [
+      'a nested shared type',
+      (malicious) => taskEntry(malicious, testId('a')).set('name', new Y.Text('a')),
+    ],
+    [
+      'an invalid hidden field',
+      (malicious) => taskEntry(malicious, testId('a')).set('segments', 'x'),
+    ],
     ['an unknown project field', (malicious) => malicious.getMap('project').set('extra', 1)],
+    [
+      'a calendar key not written exactly',
+      (malicious) => malicious.getMap(TIME_RANGES_ROOT).set('09,12', true),
+    ],
+    [
+      'a calendar entry not marked present',
+      (malicious) => malicious.getMap(WEEKDAYS_ROOT).set('6', 1),
+    ],
+    [
+      'a shared type in the calendar',
+      (malicious) => malicious.getMap(PERIODS_ROOT).set('20000,20000', new Y.Map()),
+    ],
+    [
+      'a weekday that does not exist',
+      (malicious) => malicious.getMap(WEEKDAYS_ROOT).set('7', true),
+    ],
+    [
+      'list content in the calendar',
+      (malicious) => {
+        hideListContent(malicious.getMap(WEEKDAYS_ROOT));
+      },
+    ],
+    [
+      'the calendar as a project field',
+      (malicious) => malicious.getMap('project').set('workingWeekdays', [1]),
+    ],
     ['an invalid project name', (malicious) => malicious.getMap('project').set('name', '')],
     [
       'a project name of the wrong type',
       (malicious) => malicious.getMap('project').set('name', 42),
     ],
-    ['an empty task name', (malicious) => taskEntry(malicious, 'a').set('name', '')],
-    ['a task name of the wrong type', (malicious) => taskEntry(malicious, 'a').set('name', 42)],
+    ['an empty task name', (malicious) => taskEntry(malicious, testId('a')).set('name', '')],
+    [
+      'a task name of the wrong type',
+      (malicious) => taskEntry(malicious, testId('a')).set('name', 42),
+    ],
     [
       'another document identifier',
       (malicious) => malicious.getMap('project').set('documentId', OTHER_DOCUMENT_ID),
@@ -124,7 +166,7 @@ describe('a session receiving updates from the network', () => {
       expect(readSharedData(sessionDocument(victim))).toEqual(data);
       expect(victim.project()).toEqual(before);
       const honest = sessionOn(origin, 3);
-      expect(victim.merge(renameUpdate(honest, 'a', 'Honest')).ok).toBe(true);
+      expect(victim.merge(renameUpdate(honest, testId('a'), 'Honest')).ok).toBe(true);
       expect(victim.project().tasks.find((task) => task.id === 'a')?.name).toBe('Honest');
     },
   );
@@ -150,8 +192,8 @@ describe('a session receiving updates from the network', () => {
     const origin = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     const sender = sessionOn(origin, 1);
     const receiver = sessionOn(origin, 2);
-    const first = renameUpdate(sender, 'a', 'First');
-    const second = renameUpdate(sender, 'a', 'Second');
+    const first = renameUpdate(sender, testId('a'), 'First');
+    const second = renameUpdate(sender, testId('a'), 'Second');
     const data = readSharedData(sessionDocument(receiver));
     const before = receiver.project();
     expect(receiver.merge(second)).toEqual({ ok: false, error: { kind: 'incompleteUpdate' } });
@@ -186,7 +228,7 @@ describe('a session receiving updates from the network', () => {
     expect(session.history.undo().ok).toBe(true);
     expect(session.project().calendar.workingTimeRanges).toEqual(SAMPLE.calendar.workingTimeRanges);
     const peer = sessionOn(origin, 2);
-    expect(session.merge(renameUpdate(peer, 'b', 'After')).ok).toBe(true);
+    expect(session.merge(renameUpdate(peer, testId('b'), 'After')).ok).toBe(true);
     const read = readSharedProject(sessionDocument(session));
     expect(read.ok && read.value.tasks.find((task) => task.id === 'b')?.name).toBe('After');
   });
@@ -225,7 +267,7 @@ describe('a session receiving updates from the network', () => {
     /** Builds a baseline of the two tasks, taken some hours after the project start. */
     const baselineOf = (hours: number) => ({
       takenAt: SAMPLE.startDate + hours,
-      entries: ['a', 'b'].map((taskId) => ({
+      entries: [testId('a'), testId('b')].map((taskId) => ({
         taskId,
         start: SAMPLE.startDate + hours,
         end: SAMPLE.startDate + hours + 1,
@@ -249,15 +291,19 @@ describe('a session receiving updates from the network', () => {
 
   it('removes at once a tag and a task it marked, as the full merge does, without adjusting the removed task', () => {
     const design = {
-      id: 'design',
+      id: testId('design'),
       name: 'Design',
       color: '#336699',
       representsPersonOrTeam: false,
     };
     const origin = createSharedDocument(
-      project([workTask('a', { tagId: 'design' }), workTask('b', { tagId: 'design' })], [], {
-        tags: [design],
-      }),
+      project(
+        [workTask('a', { tagId: testId('design') }), workTask('b', { tagId: testId('design') })],
+        [],
+        {
+          tags: [design],
+        },
+      ),
       TEST_DOCUMENT_ID,
     );
     const sender = sessionOn(origin, 1);
@@ -266,8 +312,8 @@ describe('a session receiving updates from the network', () => {
     const before = Y.encodeStateVector(sessionDocument(sender));
     expect(
       sender.applyAll([
-        { type: 'removeTasks', ids: ['a'] },
-        { type: 'removeTag', id: 'design' },
+        { type: 'removeTasks', ids: [testId('a')] },
+        { type: 'removeTag', id: testId('design') },
       ]).ok,
     ).toBe(true);
     const update = Y.encodeStateAsUpdate(sessionDocument(sender), before);
@@ -283,8 +329,8 @@ describe('a session receiving updates from the network', () => {
     [
       'a tag deleted while a task takes it',
       project([workTask('a')], [], { tags: [DESIGN] }),
-      [{ type: 'removeTag', id: 'design' }],
-      [{ type: 'putTask', task: workTask('a', { tagId: 'design' }) }],
+      [{ type: 'removeTag', id: testId('design') }],
+      [{ type: 'putTask', task: workTask('a', { tagId: testId('design') }) }],
       ['TAG_CLEARED'],
     ],
     [
@@ -297,8 +343,8 @@ describe('a session receiving updates from the network', () => {
     [
       'a summary deleted while a task moves under it',
       project([summary('s'), workTask('a')]),
-      [{ type: 'removeTasks', ids: ['s'] }],
-      [{ type: 'putTask', task: workTask('a', { parentId: 's' }) }],
+      [{ type: 'removeTasks', ids: [testId('s')] }],
+      [{ type: 'putTask', task: workTask('a', { parentId: testId('s') }) }],
       ['MOVED_TO_ROOT'],
     ],
     [
@@ -375,8 +421,12 @@ describe('a session receiving updates from the network', () => {
     expect(bob.apply({ type: 'putTask', task: workTask('a', { hoursPerDay: 2 }) }).ok).toBe(true);
     const fromAlice = Y.encodeStateAsUpdate(sessionDocument(alice), aliceBefore);
     const fromBob = Y.encodeStateAsUpdate(sessionDocument(bob), bobBefore);
-    expect(alice.merge(fromBob)).toEqual(success([{ code: 'HOURS_PER_DAY_REDUCED', id: 'a' }]));
-    expect(bob.merge(fromAlice)).toEqual(success([{ code: 'HOURS_PER_DAY_REDUCED', id: 'a' }]));
+    expect(alice.merge(fromBob)).toEqual(
+      success([{ code: 'HOURS_PER_DAY_REDUCED', id: testId('a') }]),
+    );
+    expect(bob.merge(fromAlice)).toEqual(
+      success([{ code: 'HOURS_PER_DAY_REDUCED', id: testId('a') }]),
+    );
     alice.merge(Y.encodeStateAsUpdate(sessionDocument(bob)));
     bob.merge(Y.encodeStateAsUpdate(sessionDocument(alice)));
     expect(alice.project()).toEqual(bob.project());
@@ -395,7 +445,9 @@ describe('a session receiving updates from the network', () => {
     expect(bob.apply({ type: 'putDependency', dependency: link('b', 'a') }).ok).toBe(true);
     const fromAlice = Y.encodeStateAsUpdate(sessionDocument(alice), aliceBefore);
     const fromBob = Y.encodeStateAsUpdate(sessionDocument(bob), bobBefore);
-    expect(alice.merge(fromBob)).toEqual(success([{ code: 'DEPENDENCY_REMOVED', id: 'b-a' }]));
+    expect(alice.merge(fromBob)).toEqual(
+      success([{ code: 'DEPENDENCY_REMOVED', id: testId('b-a') }]),
+    );
     expect(alice.project().dependencies.map((dependency) => dependency.id)).toEqual(['a-b']);
     const data = readSharedData(sessionDocument(alice));
     const repaired = alice.project();
@@ -413,7 +465,7 @@ describe('a session receiving updates from the network', () => {
     { timeout: PROPERTY_TEST_TIMEOUT_MS },
     () => {
       const origin = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
-      const honest = renameUpdate(sessionOn(origin, 9), 'a', 'Honest name');
+      const honest = renameUpdate(sessionOn(origin, 9), testId('a'), 'Honest name');
       fc.assert(
         fc.property(
           fc.nat({ max: honest.length - 1 }),

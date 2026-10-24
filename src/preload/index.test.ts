@@ -1,3 +1,5 @@
+import { requireParticipantId } from '../core/collaboration/participants';
+import { testDigest, testJoinCode } from '../core/testing/secrets';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrintDocument } from '../core/print/print-document';
 import { BRIDGE_NAME, IPC_CHANNELS, type TasklaceBridge } from './bridge-contract';
@@ -12,8 +14,8 @@ const PRINTED: PrintDocument = {
 
 const electron = vi.hoisted(() => ({
   exposed: new Map<string, unknown>(),
-  listeners: new Map<string, () => void>(),
-  sent: [] as [string, unknown][],
+  listeners: new Map<string, (event?: unknown, value?: unknown) => void>(),
+  sent: [] as unknown[][],
   invoke: vi.fn<(channel: string, ...values: unknown[]) => Promise<unknown>>(),
 }));
 
@@ -25,14 +27,16 @@ vi.mock('electron', () => ({
   },
   ipcRenderer: {
     invoke: (channel: string, ...values: unknown[]) => electron.invoke(channel, ...values),
-    on: (channel: string, listener: () => void) => {
+    on: (channel: string, listener: (event?: unknown, value?: unknown) => void) => {
       electron.listeners.set(channel, listener);
     },
-    send: (channel: string, value: unknown) => {
-      electron.sent.push([channel, value]);
+    send: (channel: string, ...values: unknown[]) => {
+      electron.sent.push([channel, ...values]);
     },
   },
 }));
+
+const ENDPOINT = { addresses: ['192.168.1.24'], port: 47_313 };
 
 const FORMAT = {
   listSeparator: ';',
@@ -75,6 +79,8 @@ describe('the bridge exposed to the page', () => {
     await bridge.adoptProject(requireDocumentId('11111111-1111-4111-8111-111111111111'));
     await bridge.saveProject(state);
     await bridge.saveProjectAs(state, 'Plan');
+    await bridge.keepOwnChanges(state, 'Plan');
+    await bridge.openKeptChanges();
     await bridge.exportProject('json', '{}', 'Plan');
     await bridge.exportPdf(PRINTED, 'Plan');
     await bridge.saveHeldPdf();
@@ -86,6 +92,8 @@ describe('the bridge exposed to the page', () => {
       [IPC_CHANNELS.adoptProject, '11111111-1111-4111-8111-111111111111'],
       [IPC_CHANNELS.saveProject, state],
       [IPC_CHANNELS.saveProjectAs, state, 'Plan'],
+      [IPC_CHANNELS.keepOwnChanges, state, 'Plan'],
+      [IPC_CHANNELS.openKeptChanges],
       [IPC_CHANNELS.exportProject, 'json', '{}', 'Plan'],
       [IPC_CHANNELS.exportPdf, PRINTED, 'Plan'],
       [IPC_CHANNELS.saveHeldPdf],
@@ -96,7 +104,7 @@ describe('the bridge exposed to the page', () => {
   it('tells the main process that the page could not start', async () => {
     const bridge = await loadBridge();
     bridge.reportStartFailure();
-    expect(electron.sent).toEqual([[IPC_CHANNELS.pageStartFailed, undefined]]);
+    expect(electron.sent).toEqual([[IPC_CHANNELS.pageStartFailed]]);
   });
 
   it('turns an answer that is not a result into a failed task', async () => {
@@ -198,5 +206,161 @@ describe('closing the window', () => {
       logged.mockRestore();
     }
     expect(electron.sent).toEqual([[IPC_CHANNELS.flushDone, false]]);
+  });
+});
+
+describe('the shared plan through the bridge', () => {
+  it('sends each collaboration request on its own channel with its values', async () => {
+    const bridge = await loadBridge();
+    electron.invoke.mockResolvedValue({ ok: true, value: null });
+    const settings = { name: 'Léa', port: 47_313, firewallNoticeSeen: true };
+    const joining = {
+      address: '192.168.1.24',
+      port: 47_313,
+      code: testJoinCode('K7Q4MZ'),
+      participantId: 'lea',
+      name: 'Léa',
+    };
+    await bridge.collaborationSettings();
+    await bridge.saveCollaborationSettings(settings);
+    await bridge.sharePlan('Thesis', 'Camille', 'camille');
+    await bridge.stopCollaboration();
+    await bridge.joinPlan(joining);
+    await bridge.openSharedPlan(Uint8Array.of(1));
+    await bridge.findPlans(true);
+    await bridge.dropPeer(2);
+    await bridge.copyJoinCode();
+    await bridge.findNextHost(
+      [{ participantId: requireParticipantId('lea'), rank: 1, endpoint: null }],
+      'Thesis',
+      'Léa',
+      [],
+    );
+    expect(electron.invoke.mock.calls).toEqual([
+      [IPC_CHANNELS.collaborationSettings],
+      [IPC_CHANNELS.saveCollaborationSettings, settings],
+      [IPC_CHANNELS.sharePlan, 'Thesis', 'Camille', 'camille'],
+      [IPC_CHANNELS.stopCollaboration],
+      [IPC_CHANNELS.joinPlan, joining],
+      [IPC_CHANNELS.openSharedPlan, Uint8Array.of(1)],
+      [IPC_CHANNELS.findPlans, true],
+      [IPC_CHANNELS.dropPeer, 2],
+      [IPC_CHANNELS.copyJoinCode],
+      [
+        IPC_CHANNELS.findNextHost,
+        [{ participantId: requireParticipantId('lea'), rank: 1, endpoint: null }],
+        'Thesis',
+        'Léa',
+        [],
+      ],
+    ]);
+  });
+
+  it('sends the messages of the plan without waiting for an answer', async () => {
+    const bridge = await loadBridge();
+    bridge.sendToCollaboration('host', Uint8Array.of(1));
+    bridge.sendToCollaboration(3, Uint8Array.of(2));
+    expect(electron.sent).toEqual([
+      [IPC_CHANNELS.collaborationSend, 'host', Uint8Array.of(1)],
+      [IPC_CHANNELS.collaborationSend, 3, Uint8Array.of(2)],
+    ]);
+  });
+
+  it('passes on each event of the main process of a known shape, and logs any other', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const bridge = await loadBridge();
+    /** Sends an event to the page as the main process does. */
+    const emit = (value: unknown): void => {
+      electron.listeners.get(IPC_CHANNELS.collaborationEvent)?.({}, value);
+    };
+    emit({ kind: 'connected' });
+    const received: unknown[] = [];
+    bridge.onCollaborationEvent((event) => received.push(event));
+    const plan = {
+      key: 'k',
+      planName: 'Thesis',
+      hostName: 'Camille',
+      addresses: ['10.0.0.1'],
+      port: 1,
+    };
+    const valid = [
+      {
+        kind: 'peerJoined',
+        peer: 1,
+        participantId: requireParticipantId('lea'),
+        name: 'Léa',
+        endpoint: ENDPOINT,
+        tokenDigest: testDigest('d'.repeat(64)),
+      },
+      { kind: 'peerMessage', peer: 1, message: Uint8Array.of(1) },
+      { kind: 'peerLeft', peer: 1 },
+      { kind: 'codeChanged', code: testJoinCode('K7Q4MZ') },
+      { kind: 'nearbyPlans', plans: [plan] },
+      { kind: 'connected' },
+      { kind: 'reconnecting' },
+      { kind: 'hostLeft' },
+      { kind: 'yielded' },
+      {
+        kind: 'becameHost',
+        sharing: {
+          code: testJoinCode('K7Q4MZ'),
+          port: 47_313,
+          addresses: ['10.0.0.1'],
+          tokenDigest: testDigest('d'.repeat(64)),
+        },
+      },
+      { kind: 'offline' },
+      { kind: 'hostMessage', message: Uint8Array.of(2) },
+      { kind: 'ended', reason: 'WRONG_CODE' },
+      { kind: 'ended', reason: 'TURNED_AWAY' },
+    ];
+    const invalid = [
+      null,
+      { kind: 'unknown' },
+      { kind: 'constructor' },
+      {
+        kind: 'peerJoined',
+        peer: 1.5,
+        participantId: requireParticipantId('lea'),
+        name: 'Léa',
+        endpoint: ENDPOINT,
+        tokenDigest: testDigest('d'.repeat(64)),
+      },
+      {
+        kind: 'peerJoined',
+        peer: 1,
+        participantId: requireParticipantId('lea'),
+        name: 'Léa',
+        endpoint: { port: 1 },
+        tokenDigest: testDigest('d'.repeat(64)),
+      },
+      { kind: 'peerMessage', peer: 1, message: [1] },
+      { kind: 'codeChanged', code: 1 },
+      { kind: 'codeChanged', code: 'k7q4mz' },
+      {
+        kind: 'peerJoined',
+        peer: 1,
+        participantId: 'a b',
+        name: 'Léa',
+        endpoint: ENDPOINT,
+        tokenDigest: testDigest('d'.repeat(64)),
+      },
+      { kind: 'nearbyPlans', plans: [{ ...plan, addresses: [1] }] },
+      { kind: 'nearbyPlans', plans: 'none' },
+      { kind: 'ended', reason: 'SOMETHING' },
+      {
+        kind: 'becameHost',
+        sharing: {
+          code: testJoinCode('K7Q4MZ'),
+          port: 47_313,
+          addresses: [1],
+          tokenDigest: testDigest('d'.repeat(64)),
+        },
+      },
+      { kind: 'becameHost', sharing: null },
+    ];
+    [...valid, ...invalid].forEach(emit);
+    expect(received).toEqual(valid);
+    expect(errors.mock.calls.map((call): unknown => call[1])).toEqual(invalid);
   });
 });

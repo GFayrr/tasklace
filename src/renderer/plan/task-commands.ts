@@ -31,6 +31,7 @@ import { relinkBlocks } from './block-links';
 import { parseDuration } from './durations';
 import { predecessorText, taskIdOfNumber, type PlanOutline } from './plan-outline';
 import { mapSegments, withLastSegment } from '../../core/task-segments';
+import type { NewIdentifier } from '../../core/identifiers';
 
 export type Edit = Result<readonly SharedOperation[], EditError>;
 
@@ -39,7 +40,7 @@ export type EditBuild = (context: EditContext) => Result<readonly SharedOperatio
 export interface EditContext {
   readonly project: Project;
   readonly outline: PlanOutline;
-  readonly createId: () => string;
+  readonly createId: () => NewIdentifier;
   readonly dayHours: number;
 }
 
