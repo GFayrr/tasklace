@@ -10,7 +10,7 @@ Tasklace is built in nine steps.
 | 4    | Shared model, project file, validation, JSON and CSV | Done    |
 | 5    | Secure Electron shell and Svelte user interface      | Done    |
 | 6    | PDF export                                           | Done    |
-| 7    | Real-time collaboration on the local network         | Planned |
+| 7    | Real-time collaboration on the local network         | Done    |
 | 8    | End-to-end encrypted relay                           | Planned |
 | 9    | Distribution                                         | Planned |
 

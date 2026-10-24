@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, plans tasks in a table and on a timeline, and has its project settings: name and start, working calendar, tags, and the critical path, date constraints and baseline among the advanced options. It exports plans to PDF. Collaboration is still to come, and there is no downloadable release yet.
+> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, plans tasks in a table and on a timeline, and has its project settings: name and start, working calendar, tags, and the critical path, date constraints and baseline among the advanced options. It exports plans to PDF, and several people can edit the same plan at the same time on a local network. The encrypted relay for working remotely is still to come, and there is no downloadable release yet.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -66,6 +66,9 @@ What Tasklace already supports:
 - Tag management: rename, choose one of twelve tested colors or a custom one, mark a person or a team, add and delete (with a question when tasks use the tag); the legend shows the patterns of close colors.
 - A list of the conflicts of people and teams next to the legend: a line selects the first task concerned and scrolls the table and the timeline to it.
 - PDF export: A4, A3 or US Letter, the whole project or chosen days, an automatic or chosen zoom and optional columns, with a live preview of the first page. Text is never smaller than 10 points: a plan fits on one page when it can, otherwise it is printed on a grid of pages repeating the names and the time scale. The title, the export date, the legend of the tags and the page numbers are on every page; a PDF heavier than expected can be written again without the browser, lighter.
+- Real-time collaboration on the local network, without an account: share a plan and give the people near you its six-character code; they find it nearby or type the address of the host. Everything sent is encrypted, after a key exchange based on the code (CPace), and only computers on a private network are accepted.
+- People in a shared plan see who is there and which task each one has selected; newcomers are in read only until the host lets them edit.
+- A shared plan keeps going on its own: a lost connection comes back without any action, the person connected the longest takes over when the host leaves or their computer is switched off, and changes made offline are shared on return, or kept in a copy of your own when you were in read only.
 - Advanced options, off by default, turned on in the project settings: with the critical path on, the table shows total and free floats, the timeline underlines critical tasks and draws how far the others can slip; with date constraints on, a task can have a date it must finish on and a deadline, each date missed is listed with the conflicts, marked in the table and on the timeline, and each deadline is drawn on its row; with the baseline on, the plan can be frozen, each task then shows where it was planned and how many working days later or earlier it now ends.
 
 ## Roadmap
@@ -76,7 +79,7 @@ What Tasklace already supports:
 - [x] Project file format, validation, JSON and CSV import and export
 - [x] Desktop application and user interface
 - [x] PDF export
-- [ ] Real-time collaboration on the local network
+- [x] Real-time collaboration on the local network
 - [ ] End-to-end encrypted relay and deployment guide
 - [ ] Portable Windows executable
 
@@ -120,6 +123,7 @@ The test suite covers edge cases extensively and uses property-based testing to 
 src/core/            pure logic, independent of any user interface
   baseline/          baseline plan snapshots
   calendar/          working-time calendar and task time slots
+  collaboration/     shared plan protocol, people and rights, succession, join code, CPace and encrypted channel
   exchange/          JSON and CSV import and export
   file/              .tasklace project file: header, checksum and defensive reading
   model/             project data types
@@ -129,7 +133,7 @@ src/core/            pure logic, independent of any user interface
   tags/              tag colors, patterns and person or team conflicts
   testing/           test helpers and random data generators
   validation/        validation of untrusted project data
-src/main/            Electron main process: window, security, files, file worker, PDF printing
+src/main/            Electron main process: window, security, files, file worker, PDF printing, host server and discovery
 src/preload/         minimal typed bridge between the page and the main process
 src/renderer/        Svelte user interface: theme, messages, schedule worker, components, printed pages
 docs/                roadmap, and user documentation to come
