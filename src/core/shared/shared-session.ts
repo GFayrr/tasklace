@@ -23,8 +23,8 @@ import {
   deleteEntry,
   DOCUMENT_ID_KEY,
   findEntryIssues,
+  CALENDAR_ROOTS,
   findRootIssues,
-  isCalendarField,
   LOCAL_ORIGIN,
   PROJECT_ROOT,
   readDocumentId,
@@ -130,7 +130,13 @@ export type StateOpeningFailure =
 const INCOMPLETE_STATE = 'The state depends on updates it does not hold.';
 const UNDO_CAPTURE_TIMEOUT_MS = 0;
 const SESSION_DOCUMENTS = new WeakMap<SharedSession, Y.Doc>();
-const HISTORY_ROOTS = [PROJECT_ROOT, TASKS_ROOT, DEPENDENCIES_ROOT, TAGS_ROOT] as const;
+const HISTORY_ROOTS = [
+  PROJECT_ROOT,
+  TASKS_ROOT,
+  DEPENDENCIES_ROOT,
+  TAGS_ROOT,
+  ...CALENDAR_ROOTS,
+] as const;
 
 type SharedType = Y.Transaction['changed'] extends Map<infer Type, unknown> ? Type : never;
 
@@ -522,7 +528,10 @@ function noteChange(
   const names = [...keys].filter((key) => key !== null);
   if (Object.is(type, shadow.getMap(PROJECT_ROOT))) {
     names.forEach((key) => change.headerFields.add(key));
-    change.structural ||= names.some(isCalendarField);
+    return;
+  }
+  if (CALENDAR_ROOTS.some((root) => Object.is(type, shadow.getMap(root)))) {
+    change.structural = true;
     return;
   }
   const rootName = rootNameOf(shadow, type);

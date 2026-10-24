@@ -3,7 +3,9 @@ import fc from 'fast-check';
 import * as Y from 'yjs';
 import { compareStrings } from '../compare-strings';
 import { MAX_HIERARCHY_DEPTH, MAX_TAGS } from '../limits';
+import type { WorkingCalendar } from '../model/calendar';
 import type { DependencyType, Project, Tag, Task, TaskId } from '../model/project';
+import { dayIndexOf, MONDAY, WEEKDAYS } from '../time';
 import { CONVERGENCE_TEST_TIMEOUT_MS, PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { hideListContent } from '../testing/hidden-list-content';
 import {
@@ -11,6 +13,7 @@ import {
   milestone,
   project,
   summary,
+  PROJECT_START,
   workTask,
   TEST_DOCUMENT_ID,
   segmentsOrThrow,
@@ -537,6 +540,15 @@ type OperationShape =
   | { readonly type: 'putTag'; readonly id: string }
   | { readonly type: 'removeTag'; readonly id: string }
   | { readonly type: 'day'; readonly fullDay: boolean }
+  | {
+      readonly type: 'range';
+      readonly index: number;
+      readonly start: number;
+      readonly hours: number;
+      readonly replace: boolean;
+    }
+  | { readonly type: 'weekday'; readonly day: number }
+  | { readonly type: 'period'; readonly day: number; readonly remove: boolean }
   | { readonly type: 'name'; readonly name: string };
 
 type Step =
@@ -597,6 +609,19 @@ const operationArbitrary: fc.Arbitrary<OperationShape> = fc.oneof(
   fc.record({ type: fc.constant('putTag' as const), id: tagId }),
   fc.record({ type: fc.constant('removeTag' as const), id: tagId }),
   fc.record({ type: fc.constant('day' as const), fullDay: fc.boolean() }),
+  fc.record({
+    type: fc.constant('range' as const),
+    index: position,
+    start: fc.integer({ min: 0, max: 20 }),
+    hours: fc.integer({ min: 1, max: 4 }),
+    replace: fc.boolean(),
+  }),
+  fc.record({ type: fc.constant('weekday' as const), day: fc.integer({ min: 0, max: 6 }) }),
+  fc.record({
+    type: fc.constant('period' as const),
+    day: fc.integer({ min: 0, max: 30 }),
+    remove: fc.boolean(),
+  }),
   fc.record({ type: fc.constant('name' as const), name: fc.constantFrom('Plan', 'Projet', '') }),
 );
 
@@ -745,8 +770,51 @@ function toOperation(shape: OperationShape, current: Project, newId: string): Sh
           },
         },
       };
+    case 'range':
+    case 'weekday':
+    case 'period':
+      return { type: 'updateProject', fields: { calendar: changedCalendar(shape, current) } };
     case 'name':
       return { type: 'updateProject', fields: { name: shape.name } };
+  }
+}
+
+/** Adds, replaces or removes one range of working hours, working day or period off of a calendar, as people do from the settings. */
+function changedCalendar(
+  shape: Extract<OperationShape, { readonly type: 'range' | 'weekday' | 'period' }>,
+  current: Project,
+): WorkingCalendar {
+  const calendar = current.calendar;
+  switch (shape.type) {
+    case 'range': {
+      const ranges = calendar.workingTimeRanges;
+      const range = { startHour: shape.start, endHour: shape.start + shape.hours };
+      const at = shape.index % ranges.length;
+      return {
+        ...calendar,
+        workingTimeRanges: shape.replace
+          ? ranges.map((existing, index) => (index === at ? range : existing))
+          : [...ranges, range],
+      };
+    }
+    case 'weekday': {
+      const days = calendar.workingWeekdays;
+      const day = WEEKDAYS[shape.day] ?? MONDAY;
+      return {
+        ...calendar,
+        workingWeekdays: days.includes(day)
+          ? days.filter((existing) => existing !== day)
+          : [...days, day],
+      };
+    }
+    case 'period': {
+      const day = dayIndexOf(PROJECT_START) + shape.day;
+      const others = calendar.nonWorkingPeriods.filter((period) => period.firstDay !== day);
+      return {
+        ...calendar,
+        nonWorkingPeriods: shape.remove ? others : [...others, { firstDay: day, lastDay: day }],
+      };
+    }
   }
 }
 

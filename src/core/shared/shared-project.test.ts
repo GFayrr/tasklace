@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import * as Y from 'yjs';
 import type { DependencyType, Project, Tag, Task, TaskId, TagId } from '../model/project';
+import { canonicalCalendar } from '../calendar/canonical-calendar';
 import { compareStrings } from '../compare-strings';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { at } from '../testing/civil-time';
@@ -20,7 +21,10 @@ import {
 import {
   createSharedDocument,
   readSharedData,
+  PERIODS_ROOT,
   TASKS_ROOT,
+  TIME_RANGES_ROOT,
+  WEEKDAYS_ROOT,
   requireDocumentId,
 } from './shared-document';
 import {
@@ -171,7 +175,7 @@ describe('shared document', () => {
         const read = projectOf(createSharedDocument(input, TEST_DOCUMENT_ID));
         expect(byId(read.tasks)).toEqual(byId(input.tasks));
         expect(byId(read.dependencies)).toEqual(byId(input.dependencies));
-        expect(read.calendar).toEqual(input.calendar);
+        expect(read.calendar).toEqual(canonicalCalendar(input.calendar));
       }),
     );
   });
@@ -409,6 +413,32 @@ describe('merging updates that break the shared schema', () => {
     ],
     ['an unknown project field', (malicious) => malicious.getMap('project').set('extra', 1)],
     ['an unknown root', (malicious) => malicious.getMap('other').set('x', 1)],
+    [
+      'a calendar key not written exactly',
+      (malicious) => malicious.getMap(TIME_RANGES_ROOT).set('09,12', true),
+    ],
+    [
+      'a calendar entry not marked present',
+      (malicious) => malicious.getMap(WEEKDAYS_ROOT).set('6', 1),
+    ],
+    [
+      'a shared type in the calendar',
+      (malicious) => malicious.getMap(PERIODS_ROOT).set('20000,20000', new Y.Map()),
+    ],
+    [
+      'a weekday that does not exist',
+      (malicious) => malicious.getMap(WEEKDAYS_ROOT).set('7', true),
+    ],
+    [
+      'list content in the calendar',
+      (malicious) => {
+        hideListContent(malicious.getMap(WEEKDAYS_ROOT));
+      },
+    ],
+    [
+      'the calendar as a project field',
+      (malicious) => malicious.getMap('project').set('workingWeekdays', [1]),
+    ],
     [
       'an entry that is not a map',
       (malicious) => malicious.getMap(TASKS_ROOT).set('z', { kind: 'task' }),

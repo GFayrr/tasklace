@@ -125,12 +125,16 @@ export interface ListLimits {
   readonly tasks: number;
   readonly dependencies: number;
   readonly tags: number;
+  readonly workingTimeRanges: number;
+  readonly nonWorkingPeriods: number;
 }
 
 export const NOMINAL_LIST_LIMITS: ListLimits = {
   tasks: MAX_TASKS,
   dependencies: MAX_DEPENDENCIES,
   tags: MAX_TAGS,
+  workingTimeRanges: MAX_WORKING_TIME_RANGES,
+  nonWorkingPeriods: MAX_NON_WORKING_PERIODS,
 };
 
 export const TASK_KEYS_BY_KIND: Readonly<Record<Task['kind'], readonly string[]>> = {
@@ -227,7 +231,7 @@ function readProjectFields(
   const project = {
     name: readText(child('name'), issues, MAX_PROJECT_NAME_LENGTH),
     startDate: codec.readInstant(child('startDate'), issues),
-    calendar: readCalendar(child('calendar'), issues, codec),
+    calendar: readCalendar(child('calendar'), issues, codec, limits),
     options: readOptions(child('options'), issues),
     tags: readList(child('tags'), issues, limits.tags, readTag),
     tasks: readList(child('tasks'), issues, limits.tasks, (item, list) =>
@@ -241,11 +245,12 @@ function readProjectFields(
   return allDefined(project) ? project : undefined;
 }
 
-/** Reads the working weekdays, daily time ranges and non-working periods of a calendar. */
+/** Reads the working weekdays, daily time ranges and non-working periods of a calendar, with given list limits. */
 function readCalendar(
   field: Field,
   issues: IssueList,
   codec: ValueCodec,
+  limits: ListLimits,
 ): WorkingCalendar | undefined {
   const record = readRecord(field, issues, CALENDAR_KEYS);
   if (record === undefined) {
@@ -258,13 +263,13 @@ function readCalendar(
     workingTimeRanges: readList(
       child('workingTimeRanges'),
       issues,
-      MAX_WORKING_TIME_RANGES,
+      limits.workingTimeRanges,
       readTimeRange,
     ),
     nonWorkingPeriods: readList(
       child('nonWorkingPeriods'),
       issues,
-      MAX_NON_WORKING_PERIODS,
+      limits.nonWorkingPeriods,
       (item, list) => readDayRange(item, list, codec),
     ),
   };

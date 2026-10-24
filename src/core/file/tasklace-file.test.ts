@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import * as Y from 'yjs';
+import { canonicalCalendar } from '../calendar/canonical-calendar';
 import { compareStrings } from '../compare-strings';
 import { MAX_FILE_BYTES, MAX_TAGS, MAX_UNCOMPRESSED_BYTES } from '../limits';
 import type { Project } from '../model/project';
@@ -165,13 +166,14 @@ function tampered(change: (document: Y.Doc) => void): Uint8Array {
   return encodeTasklaceFile(document, storingCompressor);
 }
 
-/** Sorts the lists of a project by identifier. */
+/** Sorts the lists of a project by identifier and writes its calendar as a shared document holds it. */
 function sorted(input: Project): Project {
   /** Returns items ordered by identifier. */
   const byId = <T extends { readonly id: string }>(items: readonly T[]): T[] =>
     [...items].sort((left, right) => compareStrings(left.id, right.id));
   return {
     ...input,
+    calendar: canonicalCalendar(input.calendar),
     tasks: byId(input.tasks),
     dependencies: byId(input.dependencies),
     tags: byId(input.tags),

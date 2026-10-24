@@ -1,5 +1,7 @@
 import * as Y from 'yjs';
+import { compareNumbers } from '../calendar/canonical-calendar';
 import { compareStrings } from '../compare-strings';
+import type { DayRange, TimeRange, WorkingCalendar } from '../model/calendar';
 import type { Project, SummaryTask, WorkTask } from '../model/project';
 import {
   DEPENDENCY_KEYS,
@@ -17,6 +19,10 @@ export const PROJECT_ROOT = 'project';
 export const TASKS_ROOT = 'tasks';
 export const DEPENDENCIES_ROOT = 'dependencies';
 export const TAGS_ROOT = 'tags';
+export const WEEKDAYS_ROOT = 'workingWeekdays';
+export const TIME_RANGES_ROOT = 'workingTimeRanges';
+export const PERIODS_ROOT = 'nonWorkingPeriods';
+export const CALENDAR_ROOTS = [WEEKDAYS_ROOT, TIME_RANGES_ROOT, PERIODS_ROOT] as const;
 
 export const LOCAL_ORIGIN = Symbol('local change');
 export const REMOTE_ORIGIN = Symbol('remote update');
@@ -38,15 +44,22 @@ export type DocumentId = string & { readonly [DOCUMENT_ID_BRAND]: true };
 
 export const DOCUMENT_ID_KEY = 'documentId';
 
-const ROOTS: readonly string[] = [PROJECT_ROOT, TASKS_ROOT, DEPENDENCIES_ROOT, TAGS_ROOT];
+const ROOTS: readonly string[] = [
+  PROJECT_ROOT,
+  TASKS_ROOT,
+  DEPENDENCIES_ROOT,
+  TAGS_ROOT,
+  ...CALENDAR_ROOTS,
+];
+const CALENDAR_KEY_SEPARATOR = ',';
+const PRESENT = true;
+const DAY_KEY_NUMBERS = 1;
+const RANGE_KEY_NUMBERS = 2;
 const DOCUMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const PROJECT_FIELD_KEYS: readonly string[] = [
   DOCUMENT_ID_KEY,
   'name',
   'startDate',
-  'workingWeekdays',
-  'workingTimeRanges',
-  'nonWorkingPeriods',
   'criticalPathEnabled',
   'dateConstraintsEnabled',
   'baselineEnabled',
@@ -57,11 +70,6 @@ const ENTRY_KEYS_BY_ROOT: readonly (readonly [EntryRoot, readonly string[]])[] =
   [TASKS_ROOT, WORK_TASK_KEYS.filter((key) => key !== 'id')],
   [DEPENDENCIES_ROOT, DEPENDENCY_KEYS.filter((key) => key !== 'id')],
   [TAGS_ROOT, TAG_KEYS.filter((key) => key !== 'id')],
-];
-const CALENDAR_FIELD_KEYS: readonly string[] = [
-  'workingWeekdays',
-  'workingTimeRanges',
-  'nonWorkingPeriods',
 ];
 
 const NEW_TASK_DURATION_HOURS = 1;
@@ -128,6 +136,9 @@ export function findSchemaIssues(document: Y.Doc): readonly ValidationIssue[] {
   for (const [root, allowedKeys] of ENTRY_KEYS_BY_ROOT) {
     checkEntries(document.getMap(root), root, allowedKeys, issues);
   }
+  for (const root of CALENDAR_ROOTS) {
+    checkCalendarEntries(document.getMap(root), root, issues);
+  }
   return issues.issues;
 }
 
@@ -139,7 +150,7 @@ export function findRootIssues(document: Y.Doc): readonly ValidationIssue[] {
   }
   checkFields(document.getMap(PROJECT_ROOT), PROJECT_ROOT, PROJECT_FIELD_KEYS, issues);
   checkDocumentId(document, issues);
-  for (const [root] of ENTRY_KEYS_BY_ROOT) {
+  for (const root of [...ENTRY_KEYS_BY_ROOT.map(([name]) => name), ...CALENDAR_ROOTS]) {
     checkSequenceContent(document.getMap(root), root, issues);
   }
   return issues.issues;
@@ -173,11 +184,6 @@ export function readHeaderData(document: Y.Doc): SharedProjectData {
   return { ...readData(document, keepFieldsOfKind, false) };
 }
 
-/** Tells whether a project field of a shared document belongs to the calendar. */
-export function isCalendarField(key: string): boolean {
-  return CALENDAR_FIELD_KEYS.includes(key);
-}
-
 /** Keeps only the fields of the kind of a task, the others staying hidden in the shared document. */
 export function viewTaskFields(entry: unknown): unknown {
   return keepFieldsOfKind(entry);
@@ -188,9 +194,10 @@ export function viewTaskUnion(entry: unknown): unknown {
   return asWorkTask(entry);
 }
 
-/** Writes the project fields of a shared document, changing only what differs. */
+/** Writes the project fields of a shared document, changing only what differs, each day, time range and period of the calendar being an entry of its own so that changes made at the same time all stay. */
 export function writeProjectHeader(document: Y.Doc, header: ProjectHeader): void {
   setChangedFields(document.getMap(PROJECT_ROOT), headerFields(header));
+  writeCalendar(document, header.calendar);
 }
 
 /** Writes one task, dependency or tag into a shared document, filling the hidden fields of a new task with defaults. */
@@ -219,13 +226,10 @@ export function writeSharedProject(
 
 /** Lists the fields of the project root of a shared document for a project header. */
 function headerFields(header: ProjectHeader): object {
-  const { calendar, options } = header;
+  const { options } = header;
   return {
     name: header.name,
     startDate: header.startDate,
-    workingWeekdays: calendar.workingWeekdays,
-    workingTimeRanges: calendar.workingTimeRanges,
-    nonWorkingPeriods: calendar.nonWorkingPeriods,
     criticalPathEnabled: options.criticalPathEnabled,
     dateConstraintsEnabled: options.dateConstraintsEnabled,
     baselineEnabled: options.baselineEnabled,
@@ -244,11 +248,7 @@ function readData(
   return {
     name: root.get('name'),
     startDate: root.get('startDate'),
-    calendar: {
-      workingWeekdays: root.get('workingWeekdays'),
-      workingTimeRanges: root.get('workingTimeRanges'),
-      nonWorkingPeriods: root.get('nonWorkingPeriods'),
-    },
+    calendar: readCalendar(document),
     options: {
       criticalPathEnabled: root.get('criticalPathEnabled'),
       dateConstraintsEnabled: root.get('dateConstraintsEnabled'),
@@ -260,6 +260,98 @@ function readData(
     dependencies: withLists ? readEntries(document.getMap(DEPENDENCIES_ROOT)) : [],
     tags: withLists ? readEntries(document.getMap(TAGS_ROOT)) : [],
   };
+}
+
+/** Writes the days, time ranges and periods of a calendar as the keys of their shared maps, adding the missing ones and deleting the others. */
+function writeCalendar(document: Y.Doc, calendar: WorkingCalendar): void {
+  writeKeys(document.getMap(WEEKDAYS_ROOT), calendar.workingWeekdays.map(String));
+  writeKeys(document.getMap(TIME_RANGES_ROOT), calendar.workingTimeRanges.map(timeRangeKey));
+  writeKeys(document.getMap(PERIODS_ROOT), calendar.nonWorkingPeriods.map(dayRangeKey));
+}
+
+/** Makes a shared map hold exactly the given keys, each marked present. */
+function writeKeys(entries: Y.Map<unknown>, keys: readonly string[]): void {
+  const wanted = new Set(keys);
+  for (const key of [...entries.keys()].filter((existing) => !wanted.has(existing))) {
+    entries.delete(key);
+  }
+  for (const key of wanted) {
+    if (entries.get(key) !== PRESENT) {
+      entries.set(key, PRESENT);
+    }
+  }
+}
+
+/** Gives the key of a time range in the shared document, made of its start and end hours. */
+function timeRangeKey(range: TimeRange): string {
+  return [range.startHour, range.endHour].join(CALENDAR_KEY_SEPARATOR);
+}
+
+/** Gives the key of a period in the shared document, made of its first and last days. */
+function dayRangeKey(period: DayRange): string {
+  return [period.firstDay, period.lastDay].join(CALENDAR_KEY_SEPARATOR);
+}
+
+/** Reads the calendar of a shared document as plain, still untrusted lists in the order of their values. */
+function readCalendar(document: Y.Doc): { readonly [Key in keyof WorkingCalendar]: unknown } {
+  return {
+    workingWeekdays: readKeys(document.getMap(WEEKDAYS_ROOT), DAY_KEY_NUMBERS, ([day]) => day),
+    workingTimeRanges: readKeys(
+      document.getMap(TIME_RANGES_ROOT),
+      RANGE_KEY_NUMBERS,
+      ([startHour, endHour]) => ({
+        startHour,
+        endHour,
+      }),
+    ),
+    nonWorkingPeriods: readKeys(
+      document.getMap(PERIODS_ROOT),
+      RANGE_KEY_NUMBERS,
+      ([firstDay, lastDay]) => ({
+        firstDay,
+        lastDay,
+      }),
+    ),
+  };
+}
+
+/** Reads the keys of a calendar map as values sorted by their numbers, a key that is not the exact writing of the expected numbers being kept as it is, after the others, for the validation to refuse. */
+function readKeys(
+  entries: Y.Map<unknown>,
+  count: number,
+  build: (numbers: readonly number[]) => unknown,
+): unknown[] {
+  const read: { readonly numbers: readonly number[]; readonly key: string }[] = [];
+  const malformed: string[] = [];
+  for (const key of entries.keys()) {
+    const numbers = numbersOfKey(key, count);
+    if (numbers === null) {
+      malformed.push(key);
+    } else {
+      read.push({ numbers, key });
+    }
+  }
+  read.sort((left, right) => compareNumbers(left.numbers, right.numbers));
+  return [...read.map(({ numbers }) => build(numbers)), ...malformed.sort(compareStrings)];
+}
+
+/** Reads the numbers of a calendar key, or returns null when the key is not exactly how they are written. */
+function numbersOfKey(key: string, count: number): readonly number[] | null {
+  const parts = key.split(CALENDAR_KEY_SEPARATOR);
+  const numbers = parts.map(Number);
+  const exact =
+    parts.length === count && numbers.every((value, index) => String(value) === parts[index]);
+  return exact ? numbers : null;
+}
+
+/** Reports a calendar map that holds anything but keys marked present, or hidden list content. */
+function checkCalendarEntries(entries: Y.Map<unknown>, root: string, issues: IssueList): void {
+  checkSequenceContent(entries, root, issues);
+  for (const [key, value] of entries.entries()) {
+    if (value !== PRESENT) {
+      issues.add(`${root}.${key}`, 'WRONG_TYPE');
+    }
+  }
 }
 
 /** Reports every entry of a shared map that is not a map, then the fields of the others that do not belong in them. */

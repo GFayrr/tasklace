@@ -1,3 +1,4 @@
+import { canonicalCalendar } from '../calendar/canonical-calendar';
 import { compileCalendar } from '../calendar/compile-calendar';
 import { computeDailyWindow } from '../calendar/task-slots';
 import { MAX_DEPENDENCIES, MAX_HIERARCHY_DEPTH, MAX_TAGS, MAX_TASKS } from '../limits';
@@ -346,7 +347,12 @@ function updateProjectChecked(state: ProjectState, fields: Partial<ProjectHeader
     return failure(requireIssues(read.error));
   }
   const previous = state.header;
-  state.header = { ...read.value, baseline: header.baseline };
+  state.header = {
+    ...read.value,
+    calendar:
+      fields.calendar === undefined ? read.value.calendar : canonicalCalendar(read.value.calendar),
+    baseline: header.baseline,
+  };
   const problem = fields.calendar === undefined ? null : findCalendarProblem(state);
   if (problem !== null) {
     state.header = previous;
