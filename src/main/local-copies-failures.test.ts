@@ -96,7 +96,7 @@ describe('a file set aside while Windows briefly holds it', () => {
 
 describe('a damaged local copy index that cannot be kept aside', () => {
   it('is logged, then replaced by an index holding its well-formed entries', async () => {
-    const refusal = Object.assign(new Error('access denied'), { code: 'EACCES' });
+    const refusal = Object.assign(new Error('read-only file system'), { code: 'EROFS' });
     failSettingAside(refusal);
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {

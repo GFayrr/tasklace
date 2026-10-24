@@ -952,7 +952,7 @@ describe('setting aside the local copy of an opened file', () => {
   it('reports a copy the system cannot move as a failed write, logging why', async () => {
     const { sender, path } = await offeredFile();
     await writeCopy();
-    const denied = Object.assign(new Error('denied'), { code: 'EPERM' });
+    const denied = Object.assign(new Error('read-only file system'), { code: 'EROFS' });
     moving.failure = denied;
     const { answer, logged } = await quietly(() =>
       request(IPC_CHANNELS.setLocalCopyAside, sender, DOCUMENT_ID),
