@@ -11,6 +11,7 @@ import { RefusedRequest } from './ipc-trust';
 import {
   forgetWindowProject,
   registerProjectFileHandlers,
+  offerSharedProject,
   windowProjectKind,
 } from './project-files';
 import type { FakeIpcMain } from './testing/fake-electron';
@@ -717,6 +718,21 @@ describe('the kind of project a window holds', () => {
     expect(windowProjectKind(fresh as WebContents)).toBe('none');
     await request(IPC_CHANNELS.adoptProject, fresh, documentId);
     expect(windowProjectKind(fresh as WebContents)).toBe('withoutFile');
+  });
+
+  it('is a joined plan once the page adopts the shared plan it joined', async () => {
+    const joined = {};
+    const documentId = requireDocumentId('7d3c1f9e-2b4a-4c6d-8e0f-1a2b3c4d5e6f');
+    offerSharedProject(joined as WebContents, {
+      kind: 'loaded',
+      state: Uint8Array.of(1),
+      documentId,
+      warnings: [],
+      localChanges: null,
+    });
+    expect(windowProjectKind(joined as WebContents)).toBe('none');
+    await request(IPC_CHANNELS.adoptProject, joined, documentId);
+    expect(windowProjectKind(joined as WebContents)).toBe('joinedPlan');
   });
 
   it('is none again once the page reloads, and the project it was offered can no longer be adopted', async () => {

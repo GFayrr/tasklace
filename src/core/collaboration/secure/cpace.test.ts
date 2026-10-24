@@ -71,8 +71,8 @@ describe('the exchange of keys from a join code', () => {
 
   it('refuses both sides when the codes differ', () => {
     expect(handshake('K7Q4MZ', 'K7Q4MA')).toEqual({
-      host: failure('WRONG_CODE'),
-      guest: failure('WRONG_CODE'),
+      host: failure('WRONG_PASSWORD'),
+      guest: failure('WRONG_PASSWORD'),
     });
   });
 
@@ -86,11 +86,11 @@ describe('the exchange of keys from a join code', () => {
     }
     const changed = Uint8Array.from(guestSide.value.proof);
     changed[0] = (changed[0] ?? 0) ^ 1;
-    expect(hostSide.value.check(changed)).toEqual(failure('WRONG_CODE'));
+    expect(hostSide.value.check(changed)).toEqual(failure('WRONG_PASSWORD'));
     const other = startHandshake('K7Q4MZ', Uint8Array.from(SESSION).reverse(), 'guest', seeded(2));
     expect(finish(host, other)).toEqual({
-      host: failure('WRONG_CODE'),
-      guest: failure('WRONG_CODE'),
+      host: failure('WRONG_PASSWORD'),
+      guest: failure('WRONG_PASSWORD'),
     });
   });
 

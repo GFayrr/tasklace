@@ -599,7 +599,7 @@ describe('a shared plan whose host changes', () => {
     const impostor = await startHostServer({
       port,
       planKey,
-      knownTokens: new Map(),
+      knownDigests: new Map(),
       identity: identity('mallory', port),
       startTimer: firstTurnsOnly,
       randomBytes: systemRandomBytes,

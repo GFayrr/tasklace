@@ -35,7 +35,7 @@ function isEndpoint(value: unknown): boolean {
   return readEndpoint({ value, path: '' }, createIssueList()) !== undefined;
 }
 
-/** Tells whether a value describes a plan this window now hosts: its code, port and addresses. */
+/** Tells whether a value describes a plan this window now hosts: its code, port, addresses and the digest of the token of its host. */
 function isSharing(value: unknown): boolean {
   const addresses = field(value, 'addresses');
   return (

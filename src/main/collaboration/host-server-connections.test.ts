@@ -39,7 +39,7 @@ describe('a host holding as many connections as it allows', () => {
     const started = await startHostServer({
       port: await freePort(),
       planKey: null,
-      knownTokens: new Map(),
+      knownDigests: new Map(),
       startTimer: noTimer,
       randomBytes: systemRandomBytes,
       now: spacedClock(),

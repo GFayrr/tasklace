@@ -3,13 +3,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { permutationOf } from '../testing/arbitraries';
 import { requireParticipantId, type Participant } from './participants';
-import {
-  hostingDelay,
-  sharingIdOf,
-  shouldYield,
-  successionQueue,
-  SUCCESSION_TURN_MILLISECONDS,
-} from './succession';
+import { sharingIdOf, shouldYield, successionQueue } from './succession';
 
 /** Builds a participant with a rank, allowed to edit unless told otherwise. */
 function person(id: string, rank: number, isHost = false, canEdit = true): Participant {
@@ -57,15 +51,6 @@ describe('who takes over a plan whose host left', () => {
         },
       ),
     );
-  });
-
-  it('makes each one wait one turn per person before it, and someone outside the queue not at all', () => {
-    const queue = successionQueue([HOST, person('lea', 1), person('noah', 2)]);
-    expect([
-      hostingDelay(queue, requireParticipantId('lea')),
-      hostingDelay(queue, requireParticipantId('noah')),
-      hostingDelay(queue, requireParticipantId('camille')),
-    ]).toEqual([0, SUCCESSION_TURN_MILLISECONDS, null]);
   });
 
   it('lets the newer of two hosts give way, the identifier deciding between equal ranks', () => {

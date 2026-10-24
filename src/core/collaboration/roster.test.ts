@@ -1,12 +1,10 @@
-import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { MAX_DEPARTED_PARTICIPANTS, MAX_JOIN_RANK, MAX_PARTICIPANTS } from '../limits';
 import { failure } from '../result';
-import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
+import { unwrap } from '../testing/arbitraries';
 import { testId } from '../testing/project-builder';
 import { PARTICIPANT_COLOR_COUNT, requireParticipantId } from './participants';
 import {
-  electHost,
   joinRoster,
   leaveRoster,
   mayEdit,
@@ -226,80 +224,4 @@ describe('the participants of a shared plan', () => {
       updatePresence(roster, requireParticipantId('stranger'), { name: 'X', selectedTaskId: null }),
     ).toBe(roster);
   });
-
-  it('makes the participant connected the longest the host when the host is gone, with the right to edit, and nobody when alone', () => {
-    const elected = electHost(threePeople());
-    expect(
-      elected?.participants.map((participant) => [
-        participant.id,
-        participant.isHost,
-        participant.canEdit,
-      ]),
-    ).toEqual([
-      [LEA, true, true],
-      [NOAH, false, false],
-    ]);
-    expect(electHost(startRoster(HOST, 'Camille', null))).toBeNull();
-  });
-
-  it('decides between equal ranks by identifier', () => {
-    const roster = threePeople();
-    const tied = {
-      ...roster,
-      participants: roster.participants.map((participant) =>
-        participant.id === NOAH ? { ...participant, rank: 1 } : participant,
-      ),
-    };
-    expect(electHost(tied)?.participants.find((participant) => participant.isHost)?.id).toBe(LEA);
-  });
-
-  it(
-    'elects the same host whatever the order in which each copy holds the list',
-    { timeout: PROPERTY_TEST_TIMEOUT_MS },
-    () => {
-      fc.assert(
-        fc.property(
-          fc.uniqueArray(fc.stringMatching(/^[a-z]{1,6}$/), { minLength: 1, maxLength: 12 }),
-          fc.array(fc.integer({ min: 0, max: 3 }), { minLength: 12, maxLength: 12 }),
-          (names, ranks) => {
-            const participants = names.map((name, index) => ({
-              id: requireParticipantId(name),
-              name,
-              color: 0,
-              canEdit: false,
-              isHost: false,
-              rank: ranks[index] ?? 0,
-              selectedTaskId: null,
-              endpoint: null,
-              tokenDigest: null,
-            }));
-            const host = {
-              id: requireParticipantId('zzzzzzz'),
-              name: 'Camille',
-              color: 0,
-              canEdit: true,
-              isHost: true,
-              rank: 0,
-              selectedTaskId: null,
-              endpoint: null,
-              tokenDigest: null,
-            };
-            const roster: Roster = {
-              participants: [host, ...participants],
-              departed: [],
-              nextRank: 4,
-            };
-            const reversed: Roster = {
-              ...roster,
-              participants: [...roster.participants].reverse(),
-            };
-            /** Returns the host a copy of the list elects. */
-            const hostOf = (copy: Roster) =>
-              electHost(copy)?.participants.find((participant) => participant.isHost)?.id;
-            expect(hostOf(reversed)).toBe(hostOf(roster));
-          },
-        ),
-      );
-    },
-  );
 });

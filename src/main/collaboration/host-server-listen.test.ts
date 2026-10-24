@@ -51,7 +51,7 @@ function start(port: number, outcomes: (string | Error | null)[]) {
   return startHostServer({
     port,
     planKey: null,
-    knownTokens: new Map(),
+    knownDigests: new Map(),
     startTimer: () => () => undefined,
     randomBytes: systemRandomBytes,
     identity: null,

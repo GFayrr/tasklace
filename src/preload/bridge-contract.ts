@@ -119,7 +119,7 @@ export interface Sharing {
   readonly tokenDigest: TokenDigest;
 }
 
-export interface KnownToken {
+export interface KnownPerson {
   readonly participantId: ParticipantId;
   readonly tokenDigest: TokenDigest;
   readonly rank: number;
@@ -250,7 +250,7 @@ export interface TasklaceBridge {
     queue: readonly NextHostCandidate[],
     planName: string,
     hostName: string,
-    knownTokens: readonly KnownToken[],
+    knownPeople: readonly KnownPerson[],
   ) => Promise<BridgeResult<null>>;
   readonly sendToCollaboration: (to: CollaborationTarget, message: Uint8Array) => void;
   readonly onCollaborationEvent: (listener: (event: CollaborationEvent) => void) => void;
@@ -331,7 +331,7 @@ export interface ChannelArguments {
     queue: readonly NextHostCandidate[],
     planName: string,
     hostName: string,
-    knownTokens: readonly KnownToken[],
+    knownPeople: readonly KnownPerson[],
   ];
 }
 

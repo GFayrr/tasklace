@@ -66,7 +66,7 @@ type JoinAnswer = 'admitted' | 'identityTaken' | 'closed';
 interface ServerOptions {
   readonly port: number;
   readonly planKey: PlanKey | null;
-  readonly knownTokens: ReadonlyMap<ParticipantId, TokenDigest>;
+  readonly knownDigests: ReadonlyMap<ParticipantId, TokenDigest>;
   readonly identity: Introduction | null;
   readonly events: HostServerEvents;
   readonly startTimer: StartTimer;
@@ -89,9 +89,9 @@ export const TRY_LATER_CLOSE = 4_007;
 export const HOST_LEFT_CLOSE = 4_006;
 export const CLOSE_GRACE_MILLISECONDS = 1_024;
 const MAX_CONNECTIONS = MAX_PARTICIPANTS + MAX_OPEN_HANDSHAKES;
-const MAX_KNOWN_TOKENS = MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS;
+const MAX_KNOWN_DIGESTS = MAX_PARTICIPANTS + MAX_DEPARTED_PARTICIPANTS;
 
-/** Starts the server of a shared plan on the chosen port or the next free one, on every private network, IPv4 and IPv6, accepting only guests from a private address who prove they know the code. */
+/** Starts the server of a shared plan on the chosen port or the next free one, on every private network, IPv4 and IPv6, accepting only guests from a private address who prove they know the join code or the key of the plan. */
 export async function startHostServer(
   options: ServerOptions,
 ): Promise<Result<HostServer, ListenFailure>> {
@@ -171,7 +171,7 @@ function guestCounter(options: ServerOptions) {
   let wrongCodes = 0;
   let opening = 0;
   let nextNumber = 1;
-  const tokens = new Map<ParticipantId, TokenDigest>(options.knownTokens);
+  const digests = new Map<ParticipantId, TokenDigest>(options.knownDigests);
   const admitted = new Map<string, SecureConnection>();
   const admission: Admission = createAdmission(options.now);
   const editors = new WeakSet<SecureConnection>();
@@ -200,17 +200,17 @@ function guestCounter(options: ServerOptions) {
     options.events.codeChanged(code);
     return true;
   };
-  /** Tells whether a guest may come in as the person who first came with its identifier, refusing, once the tokens remembered reach their limit, any new identifier, a token being forgotten only once the list of the host forgot its person. */
+  /** Tells whether a guest may come in as the person who first came with its identifier, refusing, once the digests remembered reach their limit, any new identifier, a digest being forgotten only once the list of the host forgot its person. */
   const isSamePerson = (introduction: Introduction): boolean => {
     const digest = tokenDigestOf(introduction.token);
-    const known = tokens.get(introduction.participantId);
+    const known = digests.get(introduction.participantId);
     if (known !== undefined) {
       return known === digest;
     }
-    if (tokens.size >= MAX_KNOWN_TOKENS) {
+    if (digests.size >= MAX_KNOWN_DIGESTS) {
       return false;
     }
-    tokens.set(introduction.participantId, digest);
+    digests.set(introduction.participantId, digest);
     return true;
   };
   /** Gives a guest the key of the plan, closing a connection that cannot carry it, and tells whether the key went. */
@@ -240,7 +240,7 @@ function guestCounter(options: ServerOptions) {
     forget: (ids: readonly ParticipantId[]): void => {
       for (const id of ids) {
         if (!admitted.has(id)) {
-          tokens.delete(id);
+          digests.delete(id);
         }
       }
     },

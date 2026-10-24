@@ -24,7 +24,7 @@ async function joinWith(answers: boolean[]): Promise<{ ends: GuestEnd[]; joined:
   const started = await startHostServer({
     port: await freePort(),
     planKey: null,
-    knownTokens: new Map(),
+    knownDigests: new Map(),
     startTimer: () => () => undefined,
     randomBytes: systemRandomBytes,
     identity: null,

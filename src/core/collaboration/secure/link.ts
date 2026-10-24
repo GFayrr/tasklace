@@ -93,7 +93,7 @@ export function startHostLink(
       }
       const keys = confirmation.value.check(reply.subarray(1 + SHARE_BYTES));
       if (!keys.ok) {
-        return failure(mode === KEY_MODE ? 'WRONG_KEY' : keys.error);
+        return failure(mode === KEY_MODE ? 'WRONG_KEY' : 'WRONG_CODE');
       }
       return success({ confirm: confirmation.value.proof, keys: keys.value });
     },
@@ -137,7 +137,7 @@ export function answerHostLink(
         return failure('MALFORMED');
       }
       const keys = confirmation.value.check(confirm);
-      return keys.ok || !byKey ? keys : failure('WRONG_KEY');
+      return keys.ok ? keys : failure(byKey ? 'WRONG_KEY' : 'WRONG_CODE');
     },
   });
 }

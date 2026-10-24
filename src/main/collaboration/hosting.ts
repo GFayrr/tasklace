@@ -15,7 +15,7 @@ import type { StartTimer } from './secure-connection';
 export interface HostingOptions {
   readonly port: number;
   readonly planKey: PlanKey | null;
-  readonly knownTokens: ReadonlyMap<ParticipantId, TokenDigest>;
+  readonly knownDigests: ReadonlyMap<ParticipantId, TokenDigest>;
   readonly identity: Introduction;
   readonly rank: number;
   readonly planName: string;
@@ -43,7 +43,7 @@ export async function startHosting(
   const started = await startHostServer({
     port: options.port,
     planKey: options.planKey,
-    knownTokens: options.knownTokens,
+    knownDigests: options.knownDigests,
     identity: options.identity,
     startTimer: options.startTimer,
     randomBytes: options.randomBytes,

@@ -33,7 +33,7 @@ describe('closing the server of a shared plan', () => {
     const started = await startHostServer({
       port: await freePort(),
       planKey: null,
-      knownTokens: new Map(),
+      knownDigests: new Map(),
       startTimer: timers.startTimer,
       randomBytes: systemRandomBytes,
       now: spacedClock(),

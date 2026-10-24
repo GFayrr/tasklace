@@ -20,7 +20,7 @@ export interface Handshake {
 
 export interface Confirmation {
   readonly proof: Uint8Array;
-  readonly check: (peerProof: Uint8Array) => Result<SessionKeys, 'WRONG_CODE'>;
+  readonly check: (peerProof: Uint8Array) => Result<SessionKeys, 'WRONG_PASSWORD'>;
 }
 
 export const SESSION_ID_BYTES = 32;
@@ -44,15 +44,15 @@ const LABELS = {
   resume: 'resume',
 } as const;
 
-/** Starts the exchange of keys from a join code (CPace on ristretto255): both sides share a random multiple of a generator derived from the code and the session, so only those knowing the code get the same secret. */
+/** Starts the exchange of keys from a password, a join code or the key of a plan (CPace on ristretto255), both sides share a random multiple of a generator derived from the password and the session, so only those knowing it get the same secret. */
 export function startHandshake(
-  code: string,
+  password: string,
   sessionId: Uint8Array,
   role: HandshakeRole,
   randomBytes: (count: number) => Uint8Array,
 ): Handshake {
   const generator = ristretto255_hasher.hashToCurve(
-    withLengths([ENCODER.encode(code), sessionId]),
+    withLengths([ENCODER.encode(password), sessionId]),
     { DST: GENERATOR_DOMAIN },
   );
   const secret = randomScalar(randomBytes);
@@ -78,7 +78,7 @@ export function startHandshake(
   };
 }
 
-/** Builds the proof that this side knows the code and the check of the proof of the other side, the keys being given only when that proof matches. */
+/** Builds the proof that this side knows the password and the check of the proof of the other side, the keys being given only when that proof matches. */
 function confirmationOf(
   secret: Uint8Array,
   context: {
@@ -107,7 +107,7 @@ function confirmationOf(
     proof: proofOf(role),
     check: (peerProof) => {
       if (!equalBytes(peerProof, proofOf(peerRole))) {
-        return failure('WRONG_CODE');
+        return failure('WRONG_PASSWORD');
       }
       const hostToGuest = derive(LABELS.hostToGuest);
       const guestToHost = derive(LABELS.guestToHost);

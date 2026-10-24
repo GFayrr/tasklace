@@ -216,7 +216,7 @@ export class CollaborationState {
     );
   }
 
-  /** Tells whether this page is connected to a plan in which it may not edit, so that its changes are refused while it is there, changes made away from the host being kept apart once back. */
+  /** Tells whether this page is joining, or connected to, a plan in which it may not edit, so that its changes are refused while it is there, changes made away from the host being kept apart once back. */
   get isReadOnly(): boolean {
     const connected = this.#phase.kind === 'guest' && this.#phase.connection === 'connected';
     if (!connected && this.#phase.kind !== 'joining') {
@@ -573,7 +573,7 @@ export class CollaborationState {
       rank: participant.rank,
       endpoint: participant.endpoint,
     }));
-    const knownTokens = this.#participants.flatMap((participant) =>
+    const knownPeople = this.#participants.flatMap((participant) =>
       participant.tokenDigest === null
         ? []
         : [
@@ -589,7 +589,7 @@ export class CollaborationState {
       queue,
       session.project().name,
       name,
-      knownTokens,
+      knownPeople,
     );
     if (!asked.ok) {
       console.error('The next host of the shared plan could not be looked for:', asked.error);
@@ -648,7 +648,7 @@ export class CollaborationState {
     };
   }
 
-  /** Adds a guest who proved it knows the code, known by its connection before the host sends it the people in the plan, and drops a guest the plan cannot take, the main process having already closed the old connection of a person who came back. */
+  /** Adds a guest who proved it knows the code or the plan key, known by its connection before the host sends it the people in the plan, and drops a guest the plan cannot take, the main process having closed the old connection of a person coming back. */
   #peerJoined(
     peer: number,
     participantId: ParticipantId,
@@ -840,7 +840,7 @@ export class CollaborationState {
     });
   }
 
-  /** Tells that the connection to the host ended, keeping the plan open as it is: a plan already opened stays joined but offline, with the people last known, and an attempt to join ends. */
+  /** Tells that the connection to the host ended for good, keeping the plan open as it is: a plan already opened stays open with its connection lost and the people last known, and an attempt to join ends. */
   #ended(reason: GuestEndReason): void {
     this.#lastEnd = reason;
     const phase = this.#phase;

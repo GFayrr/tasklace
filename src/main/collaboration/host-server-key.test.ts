@@ -43,7 +43,7 @@ describe('a host that cannot give the key of the plan', () => {
     const started = await startHostServer({
       port: await freePort(),
       planKey: null,
-      knownTokens: new Map(),
+      knownDigests: new Map(),
       startTimer: noTimer,
       randomBytes: systemRandomBytes,
       now: spacedClock(),

@@ -81,7 +81,7 @@ export async function startPlanHost(
   const started = await startHostServer({
     port: await freePort(),
     planKey: options.planKey,
-    knownTokens: new Map(),
+    knownDigests: new Map(),
     startTimer: () => () => undefined,
     randomBytes: systemRandomBytes,
     identity: null,

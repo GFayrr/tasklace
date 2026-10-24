@@ -1,7 +1,7 @@
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import type { PlanKey } from './secure/link';
-import type { Participant, ParticipantId } from './participants';
+import type { Participant } from './participants';
 import { isOlder, type RankedId } from './roster';
 
 export const SUCCESSION_TURN_MILLISECONDS = 15_000;
@@ -14,12 +14,6 @@ export function successionQueue(participants: readonly Participant[]): readonly 
   return participants
     .filter((participant) => !participant.isHost && participant.canEdit)
     .toSorted((first, second) => (isOlder(first, second) ? -1 : 1));
-}
-
-/** Gives how long a participant waits for an older one to host before hosting itself, one turn per participant before it in the queue, or null for someone not in it. */
-export function hostingDelay(queue: readonly Participant[], me: ParticipantId): number | null {
-  const place = queue.findIndex((participant) => participant.id === me);
-  return place === -1 ? null : place * SUCCESSION_TURN_MILLISECONDS;
 }
 
 /** Tells whether a host must give way to another host of the same plan, the one connected the longest keeping its place. */

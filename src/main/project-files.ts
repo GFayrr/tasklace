@@ -56,11 +56,12 @@ export interface ProjectFileServices {
   readonly userDataFolder: string;
 }
 
-export type WindowProjectKind = 'none' | 'withFile' | 'withoutFile';
+export type WindowProjectKind = 'none' | 'withFile' | 'withoutFile' | 'joinedPlan';
 
 interface WindowProject {
   readonly path: string | null;
   readonly documentId: DocumentId;
+  readonly joined: boolean;
 }
 
 type ReadKind = 'tasklace' | ExchangeKind;
@@ -99,13 +100,16 @@ export function forgetWindowProject(sender: WebContents): void {
   offered.delete(sender);
 }
 
-/** Tells what the window of a page holds: no project, a project saved to a file, or a project kept only on this computer. */
+/** Tells what the window of a page holds: no project, a project saved to a file, a shared plan it joined, or a project kept only on this computer. */
 export function windowProjectKind(sender: WebContents): WindowProjectKind {
   const project = projects.get(sender);
   if (project === undefined) {
     return 'none';
   }
-  return project.path === null ? 'withoutFile' : 'withFile';
+  if (project.path !== null) {
+    return 'withFile';
+  }
+  return project.joined ? 'joinedPlan' : 'withoutFile';
 }
 
 /** Answers the project file requests of the bridge (new, open, recent, import, adopt, save, save as, export, changes kept apart), the main process alone choosing paths and knowing the project of each window, which changes only once its page adopts it. */
@@ -177,13 +181,14 @@ export async function answerOrFail(
   }
 }
 
-/** Offers a window the file and document it is about to work on, which become its project once its page adopts them, returning the document identifier. */
+/** Offers a window the file and document it is about to work on, or the shared plan it joined, which become its project once its page adopts them, returning the document identifier. */
 function offerProject(
   sender: WebContents,
   path: string | null,
   documentId: DocumentId,
+  joined = false,
 ): DocumentId {
-  offered.set(sender, { path, documentId });
+  offered.set(sender, { path, documentId, joined });
   return documentId;
 }
 
@@ -243,7 +248,7 @@ async function setCopyAside(
 
 /** Offers a window the shared plan it joined, whose state the worker checked, as a project without file, giving what the page opens. */
 export function offerSharedProject(sender: WebContents, loaded: LoadedProject): OpenedProject {
-  offerProject(sender, null, loaded.documentId);
+  offerProject(sender, null, loaded.documentId, true);
   return {
     state: loaded.state,
     documentId: loaded.documentId,
@@ -408,7 +413,7 @@ async function saveProject(
     return saved;
   }
   if (path !== null && path !== project.path) {
-    projects.set(sender, { path, documentId });
+    projects.set(sender, { path, documentId, joined: false });
     await rememberRecentProject(services, path);
   }
   return success({ localCopySaved: saved.value.localCopySaved });
@@ -484,7 +489,7 @@ async function createdFolder(folder: string): Promise<boolean> {
   }
 }
 
-/** Finds a path in a folder for a file name that no file uses yet, numbering the name after the first, then naming it after a random identifier once every number tried is taken. */
+/** Finds a path in a folder for a file name that no file uses yet, trying the name itself, then “name 2”, “name 3” and so on up to a limit, then a random identifier. */
 async function freePathIn(folder: string, fileName: string): Promise<string> {
   const extension = extname(fileName);
   const stem = fileName.slice(0, fileName.length - extension.length);

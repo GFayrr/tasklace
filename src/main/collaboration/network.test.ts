@@ -72,7 +72,7 @@ async function portBeforeAFreeOne(): Promise<number> {
 async function host(
   port?: number,
   planKey: PlanKey | null = null,
-  knownTokens: ReadonlyMap<ParticipantId, TokenDigest> = new Map(),
+  knownDigests: ReadonlyMap<ParticipantId, TokenDigest> = new Map(),
   now: () => number = spacedClock(),
   identity: Introduction | null = null,
 ) {
@@ -83,7 +83,7 @@ async function host(
   const started = await startHostServer({
     port: port ?? (await freePort()),
     planKey,
-    knownTokens,
+    knownDigests,
     startTimer: noTimer,
     randomBytes: systemRandomBytes,
     now,

@@ -35,7 +35,7 @@ import {
   type BridgeResult,
   type CollaborationEvent,
   type CollaborationTarget,
-  type KnownToken,
+  type KnownPerson,
   type CollaborationSettings,
   type InvokeChannel,
   type NearbyPlan,
@@ -115,7 +115,7 @@ export function privateAddressesOf(
   ].map((entry) => entry.address);
 }
 
-/** Answers the collaboration requests of the bridge (settings, sharing, joining, the plan received, plans nearby), passing the encoded messages of each window without reading the plan, and returns how to stop a window that reloads or closes. */
+/** Answers the collaboration requests of the bridge, passing the encoded messages of each window without reading the plan, and returns how to stop a window that reloads or closes. */
 export function registerCollaborationHandlers(services: CollaborationServices): {
   readonly forgetWindow: (sender: WebContents) => void;
 } {
@@ -264,15 +264,15 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
     windowOf(event.sender).join(request, identity.value);
     return success(null);
   });
-  handle(IPC_CHANNELS.findNextHost, async (event, queue, planName, hostName, tokens) => {
+  handle(IPC_CHANNELS.findNextHost, async (event, queue, planName, hostName, people) => {
     const candidates = readSuccessionQueue(queue) ?? refuseMessage();
     const names = readSharingNames(planName, hostName) ?? refuseMessage();
-    const knownTokens = readKnownTokens(tokens) ?? refuseMessage();
+    const knownPeople = readKnownPeople(people) ?? refuseMessage();
     const settings = await readSettings(storePath);
     if (!settings.ok) {
       return settings;
     }
-    if (!windowOf(event.sender).succeed(candidates, names, settings.value.port, knownTokens)) {
+    if (!windowOf(event.sender).succeed(candidates, names, settings.value.port, knownPeople)) {
       console.error('A page looked for the next host without having joined a plan with its key.');
       return failure({ code: 'TASK_FAILED' });
     }
@@ -437,18 +437,18 @@ function readParticipantIds(value: unknown): readonly ParticipantId[] | null {
     : null;
 }
 
-/** Reads the digests of the tokens of the people of a plan a page gives, which the next host checks the people coming back against, or null for any other shape. */
-function readKnownTokens(value: unknown): readonly KnownToken[] | null {
+/** Reads the people of a plan a page gives, with the digest of their token, rank and right, which the next host checks the people coming back against, or null for any other shape. */
+function readKnownPeople(value: unknown): readonly KnownPerson[] | null {
   if (!Array.isArray(value) || value.length > MAX_PARTICIPANTS) {
     return null;
   }
-  const entries = value.map(readKnownToken);
+  const entries = value.map(readKnownPerson);
   const valid = entries.filter((entry) => entry !== null);
   return valid.length === entries.length ? valid : null;
 }
 
 /** Reads one person of a plan a page gives: its identifier, the digest of its token, its rank and whether it may edit, or null for any other shape. */
-function readKnownToken(item: unknown): KnownToken | null {
+function readKnownPerson(item: unknown): KnownPerson | null {
   const participantId: unknown = Reflect.get(Object(item), 'participantId');
   const tokenDigest: unknown = Reflect.get(Object(item), 'tokenDigest');
   const rank: unknown = Reflect.get(Object(item), 'rank');

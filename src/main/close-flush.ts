@@ -17,6 +17,7 @@ const CRASHED_BODIES: Readonly<Record<WindowProjectKind, string>> = {
   none: MESSAGES.pageProblems.crashedWithoutProjectBody,
   withFile: MESSAGES.pageProblems.crashedBody,
   withoutFile: MESSAGES.pageProblems.crashedWithoutFileBody,
+  joinedPlan: MESSAGES.pageProblems.crashedJoinedPlanBody,
 };
 
 /** Answers the page telling whether its window may close once its changes are saved, logging any other answer and keeping the window open so that the next close asks again, and offers to reload a page that could not start. */

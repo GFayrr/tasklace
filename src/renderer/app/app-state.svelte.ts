@@ -867,7 +867,7 @@ export class AppState {
     await this.collaboration.findPlans(true);
   }
 
-  /** Closes the window of the shared plan, leaving a plan still being joined and no longer looking for plans nearby. */
+  /** Closes the window of the shared plan and, for the join window, stops looking for plans nearby and gives up a join still in progress. */
   closeCollaborationWindow(): void {
     const closed = this.#collaborationWindow;
     this.#collaborationWindow = null;

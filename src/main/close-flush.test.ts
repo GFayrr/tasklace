@@ -152,6 +152,7 @@ describe('a page that crashes', () => {
   it.each([
     ['withFile', en.pageProblems.crashedBody],
     ['withoutFile', en.pageProblems.crashedWithoutFileBody],
+    ['joinedPlan', en.pageProblems.crashedJoinedPlanBody],
     ['none', en.pageProblems.crashedWithoutProjectBody],
   ] as const)('tells what a crash loses for a window holding %s', async (kind, body) => {
     projectKind.current = kind;

@@ -234,9 +234,9 @@ export function fakeBridge(): {
     allowPeerToEdit: (peer) => asked(['allowPeerToEdit', peer], collaboration.allowResult),
     forgetGuests: (ids) => asked(['forgetGuests', ids], collaboration.forgetResult),
     copyJoinCode: () => asked(['copyCode'], collaboration.copyResult),
-    findNextHost: (queue, planName, hostName, knownTokens) =>
+    findNextHost: (queue, planName, hostName, knownPeople) =>
       asked(
-        ['findNextHost', queue, planName, hostName, knownTokens],
+        ['findNextHost', queue, planName, hostName, knownPeople],
         collaboration.findNextHostResult,
       ),
     keepOwnChanges: (state, planName) =>

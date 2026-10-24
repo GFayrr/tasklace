@@ -11,7 +11,7 @@ import type { JoinCode } from '../../core/collaboration/secure/join-code';
 import { isOlder } from '../../core/collaboration/roster';
 import { sharingIdOf } from '../../core/collaboration/succession';
 import { success, type Result } from '../../core/result';
-import type { CollaborationEvent, KnownToken, Sharing } from '../../preload/bridge-contract';
+import type { CollaborationEvent, KnownPerson, Sharing } from '../../preload/bridge-contract';
 import { findPlans, type Mdns, type NearbyPlan } from './discovery';
 import { connectAsGuest } from './guest-client';
 import { startGuestSession, type GuestSession } from './guest-session';
@@ -60,7 +60,7 @@ export type WindowState =
     };
 
 export interface TakenOver {
-  readonly people: readonly KnownToken[];
+  readonly people: readonly KnownPerson[];
   readonly rank: number;
 }
 
@@ -79,7 +79,7 @@ export interface WindowSharing {
     queue: readonly SuccessionCandidate[],
     names: PlanNames,
     port: number,
-    knownPeople: readonly KnownToken[],
+    knownPeople: readonly KnownPerson[],
   ) => boolean;
   readonly stop: () => Promise<void>;
 }
@@ -96,7 +96,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
     options: {
       readonly port: number;
       readonly planKey: PlanKey | null;
-      readonly knownTokens: ReadonlyMap<ParticipantId, TokenDigest>;
+      readonly knownDigests: ReadonlyMap<ParticipantId, TokenDigest>;
       readonly identity: Introduction;
       readonly rank: number;
     },
@@ -186,7 +186,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
     hosting: {
       readonly names: PlanNames;
       readonly port: number;
-      readonly knownPeople: readonly KnownToken[];
+      readonly knownPeople: readonly KnownPerson[];
     },
   ): void => {
     const attempts = new Set<GuestSession>();
@@ -203,7 +203,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       const hosted = await startHostingAs(place.names, {
         port: place.port,
         planKey,
-        knownTokens: new Map(
+        knownDigests: new Map(
           place.knownPeople.map(({ participantId, tokenDigest }) => [participantId, tokenDigest]),
         ),
         identity,
@@ -331,7 +331,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       const hosted = await startHostingAs(names, {
         port,
         planKey: null,
-        knownTokens: new Map(),
+        knownDigests: new Map(),
         identity,
         rank: 0,
       });

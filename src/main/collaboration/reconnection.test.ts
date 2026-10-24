@@ -133,7 +133,7 @@ async function host(port: number, startTimer: StartTimer = () => () => undefined
   const started = await startHostServer({
     port,
     planKey: PLAN_KEY,
-    knownTokens: new Map(),
+    knownDigests: new Map(),
     startTimer,
     randomBytes: systemRandomBytes,
     identity: null,
