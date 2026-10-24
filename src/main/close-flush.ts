@@ -17,6 +17,7 @@ const CRASHED_BODIES: Readonly<Record<WindowProjectKind, string>> = {
   none: MESSAGES.pageProblems.crashedWithoutProjectBody,
   withFile: MESSAGES.pageProblems.crashedBody,
   withoutFile: MESSAGES.pageProblems.crashedWithoutFileBody,
+  joinedPlan: MESSAGES.pageProblems.crashedJoinedPlanBody,
 };
 
 /** Answers the page telling whether its window may close once its changes are saved, logging any other answer and keeping the window open so that the next close asks again, and offers to reload a page that could not start. */
@@ -53,11 +54,12 @@ function windowOf(sender: WebContents, channel: string): PageWindow | undefined 
   return known;
 }
 
-/** Holds the closing of a window until its page has saved its pending changes and agreed to close, while a page that crashed, could not load or lost its bridge lets its window close and, when nobody asked to close, is offered a reload that forgets its project, unless its first load failed, which the failed start reports, and a page that stops responding while asked to save lets the user wait for it or close anyway. */
+/** Holds the closing of a window until its page has saved its pending changes and agreed to close, while a page that crashed, could not load or lost its bridge lets its window close and, when nobody asked to close, is offered a reload that forgets its project, unless its first load failed, which the failed start reports, telling at once of each such failure, and a page that stops responding while asked to save lets the user wait for it or close anyway. */
 export function flushBeforeClosing(
   window: BrowserWindow,
   projectKind: (contents: WebContents) => WindowProjectKind,
   forgetProject: (contents: WebContents) => void,
+  pageFailed: (contents: WebContents) => void,
 ): void {
   const contents = window.webContents;
   let requested = false;
@@ -125,6 +127,7 @@ export function flushBeforeClosing(
   contents.on('render-process-gone', (_event, details: unknown) => {
     console.error('The page of a window stopped:', details);
     pageGone = true;
+    pageFailed(contents);
     if (requested) {
       closeNow();
       return;
@@ -148,6 +151,7 @@ export function flushBeforeClosing(
         return;
       }
       pageGone = true;
+      pageFailed(contents);
       if (loadedOnce) {
         offerReload(window, MESSAGES.pageProblems.startFailedBody, forgetProject);
       }
@@ -156,6 +160,7 @@ export function flushBeforeClosing(
   contents.on('preload-error', (_event, path: string, error: unknown) => {
     console.error(`The bridge of a page could not load (${path}):`, error);
     bridgeMissing = true;
+    pageFailed(contents);
     offerReload(window, MESSAGES.pageProblems.startFailedBody, forgetProject);
   });
   window.on('unresponsive', () => {

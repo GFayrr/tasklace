@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_CALENDAR } from '../calendar/default-calendar';
 import type { Project } from '../model/project';
 import { computeWbsNumbers } from '../scheduling/wbs';
 import { dayIndexOf, SATURDAY } from '../time';
@@ -57,26 +58,26 @@ describe('two people changing the same plan at the same time', () => {
     });
   });
 
-  it('keeps one of two non-working periods added at the same time, the calendar lists being written whole, the same one for both people', () => {
+  it('keeps both non-working periods added at the same time', () => {
     const { left, right } = twoPeople();
     const calendar = left.project().calendar;
     apply(left, {
       type: 'updateProject',
-      fields: { calendar: { ...calendar, nonWorkingPeriods: [LEFT_PERIOD] } },
+      fields: { calendar: { ...calendar, nonWorkingPeriods: [RIGHT_PERIOD] } },
     });
     apply(right, {
       type: 'updateProject',
-      fields: { calendar: { ...calendar, nonWorkingPeriods: [RIGHT_PERIOD] } },
+      fields: { calendar: { ...calendar, nonWorkingPeriods: [LEFT_PERIOD] } },
     });
     expect(exchange(left, right)).toEqual([
       { ok: true, value: [] },
       { ok: true, value: [] },
     ]);
     expect(left.project()).toEqual(right.project());
-    expect(left.project().calendar.nonWorkingPeriods).toEqual([RIGHT_PERIOD]);
+    expect(left.project().calendar.nonWorkingPeriods).toEqual([LEFT_PERIOD, RIGHT_PERIOD]);
   });
 
-  it('keeps one of two working days changed at the same time, the same one for both people', () => {
+  it('keeps both working days changed at the same time', () => {
     const { left, right } = twoPeople();
     const calendar = left.project().calendar;
     apply(left, {
@@ -94,7 +95,52 @@ describe('two people changing the same plan at the same time', () => {
       { ok: true, value: [] },
     ]);
     expect(left.project()).toEqual(right.project());
-    expect(left.project().calendar.workingWeekdays).toEqual(TEST_CALENDAR.workingWeekdays.slice(1));
+    expect(left.project().calendar.workingWeekdays).toEqual([
+      ...TEST_CALENDAR.workingWeekdays.slice(1),
+      SATURDAY,
+    ]);
+  });
+
+  it('keeps the earlier of two ranges of working hours that overlap once both changes meet, the same for both people', () => {
+    const { left, right } = twoPeople();
+    const calendar = left.project().calendar;
+    /** Gives the calendar with its morning range replaced. */
+    const withMorning = (startHour: number, endHour: number) => ({
+      ...calendar,
+      workingTimeRanges: [{ startHour, endHour }, ...calendar.workingTimeRanges.slice(1)],
+    });
+    apply(left, { type: 'updateProject', fields: { calendar: withMorning(8, 11) } });
+    apply(right, { type: 'updateProject', fields: { calendar: withMorning(10, 12) } });
+    const removed = { code: 'WORKING_HOURS_REMOVED', id: '10,12' };
+    expect(exchange(left, right)).toEqual([
+      { ok: true, value: [removed] },
+      { ok: true, value: [removed] },
+    ]);
+    expect(left.project()).toEqual(right.project());
+    expect(left.project().calendar.workingTimeRanges).toEqual([
+      { startHour: 8, endHour: 11 },
+      { startHour: 13, endHour: 17 },
+    ]);
+  });
+
+  it('puts back the default working hours when each person removed a different last range', () => {
+    const { left, right } = twoPeople();
+    const calendar = left.project().calendar;
+    apply(left, {
+      type: 'updateProject',
+      fields: { calendar: { ...calendar, workingTimeRanges: [{ startHour: 9, endHour: 12 }] } },
+    });
+    apply(right, {
+      type: 'updateProject',
+      fields: { calendar: { ...calendar, workingTimeRanges: [{ startHour: 13, endHour: 17 }] } },
+    });
+    const restored = { code: 'WORKING_HOURS_RESTORED', id: '' };
+    expect(exchange(left, right)).toEqual([
+      { ok: true, value: [restored] },
+      { ok: true, value: [restored] },
+    ]);
+    expect(left.project()).toEqual(right.project());
+    expect(left.project().calendar.workingTimeRanges).toEqual(DEFAULT_CALENDAR.workingTimeRanges);
   });
 
   it('gives both people the same valid order, mixing the two, when each renumbers the same siblings', () => {

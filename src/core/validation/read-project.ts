@@ -59,7 +59,9 @@ import {
   readArray,
   readBoolean,
   readEnum,
-  readIdentifier,
+  readDependencyId,
+  readTagId,
+  readTaskId,
   readInteger,
   readQuarterHours,
   readNullable,
@@ -125,12 +127,16 @@ export interface ListLimits {
   readonly tasks: number;
   readonly dependencies: number;
   readonly tags: number;
+  readonly workingTimeRanges: number;
+  readonly nonWorkingPeriods: number;
 }
 
 export const NOMINAL_LIST_LIMITS: ListLimits = {
   tasks: MAX_TASKS,
   dependencies: MAX_DEPENDENCIES,
   tags: MAX_TAGS,
+  workingTimeRanges: MAX_WORKING_TIME_RANGES,
+  nonWorkingPeriods: MAX_NON_WORKING_PERIODS,
 };
 
 export const TASK_KEYS_BY_KIND: Readonly<Record<Task['kind'], readonly string[]>> = {
@@ -227,7 +233,7 @@ function readProjectFields(
   const project = {
     name: readText(child('name'), issues, MAX_PROJECT_NAME_LENGTH),
     startDate: codec.readInstant(child('startDate'), issues),
-    calendar: readCalendar(child('calendar'), issues, codec),
+    calendar: readCalendar(child('calendar'), issues, codec, limits),
     options: readOptions(child('options'), issues),
     tags: readList(child('tags'), issues, limits.tags, readTag),
     tasks: readList(child('tasks'), issues, limits.tasks, (item, list) =>
@@ -241,11 +247,12 @@ function readProjectFields(
   return allDefined(project) ? project : undefined;
 }
 
-/** Reads the working weekdays, daily time ranges and non-working periods of a calendar. */
+/** Reads the working weekdays, daily time ranges and non-working periods of a calendar, with given list limits. */
 function readCalendar(
   field: Field,
   issues: IssueList,
   codec: ValueCodec,
+  limits: ListLimits,
 ): WorkingCalendar | undefined {
   const record = readRecord(field, issues, CALENDAR_KEYS);
   if (record === undefined) {
@@ -258,13 +265,13 @@ function readCalendar(
     workingTimeRanges: readList(
       child('workingTimeRanges'),
       issues,
-      MAX_WORKING_TIME_RANGES,
+      limits.workingTimeRanges,
       readTimeRange,
     ),
     nonWorkingPeriods: readList(
       child('nonWorkingPeriods'),
       issues,
-      MAX_NON_WORKING_PERIODS,
+      limits.nonWorkingPeriods,
       (item, list) => readDayRange(item, list, codec),
     ),
   };
@@ -333,7 +340,7 @@ function readTag(field: Field, issues: IssueList): Tag | undefined {
   /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const tag = {
-    id: readIdentifier(child('id'), issues),
+    id: readTagId(child('id'), issues),
     name: readText(child('name'), issues, MAX_TAG_NAME_LENGTH),
     color: readColor(child('color'), issues),
     representsPersonOrTeam: readBoolean(child('representsPersonOrTeam'), issues),
@@ -376,9 +383,9 @@ function readTaskBase(record: UnknownRecord, path: string, issues: IssueList) {
   /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, path);
   return {
-    id: readIdentifier(child('id'), issues),
+    id: readTaskId(child('id'), issues),
     name: readText(child('name'), issues, MAX_TASK_NAME_LENGTH),
-    parentId: readNullable(child('parentId'), issues, readIdentifier),
+    parentId: readNullable(child('parentId'), issues, readTaskId),
     sortKey: readPatternString(child('sortKey'), issues, SORT_KEY_PATTERN, MAX_SORT_KEY_LENGTH),
   };
 }
@@ -402,7 +409,7 @@ function readDatedFields(
   return {
     ...readTaskBase(record, path, issues),
     progressPercent: readInteger(child('progressPercent'), issues, 0, FULL_PROGRESS),
-    tagId: readNullable(child('tagId'), issues, readIdentifier),
+    tagId: readNullable(child('tagId'), issues, readTagId),
     startNoEarlierThan: readNullable(child('startNoEarlierThan'), issues, codec.readInstant),
     mustFinishOn: readNullable(child('mustFinishOn'), issues, codec.readInstant),
     deadline: readNullable(child('deadline'), issues, codec.readInstant),
@@ -543,9 +550,9 @@ function readDependency(field: Field, issues: IssueList): Dependency | undefined
   /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const dependency = {
-    id: readIdentifier(child('id'), issues),
-    predecessorId: readIdentifier(child('predecessorId'), issues),
-    successorId: readIdentifier(child('successorId'), issues),
+    id: readDependencyId(child('id'), issues),
+    predecessorId: readTaskId(child('predecessorId'), issues),
+    successorId: readTaskId(child('successorId'), issues),
     type: readEnum(child('type'), issues, DEPENDENCY_TYPES),
     lagHours: readQuarterHours(child('lagHours'), issues, -MAX_LAG_HOURS, MAX_LAG_HOURS),
     predecessorBlock: readBlockReference(child('predecessorBlock'), issues),
@@ -594,7 +601,7 @@ function readBaselineEntry(
   /** Reads a field of the record under its key. */
   const child = (key: string): Field => childField(record, key, field.path);
   const entry = {
-    taskId: readIdentifier(child('taskId'), issues),
+    taskId: readTaskId(child('taskId'), issues),
     start: codec.readInstant(child('start'), issues),
     end: codec.readInstant(child('end'), issues),
     durationHours: readQuarterHours(child('durationHours'), issues, 0, MAX_BASELINE_DURATION_HOURS),

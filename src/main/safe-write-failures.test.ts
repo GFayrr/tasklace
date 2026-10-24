@@ -49,7 +49,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 });
 
 const { writeFileSafely } = await import('./safe-write');
-type Renaming = import('./safe-write').Renaming;
+type Renaming = import('./stored-files').Renaming;
 
 const KEPT = 'kept';
 

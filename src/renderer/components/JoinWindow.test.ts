@@ -230,6 +230,10 @@ describe('joining a shared plan', () => {
       kind: 'hostMessage',
       message: encodeMessage({ kind: 'update', update: Uint8Array.of(0, 0) }),
     });
+    control.collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'stateVector', vector: Uint8Array.of(0) }),
+    });
     await settle();
     await settle();
     update();

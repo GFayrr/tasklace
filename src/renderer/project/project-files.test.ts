@@ -216,7 +216,7 @@ describe('createProjectFiles', () => {
     expect(events).toEqual(['adopt', 'save', 'open', 'adopt']);
   });
 
-  it('refuses a second file action while one is running, and accepts one again once it ends', async () => {
+  it('refuses a second file action while one is running, opening a plan the host sent once it ends, and accepts one again', async () => {
     let finish: (result: BridgeResult<OpenedProject>) => void = () => undefined;
     const slow = new Promise<BridgeResult<OpenedProject>>((resolve) => {
       finish = resolve;
@@ -241,7 +241,10 @@ describe('createProjectFiles', () => {
     expect(events).toEqual(before);
     expect(await files.discardHeldPdf()).toEqual({ ok: true, value: null });
     expect(events).toEqual([...before, 'discard']);
+    const shared = files.openShared(Uint8Array.of(0, 0));
+    await settle();
     finish(openedOf(OTHER_ID));
+    expect((await shared).ok).toBe(true);
     expect((await first).ok).toBe(true);
     expect(await files.exportFile('csv', 'a', 'Plan')).toEqual({
       ok: true,

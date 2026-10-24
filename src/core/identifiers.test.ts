@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_IDENTIFIER_LENGTH } from './limits';
-import { isIdentifier, requireIdentifier } from './identifiers';
+import {
+  isDependencyId,
+  isIdentifierText,
+  isTagId,
+  isTaskId,
+  requireIdentifier,
+} from './identifiers';
 import type { DependencyId, TagId, TaskId } from './model/project';
 import type { DayIndex, ProjectHour } from './time';
 
@@ -18,8 +24,23 @@ describe('identifiers', () => {
         'é',
         42,
         null,
-      ].map(isIdentifier),
+      ].map(isIdentifierText),
     ).toEqual([true, true, true, false, false, false, false, false, false, false]);
+  });
+
+  it('reads each kind of identifier with the same rule, keeping its kind', () => {
+    const values: unknown[] = ['t1', 'a b', 42];
+    expect([values.map(isTaskId), values.map(isTagId), values.map(isDependencyId)]).toEqual([
+      [true, false, false],
+      [true, false, false],
+      [true, false, false],
+    ]);
+    const read: unknown = 't1';
+    if (isTaskId(read)) {
+      // @ts-expect-error A value read as a task identifier is not a tag identifier.
+      const tag: TagId = read;
+      expect(tag).toBe('t1');
+    }
   });
 
   it('gives a valid identifier as one, and throws for any other value', () => {

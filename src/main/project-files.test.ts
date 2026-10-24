@@ -11,6 +11,7 @@ import { RefusedRequest } from './ipc-trust';
 import {
   forgetWindowProject,
   registerProjectFileHandlers,
+  offerSharedProject,
   windowProjectKind,
 } from './project-files';
 import type { FakeIpcMain } from './testing/fake-electron';
@@ -81,6 +82,7 @@ const LOADED = {
   localChanges: null,
 } as const;
 const SAVED = { kind: 'saved', localCopySaved: true } as const;
+const LATER_TURNS = 64;
 const tasks: FileTask[] = [];
 const runTask = vi.fn<(task: FileTask) => Promise<FileTaskResult>>();
 const trusted = vi.fn();
@@ -137,6 +139,13 @@ async function openedIn(path: string): Promise<object> {
   expect(await request(IPC_CHANNELS.openProject, sender)).toMatchObject({ ok: true });
   expect(await request(IPC_CHANNELS.adoptProject, sender, DOCUMENT_ID)).toEqual(success(null));
   return sender;
+}
+
+/** Lets the event loop turn a number of times, so that work started meanwhile goes as far as it can. */
+async function laterTurns(count: number): Promise<void> {
+  for (let turn = 0; turn < count; turn += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
 }
 
 /** Runs a request while silencing, and returning, what it logs as errors. */
@@ -711,6 +720,21 @@ describe('the kind of project a window holds', () => {
     expect(windowProjectKind(fresh as WebContents)).toBe('withoutFile');
   });
 
+  it('is a joined plan once the page adopts the shared plan it joined', async () => {
+    const joined = {};
+    const documentId = requireDocumentId('7d3c1f9e-2b4a-4c6d-8e0f-1a2b3c4d5e6f');
+    offerSharedProject(joined as WebContents, {
+      kind: 'loaded',
+      state: Uint8Array.of(1),
+      documentId,
+      warnings: [],
+      localChanges: null,
+    });
+    expect(windowProjectKind(joined as WebContents)).toBe('none');
+    await request(IPC_CHANNELS.adoptProject, joined, documentId);
+    expect(windowProjectKind(joined as WebContents)).toBe('joinedPlan');
+  });
+
   it('is none again once the page reloads, and the project it was offered can no longer be adopted', async () => {
     const opened = await openedIn(join(folder, 'Plan.tasklace'));
     forgetWindowProject(opened as WebContents);
@@ -761,10 +785,13 @@ describe('keeping the changes a person could not share', () => {
 
   it('keeps the plan under a new identifier in a folder of this computer, first among the recent projects, and opens it again', async () => {
     const sender = await openedIn(join(folder, 'Thesis.tasklace'));
-    const before = Date.now();
-    expect(await request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis')).toEqual(
-      success(null),
-    );
+    const keptAt = new Date(Date.UTC(2026, 9, 22, 11, 5, 30));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(keptAt);
+    const kept = await request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis').finally(() => {
+      vi.useRealTimers();
+    });
+    expect(kept).toEqual(success({ localCopySaved: true }));
     const task = keptTask();
     const path = join(userData, KEPT, 'Thesis (my changes).tasklace');
     expect([
@@ -773,8 +800,8 @@ describe('keeping the changes a person could not share', () => {
       task.nameTemplate,
       task.path,
       task.localCopyFolder,
-      task.savedAt.getTime() >= before,
-    ]).toEqual([STATE, true, '{plan} (my changes)', path, join(userData, 'local-copies'), true]);
+      task.savedAt,
+    ]).toEqual([STATE, true, '{plan} (my changes)', path, join(userData, 'local-copies'), keptAt]);
     expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(
       success([
         { name: 'Thesis (my changes)', folder: 'Kept on this computer' },
@@ -783,12 +810,41 @@ describe('keeping the changes a person could not share', () => {
     );
     await writeFile(path, 'project');
     runTask.mockResolvedValueOnce(success(LOADED));
-    expect(await request(IPC_CHANNELS.openKeptChanges, sender)).toMatchObject({ ok: true });
+    expect(await request(IPC_CHANNELS.openKeptChanges, sender)).toEqual(
+      success({
+        state: STATE,
+        documentId: DOCUMENT_ID,
+        fileName: 'Thesis (my changes).tasklace',
+        warnings: [],
+        localChanges: null,
+      }),
+    );
     expect(tasks.at(-1)).toEqual({
       kind: 'openProject',
       path,
       localCopyFolder: copiesIn(userData),
     });
+  });
+
+  it('gives two windows keeping their changes at once two files, each choosing its name once the other is written', async () => {
+    const first = await openedIn(join(folder, 'Thesis.tasklace'));
+    const second = await openedIn(join(folder, 'Thesis copy.tasklace'));
+    runTask.mockImplementation(async (task) => {
+      if (task.kind === 'keepSharedCopy') {
+        await laterTurns(LATER_TURNS);
+        await writeFile(task.path, 'kept');
+      }
+      return success(SAVED);
+    });
+    await Promise.all([
+      request(IPC_CHANNELS.keepOwnChanges, first, STATE, 'Thesis'),
+      request(IPC_CHANNELS.keepOwnChanges, second, STATE, 'Thesis'),
+    ]);
+    const kept = join(userData, KEPT);
+    expect(tasks.flatMap((task) => (task.kind === 'keepSharedCopy' ? [task.path] : []))).toEqual([
+      join(kept, 'Thesis (my changes).tasklace'),
+      join(kept, 'Thesis (my changes) 2.tasklace'),
+    ]);
   });
 
   it('numbers the name of a file already kept, then names it after an identifier once every number is taken', async () => {
@@ -923,7 +979,7 @@ describe('setting aside the local copy of an opened file', () => {
   it('reports a copy the system cannot move as a failed write, logging why', async () => {
     const { sender, path } = await offeredFile();
     await writeCopy();
-    const denied = Object.assign(new Error('denied'), { code: 'EPERM' });
+    const denied = Object.assign(new Error('read-only file system'), { code: 'EROFS' });
     moving.failure = denied;
     const { answer, logged } = await quietly(() =>
       request(IPC_CHANNELS.setLocalCopyAside, sender, DOCUMENT_ID),

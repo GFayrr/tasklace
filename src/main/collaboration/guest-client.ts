@@ -2,14 +2,20 @@ import type { IncomingMessage } from 'node:http';
 import { isIP } from 'node:net';
 import { WebSocket, type RawData } from 'ws';
 import { MAX_SEALED_FRAME_BYTES } from '../../core/collaboration/secure/channel';
-import type { Introduction, JoinSecret } from '../../core/collaboration/secure/link';
+import {
+  readIntroduction,
+  type Introduction,
+  type JoinSecret,
+  type PlanKey,
+} from '../../core/collaboration/secure/link';
 import { isPort } from '../../core/collaboration/ports';
 import { MAX_HANDSHAKE_MILLISECONDS } from '../../core/limits';
 import {
   bytesOf,
   CODE_REPLACED_CLOSE,
   IDENTITY_TAKEN_CLOSE,
-  REMOVED_CLOSE,
+  TURNED_AWAY_CLOSE,
+  TRY_LATER_CLOSE,
   HOST_LEFT_CLOSE,
   WRONG_CODE_CLOSE,
   WRONG_KEY_CLOSE,
@@ -27,7 +33,8 @@ export type GuestEnd =
   | ConnectionEnd
   | 'CODE_REPLACED'
   | 'IDENTITY_TAKEN'
-  | 'REMOVED'
+  | 'TURNED_AWAY'
+  | 'TRY_LATER'
   | 'HOST_LEFT'
   | 'UNREACHABLE'
   | 'NOT_PRIVATE';
@@ -42,13 +49,15 @@ export interface GuestOptions {
   readonly events: {
     readonly opened: () => void;
     readonly message: (message: Uint8Array) => void;
-    readonly planKey: (key: Uint8Array) => void;
+    readonly planKey: (key: PlanKey) => void;
+    readonly identity?: (host: Introduction | null) => void;
     readonly ended: (reason: GuestEnd) => void;
   };
 }
 
 export interface GuestClient {
   readonly send: SecureConnection['send'];
+  readonly askIdentity: () => void;
   readonly close: () => void;
 }
 
@@ -56,14 +65,22 @@ const HOST_NAME_PATTERN =
   /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?$/i;
 const IPV6 = 6;
 const ZONE_SEPARATOR = '%';
+const WS_ERROR_PREFIX = 'WS_ERR_';
 const REFUSED_CODES: ReadonlyMap<number, GuestEnd> = new Map([
   [WRONG_CODE_CLOSE, 'WRONG_CODE'],
   [CODE_REPLACED_CLOSE, 'CODE_REPLACED'],
   [WRONG_KEY_CLOSE, 'WRONG_KEY'],
   [IDENTITY_TAKEN_CLOSE, 'IDENTITY_TAKEN'],
-  [REMOVED_CLOSE, 'REMOVED'],
+  [TURNED_AWAY_CLOSE, 'TURNED_AWAY'],
+  [TRY_LATER_CLOSE, 'TRY_LATER'],
   [HOST_LEFT_CLOSE, 'HOST_LEFT'],
 ]);
+
+/** Tells whether an error of a socket comes from what the other end sent, breaking the protocol of ws, rather than from the network, so that a faulty host is not tried again and again. */
+function isProtocolError(error: Error): boolean {
+  const code: unknown = Reflect.get(error, 'code');
+  return typeof code === 'string' && code.startsWith(WS_ERROR_PREFIX);
+}
 
 /** Tells whether an address typed by a person or found on the network can name a host: an IP address, or a host name of letters, digits, hyphens and dots. */
 export function isHostAddress(address: string): boolean {
@@ -110,6 +127,9 @@ export function connectAsGuest(options: GuestOptions): GuestClient {
     events: {
       message: options.events.message,
       planKey: options.events.planKey,
+      identity: (message) => {
+        options.events.identity?.(readIntroduction(message));
+      },
       ended: (reason) => {
         options.events.ended(endReason ?? reason);
       },
@@ -138,7 +158,7 @@ export function connectAsGuest(options: GuestOptions): GuestClient {
   });
   socket.on('error', (error) => {
     console.warn(`The connection to the shared plan failed: ${error.message}`);
-    endWith('UNREACHABLE');
+    endWith(isProtocolError(error) ? 'MALFORMED' : 'UNREACHABLE');
   });
   socket.on('close', (code: number) => {
     const refused = REFUSED_CODES.get(code);
@@ -148,5 +168,14 @@ export function connectAsGuest(options: GuestOptions): GuestClient {
     }
     connection.wireClosed();
   });
-  return { send: connection.send, close: connection.close };
+  return {
+    send: connection.send,
+    askIdentity: () => {
+      const asked = connection.sendIdentity(new Uint8Array());
+      if (!asked.ok) {
+        console.warn(`Who hosts the shared plan could not be asked: ${asked.error}.`);
+      }
+    },
+    close: connection.close,
+  };
 }

@@ -1,3 +1,4 @@
+import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { describe, expect, it } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
 import { requireParticipantId, type Participant } from '../../core/collaboration/participants';
@@ -51,10 +52,10 @@ async function renderHosting(guestCount: number) {
     collaboration.listener?.({
       kind: 'peerJoined',
       peer: index + 1,
-      participantId: `guest${String(index)}`,
+      participantId: requireParticipantId(`guest${String(index)}`),
       name,
       endpoint: { addresses: [], port: 47_313 },
-      tokenDigest: 'd'.repeat(64),
+      tokenDigest: testDigest('d'.repeat(64)),
     });
   });
   collaboration.listener?.({
@@ -79,7 +80,7 @@ async function renderJoined(canEdit = false) {
   };
   collaboration.openSharedResult = openedProjectOf(PLAN, { fileName: '' });
   await app.collaboration.loadSettings();
-  await app.join({ address: '192.168.1.24', port: 47_313, code: 'K7Q4MZ' });
+  await app.join({ address: '192.168.1.24', port: 47_313, code: testJoinCode('K7Q4MZ') });
   const me = app.collaboration.me ?? requireParticipantId('nobody');
   const guest: Participant = {
     ...HOST,
@@ -101,6 +102,10 @@ async function renderJoined(canEdit = false) {
   collaboration.listener?.({
     kind: 'hostMessage',
     message: encodeMessage({ kind: 'update', update: Uint8Array.of(0, 0) }),
+  });
+  collaboration.listener?.({
+    kind: 'hostMessage',
+    message: encodeMessage({ kind: 'stateVector', vector: Uint8Array.of(0) }),
   });
   await settle();
   await settle();
@@ -183,7 +188,7 @@ describe('the chip of the connection', () => {
     collaboration.openSharedResult = openedProjectOf(PLAN, { fileName: '' });
     await opened.app.collaboration.loadSettings();
     const root = render(App, { app: opened.app });
-    await opened.app.join({ address: '192.168.1.24', port: 47_313, code: 'K7Q4MZ' });
+    await opened.app.join({ address: '192.168.1.24', port: 47_313, code: testJoinCode('K7Q4MZ') });
     update();
     expect(
       single(root, 'header.toolbar').querySelector('.share, [aria-haspopup="menu"].trigger'),
@@ -192,6 +197,10 @@ describe('the chip of the connection', () => {
     collaboration.listener?.({
       kind: 'hostMessage',
       message: encodeMessage({ kind: 'update', update: Uint8Array.of(0, 0) }),
+    });
+    collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'stateVector', vector: Uint8Array.of(0) }),
     });
     await settle();
     await settle();
@@ -229,7 +238,7 @@ describe('the chip of the connection', () => {
     expect(textsOf(single(root, 'header.toolbar'), '.label')).toEqual([TEXT.offlineKeptApart]);
   });
 
-  it('says when the connection to the host is lost, the plan staying open', async () => {
+  it('says when and why the connection to the host is lost, the plan staying open', async () => {
     const { root, app, control } = await renderJoined();
     control.collaboration.listener?.({ kind: 'ended', reason: 'BROKEN' });
     update();
@@ -241,7 +250,7 @@ describe('the chip of the connection', () => {
     ]).toEqual(['Thesis', [TEXT.connectionLost], null, 0]);
     click(button(root, TEXT.connectionLost));
     expect(textsOf(root, '[role="menuitem"]')).toEqual([
-      'Leave the shared plan The connection to Camille ended. The plan stays open on this computer.',
+      'Leave the shared plan The connection to Camille broke: what came through it was not what Tasklace expects. The plan stays open on this computer.',
     ]);
   });
 });

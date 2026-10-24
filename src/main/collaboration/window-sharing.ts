@@ -1,28 +1,41 @@
+import type { TokenDigest } from '../../core/collaboration/secure/token-digest';
+import type { ParticipantId } from '../../core/collaboration/participants';
 import { isPort } from '../../core/collaboration/ports';
 import {
   tokenDigestOf,
   type Introduction,
   type JoinSecret,
+  type PlanKey,
 } from '../../core/collaboration/secure/link';
+import type { JoinCode } from '../../core/collaboration/secure/join-code';
+import { isOlder } from '../../core/collaboration/roster';
 import { sharingIdOf } from '../../core/collaboration/succession';
 import { success, type Result } from '../../core/result';
-import type { CollaborationEvent, Sharing } from '../../preload/bridge-contract';
-import { systemRandomBytes } from './aes-gcm';
+import type { CollaborationEvent, KnownPerson, Sharing } from '../../preload/bridge-contract';
 import { findPlans, type Mdns, type NearbyPlan } from './discovery';
-import { connectAsGuest, isHostAddress } from './guest-client';
+import { connectAsGuest } from './guest-client';
 import { startGuestSession, type GuestSession } from './guest-session';
 import type { ListenFailure } from './host-server';
 import { startHosting, type Hosting } from './hosting';
+import { isPrivateAddress } from './private-addresses';
 import type { StartTimer } from './secure-connection';
 import { startSuccession, type Succession, type SuccessionCandidate } from './succession-driver';
 
 export interface WindowContext {
   readonly tell: (event: CollaborationEvent) => void;
   readonly startTimer: StartTimer;
+  readonly now: () => number;
   readonly mdns: () => Mdns;
   readonly addresses: () => readonly string[];
   readonly instance: () => string;
+  readonly randomBytes: (count: number) => Uint8Array;
 }
+
+export type WindowStateView =
+  | Exclude<WindowState, { readonly kind: 'searching' }>
+  | (Omit<Extract<WindowState, { readonly kind: 'searching' }>, 'attempts'> & {
+      readonly attempts: ReadonlySet<GuestSession>;
+    });
 
 export interface PlanNames {
   readonly planName: string;
@@ -35,6 +48,7 @@ export type WindowState =
       readonly kind: 'hosting';
       readonly hosting: Hosting;
       readonly identity: Introduction;
+      readonly takenOver: TakenOver | null;
     }
   | { readonly kind: 'guest'; readonly session: GuestSession; readonly identity: Introduction }
   | {
@@ -42,25 +56,30 @@ export type WindowState =
       readonly succession: Succession;
       readonly attempts: Set<GuestSession>;
       readonly identity: Introduction;
-      readonly planKey: Uint8Array;
+      readonly planKey: PlanKey;
     };
 
+export interface TakenOver {
+  readonly people: readonly KnownPerson[];
+  readonly rank: number;
+}
+
 export interface WindowSharing {
-  readonly state: () => WindowState;
+  readonly state: () => WindowStateView;
   readonly host: (
     names: PlanNames,
     identity: Introduction,
     port: number,
   ) => Promise<Result<Sharing, ListenFailure>>;
   readonly join: (
-    target: { address: string; port: number; code: string },
+    target: { address: string; port: number; code: JoinCode },
     identity: Introduction,
   ) => void;
   readonly succeed: (
     queue: readonly SuccessionCandidate[],
     names: PlanNames,
     port: number,
-    knownTokens: ReadonlyMap<string, string>,
+    knownPeople: readonly KnownPerson[],
   ) => boolean;
   readonly stop: () => Promise<void>;
 }
@@ -68,6 +87,7 @@ export interface WindowSharing {
 /** Runs what one window shares or joined: hosting a plan, joining a host, looking for the next host once the host left, and giving way to an older host of the same plan, each step telling the page. */
 export function createWindowSharing(context: WindowContext): WindowSharing {
   let state: WindowState = { kind: 'idle' };
+  const probes = new Set<GuestSession>();
   /** Reads what the window does now, which may have changed while waiting. */
   const stateNow = (): WindowState => state;
   /** Hosts the plan with a key and a rank, giving way to an older host of the same plan once one is heard, the caller making it what the window does. */
@@ -75,8 +95,9 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
     names: PlanNames,
     options: {
       readonly port: number;
-      readonly planKey: Uint8Array | null;
-      readonly knownTokens: ReadonlyMap<string, string>;
+      readonly planKey: PlanKey | null;
+      readonly knownDigests: ReadonlyMap<ParticipantId, TokenDigest>;
+      readonly identity: Introduction;
       readonly rank: number;
     },
   ): Promise<Result<Hosting, ListenFailure>> =>
@@ -85,6 +106,8 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       ...names,
       instance: context.instance(),
       startTimer: context.startTimer,
+      now: context.now,
+      randomBytes: context.randomBytes,
       mdns: context.mdns,
       tell: context.tell,
       olderHost: (older, planKey) => {
@@ -104,17 +127,21 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
     identity: Introduction,
     tell: (session: GuestSession, event: CollaborationEvent) => void,
     ended: (session: GuestSession) => void = forgetEnded,
+    identified?: (session: GuestSession, host: Introduction | null) => void,
   ): GuestSession => {
     const session: GuestSession = startGuestSession({
       ...target,
       introduction: identity,
       startTimer: context.startTimer,
-      connect: (options) => connectAsGuest({ ...options, randomBytes: systemRandomBytes }),
+      connect: (options) => connectAsGuest({ ...options, randomBytes: context.randomBytes }),
       tell: (event) => {
         tell(session, event);
       },
       ended: () => {
         ended(session);
+      },
+      identity: (host) => {
+        identified?.(session, host);
       },
     });
     return session;
@@ -153,19 +180,19 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
   };
   /** Starts a search for the next host with a key, the given queue of candidates, and the names and port this window announces if its turn comes. */
   const search = (
-    planKey: Uint8Array,
+    planKey: PlanKey,
     identity: Introduction,
     queue: readonly SuccessionCandidate[],
     hosting: {
       readonly names: PlanNames;
       readonly port: number;
-      readonly knownTokens: ReadonlyMap<string, string>;
+      readonly knownPeople: readonly KnownPerson[];
     },
   ): void => {
     const attempts = new Set<GuestSession>();
-    /** Tries to join a host at a few addresses with the key, each one valid. */
+    /** Tries to join a host with the key at the few private addresses it gave, never at a name or a public address that someone in the plan may have written. */
     const attempt = (addresses: readonly string[], port: number): void => {
-      for (const address of addresses.filter((each) => isHostAddress(each) && isPort(port))) {
+      for (const address of addresses.filter((each) => isPrivateAddress(each) && isPort(port))) {
         attempts.add(
           joinWith({ address, port, secret: { kind: 'key', key: planKey } }, identity, tellOrAdopt),
         );
@@ -176,7 +203,10 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       const hosted = await startHostingAs(place.names, {
         port: place.port,
         planKey,
-        knownTokens: place.knownTokens,
+        knownDigests: new Map(
+          place.knownPeople.map(({ participantId, tokenDigest }) => [participantId, tokenDigest]),
+        ),
+        identity,
         rank,
       });
       if (!hosted.ok) {
@@ -191,7 +221,8 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       attempts.forEach((other) => {
         other.close();
       });
-      state = { kind: 'hosting', hosting: hosted.value, identity };
+      const takenOver = { people: place.knownPeople, rank };
+      state = { kind: 'hosting', hosting: hosted.value, identity, takenOver };
       context.tell({ kind: 'becameHost', sharing: sharingOf(hosted.value, identity) });
       return true;
     };
@@ -207,32 +238,60 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
     });
     state = { kind: 'searching', succession, attempts, identity, planKey };
   };
-  /** Tries to join an older host of the same plan with the key while still hosting, and gives way only once that host proved it holds the key, since anyone nearby can forge an announcement, the guests of this window then finding the older host too. */
-  const giveWay = (older: NearbyPlan, planKey: Uint8Array): void => {
+  /** Closes every attempt to join an older host but the one given. */
+  const closeProbes = (kept: GuestSession | null): void => {
+    probes.forEach((probe) => {
+      if (probe !== kept) {
+        probe.close();
+      }
+    });
+    probes.clear();
+  };
+  /** Keeps trying to join an older host of the same plan with the key while hosting, and gives way only once that host proved who it is, since anyone holding the key can announce an older rank, the guests of this window then finding it too. */
+  const giveWay = (older: NearbyPlan, planKey: PlanKey): void => {
     if (state.kind !== 'hosting') {
       return;
     }
-    const { hosting, identity } = state;
-    const probes = new Set<GuestSession>();
-    /** Follows the window into the older host once a probe connects, and passes on what the followed connection tells. */
+    const { hosting, identity, takenOver } = state;
+    if (takenOver === null) {
+      console.warn('A host of the same plan claims to be older, but this window shared it first.');
+      return;
+    }
+    const asked = new Set<GuestSession>();
+    /** Asks an older host who it is once it sent the first message of the plan, by then knowing the right of this window, and logs a probe refused for good. */
     const tellProbe = (session: GuestSession, event: CollaborationEvent): void => {
-      if (event.kind !== 'connected' || state.kind !== 'hosting' || state.hosting !== hosting) {
-        tellIfFollowed(session, event);
+      if (event.kind === 'ended' && probes.has(session)) {
+        console.warn(`An older host of the shared plan could not be joined: ${event.reason}.`);
+      }
+      if (event.kind === 'hostMessage' && probes.has(session) && !asked.has(session)) {
+        asked.add(session);
+        session.askIdentity();
+      }
+      tellIfFollowed(session, event);
+    };
+    /** Follows the window into the older host once it proved who it is, or leaves a host that could not. */
+    const identified = (session: GuestSession, host: Introduction | null): void => {
+      if (state.kind !== 'hosting' || state.hosting !== hosting || !probes.has(session)) {
         return;
       }
-      probes.delete(session);
-      probes.forEach((other) => {
-        other.close();
-      });
+      if (!provesOlder(host, takenOver, identity)) {
+        console.warn('An older host of the shared plan could not prove who it is.');
+        probes.delete(session);
+        session.close();
+        return;
+      }
+      closeProbes(session);
       state = { kind: 'guest', session, identity };
       context.tell({ kind: 'yielded' });
-      context.tell(event);
+      context.tell({ kind: 'connected' });
       hosting.stop().catch((error: unknown) => {
         console.error('The plan given way could not stop being hosted here:', error);
       });
     };
     const port = older.port;
-    for (const address of older.addresses.filter((each) => isHostAddress(each) && isPort(port))) {
+    for (const address of older.addresses.filter(
+      (each) => isPrivateAddress(each) && isPort(port),
+    )) {
       probes.add(
         joinWith(
           { address, port, secret: { kind: 'key', key: planKey } },
@@ -242,6 +301,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
             probes.delete(session);
             forgetEnded(session);
           },
+          identified,
         ),
       );
     }
@@ -251,6 +311,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
   const stopCurrent = async (): Promise<void> => {
     const current = state;
     state = { kind: 'idle' };
+    closeProbes(null);
     if (current.kind === 'guest') {
       current.session.close();
     }
@@ -270,13 +331,14 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       const hosted = await startHostingAs(names, {
         port,
         planKey: null,
-        knownTokens: new Map(),
+        knownDigests: new Map(),
+        identity,
         rank: 0,
       });
       if (!hosted.ok) {
         return hosted;
       }
-      state = { kind: 'hosting', hosting: hosted.value, identity };
+      state = { kind: 'hosting', hosting: hosted.value, identity, takenOver: null };
       return success(sharingOf(hosted.value, identity));
     },
     join: (target, identity) => {
@@ -287,7 +349,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       );
       state = { kind: 'guest', session, identity };
     },
-    succeed: (queue, names, port, knownTokens) => {
+    succeed: (queue, names, port, knownPeople) => {
       if (state.kind !== 'guest' && state.kind !== 'searching') {
         return false;
       }
@@ -297,7 +359,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       }
       const { identity } = state;
       void stopCurrent();
-      search(planKey, identity, queue, { names, port, knownTokens });
+      search(planKey, identity, queue, { names, port, knownPeople });
       return true;
     },
     stop: stopCurrent,
@@ -315,4 +377,25 @@ function watchSafely(
     console.warn('The shared plan could not look for its next host on the network:', error);
     return () => undefined;
   }
+}
+
+/** Tells whether a host proved it is an older person of the plan allowed to edit: its token matches the digest this window knows for it, and it joined before this window. */
+function provesOlder(
+  host: Introduction | null,
+  takenOver: TakenOver,
+  identity: Introduction,
+): boolean {
+  const person = takenOver.people.find(
+    ({ participantId }) => participantId === host?.participantId,
+  );
+  return (
+    host !== null &&
+    person !== undefined &&
+    person.canEdit &&
+    person.tokenDigest === tokenDigestOf(host.token) &&
+    isOlder(
+      { id: person.participantId, rank: person.rank },
+      { id: identity.participantId, rank: takenOver.rank },
+    )
+  );
 }

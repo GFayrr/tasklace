@@ -20,18 +20,20 @@ export function readEndpoint(field: Field, issues: IssueList): Endpoint | undefi
   if (record === undefined) {
     return undefined;
   }
-  const items = readArray(
-    childField(record, 'addresses', field.path),
-    issues,
-    MAX_ENDPOINT_ADDRESSES,
-  );
+  const addressesField = childField(record, 'addresses', field.path);
+  const items = readArray(addressesField, issues, MAX_ENDPOINT_ADDRESSES);
   const port = readInteger(childField(record, 'port', field.path), issues, FIRST_PORT, LAST_PORT);
   if (items === undefined || port === undefined) {
     return undefined;
   }
-  const addresses = items.map((_item, index) => itemField(items, index, field.path).value);
-  if (!addresses.every((address) => typeof address === 'string' && ADDRESS_PATTERN.test(address))) {
-    return undefined;
+  const addresses: string[] = [];
+  for (const [index] of items.entries()) {
+    const item = itemField(items, index, addressesField.path);
+    if (typeof item.value !== 'string' || !ADDRESS_PATTERN.test(item.value)) {
+      issues.add(item.path, 'INVALID_TEXT');
+      return undefined;
+    }
+    addresses.push(item.value);
   }
-  return { addresses: addresses.filter((address) => typeof address === 'string'), port };
+  return { addresses, port };
 }

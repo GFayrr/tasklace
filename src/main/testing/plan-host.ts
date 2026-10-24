@@ -6,12 +6,23 @@ import {
   type CollaborationMessage,
 } from '../../core/collaboration/messages';
 import { requireParticipantId, type ParticipantId } from '../../core/collaboration/participants';
+import type { PlanKey } from '../../core/collaboration/secure/link';
 import { createHost } from '../../core/collaboration/sync';
 import type { SharedSession } from '../../core/shared/shared-session';
 import { systemRandomBytes } from '../collaboration/aes-gcm';
 import { startHostServer, type Peer } from '../collaboration/host-server';
 
 export const LOOPBACK = '127.0.0.1';
+const HOUR_MILLISECONDS = 3_600_000;
+
+/** Gives a clock that moves an hour each time it is read, so that the limits of a host on how fast connections come never stop a test that opens many on purpose. */
+export function spacedClock(): () => number {
+  let time = 0;
+  return () => {
+    time += HOUR_MILLISECONDS;
+    return time;
+  };
+}
 const HOST = requireParticipantId('host');
 const POLL_MILLISECONDS = 5;
 
@@ -47,7 +58,7 @@ export function messageOf(bytes: Uint8Array): CollaborationMessage {
 /** Starts a real host server on a free port that shares a session, merging what its guests send and passing it on, each guest being let edit when told so, and recording the refusals it reports. */
 export async function startPlanHost(
   session: SharedSession,
-  options: { readonly planKey: Uint8Array | null; readonly letEdit: boolean },
+  options: { readonly planKey: PlanKey | null; readonly letEdit: boolean },
 ) {
   const peers = new Map<ParticipantId, Peer>();
   const ids = new Map<number, ParticipantId>();
@@ -70,9 +81,11 @@ export async function startPlanHost(
   const started = await startHostServer({
     port: await freePort(),
     planKey: options.planKey,
-    knownTokens: new Map(),
+    knownDigests: new Map(),
     startTimer: () => () => undefined,
     randomBytes: systemRandomBytes,
+    identity: null,
+    now: spacedClock(),
     events: {
       joined: (peer, introduction) => {
         const id = introduction.participantId;
@@ -97,7 +110,6 @@ export async function startPlanHost(
         }
       },
       codeChanged: () => undefined,
-      planKeyChanged: () => undefined,
     },
   });
   if (!started.ok) {

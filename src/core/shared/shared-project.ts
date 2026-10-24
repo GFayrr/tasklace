@@ -26,7 +26,7 @@ import {
 
 export type SharedRepairCode = RepairCode | 'MILESTONE_PROGRESS_ROUNDED';
 
-export type RepairSubject = 'task' | 'dependency' | 'tag';
+export type RepairSubject = 'task' | 'dependency' | 'tag' | 'calendar';
 
 export const REPAIR_SUBJECTS: Readonly<Record<SharedRepairCode, RepairSubject>> = {
   TASK_REMOVED: 'task',
@@ -38,6 +38,10 @@ export const REPAIR_SUBJECTS: Readonly<Record<SharedRepairCode, RepairSubject>> 
   HOURS_PER_DAY_REDUCED: 'task',
   DAILY_START_HOUR_CLEARED: 'task',
   MILESTONE_PROGRESS_ROUNDED: 'task',
+  WORKING_DAYS_RESTORED: 'calendar',
+  WORKING_HOURS_RESTORED: 'calendar',
+  WORKING_HOURS_REMOVED: 'calendar',
+  NON_WORKING_PERIOD_REMOVED: 'calendar',
 };
 
 export interface SharedRepair {
@@ -62,6 +66,8 @@ const MERGE_LIST_LIMITS: ListLimits = {
   tasks: NOMINAL_LIST_LIMITS.tasks * MERGE_LIST_LIMIT_FACTOR,
   dependencies: NOMINAL_LIST_LIMITS.dependencies * MERGE_LIST_LIMIT_FACTOR,
   tags: NOMINAL_LIST_LIMITS.tags * MERGE_LIST_LIMIT_FACTOR,
+  workingTimeRanges: NOMINAL_LIST_LIMITS.workingTimeRanges * MERGE_LIST_LIMIT_FACTOR,
+  nonWorkingPeriods: NOMINAL_LIST_LIMITS.nonWorkingPeriods * MERGE_LIST_LIMIT_FACTOR,
 };
 const FULL_PROGRESS = 100;
 

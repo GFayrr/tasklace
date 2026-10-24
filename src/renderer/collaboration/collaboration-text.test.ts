@@ -4,6 +4,7 @@ import {
   collaborationFailureText,
   initialsOf,
   joinEndText,
+  lostText,
   preferredAddress,
 } from './collaboration-text';
 
@@ -24,7 +25,7 @@ describe('the texts of a shared plan', () => {
     ]).toEqual([english.collaboration.noName, english.fileErrors.NO_FREE_PORT, null]);
   });
 
-  it('tells why joining ended, naming the host, with a common text for the other reasons', () => {
+  it('tells why joining ended, naming the host, with a common text for a plain end', () => {
     expect(
       (['WRONG_CODE', 'CODE_REPLACED', 'UNREACHABLE', 'NOT_PRIVATE', 'TIMEOUT'] as const).map(
         (reason) => joinEndText(english, reason, 'Camille'),
@@ -35,6 +36,34 @@ describe('the texts of a shared plan', () => {
       'Tasklace could not reach Camille at this address. Check the address and the port, and that you are on the same network.',
       'This address is not on a private network, so Tasklace does not join it.',
       'The connection to Camille ended before the plan opened. Try again.',
+    ]);
+  });
+
+  it('tells why the connection ended once the plan was open, with a common text for a plain end', () => {
+    expect(
+      (
+        [
+          'UNSUPPORTED_VERSION',
+          'WRONG_KEY',
+          'IDENTITY_TAKEN',
+          'TURNED_AWAY',
+          'TRY_LATER',
+          'HOST_LEFT',
+          'TAMPERED',
+          'WIRE_CLOSED',
+          null,
+        ] as const
+      ).map((reason) => lostText(english, reason, 'Camille')),
+    ).toEqual([
+      'Camille uses another version of Tasklace. You both need the same version to share a plan. The plan stays open on this computer.',
+      'Camille no longer takes the key this computer holds for the plan. Ask Camille for the code to join again. The plan stays open on this computer.',
+      'Someone else already came into the plan in your place. Ask Camille for the code to join again. The plan stays open on this computer.',
+      'Camille could not take you in: the plan already has as many people as it can. The plan stays open on this computer.',
+      'Camille received too many tries at once. Wait a moment, then try again. The plan stays open on this computer.',
+      'Camille stopped sharing the plan. The plan stays open on this computer.',
+      'The connection to Camille broke: what came through it was not what Tasklace expects. The plan stays open on this computer.',
+      'The connection to Camille ended. The plan stays open on this computer.',
+      'The connection to Camille ended. The plan stays open on this computer.',
     ]);
   });
 

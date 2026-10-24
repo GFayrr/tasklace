@@ -1,10 +1,11 @@
+import { testToken } from '../../testing/secrets';
 import { describe, expect, it } from 'vitest';
 import { tokenDigestOf } from './link';
-import { isTokenDigest } from './token-digest';
+import { isTokenDigest, requireTokenDigest } from './token-digest';
 
 describe('the digest of the token of a person', () => {
   it('gives the SHA-256 of the token in lowercase hexadecimal digits, which it then recognises', () => {
-    const digest = tokenDigestOf('ab'.repeat(32));
+    const digest = tokenDigestOf(testToken('ab'.repeat(32)));
     expect([digest, isTokenDigest(digest)]).toEqual([
       '271a413bd339c5709fdceaec41f14f11e9fbfb5042d72d331c65f32b284cd09a',
       true,
@@ -19,5 +20,8 @@ describe('the digest of the token of a person', () => {
       false,
       false,
     ]);
+    expect(() => requireTokenDigest('abc')).toThrow(
+      new TypeError('Not the digest of a token: abc'),
+    );
   });
 });

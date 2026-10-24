@@ -26,7 +26,7 @@ export interface Mdns {
     readonly type: string;
     readonly port: number;
     readonly txt: Readonly<Record<string, string>>;
-  }) => { readonly stop: (done?: () => void) => void };
+  }) => { readonly stop: (done?: (error?: unknown) => void) => void };
   readonly find: (options: { readonly type: string }) => ServiceBrowser;
 }
 
@@ -96,7 +96,12 @@ export function announcePlan(
   });
   return () =>
     new Promise((resolve) => {
-      service.stop(resolve);
+      service.stop((error) => {
+        if (error !== undefined && error !== null) {
+          console.warn('The shared plan could not tell the network it is no longer shared:', error);
+        }
+        resolve();
+      });
     });
 }
 

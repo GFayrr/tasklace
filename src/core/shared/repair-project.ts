@@ -1,13 +1,18 @@
+import { canonicalCalendar } from '../calendar/canonical-calendar';
 import { compileCalendar, type CompiledCalendar } from '../calendar/compile-calendar';
+import { DEFAULT_CALENDAR } from '../calendar/default-calendar';
 import { computeDailyWindow } from '../calendar/task-slots';
 import { compareStrings } from '../compare-strings';
 import {
   MAX_DEPENDENCIES,
   MAX_HIERARCHY_DEPTH,
   MAX_MERGE_REPAIR_ROUNDS,
+  MAX_NON_WORKING_PERIODS,
   MAX_TAGS,
   MAX_TASKS,
+  MAX_WORKING_TIME_RANGES,
 } from '../limits';
+import type { TimeRange } from '../model/calendar';
 import type { Dependency, Project, Task, TaskId, WorkTask } from '../model/project';
 import { failure, success, type Result } from '../result';
 import {
@@ -27,7 +32,11 @@ export type RepairCode =
   | 'TAG_CLEARED'
   | 'MOVED_TO_ROOT'
   | 'HOURS_PER_DAY_REDUCED'
-  | 'DAILY_START_HOUR_CLEARED';
+  | 'DAILY_START_HOUR_CLEARED'
+  | 'WORKING_DAYS_RESTORED'
+  | 'WORKING_HOURS_RESTORED'
+  | 'WORKING_HOURS_REMOVED'
+  | 'NON_WORKING_PERIOD_REMOVED';
 
 export interface Repair {
   readonly code: RepairCode;
@@ -46,6 +55,7 @@ interface RepairStepResult extends RepairedProject {
 type RepairStep = (project: Project, remainingRounds: number) => RepairStepResult | null;
 
 const REPAIR_STEPS: readonly RepairStep[] = [
+  singleRound(repairCalendar),
   singleRound(trimToLimits),
   singleRound(clearUnknownTags),
   singleRound(moveTasksUnderInvalidParents),
@@ -98,6 +108,61 @@ function repeatRepair<T>(
     rounds += 1;
   }
   return { project: current, repairs, rounds };
+}
+
+/** Makes a calendar merged from changes made at the same time valid again: overlapping or excess time ranges and excess periods removed, the latest ones first, and the default working days or hours put back when none are left. */
+function repairCalendar(project: Project): RepairedProject {
+  const calendar = canonicalCalendar(project.calendar);
+  const repairs: Repair[] = [];
+  const ranges = keepSeparateRanges(calendar.workingTimeRanges);
+  repairs.push(
+    ...ranges.removed.map((range) =>
+      calendarRepair('WORKING_HOURS_REMOVED', [range.startHour, range.endHour]),
+    ),
+  );
+  const periods = calendar.nonWorkingPeriods.slice(MAX_NON_WORKING_PERIODS);
+  repairs.push(
+    ...periods.map((period) =>
+      calendarRepair('NON_WORKING_PERIOD_REMOVED', [period.firstDay, period.lastDay]),
+    ),
+  );
+  const noDays = calendar.workingWeekdays.length === 0;
+  const noHours = ranges.kept.length === 0;
+  repairs.push(
+    ...(noDays ? [{ code: 'WORKING_DAYS_RESTORED' as const, id: '' }] : []),
+    ...(noHours ? [{ code: 'WORKING_HOURS_RESTORED' as const, id: '' }] : []),
+  );
+  return {
+    project: {
+      ...project,
+      calendar: {
+        workingWeekdays: noDays ? DEFAULT_CALENDAR.workingWeekdays : calendar.workingWeekdays,
+        workingTimeRanges: noHours ? DEFAULT_CALENDAR.workingTimeRanges : ranges.kept,
+        nonWorkingPeriods: calendar.nonWorkingPeriods.slice(0, MAX_NON_WORKING_PERIODS),
+      },
+    },
+    repairs,
+  };
+}
+
+/** Keeps, from time ranges sorted by start, each one that starts once the previous kept one ends, up to the limit, and lists the others. */
+function keepSeparateRanges(ranges: readonly TimeRange[]): {
+  readonly kept: readonly TimeRange[];
+  readonly removed: readonly TimeRange[];
+} {
+  const kept: TimeRange[] = [];
+  const removed: TimeRange[] = [];
+  for (const range of ranges) {
+    const previous = kept.at(-1);
+    const fits = previous === undefined || range.startHour >= previous.endHour;
+    (fits && kept.length < MAX_WORKING_TIME_RANGES ? kept : removed).push(range);
+  }
+  return { kept, removed };
+}
+
+/** Builds the repair of one time range or period of the calendar, named by its numbers. */
+function calendarRepair(code: RepairCode, numbers: readonly number[]): Repair {
+  return { code, id: numbers.join() };
 }
 
 /** Keeps the tasks, dependencies and tags with the smallest identifiers when a list exceeds its limit. */

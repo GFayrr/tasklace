@@ -1,4 +1,6 @@
-import type { Endpoint } from '../core/collaboration/participants';
+import type { Endpoint, ParticipantId } from '../core/collaboration/participants';
+import type { JoinCode } from '../core/collaboration/secure/join-code';
+import type { TokenDigest } from '../core/collaboration/secure/token-digest';
 import type { CsvWarning } from '../core/exchange/csv/csv-rows';
 import type { RegionalFormat } from '../core/exchange/csv/regional-format';
 import type { FileError, StateCheckError } from '../core/file/tasklace-file';
@@ -36,6 +38,8 @@ export const IPC_CHANNELS = {
   openSharedPlan: 'collaboration:open-shared',
   findPlans: 'collaboration:find-plans',
   dropPeer: 'collaboration:drop-peer',
+  allowPeerToEdit: 'collaboration:allow-peer-to-edit',
+  forgetGuests: 'collaboration:forget-guests',
   copyJoinCode: 'collaboration:copy-join-code',
   findNextHost: 'collaboration:find-next-host',
   collaborationSend: 'collaboration:send',
@@ -109,15 +113,17 @@ export interface CollaborationSettings {
 }
 
 export interface Sharing {
-  readonly code: string;
+  readonly code: JoinCode;
   readonly port: number;
   readonly addresses: readonly string[];
-  readonly tokenDigest: string;
+  readonly tokenDigest: TokenDigest;
 }
 
-export interface KnownToken {
-  readonly participantId: string;
-  readonly tokenDigest: string;
+export interface KnownPerson {
+  readonly participantId: ParticipantId;
+  readonly tokenDigest: TokenDigest;
+  readonly rank: number;
+  readonly canEdit: boolean;
 }
 
 export interface JoinRequest {
@@ -129,7 +135,7 @@ export interface JoinRequest {
 }
 
 export interface NextHostCandidate {
-  readonly participantId: string;
+  readonly participantId: ParticipantId;
   readonly rank: number;
   readonly endpoint: Endpoint | null;
 }
@@ -150,7 +156,8 @@ export const GUEST_ENDS = [
   'CODE_REPLACED',
   'WRONG_KEY',
   'IDENTITY_TAKEN',
-  'REMOVED',
+  'TURNED_AWAY',
+  'TRY_LATER',
   'HOST_LEFT',
   'TAMPERED',
   'TOO_LARGE',
@@ -171,14 +178,14 @@ export type CollaborationEvent =
   | {
       readonly kind: 'peerJoined';
       readonly peer: number;
-      readonly participantId: string;
+      readonly participantId: ParticipantId;
       readonly name: string;
       readonly endpoint: Endpoint;
-      readonly tokenDigest: string;
+      readonly tokenDigest: TokenDigest;
     }
   | { readonly kind: 'peerMessage'; readonly peer: number; readonly message: Uint8Array }
   | { readonly kind: 'peerLeft'; readonly peer: number }
-  | { readonly kind: 'codeChanged'; readonly code: string }
+  | { readonly kind: 'codeChanged'; readonly code: JoinCode }
   | { readonly kind: 'nearbyPlans'; readonly plans: readonly NearbyPlan[] }
   | { readonly kind: 'connected' }
   | { readonly kind: 'hostMessage'; readonly message: Uint8Array }
@@ -189,7 +196,7 @@ export type CollaborationEvent =
   | { readonly kind: 'offline' }
   | { readonly kind: 'ended'; readonly reason: GuestEndReason };
 
-export type CollaborationTarget = number | 'host';
+export type CollaborationTarget = number | readonly number[] | 'host';
 
 export interface TasklaceBridge {
   readonly regionalFormat: () => Promise<RegionalFormat>;
@@ -200,7 +207,10 @@ export interface TasklaceBridge {
   readonly importProject: (kind: ExchangeKind) => Promise<BridgeResult<OpenedProject>>;
   readonly adoptProject: (documentId: DocumentId) => Promise<BridgeResult<null>>;
   readonly saveProject: (state: Uint8Array) => Promise<BridgeResult<SavedProject>>;
-  readonly keepOwnChanges: (state: Uint8Array, planName: string) => Promise<BridgeResult<null>>;
+  readonly keepOwnChanges: (
+    state: Uint8Array,
+    planName: string,
+  ) => Promise<BridgeResult<SavedProject>>;
   readonly openKeptChanges: () => Promise<BridgeResult<OpenedProject>>;
   readonly setLocalCopyAside: (documentId: DocumentId) => Promise<BridgeResult<null>>;
   readonly saveProjectAs: (
@@ -233,12 +243,14 @@ export interface TasklaceBridge {
   readonly openSharedPlan: (state: Uint8Array) => Promise<BridgeResult<OpenedProject>>;
   readonly findPlans: (searching: boolean) => Promise<BridgeResult<null>>;
   readonly dropPeer: (peer: number) => Promise<BridgeResult<null>>;
+  readonly allowPeerToEdit: (peer: number) => Promise<BridgeResult<null>>;
+  readonly forgetGuests: (participantIds: readonly string[]) => Promise<BridgeResult<null>>;
   readonly copyJoinCode: () => Promise<BridgeResult<null>>;
   readonly findNextHost: (
     queue: readonly NextHostCandidate[],
     planName: string,
     hostName: string,
-    knownTokens: readonly KnownToken[],
+    knownPeople: readonly KnownPerson[],
   ) => Promise<BridgeResult<null>>;
   readonly sendToCollaboration: (to: CollaborationTarget, message: Uint8Array) => void;
   readonly onCollaborationEvent: (listener: (event: CollaborationEvent) => void) => void;
@@ -256,7 +268,7 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.adoptProject]: BridgeResult<null>;
   readonly [IPC_CHANNELS.saveProject]: BridgeResult<SavedProject>;
   readonly [IPC_CHANNELS.saveProjectAs]: BridgeResult<SavedProject>;
-  readonly [IPC_CHANNELS.keepOwnChanges]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.keepOwnChanges]: BridgeResult<SavedProject>;
   readonly [IPC_CHANNELS.openKeptChanges]: BridgeResult<OpenedProject>;
   readonly [IPC_CHANNELS.setLocalCopyAside]: BridgeResult<null>;
   readonly [IPC_CHANNELS.exportProject]: BridgeResult<ExportedFile>;
@@ -272,6 +284,8 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.openSharedPlan]: BridgeResult<OpenedProject>;
   readonly [IPC_CHANNELS.findPlans]: BridgeResult<null>;
   readonly [IPC_CHANNELS.dropPeer]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.allowPeerToEdit]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.forgetGuests]: BridgeResult<null>;
   readonly [IPC_CHANNELS.copyJoinCode]: BridgeResult<null>;
   readonly [IPC_CHANNELS.findNextHost]: BridgeResult<null>;
 }
@@ -310,12 +324,14 @@ export interface ChannelArguments {
   readonly [IPC_CHANNELS.openSharedPlan]: readonly [state: Uint8Array];
   readonly [IPC_CHANNELS.findPlans]: readonly [searching: boolean];
   readonly [IPC_CHANNELS.dropPeer]: readonly [peer: number];
+  readonly [IPC_CHANNELS.allowPeerToEdit]: readonly [peer: number];
+  readonly [IPC_CHANNELS.forgetGuests]: readonly [participantIds: readonly string[]];
   readonly [IPC_CHANNELS.copyJoinCode]: readonly [];
   readonly [IPC_CHANNELS.findNextHost]: readonly [
     queue: readonly NextHostCandidate[],
     planName: string,
     hostName: string,
-    knownTokens: readonly KnownToken[],
+    knownPeople: readonly KnownPerson[],
   ];
 }
 

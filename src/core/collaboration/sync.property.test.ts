@@ -7,7 +7,8 @@ import { project, TEST_DOCUMENT_ID, workTask } from '../testing/project-builder'
 import { sessionOn } from '../testing/session-copy';
 import type { CollaborationMessage } from './messages';
 import { requireParticipantId, type ParticipantId } from './participants';
-import { createGuest, createHost, type Guest } from './sync';
+import { takeOverRoster } from './roster';
+import { createGuest, createHost, type Guest, type Host } from './sync';
 
 const HOST = requireParticipantId('host');
 const READER = requireParticipantId('ines');
@@ -27,8 +28,10 @@ type Packet =
 type Step =
   | { readonly kind: 'edit'; readonly actor: number; readonly task: number; readonly mark: number }
   | { readonly kind: 'deliver' | 'duplicate' | 'drop'; readonly at: number }
-  | { readonly kind: 'reconnect'; readonly guest: number }
-  | { readonly kind: 'forge' };
+  | { readonly kind: 'reconnect' | 'rejoin'; readonly guest: number }
+  | { readonly kind: 'grant' | 'revoke'; readonly guest: number }
+  | { readonly kind: 'forge' }
+  | { readonly kind: 'hostLeaves' };
 
 /** Builds the steps of a scenario for a host and a number of guests, the last guest being in read only. */
 function stepArbitrary(guestCount: number): fc.Arbitrary<Step> {
@@ -43,8 +46,12 @@ function stepArbitrary(guestCount: number): fc.Arbitrary<Step> {
       kind: fc.constantFrom('deliver', 'duplicate', 'drop'),
       at: fc.nat({ max: MAX_QUEUE_POSITION }),
     }),
-    fc.record({ kind: fc.constant('reconnect' as const), guest: fc.nat({ max: guestCount - 1 }) }),
+    fc.record({
+      kind: fc.constantFrom('reconnect', 'rejoin', 'grant', 'revoke'),
+      guest: fc.nat({ max: guestCount - 1 }),
+    }),
     fc.constant({ kind: 'forge' as const }),
+    fc.constant({ kind: 'hostLeaves' as const }),
   );
 }
 
@@ -63,26 +70,34 @@ function rename(session: SharedSession, index: number, name: string): void {
   }
 }
 
-/** Plays a scenario between a host, guests who may edit and one guest in read only, then checks that every editor ends with the plan of the host and that no change of the reader got in. */
+/** Plays a scenario of a host, editors and one reader, with rights changed, guests rejoining and the host leaving for the oldest editor, then checks that every editor left has the plan of the host and that no change of the reader got in. */
 function playScenario(editors: readonly ParticipantId[], steps: readonly Step[]): void {
   const origin = createSharedDocument(
     project(TASK_IDS.map((id) => workTask(id))),
     TEST_DOCUMENT_ID,
   );
   const queue: Packet[] = [];
-  const hostSession = sessionOn(origin, 1);
-  const host = createHost({
-    session: hostSession,
-    roster: null,
-    tokenDigest: null,
-    hostId: HOST,
-    name: 'Camille',
-    send: ({ to, message }) => queue.push({ toHost: false, to, message }),
-    report: () => undefined,
-  });
   const ids = [...editors, READER];
   const maxDeliveries = PACKETS_PER_GUEST_AND_STEP * ids.length * (MAX_STEPS + 1);
   const guests = new Map<ParticipantId, { guest: Guest; session: SharedSession }>();
+  const revoked = new Set<ParticipantId>();
+  /** Starts the host of the plan on a session, with the list of people it took over or a new one. */
+  const startHost = (
+    session: SharedSession,
+    hostId: ParticipantId,
+    roster: ReturnType<Host['roster']> | null,
+  ): Host =>
+    createHost({
+      session,
+      roster,
+      tokenDigest: null,
+      hostId,
+      name: hostId,
+      send: ({ to, message }) => queue.push({ toHost: false, to, message }),
+      report: () => undefined,
+    });
+  let hostSession = sessionOn(origin, 1);
+  let host = startHost(hostSession, HOST, null);
   ids.forEach((id, index) => {
     const session = sessionOn(origin, index + 2);
     const guest = createGuest({
@@ -112,10 +127,12 @@ function playScenario(editors: readonly ParticipantId[], steps: readonly Step[])
       }
     }
   };
-  ids.forEach((id, index) => {
-    expect(host.connect(id, `Guest ${String(index)}`, null, null).ok).toBe(true);
+  /** Connects a guest to the current host, as a new connection of that person does. */
+  const join = (id: ParticipantId): void => {
+    expect(host.connect(id, id, null, null).ok).toBe(true);
     guests.get(id)?.guest.connected();
-  });
+  };
+  ids.forEach(join);
   editors.forEach((id) => {
     expect(host.setRight(id, true).ok).toBe(true);
   });
@@ -151,29 +168,86 @@ function playScenario(editors: readonly ParticipantId[], steps: readonly Step[])
       queue.push(packet);
     }
   };
+  /** Ends the connection of a guest and opens a new one, on its side only or, for a rejoin, on the side of the host too. */
+  const reconnect = (step: Extract<Step, { kind: 'reconnect' | 'rejoin' }>): void => {
+    const id = ids[step.guest] ?? READER;
+    const entry = guests.get(id);
+    if (entry === undefined) {
+      return;
+    }
+    entry.guest.disconnected();
+    if (step.kind === 'rejoin') {
+      host.disconnect(id);
+      join(id);
+      return;
+    }
+    entry.guest.connected();
+  };
+  /** Takes the right to edit from a guest who may edit, or gives it back, the guest in read only keeping its right. */
+  const setRight = (step: Extract<Step, { kind: 'grant' | 'revoke' }>): void => {
+    const id = editors[step.guest % editors.length];
+    if (id === undefined || !guests.has(id)) {
+      return;
+    }
+    host.setRight(id, step.kind === 'grant');
+    if (step.kind === 'grant') {
+      revoked.delete(id);
+    } else {
+      revoked.add(id);
+    }
+  };
+  /** Lets the host leave for good, the oldest guest still in taking over its list and every other guest joining it, as long as two editors remain. */
+  const hostLeaves = (): void => {
+    const next = editors.find((id) => guests.has(id));
+    const entry = next === undefined ? undefined : guests.get(next);
+    const roster = next === undefined ? null : takeOverRoster(host.roster(), next);
+    if (next === undefined || entry === undefined || roster === null) {
+      return;
+    }
+    if (editors.filter((id) => guests.has(id)).length < FEW_EDITORS) {
+      return;
+    }
+    host.stop();
+    queue.length = 0;
+    guests.delete(next);
+    entry.guest.stop();
+    hostSession = entry.session;
+    host = startHost(hostSession, next, roster);
+    for (const [id, other] of guests) {
+      other.guest.disconnected();
+      join(id);
+    }
+  };
   /** Runs one step of the scenario. */
   const run = (step: Step): void => {
     if (step.kind === 'edit') {
       edit(step);
     } else if (step.kind === 'forge') {
       forge();
-    } else if (step.kind === 'reconnect') {
-      const entry = guests.get(ids[step.guest] ?? READER);
-      entry?.guest.disconnected();
-      entry?.guest.connected();
-    } else {
+    } else if (step.kind === 'hostLeaves') {
+      hostLeaves();
+    } else if ('at' in step) {
       handle(step);
+    } else if (step.kind === 'reconnect' || step.kind === 'rejoin') {
+      reconnect({ kind: step.kind, guest: step.guest });
+    } else {
+      setRight({ kind: step.kind, guest: step.guest });
     }
   };
   steps.forEach(run);
   drain();
-  ids.forEach((id) => {
-    guests.get(id)?.guest.disconnected();
-    guests.get(id)?.guest.connected();
+  revoked.forEach((id) => {
+    if (guests.has(id)) {
+      host.setRight(id, true);
+    }
+  });
+  guests.forEach((entry) => {
+    entry.guest.disconnected();
+    entry.guest.connected();
   });
   drain();
   const expected = hostSession.project();
-  for (const id of editors) {
+  for (const id of editors.filter((editor) => guests.has(editor))) {
     expect(guests.get(id)?.session.project()).toEqual(expected);
   }
   expect(expected.tasks.some((task) => task.name.startsWith(READER_MARK))).toBe(false);

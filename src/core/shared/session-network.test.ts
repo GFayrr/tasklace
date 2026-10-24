@@ -19,7 +19,10 @@ import {
   createSharedDocument,
   PROJECT_ROOT,
   readSharedData,
+  PERIODS_ROOT,
   TASKS_ROOT,
+  TIME_RANGES_ROOT,
+  WEEKDAYS_ROOT,
   requireDocumentId,
 } from './shared-document';
 import { mergeSharedUpdate, readSharedProject } from './shared-project';
@@ -101,6 +104,32 @@ describe('a session receiving updates from the network', () => {
       (malicious) => taskEntry(malicious, testId('a')).set('segments', 'x'),
     ],
     ['an unknown project field', (malicious) => malicious.getMap('project').set('extra', 1)],
+    [
+      'a calendar key not written exactly',
+      (malicious) => malicious.getMap(TIME_RANGES_ROOT).set('09,12', true),
+    ],
+    [
+      'a calendar entry not marked present',
+      (malicious) => malicious.getMap(WEEKDAYS_ROOT).set('6', 1),
+    ],
+    [
+      'a shared type in the calendar',
+      (malicious) => malicious.getMap(PERIODS_ROOT).set('20000,20000', new Y.Map()),
+    ],
+    [
+      'a weekday that does not exist',
+      (malicious) => malicious.getMap(WEEKDAYS_ROOT).set('7', true),
+    ],
+    [
+      'list content in the calendar',
+      (malicious) => {
+        hideListContent(malicious.getMap(WEEKDAYS_ROOT));
+      },
+    ],
+    [
+      'the calendar as a project field',
+      (malicious) => malicious.getMap('project').set('workingWeekdays', [1]),
+    ],
     ['an invalid project name', (malicious) => malicious.getMap('project').set('name', '')],
     [
       'a project name of the wrong type',

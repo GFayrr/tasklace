@@ -97,6 +97,7 @@ import { SettingsPanel } from './settings-panel.svelte';
 import {
   CollaborationState,
   type CollaborationFailure,
+  type KeptOwnChanges,
 } from '../collaboration/collaboration-state.svelte';
 import type { Command } from './shortcuts';
 import type { NewIdentifier } from '../../core/identifiers';
@@ -293,7 +294,7 @@ export class AppState {
       repaired: (repairs) => {
         this.#notifyRepairs(repairs);
       },
-      hostChanged: (left, next) => {
+      hostChanged: ({ left, next }) => {
         this.#tellHostChanged(left, next);
       },
       ownChangesKept: (kept) => {
@@ -866,7 +867,7 @@ export class AppState {
     await this.collaboration.findPlans(true);
   }
 
-  /** Closes the window of the shared plan, leaving a plan still being joined and no longer looking for plans nearby. */
+  /** Closes the window of the shared plan and, for the join window, stops looking for plans nearby and gives up a join still in progress. */
   closeCollaborationWindow(): void {
     const closed = this.#collaborationWindow;
     this.#collaborationWindow = null;
@@ -897,16 +898,19 @@ export class AppState {
     }
   }
 
-  /** Tells the person where the changes they made in read only away from the host are kept, or that they could not be kept apart and stay only in the plan open here. */
-  #ownChangesKept(kept: Result<string, FileFailure>): void {
+  /** Tells the person where the changes they made in read only away from the host are kept, warning when their local copy could not be written, or that they could not be kept apart and stay only in the plan open here. */
+  #ownChangesKept(kept: Result<KeptOwnChanges, FileFailure>): void {
     const text = this.messages.collaboration;
     if (!kept.ok) {
       this.#notify('error', text.ownChangesNotKept, null, true);
       return;
     }
+    if (!kept.value.localCopySaved) {
+      this.#notify('warning', this.messages.notices.localCopyFailed);
+    }
     this.#keptChanges = {
-      planName: kept.value,
-      copyName: ownCopyName(kept.value, text.ownCopyName),
+      planName: kept.value.planName,
+      copyName: ownCopyName(kept.value.planName, text.ownCopyName),
     };
   }
 

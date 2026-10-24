@@ -1,17 +1,18 @@
+import type { ParticipantId } from '../../core/collaboration/participants';
 import { SUCCESSION_TURN_MILLISECONDS } from '../../core/collaboration/succession';
 import type { Endpoint } from '../../core/collaboration/participants';
 import type { NearbyPlan } from './discovery';
 import type { StartTimer } from './secure-connection';
 
 export interface SuccessionCandidate {
-  readonly participantId: string;
+  readonly participantId: ParticipantId;
   readonly rank: number;
   readonly endpoint: Endpoint | null;
 }
 
 export interface SuccessionOptions {
   readonly queue: readonly SuccessionCandidate[];
-  readonly me: string;
+  readonly me: ParticipantId;
   readonly sharingId: string;
   readonly startTimer: StartTimer;
   readonly watchHosts: (heard: (plans: readonly NearbyPlan[]) => void) => () => void;
@@ -43,7 +44,9 @@ export function startSuccession(options: SuccessionOptions): Succession {
     }
     if (candidate.participantId === options.me) {
       if (options.host !== null) {
-        void hostOrLetPass(options.host);
+        hostOrLetPass(options.host).catch((error: unknown) => {
+          console.error('This window failed while trying to host the shared plan:', error);
+        });
       }
       return;
     }
@@ -51,13 +54,13 @@ export function startSuccession(options: SuccessionOptions): Succession {
       options.attempt(candidate.endpoint.addresses, candidate.endpoint.port);
     }
   };
-  /** Hosts the plan, stopping the succession once hosting, and logging a failure so that the next turn comes. */
+  /** Hosts the plan, stopping the succession once hosting, and logging a failure, the search going on. */
   const hostOrLetPass = async (host: () => Promise<boolean>): Promise<void> => {
     if (await host()) {
       stop();
       return;
     }
-    console.warn('This window could not host the shared plan; the next one in turn will.');
+    console.warn('This window could not host the shared plan; it keeps looking for the next host.');
   };
   const timers = options.queue.map((candidate, index) =>
     options.startTimer(index * SUCCESSION_TURN_MILLISECONDS, () => {

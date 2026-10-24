@@ -1,7 +1,8 @@
+import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encodeMessage, readMessage } from '../../core/collaboration/messages';
 import { requireParticipantId } from '../../core/collaboration/participants';
-import { MAX_PARTICIPANTS } from '../../core/limits';
+import { MAX_DEPARTED_PARTICIPANTS, MAX_PARTICIPANTS } from '../../core/limits';
 import { createSharedDocument } from '../../core/shared/shared-document';
 import { openSharedSessionFromState, type SharedSession } from '../../core/shared/shared-session';
 import {
@@ -40,6 +41,9 @@ function side(session: SharedSession | null, ids: readonly string[]) {
   const hostChanges: [string | null, string | null][] = [];
   const kept: unknown[] = [];
   let openSucceeds = true;
+  let openingError: Error | null = null;
+  const laterShares: (() => void)[] = [];
+  let sharesAtOnce = true;
   const state: CollaborationState = new CollaborationState({
     bridge: bridge,
     createId: () => {
@@ -52,6 +56,9 @@ function side(session: SharedSession | null, ids: readonly string[]) {
     now: () => JOINED_AT,
     session: () => current,
     openShared: (bytes) => {
+      if (openingError !== null) {
+        return Promise.reject(openingError);
+      }
       opened.push(bytes);
       const read = openSharedSessionFromState(bytes);
       if (!openSucceeds || !read.ok) {
@@ -62,12 +69,21 @@ function side(session: SharedSession | null, ids: readonly string[]) {
       return Promise.resolve(true);
     },
     repaired: (found) => repairs.push(...found),
-    hostChanged: (left, next) => hostChanges.push([left, next]),
+    hostChanged: ({ left, next }) => hostChanges.push([left, next]),
     ownChangesKept: (result) => kept.push(result),
     selectedTaskId: () => (selected === null ? null : testId(selected)),
+    shareLater: (share) => {
+      laterShares.push(share);
+      if (sharesAtOnce) {
+        laterShares.splice(0).forEach((each) => {
+          each();
+        });
+      }
+    },
   });
   return {
     state,
+    bridge,
     collaboration: control.collaboration,
     opened,
     repairs,
@@ -81,6 +97,13 @@ function side(session: SharedSession | null, ids: readonly string[]) {
     failOpening: () => {
       openSucceeds = false;
     },
+    failOpeningWith: (error: Error) => {
+      openingError = error;
+    },
+    holdShares: () => {
+      sharesAtOnce = false;
+    },
+    laterShares,
   };
 }
 
@@ -102,19 +125,19 @@ async function sharedPair() {
   await named(host.state, 'Camille');
   await named(guest.state, 'Léa');
   expect((await host.state.share()).ok).toBe(true);
-  expect(await guest.state.join({ address: '192.168.1.24', port: 47_313, code: 'K7Q4MZ' })).toEqual(
-    {
-      ok: true,
-      value: null,
-    },
-  );
+  expect(
+    await guest.state.join({ address: '192.168.1.24', port: 47_313, code: testJoinCode('K7Q4MZ') }),
+  ).toEqual({
+    ok: true,
+    value: null,
+  });
   emit(host.collaboration, {
     kind: 'peerJoined',
     peer: 1,
-    participantId: 'lea',
+    participantId: requireParticipantId('lea'),
     name: 'Léa',
     endpoint: ENDPOINT,
-    tokenDigest: 'd'.repeat(64),
+    tokenDigest: testDigest('d'.repeat(64)),
   });
   emit(guest.collaboration, { kind: 'connected' });
   /** Carries the messages each side sent to the other, until nothing is left. */
@@ -169,7 +192,9 @@ describe('sharing a plan from the page', () => {
     const nameless = side(sessionOn(createSharedDocument(project([]), TEST_DOCUMENT_ID)), []);
     await nameless.state.loadSettings();
     expect(await nameless.state.share()).toEqual({ ok: false, error: { code: 'NO_NAME' } });
-    expect(await nameless.state.join({ address: 'a', port: 1, code: 'K7Q4MZ' })).toEqual({
+    expect(
+      await nameless.state.join({ address: 'a', port: 1, code: testJoinCode('K7Q4MZ') }),
+    ).toEqual({
       ok: false,
       error: { code: 'NO_NAME' },
     });
@@ -188,15 +213,21 @@ describe('sharing a plan from the page', () => {
     expect(host.state.mode).toEqual({
       kind: 'hosting',
       sharing: {
-        code: 'K7Q4MZ',
+        code: testJoinCode('K7Q4MZ'),
         port: 47_313,
         addresses: ['192.168.1.24'],
-        tokenDigest: 'd'.repeat(64),
+        tokenDigest: testDigest('d'.repeat(64)),
       },
     });
     expect(guest.collaboration.requests.find(([name]) => name === 'join')).toEqual([
       'join',
-      { address: '192.168.1.24', port: 47_313, code: 'K7Q4MZ', participantId: 'lea', name: 'Léa' },
+      {
+        address: '192.168.1.24',
+        port: 47_313,
+        code: testJoinCode('K7Q4MZ'),
+        participantId: 'lea',
+        name: 'Léa',
+      },
     ]);
     expect(guest.opened).toHaveLength(1);
     expect(guest.session()?.project()).toEqual(host.session()?.project());
@@ -224,10 +255,10 @@ describe('sharing a plan from the page', () => {
     emit(host.collaboration, {
       kind: 'peerJoined',
       peer: 1,
-      participantId: 'lea',
+      participantId: requireParticipantId('lea'),
       name: 'Léa',
       endpoint: ENDPOINT,
-      tokenDigest: 'd'.repeat(64),
+      tokenDigest: testDigest('d'.repeat(64)),
     });
     const sent = host.collaboration.sent.map(([to, message]) => {
       const read = readMessage(message);
@@ -239,7 +270,7 @@ describe('sharing a plan from the page', () => {
   it('first asks the host for the whole plan with an empty state vector', async () => {
     const guest = side(null, ['lea']);
     await named(guest.state, 'Léa');
-    await guest.state.join({ address: 'a', port: 1, code: 'K7Q4MZ' });
+    await guest.state.join({ address: 'a', port: 1, code: testJoinCode('K7Q4MZ') });
     emit(guest.collaboration, { kind: 'connected' });
     expect(guest.collaboration.sent).toEqual([
       ['host', encodeMessage({ kind: 'stateVector', vector: EMPTY_STATE_VECTOR })],
@@ -280,39 +311,77 @@ describe('sharing a plan from the page', () => {
     ]);
   });
 
-  it('replaces the old connection of a person who comes back on a new one, keeping the right, and turns away an invalid identifier', async () => {
-    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  it('takes back a person whose old connection the main process closed, keeping the right', async () => {
     const { host } = await sharedPair();
     expect(host.state.setRight(LEA, true)).toBe(true);
+    emit(host.collaboration, { kind: 'peerLeft', peer: 1 });
     emit(host.collaboration, {
       kind: 'peerJoined',
       peer: 2,
-      participantId: 'lea',
+      participantId: requireParticipantId('lea'),
       name: 'Léa',
       endpoint: ENDPOINT,
-      tokenDigest: 'd'.repeat(64),
-    });
-    emit(host.collaboration, {
-      kind: 'peerJoined',
-      peer: 3,
-      participantId: 'a b',
-      name: 'Fake',
-      endpoint: ENDPOINT,
-      tokenDigest: 'd'.repeat(64),
+      tokenDigest: testDigest('d'.repeat(64)),
     });
     emit(host.collaboration, { kind: 'peerLeft', peer: 1 });
-    expect(host.collaboration.requests.filter(([name]) => name === 'dropPeer')).toEqual([
-      ['dropPeer', 1],
-      ['dropPeer', 3],
-    ]);
-    expect(warnings.mock.calls).toEqual([
-      ['A guest was turned away from the shared plan: INVALID_IDENTIFIER.'],
+    expect(
+      host.collaboration.requests.filter(
+        ([name]) => name === 'dropPeer' || name === 'allowPeerToEdit',
+      ),
+    ).toEqual([
+      ['allowPeerToEdit', 1],
+      ['allowPeerToEdit', 2],
     ]);
     expect(
       host.state.participants.map((participant) => [participant.name, participant.canEdit]),
     ).toEqual([
       ['Camille', true],
       ['Léa', true],
+    ]);
+  });
+
+  it('refuses a second share while the first one starts, and hosts nothing when the page opened another plan meanwhile', async () => {
+    const origin = createSharedDocument(project([workTask('a')]), TEST_DOCUMENT_ID);
+    const host = side(sessionOn(origin, 1), ['camille', 'again']);
+    await named(host.state, 'Camille');
+    const first = host.state.share();
+    expect(await host.state.share()).toEqual({ ok: false, error: { code: 'ALREADY_SHARING' } });
+    host.state.attached(sessionOn(origin, 2));
+    expect([await first, host.state.mode, host.collaboration.requests.at(-1)]).toEqual([
+      { ok: false, error: { code: 'CANCELLED' } },
+      { kind: 'idle' },
+      ['stop'],
+    ]);
+  });
+
+  it('joins nothing when the page stopped while the join started', async () => {
+    const guest = side(null, ['lea']);
+    await named(guest.state, 'Léa');
+    let answer: (result: { ok: true; value: null }) => void = () => undefined;
+    Object.assign(guest.bridge, {
+      joinPlan: () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const joining = guest.state.join({ address: 'a', port: 1, code: testJoinCode('K7Q4MZ') });
+    await settle();
+    await guest.state.stop();
+    answer({ ok: true, value: null });
+    expect([await joining, guest.state.mode]).toEqual([
+      { ok: false, error: { code: 'CANCELLED' } },
+      { kind: 'idle' },
+    ]);
+  });
+
+  it('logs a guest the main process could not let send its changes', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { host } = await sharedPair();
+    host.collaboration.allowResult = { ok: false, error: { code: 'TASK_FAILED' } };
+    expect(host.state.setRight(LEA, true)).toBe(true);
+    await settle();
+    expect(errors.mock.calls).toEqual([
+      ['A guest could not be let to send its changes:', { code: 'TASK_FAILED' }],
     ]);
   });
 
@@ -325,10 +394,10 @@ describe('sharing a plan from the page', () => {
       emit(host.collaboration, {
         kind: 'peerJoined',
         peer,
-        participantId: `p${String(peer)}`,
+        participantId: requireParticipantId(`p${String(peer)}`),
         name: 'Someone',
         endpoint: ENDPOINT,
-        tokenDigest: 'd'.repeat(64),
+        tokenDigest: testDigest('d'.repeat(64)),
       });
     }
     expect([host.state.participants.length, warnings.mock.calls]).toEqual([
@@ -338,23 +407,69 @@ describe('sharing a plan from the page', () => {
     emit(host.collaboration, {
       kind: 'peerJoined',
       peer: 99,
-      participantId: `p${String(MAX_PARTICIPANTS)}`,
+      participantId: requireParticipantId(`p${String(MAX_PARTICIPANTS)}`),
       name: 'Again',
       endpoint: ENDPOINT,
-      tokenDigest: 'd'.repeat(64),
+      tokenDigest: testDigest('d'.repeat(64)),
     });
     expect(host.collaboration.requests.filter(([name]) => name === 'dropPeer')).toEqual([
       ['dropPeer', MAX_PARTICIPANTS],
       ['dropPeer', 99],
     ]);
+    expect(host.collaboration.requests.filter(([name]) => name === 'forgetGuests')).toEqual([
+      ['forgetGuests', [`p${String(MAX_PARTICIPANTS)}`]],
+      ['forgetGuests', [`p${String(MAX_PARTICIPANTS)}`]],
+    ]);
   });
 
-  it('removes a guest who left, ignoring guests it does not know', async () => {
+  it('has the main process forget a guest once the list of people forgets it, and logs a failure', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const host = side(sessionOn(createSharedDocument(project([]), TEST_DOCUMENT_ID)), ['camille']);
+    await named(host.state, 'Camille');
+    await host.state.share();
+    host.collaboration.forgetResult = { ok: false, error: { code: 'TASK_FAILED' } };
+    for (let peer = 1; peer <= MAX_DEPARTED_PARTICIPANTS + 1; peer += 1) {
+      emit(host.collaboration, {
+        kind: 'peerJoined',
+        peer,
+        participantId: requireParticipantId(`p${String(peer)}`),
+        name: 'Someone',
+        endpoint: ENDPOINT,
+        tokenDigest: testDigest('d'.repeat(64)),
+      });
+      emit(host.collaboration, { kind: 'peerLeft', peer });
+    }
+    await settle();
+    expect([
+      host.collaboration.requests.filter(([name]) => name === 'forgetGuests'),
+      errors.mock.calls,
+    ]).toEqual([
+      [['forgetGuests', ['p1']]],
+      [['The guests the plan forgot could not be forgotten:', { code: 'TASK_FAILED' }]],
+    ]);
+  });
+
+  it('sends a change of the host to all its guests in one message, and nothing when none is connected', async () => {
+    const { host } = await sharedPair();
+    host.collaboration.sent.splice(0);
+    rename(host.session(), 'a', 'For everyone');
+    const targets = host.collaboration.sent.map(([to]) => to);
+    emit(host.collaboration, { kind: 'peerLeft', peer: 1 });
+    host.collaboration.sent.splice(0);
+    rename(host.session(), 'a', 'For nobody');
+    expect([targets, host.collaboration.sent]).toEqual([[[1]], []]);
+  });
+
+  it('removes a guest who left, ignoring guests it does not know and logging their messages', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { host } = await sharedPair();
     expect([host.state.joinedAt(LEA), host.state.joinedAt(HOST_ID)]).toEqual([JOINED_AT, null]);
     emit(host.collaboration, { kind: 'peerLeft', peer: 9 });
     emit(host.collaboration, { kind: 'peerMessage', peer: 9, message: Uint8Array.of(1) });
     emit(host.collaboration, { kind: 'peerLeft', peer: 1 });
+    expect(warnings.mock.calls).toEqual([
+      ['A message came from a guest no longer in the shared plan.'],
+    ]);
     expect(host.state.participants.map((participant) => participant.name)).toEqual(['Camille']);
     expect(host.state.joinedAt(LEA)).toBeNull();
   });
@@ -386,8 +501,8 @@ describe('sharing a plan from the page', () => {
 
   it('shows the new code drawn after too many wrong ones, only while hosting', async () => {
     const { host, guest } = await sharedPair();
-    emit(host.collaboration, { kind: 'codeChanged', code: 'ABCDEF' });
-    emit(guest.collaboration, { kind: 'codeChanged', code: 'ABCDEF' });
+    emit(host.collaboration, { kind: 'codeChanged', code: testJoinCode('ABCDEF') });
+    emit(guest.collaboration, { kind: 'codeChanged', code: testJoinCode('ABCDEF') });
     expect(host.state.mode.kind === 'hosting' && host.state.mode.sharing.code).toBe('ABCDEF');
     expect(guest.state.mode).toEqual({ kind: 'guest', connection: 'connected' });
   });
@@ -397,10 +512,10 @@ describe('sharing a plan from the page', () => {
     emit(page.collaboration, {
       kind: 'peerJoined',
       peer: 1,
-      participantId: 'lea',
+      participantId: requireParticipantId('lea'),
       name: 'Léa',
       endpoint: ENDPOINT,
-      tokenDigest: 'd'.repeat(64),
+      tokenDigest: testDigest('d'.repeat(64)),
     });
     emit(page.collaboration, { kind: 'peerLeft', peer: 1 });
     emit(page.collaboration, {
@@ -422,7 +537,11 @@ describe('sharing a plan from the page', () => {
     });
     emit(guest.collaboration, {
       kind: 'hostMessage',
-      message: encodeMessage({ kind: 'presence', name: 'x', selectedTaskId: null }),
+      message: encodeMessage({
+        kind: 'presence',
+        name: requireParticipantId('x'),
+        selectedTaskId: null,
+      }),
     });
     expect(warnings.mock.calls).toEqual([
       ['A message of a guest could not be read: UNSUPPORTED_VERSION.'],
@@ -501,9 +620,11 @@ describe('sharing a plan from the page', () => {
     expect(idle.state.mode).toEqual({ kind: 'idle' });
   });
 
-  it('asks once for the next host when the host leaves, giving the people from the oldest, and logs a request it could not make', async () => {
+  it('asks once for the next host when the host leaves, giving the people allowed to edit from the oldest, and leaves the plan, logging why, when the request could not be made', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const { guest } = await sharedPair();
+    const { host, guest, relay } = await sharedPair();
+    expect(host.state.setRight(LEA, true)).toBe(true);
+    await relay();
     guest.collaboration.findNextHostResult = { ok: false, error: { code: 'TASK_FAILED' } };
     emit(guest.collaboration, { kind: 'hostLeft' });
     emit(guest.collaboration, { kind: 'offline' });
@@ -513,20 +634,33 @@ describe('sharing a plan from the page', () => {
       guest.collaboration.requests.filter(([name]) => name === 'findNextHost'),
       errors.mock.calls,
     ]).toEqual([
-      { kind: 'guest', connection: 'offline' },
+      { kind: 'guest', connection: 'lost' },
       [
         [
           'findNextHost',
-          [{ participantId: 'lea', rank: 1, endpoint: ENDPOINT }],
+          [{ participantId: requireParticipantId('lea'), rank: 1, endpoint: ENDPOINT }],
           PLAN_NAME,
           'Léa',
           [
-            { participantId: 'camille', tokenDigest: 'd'.repeat(64) },
-            { participantId: 'lea', tokenDigest: 'd'.repeat(64) },
+            {
+              participantId: 'camille',
+              tokenDigest: testDigest('d'.repeat(64)),
+              rank: 0,
+              canEdit: true,
+            },
+            {
+              participantId: 'lea',
+              tokenDigest: testDigest('d'.repeat(64)),
+              rank: 1,
+              canEdit: true,
+            },
           ],
         ],
       ],
-      [['The next host of the shared plan could not be looked for:', { code: 'TASK_FAILED' }]],
+      [
+        ['The next host of the shared plan could not be looked for:', { code: 'TASK_FAILED' }],
+        ['The shared plan is left, its next host not being looked for.'],
+      ],
     ]);
   });
 
@@ -537,10 +671,10 @@ describe('sharing a plan from the page', () => {
     emit(guest.collaboration, {
       kind: 'becameHost',
       sharing: {
-        code: 'N3WC0D',
+        code: testJoinCode('N3WC9D'),
         port: 47_313,
         addresses: ['10.0.0.2'],
-        tokenDigest: 'd'.repeat(64),
+        tokenDigest: testDigest('d'.repeat(64)),
       },
     });
     expect([
@@ -550,10 +684,10 @@ describe('sharing a plan from the page', () => {
     emit(guest.collaboration, {
       kind: 'peerJoined',
       peer: 1,
-      participantId: 'camille',
+      participantId: requireParticipantId('camille'),
       name: 'Camille',
       endpoint: ENDPOINT,
-      tokenDigest: 'd'.repeat(64),
+      tokenDigest: testDigest('d'.repeat(64)),
     });
     expect([
       guest.state.participants.map((each) => [each.name, each.rank, each.canEdit]),
@@ -622,18 +756,41 @@ describe('sharing a plan from the page', () => {
     ]);
   });
 
-  it('ignores a turn to host, a request to give way or the host leaving while it does not hold the matching role', () => {
+  it('follows a lost connection and the host leaving while it waits for the whole plan again after keeping changes apart', async () => {
+    const { guest } = await sharedPair();
+    emit(guest.collaboration, {
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'refused' }),
+    });
+    await settle();
+    emit(guest.collaboration, { kind: 'reconnecting' });
+    const reconnecting = guest.state.mode;
+    emit(guest.collaboration, { kind: 'hostLeft' });
+    await settle();
+    expect([
+      guest.kept.length,
+      reconnecting,
+      guest.collaboration.requests.filter(([name]) => name === 'findNextHost').length,
+    ]).toEqual([1, { kind: 'guest', connection: 'reconnecting' }, 1]);
+  });
+
+  it('ignores a request to give way or the host leaving while it does not hold the matching role, and stops a turn to host it cannot take', () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const idle = side(null, []);
     emit(idle.collaboration, { kind: 'hostLeft' });
     emit(idle.collaboration, { kind: 'yielded' });
     emit(idle.collaboration, {
       kind: 'becameHost',
-      sharing: { code: 'N3WC0D', port: 1, addresses: [], tokenDigest: 'd'.repeat(64) },
+      sharing: {
+        code: testJoinCode('N3WC9D'),
+        port: 1,
+        addresses: [],
+        tokenDigest: testDigest('d'.repeat(64)),
+      },
     });
     expect([idle.state.mode, idle.collaboration.requests, errors.mock.calls]).toEqual([
       { kind: 'idle' },
-      [],
+      [['stop']],
       [['The page cannot host the plan it was told to host.']],
     ]);
   });
@@ -641,7 +798,7 @@ describe('sharing a plan from the page', () => {
   it('ends an attempt to join when the connection ends before the plan opens', async () => {
     const guest = side(null, ['lea']);
     await named(guest.state, 'Léa');
-    await guest.state.join({ address: '192.168.1.24', port: 47_313, code: 'K7Q4MZ' });
+    await guest.state.join({ address: '192.168.1.24', port: 47_313, code: testJoinCode('K7Q4MZ') });
     emit(guest.collaboration, { kind: 'ended', reason: 'WRONG_CODE' });
     expect([guest.state.mode, guest.state.lastEnd, guest.state.me]).toEqual([
       { kind: 'idle' },
@@ -677,17 +834,78 @@ describe('sharing a plan from the page', () => {
     expect(guest.collaboration.requests.filter(([name]) => name === 'stop')).toEqual([['stop']]);
   });
 
+  it('opens the whole plan the host sent in answer, not a change of the plan that came before it', async () => {
+    const guest = side(null, ['lea']);
+    await named(guest.state, 'Léa');
+    await guest.state.join({ address: 'a', port: 1, code: testJoinCode('K7Q4MZ') });
+    const whole = sessionOn(createSharedDocument(project([]), TEST_DOCUMENT_ID)).encodeState();
+    for (const message of [
+      { kind: 'update', update: Uint8Array.of(1, 2) },
+      { kind: 'update', update: whole },
+      { kind: 'stateVector', vector: Uint8Array.of(0) },
+    ] as const) {
+      emit(guest.collaboration, { kind: 'hostMessage', message: encodeMessage(message) });
+    }
+    await settle();
+    expect(guest.opened).toEqual([whole]);
+  });
+
+  it('leaves the plan, logging why, when opening the plan the host sent fails unexpectedly', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const guest = side(null, ['lea']);
+    await named(guest.state, 'Léa');
+    await guest.state.join({ address: 'a', port: 1, code: testJoinCode('K7Q4MZ') });
+    const failed = new Error('opening broke');
+    guest.failOpeningWith(failed);
+    const whole = sessionOn(createSharedDocument(project([]), TEST_DOCUMENT_ID)).encodeState();
+    emit(guest.collaboration, {
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'update', update: whole }),
+    });
+    emit(guest.collaboration, {
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'stateVector', vector: Uint8Array.of(0) }),
+    });
+    await settle();
+    expect([guest.state.mode, errors.mock.calls]).toEqual([
+      { kind: 'idle' },
+      [['The plan the host sent could not be opened:', failed]],
+    ]);
+  });
+
+  it('logs a guest turned away that the main process could not drop', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { host } = await sharedPair();
+    host.collaboration.dropResult = { ok: false, error: { code: 'TASK_FAILED' } };
+    emit(host.collaboration, {
+      kind: 'peerJoined',
+      peer: 3,
+      participantId: requireParticipantId('camille'),
+      name: 'Fake',
+      endpoint: ENDPOINT,
+      tokenDigest: testDigest('d'.repeat(64)),
+    });
+    await settle();
+    expect(errors.mock.calls).toEqual([
+      ['A guest turned away could not be dropped:', { code: 'TASK_FAILED' }],
+    ]);
+  });
+
   it('leaves the plan when the plan the host sent cannot be opened', async () => {
     const guest = side(null, ['lea']);
     guest.failOpening();
     await named(guest.state, 'Léa');
-    await guest.state.join({ address: 'a', port: 1, code: 'K7Q4MZ' });
+    await guest.state.join({ address: 'a', port: 1, code: testJoinCode('K7Q4MZ') });
     const state = encodeMessage({
       kind: 'update',
       update: sessionOn(createSharedDocument(project([]), TEST_DOCUMENT_ID)).encodeState(),
     });
+    const vector = encodeMessage({ kind: 'stateVector', vector: Uint8Array.of(0) });
     emit(guest.collaboration, { kind: 'hostMessage', message: state });
+    emit(guest.collaboration, { kind: 'hostMessage', message: vector });
     emit(guest.collaboration, { kind: 'hostMessage', message: state });
+    emit(guest.collaboration, { kind: 'hostMessage', message: vector });
     await settle();
     expect([guest.opened.length, guest.state.mode, guest.collaboration.requests.at(-1)]).toEqual([
       1,
@@ -776,7 +994,7 @@ describe('joining and editing together', () => {
   it('is in read only while joining, before knowing the host', async () => {
     const guest = side(null, ['lea']);
     await named(guest.state, 'Léa');
-    await guest.state.join({ address: 'a', port: 1, code: 'K7Q4MZ' });
+    await guest.state.join({ address: 'a', port: 1, code: testJoinCode('K7Q4MZ') });
     expect([guest.state.mode, guest.state.isReadOnly, guest.state.hostName]).toEqual([
       { kind: 'joining' },
       true,
@@ -788,10 +1006,12 @@ describe('joining and editing together', () => {
     const guest = side(null, ['lea']);
     await named(guest.state, 'Léa');
     guest.collaboration.joinResult = { ok: false, error: { code: 'ALREADY_SHARING' } };
-    expect(await guest.state.join({ address: 'a', port: 1, code: 'K7Q4MZ' })).toEqual({
-      ok: false,
-      error: { code: 'ALREADY_SHARING' },
-    });
+    expect(await guest.state.join({ address: 'a', port: 1, code: testJoinCode('K7Q4MZ') })).toEqual(
+      {
+        ok: false,
+        error: { code: 'ALREADY_SHARING' },
+      },
+    );
     expect([guest.state.mode, guest.state.me]).toEqual([{ kind: 'idle' }, null]);
   });
 
@@ -820,7 +1040,7 @@ describe('joining and editing together', () => {
     readOnly.push(guest.state.isReadOnly);
     emit(guest.collaboration, { kind: 'offline' });
     readOnly.push(guest.state.isReadOnly);
-    emit(guest.collaboration, { kind: 'ended', reason: 'REMOVED' });
+    emit(guest.collaboration, { kind: 'ended', reason: 'IDENTITY_TAKEN' });
     readOnly.push(guest.state.isReadOnly);
     expect(readOnly).toEqual([true, false, false, false]);
   });
@@ -844,7 +1064,7 @@ describe('joining and editing together', () => {
     ]).toEqual([
       PLAN_NAME,
       ['Changed by the host', 'Mine'],
-      [{ ok: true, value: PLAN_NAME }],
+      [{ ok: true, value: { planName: PLAN_NAME, localCopySaved: true } }],
       2,
       { kind: 'guest', connection: 'connected' },
       true,

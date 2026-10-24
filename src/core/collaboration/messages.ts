@@ -13,7 +13,7 @@ import {
   itemField,
   readArray,
   readBoolean,
-  readIdentifier,
+  readTaskId,
   readInteger,
   readNullable,
   readRecord,
@@ -27,7 +27,7 @@ import {
   type ParticipantId,
 } from './participants';
 import { readEndpoint } from './endpoint';
-import { isTokenDigest } from './secure/token-digest';
+import { isTokenDigest, type TokenDigest } from './secure/token-digest';
 
 export type CollaborationMessage =
   | { readonly kind: 'stateVector'; readonly vector: Uint8Array }
@@ -37,7 +37,8 @@ export type CollaborationMessage =
       readonly kind: 'participants';
       readonly you: ParticipantId;
       readonly participants: readonly Participant[];
-    };
+    }
+  | { readonly kind: 'refused' };
 
 export type MessageRefusal =
   'TOO_LARGE' | 'UNSUPPORTED_VERSION' | 'UNKNOWN_KIND' | 'INVALID_CONTENT';
@@ -49,6 +50,7 @@ const KIND_CODES = {
   update: 2,
   presence: 3,
   participants: 4,
+  refused: 5,
 } as const satisfies Readonly<Record<CollaborationMessage['kind'], number>>;
 const PRESENCE_KEYS = ['name', 'selectedTaskId'];
 const PARTICIPANTS_KEYS = ['you', 'participants'];
@@ -91,6 +93,8 @@ function contentOf(message: CollaborationMessage): Uint8Array {
       return ENCODER.encode(
         JSON.stringify({ you: message.you, participants: message.participants }),
       );
+    case 'refused':
+      return new Uint8Array();
   }
 }
 
@@ -114,6 +118,8 @@ export function readMessage(bytes: Uint8Array): Result<CollaborationMessage, Mes
       return readJsonMessage(content, readPresence);
     case KIND_CODES.participants:
       return readJsonMessage(content, readParticipants);
+    case KIND_CODES.refused:
+      return content.length === 0 ? success({ kind: 'refused' }) : failure('INVALID_CONTENT');
     default:
       return failure('UNKNOWN_KIND');
   }
@@ -157,11 +163,7 @@ function readPresence(field: Field, issues: IssueList): CollaborationMessage | u
     return undefined;
   }
   const name = readText(childField(record, 'name', ''), issues, MAX_PARTICIPANT_NAME_LENGTH);
-  const selectedTaskId = readNullable(
-    childField(record, 'selectedTaskId', ''),
-    issues,
-    readIdentifier,
-  );
+  const selectedTaskId = readNullable(childField(record, 'selectedTaskId', ''), issues, readTaskId);
   return name === undefined || selectedTaskId === undefined
     ? undefined
     : { kind: 'presence', name, selectedTaskId };
@@ -196,6 +198,7 @@ function isConsistentRoster(participants: readonly Participant[], you: Participa
   const ranks = new Set(participants.map((participant) => participant.rank));
   return (
     participants.filter((participant) => participant.isHost).length === 1 &&
+    participants.every((participant) => !participant.isHost || participant.canEdit) &&
     ids.size === participants.length &&
     ranks.size === participants.length &&
     ids.has(you)
@@ -217,7 +220,7 @@ function readParticipant(field: Field, issues: IssueList): Participant | undefin
     canEdit: readBoolean(child('canEdit'), issues),
     isHost: readBoolean(child('isHost'), issues),
     rank: readInteger(child('rank'), issues, 0, MAX_JOIN_RANK),
-    selectedTaskId: readNullable(child('selectedTaskId'), issues, readIdentifier),
+    selectedTaskId: readNullable(child('selectedTaskId'), issues, readTaskId),
     endpoint: readNullable(child('endpoint'), issues, readEndpoint),
     tokenDigest: readNullable(child('tokenDigest'), issues, readTokenDigest),
   };
@@ -239,7 +242,7 @@ function readParticipant(field: Field, issues: IssueList): Participant | undefin
 }
 
 /** Reads the digest of the token of a participant. */
-function readTokenDigest(field: Field, issues: IssueList): string | undefined {
+function readTokenDigest(field: Field, issues: IssueList): TokenDigest | undefined {
   if (isTokenDigest(field.value)) {
     return field.value;
   }

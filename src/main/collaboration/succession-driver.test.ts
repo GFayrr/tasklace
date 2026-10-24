@@ -1,3 +1,4 @@
+import { requireParticipantId } from '../../core/collaboration/participants';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NearbyPlan } from './discovery';
 import { startSuccession, type SuccessionCandidate } from './succession-driver';
@@ -5,9 +6,9 @@ import { startSuccession, type SuccessionCandidate } from './succession-driver';
 const SHARING = 'a'.repeat(32);
 const ENDPOINT = { addresses: ['192.168.1.30'], port: 47_313 };
 const QUEUE: readonly SuccessionCandidate[] = [
-  { participantId: 'lea', rank: 1, endpoint: ENDPOINT },
-  { participantId: 'me', rank: 2, endpoint: null },
-  { participantId: 'noah', rank: 3, endpoint: null },
+  { participantId: requireParticipantId('lea'), rank: 1, endpoint: ENDPOINT },
+  { participantId: requireParticipantId('me'), rank: 2, endpoint: null },
+  { participantId: requireParticipantId('noah'), rank: 3, endpoint: null },
 ];
 
 afterEach(() => {
@@ -37,7 +38,7 @@ function succession(hosts: boolean[] = [true]) {
   const host = vi.fn(() => Promise.resolve(hosts.shift() ?? false));
   const started = startSuccession({
     queue: QUEUE,
-    me: 'me',
+    me: requireParticipantId('me'),
     sharingId: SHARING,
     startTimer: (milliseconds, onEnd) => {
       const timer = { milliseconds, onEnd, stopped: false };
@@ -99,7 +100,22 @@ describe('the search for the next host', () => {
     expect([search.timers[2]?.stopped, search.isWatching(), warnings.mock.calls]).toEqual([
       false,
       true,
-      [['This window could not host the shared plan; the next one in turn will.']],
+      [['This window could not host the shared plan; it keeps looking for the next host.']],
+    ]);
+  });
+
+  it('logs a failure while hosting on its own turn, the search going on', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const search = succession();
+    const failed = new Error('hosting broke');
+    search.host.mockImplementationOnce(() => Promise.reject(failed));
+    search.fire(15_000);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect([search.isWatching(), errors.mock.calls]).toEqual([
+      true,
+      [['This window failed while trying to host the shared plan:', failed]],
     ]);
   });
 
@@ -121,7 +137,7 @@ describe('the search for the next host', () => {
     const attempt = vi.fn();
     startSuccession({
       queue: QUEUE,
-      me: 'me',
+      me: requireParticipantId('me'),
       sharingId: SHARING,
       startTimer: (_milliseconds, onEnd) => {
         timers.push(onEnd);

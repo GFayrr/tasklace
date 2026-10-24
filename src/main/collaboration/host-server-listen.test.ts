@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { spacedClock } from '../testing/plan-host';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAX_PORT_ATTEMPTS } from '../../core/limits';
 import { failure } from '../../core/result';
@@ -9,12 +10,14 @@ import { startHostServer } from './host-server';
 const listening = vi.hoisted(() => ({
   outcomes: [] as (string | Error | null)[],
   calls: [] as { port: number; host: string }[],
+  server: null as EventEmitter | null,
 }));
 
 vi.mock('node:http', async (importOriginal) => ({
   ...(await importOriginal<typeof import('node:http')>()),
   createServer: () => {
     const server = new EventEmitter();
+    listening.server = server;
     return Object.assign(server, {
       listen: (where: { port: number; host: string }) => {
         listening.calls.push(where);
@@ -48,15 +51,16 @@ function start(port: number, outcomes: (string | Error | null)[]) {
   return startHostServer({
     port,
     planKey: null,
-    knownTokens: new Map(),
+    knownDigests: new Map(),
     startTimer: () => () => undefined,
     randomBytes: systemRandomBytes,
+    identity: null,
+    now: spacedClock(),
     events: {
       joined: () => undefined,
       message: () => undefined,
       left: () => undefined,
       codeChanged: () => undefined,
-      planKeyChanged: () => undefined,
     },
   });
 }
@@ -66,6 +70,17 @@ afterEach(() => {
 });
 
 describe('the listening of the host', () => {
+  it('logs an error of the server once it listens instead of letting it end the main process', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const started = await start(47_313, [null]);
+    const failed = Object.assign(new Error('too many open files'), { code: 'EMFILE' });
+    listening.server?.emit('error', failed);
+    expect(errors.mock.calls).toEqual([['The server of the shared plan failed:', failed]]);
+    if (started.ok) {
+      await started.value.close();
+    }
+  });
+
   it('listens on IPv4 alone when the system has no IPv6', async () => {
     const started = await start(47_313, ['EAFNOSUPPORT', null]);
     expect([started.ok && started.value.port, listening.calls]).toEqual([

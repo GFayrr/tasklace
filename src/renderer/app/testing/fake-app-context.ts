@@ -1,3 +1,4 @@
+import { testDigest, testJoinCode } from '../../../core/testing/secrets';
 import * as Y from 'yjs';
 import type { Project } from '../../../core/model/project';
 import type { PrintDocument } from '../../../core/print/print-document';
@@ -71,7 +72,10 @@ export interface FakeCollaboration {
   openSharedResult: BridgeResult<OpenedProject>;
   copyResult: BridgeResult<null>;
   findNextHostResult: BridgeResult<null>;
-  keepResult: BridgeResult<null>;
+  allowResult: BridgeResult<null>;
+  dropResult: BridgeResult<null>;
+  forgetResult: BridgeResult<null>;
+  keepResult: BridgeResult<SavedProject>;
   openKeptResult: BridgeResult<OpenedProject>;
   listener: ((event: CollaborationEvent) => void) | null;
   readonly requests: (readonly [string, ...unknown[]])[];
@@ -134,10 +138,10 @@ export function fakeBridge(): {
       shareResult: {
         ok: true,
         value: {
-          code: 'K7Q4MZ',
+          code: testJoinCode('K7Q4MZ'),
           port: 47_313,
           addresses: ['192.168.1.24'],
-          tokenDigest: 'd'.repeat(64),
+          tokenDigest: testDigest('d'.repeat(64)),
         },
       },
       joinResult: { ok: true, value: null },
@@ -146,7 +150,10 @@ export function fakeBridge(): {
       openSharedResult: { ok: false, error: { code: 'TASK_FAILED' } },
       copyResult: { ok: true, value: null },
       findNextHostResult: { ok: true, value: null },
-      keepResult: { ok: true, value: null },
+      allowResult: { ok: true, value: null },
+      dropResult: { ok: true, value: null },
+      forgetResult: { ok: true, value: null },
+      keepResult: { ok: true, value: { localCopySaved: true } },
       openKeptResult: { ok: false, error: { code: 'CANCELLED' } },
       listener: null,
       requests: [],
@@ -223,11 +230,13 @@ export function fakeBridge(): {
     joinPlan: (joining) => asked(['join', joining], collaboration.joinResult),
     openSharedPlan: (state) => asked(['openShared', state], collaboration.openSharedResult),
     findPlans: (searching) => asked(['findPlans', searching], collaboration.findPlansResult),
-    dropPeer: (peer) => asked(['dropPeer', peer], { ok: true, value: null }),
+    dropPeer: (peer) => asked(['dropPeer', peer], collaboration.dropResult),
+    allowPeerToEdit: (peer) => asked(['allowPeerToEdit', peer], collaboration.allowResult),
+    forgetGuests: (ids) => asked(['forgetGuests', ids], collaboration.forgetResult),
     copyJoinCode: () => asked(['copyCode'], collaboration.copyResult),
-    findNextHost: (queue, planName, hostName, knownTokens) =>
+    findNextHost: (queue, planName, hostName, knownPeople) =>
       asked(
-        ['findNextHost', queue, planName, hostName, knownTokens],
+        ['findNextHost', queue, planName, hostName, knownPeople],
         collaboration.findNextHostResult,
       ),
     keepOwnChanges: (state, planName) =>

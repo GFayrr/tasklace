@@ -1,3 +1,4 @@
+import type { TokenDigest } from './secure/token-digest';
 import { compareStrings } from '../compare-strings';
 import { MAX_DEPARTED_PARTICIPANTS, MAX_JOIN_RANK, MAX_PARTICIPANTS } from '../limits';
 import type { TaskId } from '../model/project';
@@ -26,7 +27,7 @@ export type RosterRefusal = 'ROSTER_FULL' | 'ALREADY_IN' | 'UNKNOWN_PARTICIPANT'
 export function startRoster(
   hostId: ParticipantId,
   name: string,
-  tokenDigest: string | null,
+  tokenDigest: TokenDigest | null,
 ): Roster {
   return {
     participants: [
@@ -47,13 +48,19 @@ export function startRoster(
   };
 }
 
+/** Builds the list of a plan from the people a guest last heard of, none of them gone, the next rank following the highest one. */
+export function rosterOfKnown(participants: readonly Participant[]): Roster {
+  const highest = Math.max(0, ...participants.map((participant) => participant.rank));
+  return { participants, departed: [], nextRank: highest + 1 };
+}
+
 /** Adds a participant who just joined, in read only with a new rank and the first color nobody uses, or with the rank, right and color it had when it comes back, refusing a full list, an identifier already in it, or a list whose ranks are spent. */
 export function joinRoster(
   roster: Roster,
   id: ParticipantId,
   name: string,
   endpoint: Endpoint | null,
-  tokenDigest: string | null,
+  tokenDigest: TokenDigest | null,
 ): Result<Roster, RosterRefusal> {
   if (roster.participants.length >= MAX_PARTICIPANTS || roster.nextRank > MAX_JOIN_RANK) {
     return failure('ROSTER_FULL');
@@ -98,7 +105,7 @@ function rejoined(
   };
 }
 
-/** Returns the first color of the palette no participant uses, or the color of the rank when every color is taken. */
+/** Returns the first color of the palette no participant uses or, when every color is taken, the one the number of participants points to. */
 function firstFreeColor(participants: readonly Participant[]): number {
   const used = new Set(participants.map((participant) => participant.color));
   const free = Array.from({ length: PARTICIPANT_COLOR_COUNT }, (_unused, color) => color).find(
@@ -133,7 +140,7 @@ export function updatePresence(
   return target === undefined ? roster : replaceParticipant(roster, { ...target, ...presence });
 }
 
-/** Removes a participant who left, keeping its rank, right and color for when it comes back, the latest departures only, the host leaving being handled by electing the next one. */
+/** Removes a participant who left, keeping its rank, right and color for when it comes back, the latest departures only. */
 export function leaveRoster(roster: Roster, id: ParticipantId): Roster {
   const leaving = roster.participants.find((participant) => participant.id === id);
   if (leaving === undefined) {
@@ -150,22 +157,6 @@ export function leaveRoster(roster: Roster, id: ParticipantId): Roster {
 /** Tells whether the host accepts a change of the plan from a participant: only from one in the list who can edit. */
 export function mayEdit(roster: Roster, id: ParticipantId): boolean {
   return roster.participants.some((participant) => participant.id === id && participant.canEdit);
-}
-
-/** Chooses the participant who becomes the host when the host is gone, the one connected the longest, and makes it the host with its right to edit, or returns null when nobody is left. */
-export function electHost(roster: Roster): Roster | null {
-  const remaining = roster.participants.filter((participant) => !participant.isHost);
-  const next = remaining.reduce<Participant | null>(
-    (best, participant) => (best === null || isOlder(participant, best) ? participant : best),
-    null,
-  );
-  if (next === null) {
-    return null;
-  }
-  return replaceParticipant(
-    { ...roster, participants: remaining },
-    { ...next, isHost: true, canEdit: true },
-  );
 }
 
 /** Takes over the list of a host that left on the side of the participant who now hosts: it becomes the host with the right to edit, and everyone else, the old host included, waits among the departures to come back with its rank, right and color. */

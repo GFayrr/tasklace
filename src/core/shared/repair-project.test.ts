@@ -4,12 +4,25 @@ import {
   MAX_DEPENDENCIES,
   MAX_HIERARCHY_DEPTH,
   MAX_MERGE_REPAIR_ROUNDS,
+  MAX_NON_WORKING_PERIODS,
   MAX_TAGS,
   MAX_TASKS,
+  MAX_WORKING_TIME_RANGES,
 } from '../limits';
+import { DEFAULT_CALENDAR } from '../calendar/default-calendar';
+import { TEST_CALENDAR } from '../testing/test-calendar';
+import { dayIndexOf, MONDAY, QUARTER_HOUR, TUESDAY } from '../time';
 import type { Dependency, Project, Tag, Task } from '../model/project';
 import { PROPERTY_TEST_TIMEOUT_MS, unwrap } from '../testing/arbitraries';
-import { link, milestone, project, summary, workTask, testId } from '../testing/project-builder';
+import {
+  link,
+  milestone,
+  project,
+  PROJECT_START,
+  summary,
+  workTask,
+  testId,
+} from '../testing/project-builder';
 import { readProject, STORED_VALUE_CODEC } from '../validation/read-project';
 import { repairProject } from './repair-project';
 
@@ -19,6 +32,8 @@ const DESIGN: Tag = {
   color: '#336699',
   representsPersonOrTeam: false,
 };
+
+const TEST_FIRST_DAY = dayIndexOf(PROJECT_START);
 
 /** Repairs a project built from tasks, dependencies and optional project overrides, failing the test when the repair is refused. */
 function repair(
@@ -167,9 +182,77 @@ describe('repairProject', () => {
   });
 
   it('leaves daily patterns alone when the calendar itself is invalid', () => {
-    const calendar = { workingWeekdays: [], workingTimeRanges: [], nonWorkingPeriods: [] };
+    const calendar = { ...TEST_CALENDAR, workingTimeRanges: [{ startHour: 10, endHour: 9 }] };
     const result = repair([workTask('a', { hoursPerDay: 10 })], [], { calendar });
     expect(result.repairs).toEqual([]);
+  });
+
+  it('puts back the default working days and hours when changes made at the same time left none', () => {
+    const calendar = { workingWeekdays: [], workingTimeRanges: [], nonWorkingPeriods: [] };
+    const result = repair([], [], { calendar });
+    expect(result).toEqual({
+      project: project([], [], {
+        calendar: { ...DEFAULT_CALENDAR, nonWorkingPeriods: [] },
+      }),
+      repairs: [
+        { code: 'WORKING_DAYS_RESTORED', id: '' },
+        { code: 'WORKING_HOURS_RESTORED', id: '' },
+      ],
+    });
+  });
+
+  it('removes the time ranges that overlap an earlier one, whatever their order', () => {
+    const calendar = {
+      workingWeekdays: [TUESDAY, MONDAY],
+      workingTimeRanges: [
+        { startHour: 13, endHour: 17 },
+        { startHour: 10, endHour: 14 },
+        { startHour: 8, endHour: 12 },
+      ],
+      nonWorkingPeriods: [],
+    };
+    const result = repair([], [], { calendar });
+    expect(result.project.calendar).toEqual({
+      workingWeekdays: [MONDAY, TUESDAY],
+      workingTimeRanges: [
+        { startHour: 8, endHour: 12 },
+        { startHour: 13, endHour: 17 },
+      ],
+      nonWorkingPeriods: [],
+    });
+    expect(result.repairs).toEqual([{ code: 'WORKING_HOURS_REMOVED', id: '10,14' }]);
+    expect(isValid(result.project)).toBe(true);
+  });
+
+  it('removes the latest time ranges and periods off beyond their limits', () => {
+    const ranges = Array.from({ length: MAX_WORKING_TIME_RANGES + 1 }, (_unused, index) => ({
+      startHour: index,
+      endHour: index + QUARTER_HOUR,
+    }));
+    const periods = Array.from({ length: MAX_NON_WORKING_PERIODS + 1 }, (_unused, index) => ({
+      firstDay: TEST_FIRST_DAY + 2 * index,
+      lastDay: TEST_FIRST_DAY + 2 * index,
+    }));
+    const lastPeriodDay = TEST_FIRST_DAY + 2 * MAX_NON_WORKING_PERIODS;
+    const result = repair([], [], {
+      calendar: {
+        ...TEST_CALENDAR,
+        workingTimeRanges: ranges.toReversed(),
+        nonWorkingPeriods: periods.toReversed(),
+      },
+    });
+    expect(result.project.calendar).toEqual({
+      ...TEST_CALENDAR,
+      workingTimeRanges: ranges.slice(0, MAX_WORKING_TIME_RANGES),
+      nonWorkingPeriods: periods.slice(0, MAX_NON_WORKING_PERIODS),
+    });
+    expect(result.repairs).toEqual([
+      { code: 'WORKING_HOURS_REMOVED', id: `${String(MAX_WORKING_TIME_RANGES)},24.25` },
+      {
+        code: 'NON_WORKING_PERIOD_REMOVED',
+        id: `${String(lastPeriodDay)},${String(lastPeriodDay)}`,
+      },
+    ]);
   });
 
   it('repairs what the removal of tasks beyond the limit leaves behind', () => {
