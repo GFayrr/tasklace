@@ -82,6 +82,7 @@ export interface CollaborationServices {
   readonly addresses?: () => readonly string[];
   readonly startTimer?: StartTimer;
   readonly now?: () => number;
+  readonly randomBytes?: (count: number) => Uint8Array;
 }
 
 const SETTINGS_STORE = 'collaboration-settings.json';
@@ -122,6 +123,7 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
   const storePath = joinPath(services.userDataFolder, SETTINGS_STORE);
   const startTimer = services.startTimer ?? systemTimer;
   const now = services.now ?? (() => Date.now());
+  const randomBytes = services.randomBytes ?? systemRandomBytes;
   const addresses = services.addresses ?? (() => privateAddressesOf(networkInterfaces()));
   let mdns: { readonly mdns: Mdns; readonly destroy: () => void } | null = null;
   /** Gives the mDNS of the application, started on first use. */
@@ -147,7 +149,8 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
       now,
       mdns: sharedMdns,
       addresses,
-      instance: instanceName,
+      instance: () => instanceName(randomBytes),
+      randomBytes,
     });
     windows.set(sender, created);
     return created;
@@ -170,7 +173,7 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
     return success({
       participantId,
       name,
-      token: drawRejoinToken(systemRandomBytes),
+      token: drawRejoinToken(randomBytes),
       endpoint: {
         addresses: addresses().slice(0, MAX_ENDPOINT_ADDRESSES),
         port: settings.value.port,
@@ -511,8 +514,8 @@ function readJoinRequest(value: unknown): JoinRequest | null {
 }
 
 /** Draws a short random name that keeps two plans announced from the same computer apart. */
-function instanceName(): string {
-  return [...systemRandomBytes(INSTANCE_BYTES)]
+function instanceName(randomBytes: (count: number) => Uint8Array): string {
+  return [...randomBytes(INSTANCE_BYTES)]
     .map((byte) => byte.toString(HEX_BASE).padStart(HEX_DIGITS, '0'))
     .join('');
 }

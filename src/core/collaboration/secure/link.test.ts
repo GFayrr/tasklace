@@ -91,6 +91,18 @@ describe('the opening of a connection', () => {
     expect(stranger.finish(answered.value.confirm)).toEqual(failure('WRONG_KEY'));
   });
 
+  it('refuses a reply whose mode does not match the secret it was made with', () => {
+    const host = startHostLink(SECRETS, seeded(1));
+    const byCode = Uint8Array.from(guestOf(host.hello, code('K7Q4MZ')).reply);
+    const byKey = Uint8Array.from(guestOf(host.hello, { kind: 'key', key: PLAN_KEY }).reply);
+    byCode[0] = byKey[0] ?? 0;
+    byKey[0] = guestOf(host.hello, code('K7Q4MZ')).reply[0] ?? 0;
+    expect([host.answer(byCode), host.answer(byKey)]).toEqual([
+      failure('WRONG_KEY'),
+      failure('WRONG_CODE'),
+    ]);
+  });
+
   it('lets the guest refuse a confirmation that is not the proof of the host', () => {
     const host = startHostLink(SECRETS, seeded(1));
     const guest = guestOf(host.hello, code('K7Q4MZ'));

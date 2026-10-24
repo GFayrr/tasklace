@@ -8,7 +8,6 @@ import { isOlder } from '../../core/collaboration/roster';
 import { sharingIdOf } from '../../core/collaboration/succession';
 import { success, type Result } from '../../core/result';
 import type { CollaborationEvent, KnownToken, Sharing } from '../../preload/bridge-contract';
-import { systemRandomBytes } from './aes-gcm';
 import { findPlans, type Mdns, type NearbyPlan } from './discovery';
 import { connectAsGuest } from './guest-client';
 import { startGuestSession, type GuestSession } from './guest-session';
@@ -25,6 +24,7 @@ export interface WindowContext {
   readonly mdns: () => Mdns;
   readonly addresses: () => readonly string[];
   readonly instance: () => string;
+  readonly randomBytes: (count: number) => Uint8Array;
 }
 
 export interface PlanNames {
@@ -97,6 +97,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       instance: context.instance(),
       startTimer: context.startTimer,
       now: context.now,
+      randomBytes: context.randomBytes,
       mdns: context.mdns,
       tell: context.tell,
       olderHost: (older, planKey) => {
@@ -122,7 +123,7 @@ export function createWindowSharing(context: WindowContext): WindowSharing {
       ...target,
       introduction: identity,
       startTimer: context.startTimer,
-      connect: (options) => connectAsGuest({ ...options, randomBytes: systemRandomBytes }),
+      connect: (options) => connectAsGuest({ ...options, randomBytes: context.randomBytes }),
       tell: (event) => {
         tell(session, event);
       },

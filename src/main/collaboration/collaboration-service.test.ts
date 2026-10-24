@@ -1,17 +1,21 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ipcMain as electronIpcMain } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { bytesToHex } from '@noble/hashes/utils.js';
+import { generateJoinCode } from '../../core/collaboration/secure/join-code';
+import { tokenDigestOf } from '../../core/collaboration/secure/link';
+import { sharingIdOf } from '../../core/collaboration/succession';
 import { failure, success } from '../../core/result';
 import { TEST_DOCUMENT_ID } from '../../core/testing/project-builder';
 import { IPC_CHANNELS, type CollaborationEvent } from '../../preload/bridge-contract';
 import type { FileTask } from '../file-tasks';
 import type { FakeIpcMain } from '../testing/fake-electron';
+import { systemRandomBytes } from './aes-gcm';
 import { privateAddressesOf, registerCollaborationHandlers } from './collaboration-service';
 import type { AnnouncedService, Mdns } from './discovery';
-import { spacedClock } from '../testing/plan-host';
+import { freePort, LOOPBACK, spacedClock, until } from '../testing/plan-host';
 
 vi.mock('electron', async () => {
   const fakes = await import('../testing/fake-electron');
@@ -29,7 +33,7 @@ vi.mock('../project-files', () => ({
 
 const ipcMain = electronIpcMain as unknown as FakeIpcMain;
 const KNOWN = [{ participantId: 'lea', tokenDigest: 'e'.repeat(64), rank: 1, canEdit: true }];
-const LOOPBACK = '127.0.0.1';
+const draws: Uint8Array[] = [];
 
 /** A fake page that records the events the main process sends it. */
 class FakePage {
@@ -82,26 +86,6 @@ function fakeMdns() {
   return { record, mdns };
 }
 
-/** Finds a port nobody listens on. */
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const probe = createServer();
-    probe.listen(0, LOOPBACK, () => {
-      const address = probe.address();
-      probe.close(() => {
-        resolve(typeof address === 'object' && address !== null ? address.port : 0);
-      });
-    });
-  });
-}
-
-/** Waits until a condition holds. */
-async function until(condition: () => boolean): Promise<void> {
-  while (!condition()) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
-
 let folder = '';
 let mdnsFake = fakeMdns();
 let tasks: FileTask[] = [];
@@ -121,6 +105,7 @@ beforeEach(async () => {
   tasks = [];
   copied = [];
   uncopyable = '';
+  draws.length = 0;
   trusted.mockClear();
   const registered = registerCollaborationHandlers({
     assertTrusted: trusted,
@@ -144,6 +129,11 @@ beforeEach(async () => {
     }),
     addresses: () => ['192.168.1.24'],
     now: spacedClock(),
+    randomBytes: (count) => {
+      const drawn = systemRandomBytes(count);
+      draws.push(drawn);
+      return drawn;
+    },
     copyText: (text) => {
       if (text === uncopyable) {
         return Promise.reject(new Error('Clipboard unavailable'));
@@ -288,23 +278,31 @@ describe('the collaboration service', () => {
     const guest = new FakePage();
     const shared = (await shareFrom(host)) as {
       ok: true;
-      value: { code: string; port: number; addresses: string[] };
+      value: { code: string; port: number; addresses: string[]; tokenDigest: string };
     };
-    expect([shared.ok, shared.value.code.length, shared.value.addresses]).toEqual([
+    const [hostToken, instance, code, planKey] = draws;
+    expect(draws.map((drawn) => drawn.length)).toEqual([32, 8, 6, 32]);
+    expect([
+      shared.ok,
+      shared.value.code,
+      shared.value.addresses,
+      shared.value.tokenDigest,
+    ]).toEqual([
       true,
-      6,
+      generateJoinCode(() => code ?? new Uint8Array()),
       ['192.168.1.24'],
+      tokenDigestOf(bytesToHex(hostToken ?? new Uint8Array())),
     ]);
     expect(mdnsFake.record.published).toEqual([
       {
-        name: expect.stringMatching(/^Tasklace [0-9a-f]{16}$/) as unknown,
+        name: `Tasklace ${bytesToHex(instance ?? new Uint8Array())}`,
         type: 'tasklace',
         port: shared.value.port,
         txt: {
           v: '1',
           plan: 'Thesis',
           host: 'Camille',
-          share: expect.stringMatching(/^[0-9a-f]{32}$/) as unknown,
+          share: sharingIdOf(planKey ?? new Uint8Array()),
           rank: '0',
         },
       },
@@ -320,7 +318,9 @@ describe('the collaboration service', () => {
       participantId: 'lea',
       name: 'Léa',
     };
+    const guestTokenAt = draws.length;
     expect(await invoke(guest, IPC_CHANNELS.joinPlan, request)).toEqual(success(null));
+    const guestToken = bytesToHex(draws[guestTokenAt] ?? new Uint8Array());
     expect(await invoke(guest, IPC_CHANNELS.joinPlan, request)).toEqual({
       ok: false,
       error: { code: 'ALREADY_SHARING' },
@@ -334,7 +334,7 @@ describe('the collaboration service', () => {
           participantId: 'lea',
           name: 'Léa',
           endpoint: { addresses: ['192.168.1.24'], port: shared.value.port },
-          tokenDigest: expect.stringMatching(/^[0-9a-f]{64}$/) as unknown,
+          tokenDigest: tokenDigestOf(guestToken),
         },
       ],
       [{ kind: 'connected' }],

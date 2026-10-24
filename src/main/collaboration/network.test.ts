@@ -1,6 +1,6 @@
 import { request } from 'node:http';
-import { spacedClock } from '../testing/plan-host';
 import { createServer } from 'node:net';
+import { freePort, LOOPBACK, spacedClock, until } from '../testing/plan-host';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { requireParticipantId } from '../../core/collaboration/participants';
@@ -30,7 +30,6 @@ const LEA: Introduction = {
   endpoint: { addresses: [], port: 47_313 },
 };
 const PLAN_KEY = new Uint8Array(32).fill(7);
-const LOOPBACK = '127.0.0.1';
 const MANY_CONNECTIONS_TIMEOUT_MS = 60_000;
 /** Starts no timer, the tests waiting for events instead. */
 const noTimer: StartTimer = () => () => undefined;
@@ -41,23 +40,28 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
 });
 
-/** Finds a port nobody listens on, by letting the system choose one and freeing it. */
-function freePort(): Promise<number> {
+/** Tells whether nobody listens on a port of every address, by listening on it for a moment. */
+function isFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const probe = createServer();
-    probe.listen(0, LOOPBACK, () => {
-      const address = probe.address();
+    probe.once('error', () => {
+      resolve(false);
+    });
+    probe.listen(port, '::', () => {
       probe.close(() => {
-        resolve(typeof address === 'object' && address !== null ? address.port : 0);
+        resolve(true);
       });
     });
   });
 }
 
-/** Waits until a condition holds, checking at each turn of the event loop. */
-async function until(condition: () => boolean): Promise<void> {
-  while (!condition()) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
+/** Finds a free port whose next port is free too, so that a host pushed off the first one surely takes the second. */
+async function portBeforeAFreeOne(): Promise<number> {
+  for (;;) {
+    const port = await freePort();
+    if (await isFree(port + 1)) {
+      return port;
+    }
   }
 }
 
@@ -366,7 +370,7 @@ describe('a shared plan over the network', () => {
   });
 
   it('listens on the next port when the chosen one is taken', async () => {
-    const taken = await host();
+    const taken = await host(await portBeforeAFreeOne());
     const next = await host(taken.server.port);
     expect(next.server.port).toBe(taken.server.port + 1);
   });

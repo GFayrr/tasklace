@@ -659,4 +659,16 @@ describe('holdsChangesMissingFrom', () => {
       false,
     ]);
   });
+  it('finds the changes of a copy and a file that each changed apart from the other', () => {
+    const copy = changed(base, (document) => {
+      document.getMap('project').set('name', 'Renamed in the copy');
+    });
+    const file = changed(base, (document) => {
+      document.getMap('project').set('criticalPathEnabled', true);
+    });
+    expect([holdsChangesMissingFrom(copy, file), holdsChangesMissingFrom(file, copy)]).toEqual([
+      true,
+      true,
+    ]);
+  });
 });

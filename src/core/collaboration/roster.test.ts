@@ -217,7 +217,11 @@ describe('the participants of a shared plan', () => {
       name: 'Léa B.',
       selectedTaskId: testId('t1'),
     });
-    expect(roster.participants[1]).toMatchObject({ name: 'Léa B.', selectedTaskId: 't1' });
+    expect(roster.participants[1]).toEqual({
+      ...threePeople().participants[1],
+      name: 'Léa B.',
+      selectedTaskId: testId('t1'),
+    });
     expect(
       updatePresence(roster, requireParticipantId('stranger'), { name: 'X', selectedTaskId: null }),
     ).toBe(roster);

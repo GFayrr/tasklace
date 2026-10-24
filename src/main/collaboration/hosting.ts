@@ -2,7 +2,6 @@ import { tokenDigestOf, type Introduction } from '../../core/collaboration/secur
 import { sharingIdOf, shouldYield } from '../../core/collaboration/succession';
 import { failure, success, type Result } from '../../core/result';
 import type { CollaborationEvent } from '../../preload/bridge-contract';
-import { systemRandomBytes } from './aes-gcm';
 import { announcePlan, findPlans, serviceNameOf, type Mdns, type NearbyPlan } from './discovery';
 import { startHostServer, type HostServer, type ListenFailure, type Peer } from './host-server';
 import type { StartTimer } from './secure-connection';
@@ -18,6 +17,7 @@ export interface HostingOptions {
   readonly instance: string;
   readonly startTimer: StartTimer;
   readonly now: () => number;
+  readonly randomBytes: (count: number) => Uint8Array;
   readonly mdns: () => Mdns;
   readonly tell: (event: CollaborationEvent) => void;
   readonly olderHost: (host: NearbyPlan, planKey: Uint8Array) => void;
@@ -40,7 +40,7 @@ export async function startHosting(
     knownTokens: options.knownTokens,
     identity: options.identity,
     startTimer: options.startTimer,
-    randomBytes: systemRandomBytes,
+    randomBytes: options.randomBytes,
     now: options.now,
     events: {
       joined: (peer, introduction) => {

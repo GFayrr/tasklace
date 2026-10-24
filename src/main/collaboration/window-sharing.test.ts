@@ -11,9 +11,8 @@ import type { StartTimer } from './secure-connection';
 import { createWindowSharing, type WindowSharing } from './window-sharing';
 import { startHostServer } from './host-server';
 import { systemRandomBytes } from './aes-gcm';
-import { spacedClock } from '../testing/plan-host';
+import { freePort, LOOPBACK, spacedClock, until } from '../testing/plan-host';
 
-const LOOPBACK = '127.0.0.1';
 const RANGE_ATTEMPTS = 16;
 const NAMES = { planName: 'Thesis', hostName: 'Someone' };
 const windows: WindowSharing[] = [];
@@ -22,19 +21,6 @@ afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(windows.splice(0).map((window) => window.stop()));
 });
-
-/** Finds a port nobody listens on. */
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const probe = createServer();
-    probe.listen(0, LOOPBACK, () => {
-      const address = probe.address();
-      probe.close(() => {
-        resolve(typeof address === 'object' && address !== null ? address.port : 0);
-      });
-    });
-  });
-}
 
 /** Listens on a port of every address, giving the server or null when the port is taken. */
 function listenOrNull(port: number): Promise<Server | null> {
@@ -85,13 +71,6 @@ async function occupiedPorts(): Promise<{
   throw new Error('No range of free ports was found.');
 }
 
-/** Waits until a condition holds. */
-async function until(condition: () => boolean): Promise<void> {
-  while (!condition()) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
-
 /** Builds a network shared by the windows of the test, which can be split in halves that do not hear each other and healed, every window then hearing what the others announce. */
 function sharedNetwork() {
   const services = new Map<string, { readonly service: AnnouncedService; readonly half: string }>();
@@ -100,6 +79,7 @@ function sharedNetwork() {
     readonly handlers: Map<'up' | 'down', (service: AnnouncedService) => void>;
   }>();
   let isHealed = true;
+  const published: ((name: string) => void)[] = [];
   /** Tells whether a browser on a half hears a service announced on another. */
   const hears = (browserHalf: string, serviceHalf: string): boolean =>
     isHealed || browserHalf === serviceHalf;
@@ -115,6 +95,9 @@ function sharedNetwork() {
       };
       const announced = { service, half: half() };
       services.set(service.fqdn, announced);
+      published.forEach((listener) => {
+        listener(service.name);
+      });
       browsers.forEach((browser) => {
         if (hears(browser.half(), announced.half)) {
           browser.handlers.get('up')?.(service);
@@ -158,6 +141,10 @@ function sharedNetwork() {
   });
   return {
     view,
+    announced: () => [...services.values()].map(({ service }) => service.name),
+    whenPublished: (listener: (name: string) => void) => {
+      published.push(listener);
+    },
     split: () => {
       isHealed = false;
     },
@@ -194,6 +181,7 @@ function windowOn(network: ReturnType<typeof sharedNetwork>, instance: string, h
   const window = createWindowSharing({
     tell: (event) => told.push(event),
     startTimer: firstTurnsOnly,
+    randomBytes: systemRandomBytes,
     now: spacedClock(),
     mdns: () => mdns,
     addresses: () => [LOOPBACK],
@@ -383,6 +371,7 @@ describe('a shared plan whose host changes', () => {
     const deaf = createWindowSharing({
       tell: () => undefined,
       startTimer: firstTurnsOnly,
+      randomBytes: systemRandomBytes,
       now: spacedClock(),
       mdns: () => {
         throw new Error('No multicast');
@@ -403,6 +392,41 @@ describe('a shared plan whose host changes', () => {
         new Error('No multicast'),
       ],
     ]);
+  });
+
+  it('stops hosting again at once when the window stopped while the server was starting', async () => {
+    const network = sharedNetwork();
+    const camille = windowOn(network, 'camille');
+    const lea = windowOn(network, 'lea');
+    const [hostPort, leaPort] = [await freePort(), await freePort()];
+    const hosted = await camille.window.host(NAMES, identity('camille', hostPort), hostPort);
+    if (!hosted.ok) {
+      throw new Error(hosted.error);
+    }
+    lea.window.join(
+      { address: LOOPBACK, port: hosted.value.port, code: hosted.value.code },
+      identity('lea', leaPort),
+    );
+    await until(() => holdsKey(lea.window));
+    await camille.window.stop();
+    await until(() => lea.kinds().includes('hostLeft'));
+    const stopping: { promise: Promise<void> | null } = { promise: null };
+    network.whenPublished((name) => {
+      if (name === 'Tasklace lea') {
+        stopping.promise = lea.window.stop();
+      }
+    });
+    const queue = [{ participantId: 'lea', rank: 1, endpoint: null }];
+    expect(lea.window.succeed(queue, NAMES, leaPort, [])).toBe(true);
+    await until(() => stopping.promise !== null);
+    await stopping.promise;
+    await until(() => network.announced().length === 0);
+    const next = await camille.window.host(NAMES, identity('camille', leaPort), leaPort);
+    expect([
+      lea.window.state().kind,
+      lea.kinds().includes('becameHost'),
+      next.ok && next.value.port,
+    ]).toEqual(['idle', false, leaPort]);
   });
 
   it('tells why it cannot host when every port of its range is taken, and lets its turn pass during a search', async () => {
@@ -495,6 +519,38 @@ describe('a shared plan whose host changes', () => {
     const refused = `The connection to the shared plan failed: connect ECONNREFUSED 127.0.0.1:${String(nobody)}`;
     await until(() => warnings.mock.calls.some(([text]) => text === refused));
     expect(lea.window.state().kind).toBe('hosting');
+  });
+
+  it('closes its attempt to join an older host once the window stops hosting', async () => {
+    const network = sharedNetwork();
+    const { lea, planKey } = await takenOverHost(network);
+    let open = 0;
+    let isReached = false;
+    const silent = createServer((socket) => {
+      open += 1;
+      isReached = true;
+      socket.resume();
+      socket.on('close', () => {
+        open -= 1;
+      });
+    });
+    await new Promise<void>((resolve) => silent.listen(0, LOOPBACK, resolve));
+    const address = silent.address();
+    announceOlder(
+      network,
+      planKey,
+      typeof address === 'object' && address !== null ? address.port : 0,
+    );
+    await until(() => isReached);
+    expect(open).toBe(1);
+    await lea.window.stop();
+    await until(() => open === 0);
+    await new Promise<void>((resolve) => {
+      silent.close(() => {
+        resolve();
+      });
+    });
+    expect([lea.window.state().kind, open]).toEqual(['idle', 0]);
   });
 
   it('keeps hosting and logs why when the older host announced refuses the key', async () => {

@@ -1,6 +1,7 @@
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { equalBytes } from '@noble/curves/utils.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { describe, expect, it, vi } from 'vitest';
 import { CHANNEL_CHUNK_BYTES, MAX_COLLABORATION_MESSAGE_BYTES } from '../../limits';
 import { failure, success } from '../../result';
@@ -138,9 +139,12 @@ describe('the encrypted channel', () => {
     const opened = frames.map((frame) => guest.open(frame));
     expect(opened.slice(0, 2)).toEqual([success(null), success(null)]);
     const last = opened[2];
+    const received = last?.ok === true && last.value !== null ? last.value : last;
     expect(
-      last?.ok === true && last.value?.kind === 'plan' && equalBytes(last.value.message, message),
-    ).toBe(true);
+      received !== undefined && 'kind' in received
+        ? { kind: received.kind, digest: bytesToHex(sha256(received.message)) }
+        : received,
+    ).toEqual({ kind: 'plan', digest: bytesToHex(sha256(message)) });
   });
 
   it('compresses before sealing and decompresses within the limit of a message', () => {

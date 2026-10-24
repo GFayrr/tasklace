@@ -769,10 +769,13 @@ describe('keeping the changes a person could not share', () => {
 
   it('keeps the plan under a new identifier in a folder of this computer, first among the recent projects, and opens it again', async () => {
     const sender = await openedIn(join(folder, 'Thesis.tasklace'));
-    const before = Date.now();
-    expect(await request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis')).toEqual(
-      success({ localCopySaved: true }),
-    );
+    const keptAt = new Date(Date.UTC(2026, 9, 22, 11, 5, 30));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(keptAt);
+    const kept = await request(IPC_CHANNELS.keepOwnChanges, sender, STATE, 'Thesis').finally(() => {
+      vi.useRealTimers();
+    });
+    expect(kept).toEqual(success({ localCopySaved: true }));
     const task = keptTask();
     const path = join(userData, KEPT, 'Thesis (my changes).tasklace');
     expect([
@@ -781,8 +784,8 @@ describe('keeping the changes a person could not share', () => {
       task.nameTemplate,
       task.path,
       task.localCopyFolder,
-      task.savedAt.getTime() >= before,
-    ]).toEqual([STATE, true, '{plan} (my changes)', path, join(userData, 'local-copies'), true]);
+      task.savedAt,
+    ]).toEqual([STATE, true, '{plan} (my changes)', path, join(userData, 'local-copies'), keptAt]);
     expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(
       success([
         { name: 'Thesis (my changes)', folder: 'Kept on this computer' },
@@ -791,7 +794,15 @@ describe('keeping the changes a person could not share', () => {
     );
     await writeFile(path, 'project');
     runTask.mockResolvedValueOnce(success(LOADED));
-    expect(await request(IPC_CHANNELS.openKeptChanges, sender)).toMatchObject({ ok: true });
+    expect(await request(IPC_CHANNELS.openKeptChanges, sender)).toEqual(
+      success({
+        state: STATE,
+        documentId: DOCUMENT_ID,
+        fileName: 'Thesis (my changes).tasklace',
+        warnings: [],
+        localChanges: null,
+      }),
+    );
     expect(tasks.at(-1)).toEqual({
       kind: 'openProject',
       path,

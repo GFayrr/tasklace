@@ -57,6 +57,8 @@ export interface HostServer {
 
 export type ListenFailure = 'NO_FREE_PORT' | 'LISTEN_FAILED';
 
+type JoinAnswer = 'admitted' | 'identityTaken' | 'closed';
+
 interface ServerOptions {
   readonly port: number;
   readonly planKey: Uint8Array | null;
@@ -207,20 +209,20 @@ function guestCounter(options: ServerOptions) {
     tokens.set(introduction.participantId, digest);
     return true;
   };
-  /** Gives an admitted guest the key of the plan, closing a connection that cannot carry it. */
-  const givePlanKey = (connection: SecureConnection): void => {
+  /** Gives a guest the key of the plan, closing a connection that cannot carry it, and tells whether the key went. */
+  const givePlanKey = (connection: SecureConnection): boolean => {
     const sent = connection.sendPlanKey(planKey);
     if (!sent.ok) {
       console.warn(`The key of the shared plan could not be sent: ${sent.error}.`);
       connection.close();
     }
+    return sent.ok;
   };
   /** Admits a person on its new connection, closing the old one it came back from, which the host may not have seen end yet. */
   const admit = (connection: SecureConnection, id: string): void => {
     const previous = admitted.get(id);
     admitted.set(id, connection);
     previous?.close();
-    givePlanKey(connection);
   };
   /** Forgets the connection a person was in on once it ends, unless that person already came back on another one. */
   const forget = (connection: SecureConnection, id: string | null): void => {
@@ -261,11 +263,14 @@ function guestCounter(options: ServerOptions) {
         joined: (connection, introduction) => {
           doneOpening();
           if (!isSamePerson(introduction)) {
-            return false;
+            return 'identityTaken';
+          }
+          if (!givePlanKey(connection)) {
+            return 'closed';
           }
           admission.joined(address);
           admit(connection, introduction.participantId);
-          return true;
+          return 'admitted';
         },
         ended: (connection, id) => {
           doneOpening();
@@ -293,7 +298,7 @@ function attachGuest(
   secrets: HostSecrets,
   options: ServerOptions,
   counting: {
-    readonly joined: (connection: SecureConnection, introduction: Introduction) => boolean;
+    readonly joined: (connection: SecureConnection, introduction: Introduction) => JoinAnswer;
     readonly ended: (connection: SecureConnection, id: string | null) => void;
     readonly wrongCode: () => boolean;
     readonly identify: (connection: SecureConnection, request: Uint8Array) => void;
@@ -331,9 +336,12 @@ function attachGuest(
       },
     },
     joined: (introduction) => {
-      if (!counting.joined(connection, introduction)) {
+      const answer = counting.joined(connection, introduction);
+      if (answer === 'identityTaken') {
         refusal = IDENTITY_TAKEN_CLOSE;
         connection.close();
+      }
+      if (answer !== 'admitted') {
         return;
       }
       joinedAs = introduction.participantId;

@@ -1,5 +1,4 @@
-import { createServer } from 'node:net';
-import { spacedClock } from '../testing/plan-host';
+import { freePort, LOOPBACK, spacedClock } from '../testing/plan-host';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requireParticipantId } from '../../core/collaboration/participants';
 import { systemRandomBytes } from './aes-gcm';
@@ -12,25 +11,11 @@ vi.mock('./private-addresses', () => ({
   isPrivateAddress: () => privacy.answers.shift() ?? false,
 }));
 
-const LOOPBACK = '127.0.0.1';
 const servers: HostServer[] = [];
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
 });
-
-/** Finds a port nobody listens on. */
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const probe = createServer();
-    probe.listen(0, LOOPBACK, () => {
-      const address = probe.address();
-      probe.close(() => {
-        resolve(typeof address === 'object' && address !== null ? address.port : 0);
-      });
-    });
-  });
-}
 
 /** Starts a host, then a guest, and waits for how the guest ends. */
 async function joinWith(answers: boolean[]): Promise<{ ends: GuestEnd[]; joined: number }> {
