@@ -335,7 +335,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
     }
     act(member, frame);
   };
-  /** Forgets a member whose connection closed. */
+  /** Forgets a member whose connection closed or that the relay stops for. */
   const forget = (member: Member): void => {
     clearTimeout(member.helloTimer);
     member.phase = 'gone';
@@ -459,6 +459,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
         });
       });
       clearTimeout(cut);
+      [...members].forEach(forget);
       await store.settle();
     },
   };

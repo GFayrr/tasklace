@@ -1,4 +1,6 @@
+import { stat } from 'node:fs/promises';
 import { request } from 'node:http';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeClientFrame } from '../../src/core/collaboration/relay/relay-wire.ts';
 import {
@@ -365,5 +367,21 @@ describe('a relay', () => {
     await Promise.all(running.splice(0).map((started) => started.close()));
     client.socket.resume();
     expect(await client.closed).toBe(1001);
+  });
+
+  it('has let go of every room once stopped, a connection that does not answer the closing included', async () => {
+    const openedAt = 1_700_000_000_000;
+    const relay = await relayWith(
+      {},
+      { now: () => openedAt, timings: { ...FAST, closeMilliseconds: 32 } },
+    );
+    const client = await creator(relay);
+    client.socket.pause();
+    await Promise.all(running.splice(0).map((started) => started.close()));
+    const file = path.join(folder, `${Buffer.from(ROOM_KEYS.roomId).toString('hex')}.room`);
+    const touched = Math.round((await stat(file)).mtimeMs);
+    client.socket.resume();
+    await client.closed;
+    expect(touched).toBe(openedAt);
   });
 });
