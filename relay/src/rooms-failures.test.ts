@@ -13,6 +13,7 @@ const failing = vi.hoisted(() => ({
   rewrite: false,
   create: false,
   utimes: false,
+  heldUtimes: null as Promise<void> | null,
 }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -31,8 +32,10 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       }
       return original.open(...args);
     },
-    utimes: (...args: Parameters<typeof original.utimes>) =>
-      failing.utimes ? Promise.reject(diskFull()) : original.utimes(...args),
+    utimes: async (...args: Parameters<typeof original.utimes>) => {
+      await failing.heldUtimes;
+      return failing.utimes ? Promise.reject(diskFull()) : original.utimes(...args);
+    },
   };
 });
 
@@ -48,7 +51,13 @@ let failed: Room[];
 beforeEach(async () => {
   ({ folder, remove: removeFolder } = await temporaryFolder());
   failed = [];
-  Object.assign(failing, { appendFile: false, rewrite: false, create: false, utimes: false });
+  Object.assign(failing, {
+    appendFile: false,
+    rewrite: false,
+    create: false,
+    utimes: false,
+    heldUtimes: null,
+  });
 });
 
 afterEach(async () => {
@@ -147,5 +156,21 @@ describe('the rooms of a relay when the disk fails', () => {
       Buffer.from(ROOM_KEYS.roomId).toString('hex'),
       [`The room ${room?.name ?? ''} could not keep the date it was opened:`],
     ]);
+  });
+
+  it('waits for a room being released when asked to settle, so that nothing touches its file afterwards', async () => {
+    const store = await storeOf();
+    const room = await createdRoom(store);
+    let letGo = (): void => undefined;
+    failing.heldUtimes = new Promise((resolve) => {
+      letGo = resolve;
+    });
+    const steps: string[] = [];
+    const released = store.release(room).then(() => steps.push('released'));
+    const settled = store.settle().then(() => steps.push('settled'));
+    await new Promise((resolve) => setTimeout(resolve, 16));
+    letGo();
+    await Promise.all([released, settled]);
+    expect(steps).toEqual(['released', 'settled']);
   });
 });

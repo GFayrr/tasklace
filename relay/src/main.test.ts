@@ -51,19 +51,32 @@ function runRelay(environment: Record<string, string>) {
 }
 
 describe('the relay run by Node itself', () => {
-  it('starts from its environment, lets a member create a room and stops cleanly when asked to', async () => {
+  it('starts from its environment and lets a member create a room', async () => {
     const relay = runRelay({ RELAY_PORT: '0' });
-    const port = await relay.port;
-    const member = await connectTo(port);
+    const member = await connectTo(await relay.port);
     member.send(createFrame(ROOM_KEYS));
     const welcome = await member.next();
-    relay.child.kill('SIGTERM');
-    expect([welcome?.valueOf(), await relay.ended, await member.closed]).toEqual([
-      { type: 'welcome', member: 1, verifyKey: ROOM_KEYS.verifyKey, members: [] },
-      0,
-      1001,
-    ]);
+    relay.child.kill();
+    await relay.ended;
+    expect(welcome).toEqual({
+      type: 'welcome',
+      member: 1,
+      verifyKey: ROOM_KEYS.verifyKey,
+      members: [],
+    });
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'stops cleanly when a signal asks it to, Windows ending a process at once instead of sending it a signal',
+    async () => {
+      const relay = runRelay({ RELAY_PORT: '0' });
+      const member = await connectTo(await relay.port);
+      member.send(createFrame(ROOM_KEYS));
+      await member.next();
+      relay.child.kill('SIGTERM');
+      expect([await relay.ended, await member.closed]).toEqual([0, 1001]);
+    },
+  );
 
   it('refuses to start with a wrong setting, telling which', async () => {
     const relay = runRelay({ RELAY_PORT: 'eighty' });
@@ -74,14 +87,11 @@ describe('the relay run by Node itself', () => {
   });
 
   it('tells when it cannot start', async () => {
-    const relay = runRelay({
-      RELAY_PORT: '0',
-      RELAY_TLS_CERT: 'missing.pem',
-      RELAY_TLS_KEY: 'missing.pem',
-    });
+    const missing = path.join(folder, 'missing.pem');
+    const relay = runRelay({ RELAY_PORT: '0', RELAY_TLS_CERT: missing, RELAY_TLS_KEY: missing });
     expect([await relay.ended, relay.output().split('\n')[0]]).toEqual([
       1,
-      "The relay could not start: Error: ENOENT: no such file or directory, open 'missing.pem'",
+      `The relay could not start: Error: ENOENT: no such file or directory, open '${missing}'`,
     ]);
   });
 });

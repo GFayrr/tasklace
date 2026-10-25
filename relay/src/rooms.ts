@@ -108,6 +108,7 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
   const loaded = new Map<string, LoadedRoom>();
   const loading = new Map<string, Promise<LoadedRoom | null>>();
   const expiring = new Set<string>();
+  const releasing = new Set<Promise<void>>();
   let storedBytes = [...known.values()].reduce((total, room) => total + room.bytes, 0);
   /** Gives the file of a room. */
   const fileOf = (name: string): string => path.join(directory, name + ROOM_EXTENSION);
@@ -214,6 +215,22 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
       loading.delete(name);
     }
   };
+  /** Lets go of a room a member held, and once nobody holds it, forgets it from memory after its writes, noting when it was last opened. */
+  const release = async (room: Room): Promise<void> => {
+    const target = loaded.get(room.name);
+    if (target === undefined) {
+      return;
+    }
+    target.holds -= 1;
+    await target.writes;
+    if (target.holds > 0 || loaded.get(room.name) !== target) {
+      return;
+    }
+    loaded.delete(room.name);
+    if (!target.failed) {
+      await touch(room.name);
+    }
+  };
   /** Tells why a record cannot join a room: another chunk of a message under the same place, a snapshot covering what is not there yet, or a room or a relay too full, a snapshot having the room of a whole room more to replace what it covers. */
   const refusalOf = (room: LoadedRoom, record: RelayRecord, size: number): AppendRefusal | null => {
     const message = room.messages.get(messageKeyOf(record));
@@ -312,20 +329,15 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
       await target.writes;
       await rm(target.path, { force: true });
     },
-    release: async (room) => {
-      const target = loaded.get(room.name);
-      if (target === undefined) {
-        return;
-      }
-      target.holds -= 1;
-      await target.writes;
-      if (target.holds > 0 || loaded.get(room.name) !== target) {
-        return;
-      }
-      loaded.delete(room.name);
-      if (!target.failed) {
-        await touch(room.name);
-      }
+    release: (room) => {
+      const released = release(room);
+      releasing.add(released);
+      /** Forgets a release once it ended. */
+      const forget = (): void => {
+        releasing.delete(released);
+      };
+      released.then(forget, forget);
+      return released;
     },
     expire: async () => {
       const time = now();
@@ -349,6 +361,7 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
     },
     settle: async () => {
       await Promise.all([...loaded.values()].map((room) => room.writes));
+      await Promise.allSettled([...releasing]);
     },
   };
 }

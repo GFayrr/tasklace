@@ -28,25 +28,30 @@ let folder: string;
 let removeFolder: () => Promise<void>;
 let time: number;
 let failed: Room[];
+let stores: RoomStore[];
 
 beforeEach(async () => {
   ({ folder, remove: removeFolder } = await temporaryFolder());
   time = 1_000 * DAY;
   failed = [];
+  stores = [];
 });
 
 afterEach(async () => {
+  await Promise.all(stores.map((store) => store.settle()));
   await removeFolder();
 });
 
 /** Opens the rooms of the folder of the test with some limits. */
-function storeWith(limits: RoomLimits = ROOMY): Promise<RoomStore> {
-  return openRoomStore({
+async function storeWith(limits: RoomLimits = ROOMY): Promise<RoomStore> {
+  const store = await openRoomStore({
     directory: folder,
     limits,
     now: () => time,
     roomFailed: (room) => failed.push(room),
   });
+  stores.push(store);
+  return store;
 }
 
 /** Creates the room of the test keys, failing the test when it cannot be. */
