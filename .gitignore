@@ -27,3 +27,6 @@ Desktop.ini
 .DS_Store
 
 tests/fixtures/generated/
+
+# Rooms a relay run from its folder keeps
+relay/data/

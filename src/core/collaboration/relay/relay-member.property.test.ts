@@ -51,7 +51,6 @@ interface Stored {
   readonly seq: number;
   readonly record: Uint8Array;
   readonly message: string;
-  readonly count: number;
 }
 
 interface Client {
@@ -92,15 +91,12 @@ function createSimulatedRelay(keys: RelayKeys) {
   let stored: Stored[] = [];
   let nextSeq = 0;
   const clients: Client[] = [];
-  /** Drops the messages whose chunks are all in and all at or before the sequence a snapshot covers. */
+  /** Drops the messages whose chunks kept all came at or before the sequence a snapshot covers, whole or given up by the members. */
   const compact = (covers: number): void => {
     const byMessage = Map.groupBy(stored, (entry) => entry.message);
     const covered = new Set(
       [...byMessage]
-        .filter(
-          ([, entries]) =>
-            entries.length === entries[0]?.count && entries.every((entry) => entry.seq <= covers),
-        )
+        .filter(([, entries]) => entries.every((entry) => entry.seq <= covers))
         .map(([message]) => message),
     );
     stored = stored.filter((entry) => !covered.has(entry.message));
@@ -113,7 +109,7 @@ function createSimulatedRelay(keys: RelayKeys) {
     }
     nextSeq += 1;
     const message = `${bytesToHex(read.messageId)}.${bytesToHex(read.salt)}`;
-    stored.push({ seq: nextSeq, record, message, count: read.count });
+    stored.push({ seq: nextSeq, record, message });
     for (const client of clients.filter((candidate) => candidate.connected)) {
       client.inbox.push({ type: 'record', seq: nextSeq, record });
     }

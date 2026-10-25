@@ -15,6 +15,7 @@ export default defineConfig({
             'src/main/**/*.test.ts',
             'src/preload/**/*.test.ts',
             'tests/**/*.test.ts',
+            'relay/src/**/*.test.ts',
           ],
           exclude: NOT_UNIT_TESTS,
           environment: 'node',
@@ -33,10 +34,13 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      include: ['src/**/*.{ts,svelte}'],
+      include: ['src/**/*.{ts,svelte}', 'relay/src/**/*.ts'],
       exclude: [
         'src/**/*.test.ts',
         'src/**/*.d.ts',
+        'relay/src/**/*.test.ts',
+        'relay/src/main.ts',
+        'relay/src/testing/**',
         'src/core/testing/**',
         'src/main/testing/**',
         'src/renderer/**/testing/**',

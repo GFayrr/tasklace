@@ -4,7 +4,7 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 const MAX_COMMENT_LENGTH = 250;
-const CHECKED_FOLDERS = ['src', 'tests'];
+const CHECKED_FOLDERS = ['src', 'tests', 'relay/src'];
 const ROOT_FILES = /^[^/]+\.ts$/;
 const SCRIPT_BLOCK = /<script[^>]*>([\s\S]*?)<\/script>/g;
 const SENTENCE_BREAK = /[.!?]\s+[A-Z]/;

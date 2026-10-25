@@ -70,6 +70,33 @@ export default defineConfig(
     },
   },
   {
+    files: ['relay/src/**/*.ts'],
+    ignores: ['relay/src/**/*.test.ts', 'relay/src/testing/**'],
+    rules: {
+      '@typescript-eslint/no-magic-numbers': [
+        'error',
+        {
+          ignore: [-1, 0, 1, 2],
+          ignoreArrayIndexes: true,
+          ignoreNumericLiteralTypes: true,
+          ignoreTypeIndexes: true,
+        },
+      ],
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: String.raw`^(?!node:|ws$|\./[\w-]+\.ts$|\.\./\.\./src/core/collaboration/relay/relay-wire\.ts$)`,
+              message:
+                'The relay runs on Node alone: it imports only Node, ws, its own files and relay-wire.ts, each with its .ts extension.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['**/*.svelte', '**/*.svelte.ts'],
     languageOptions: {
       parserOptions: { parser: tseslint.parser, svelteConfig },
