@@ -1,6 +1,4 @@
-import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { equalBytes } from '@noble/curves/utils.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { describe, expect, it, vi } from 'vitest';
 import { CHANNEL_CHUNK_BYTES, MAX_COLLABORATION_MESSAGE_BYTES } from '../../limits';
@@ -10,10 +8,10 @@ import {
   MAX_SEALED_FRAME_BYTES,
   compressMessage,
   openSecureChannel,
-  type Aead,
   type ChannelKind,
 } from './channel';
 import type { Compressor } from '../../file/tasklace-file';
+import { plainCompression, testAead } from '../../testing/test-crypto';
 import type { SessionKeys } from './cpace';
 
 const HOST_TO_GUEST = new Uint8Array(32).fill(1);
@@ -27,35 +25,6 @@ const GUEST_KEYS: SessionKeys = {
   send: GUEST_TO_HOST,
   receive: HOST_TO_GUEST,
   resume: new Uint8Array(32),
-};
-
-/** Computes the tag of the test cipher over a nonce and plain bytes. */
-function tagOf(key: Uint8Array, nonce: Uint8Array, plain: Uint8Array): Uint8Array {
-  return hmac.create(sha256, key).update(nonce).update(plain).digest().subarray(0, AEAD_TAG_BYTES);
-}
-/** Stands for AES-GCM in the core, where Node is not allowed: the plain bytes followed by a tag over the nonce and the bytes, which is enough to see that the channel refuses any change, the real cipher being tested in main. */
-
-const testAead: Aead = {
-  seal: (key, nonce, plain) => {
-    const sealedBytes = new Uint8Array(plain.length + AEAD_TAG_BYTES);
-    sealedBytes.set(plain);
-    sealedBytes.set(tagOf(key, nonce, plain), plain.length);
-    return sealedBytes;
-  },
-  open: (key, nonce, sealed) => {
-    const plain = sealed.subarray(0, sealed.length - AEAD_TAG_BYTES);
-    return sealed.length >= AEAD_TAG_BYTES &&
-      equalBytes(tagOf(key, nonce, plain), sealed.subarray(plain.length))
-      ? plain
-      : null;
-  },
-};
-
-/** Leaves the bytes as they are, refusing on demand, to follow what the channel does with each result. */
-const plainCompression: Compressor = {
-  compress: (bytes) => Uint8Array.from(bytes),
-  decompress: (bytes, maxBytes) =>
-    bytes.length > maxBytes ? failure('OUTPUT_TOO_LARGE') : success(Uint8Array.from(bytes)),
 };
 
 /** Opens the two ends of a channel. */
