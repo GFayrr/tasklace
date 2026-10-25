@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "lint": "tsc --noEmit && tsc --noEmit -p src/main && tsc --noEmit -p src/preload && svelte-check --tsconfig src/renderer/tsconfig.json --fail-on-warnings --output human && tsc --noEmit -p tests && tsc --noEmit -p tests/e2e && tsc --noEmit -p tests/pdf-compare && eslint .",
+    "lint": "tsc --noEmit && tsc --noEmit -p src/main && tsc --noEmit -p src/preload && svelte-check --tsconfig src/renderer/tsconfig.json --fail-on-warnings --output human && tsc --noEmit -p tests && tsc --noEmit -p tests/e2e && tsc --noEmit -p tests/pdf-compare && tsc --noEmit -p relay && eslint .",
     "format": "prettier --write .",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
