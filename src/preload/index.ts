@@ -79,6 +79,13 @@ const bridge: TasklaceBridge = {
   copyJoinCode: () => request(IPC_CHANNELS.copyJoinCode),
   findNextHost: (queue, planName, hostName, knownPeople) =>
     request(IPC_CHANNELS.findNextHost, queue, planName, hostName, knownPeople),
+  shareThroughRelay: (address) => request(IPC_CHANNELS.shareThroughRelay, address),
+  joinByLink: (link) => request(IPC_CHANNELS.joinByLink, link),
+  reopenSharedPlan: (documentId) => request(IPC_CHANNELS.reopenSharedPlan, documentId),
+  makeNewLinks: () => request(IPC_CHANNELS.makeNewLinks),
+  sendToRelay: (outgoing) => {
+    ipcRenderer.send(IPC_CHANNELS.relaySend, outgoing);
+  },
   sendToCollaboration: (to, message) => {
     ipcRenderer.send(IPC_CHANNELS.collaborationSend, to, message);
   },

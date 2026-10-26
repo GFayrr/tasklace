@@ -412,3 +412,31 @@ describe('changes made in read only away from the host', () => {
     errors.mockRestore();
   });
 });
+
+describe('a plan joined by its link', () => {
+  it('opens in the window as the plan the main process offered, without a file, in read only with the link that reads', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    const offered = openedProjectOf(PLAN, { fileName: '' });
+    if (!offered.ok) {
+      throw new Error('The plan could not be offered.');
+    }
+    fake.control.collaboration.relay.joinResult = {
+      ok: true,
+      value: {
+        project: offered.value,
+        canEdit: false,
+        relay: 'relay.example.org',
+        bytesSinceSnapshot: 0,
+        kept: true,
+      },
+    };
+    const answer = await app.collaboration.relay.join('tasklace://relay.example.org/#v1.key');
+    await settle();
+    expect([answer, app.project?.name, app.collaboration.isReadOnly]).toEqual([
+      { ok: true, value: null },
+      PLAN.name,
+      true,
+    ]);
+  });
+});

@@ -291,6 +291,7 @@ export class AppState {
       now: context.now,
       session: () => this.#session,
       openShared: async (state) => (await this.#load(this.#files.openShared(state))) !== null,
+      openJoined: async (opened) => (await this.#load(this.#files.openOffered(opened))) !== null,
       repaired: (repairs) => {
         this.#notifyRepairs(repairs);
       },

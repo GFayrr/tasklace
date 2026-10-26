@@ -96,6 +96,7 @@ export interface ProjectFiles {
   readonly openRecent: (index: number) => Promise<ActionResult<OpenedSession>>;
   readonly importFile: (kind: ExchangeKind) => Promise<ActionResult<OpenedSession>>;
   readonly openShared: (state: Uint8Array) => Promise<ActionResult<OpenedSession>>;
+  readonly openOffered: (opened: OpenedProject) => Promise<ActionResult<OpenedSession>>;
   readonly openKept: () => Promise<ActionResult<OpenedSession>>;
   readonly save: () => Promise<ActionResult<SavedProject>>;
   readonly saveAs: () => Promise<ActionResult<SavedProject>>;
@@ -324,6 +325,8 @@ export function createProjectFiles(
     openRecent: (index) => exclusive(() => load(() => bridge.openRecentProject(index), true)),
     importFile: (kind) => exclusive(() => load(() => bridge.importProject(kind), false)),
     openShared: (state) => onceFree(() => load(() => bridge.openSharedPlan(state), false)),
+    openOffered: (opened) =>
+      onceFree(() => load(() => Promise.resolve({ ok: true, value: opened }), false)),
     openKept: () => exclusive(() => load(bridge.openKeptChanges, true)),
     save: () =>
       exclusive(() => (current?.hasFile === true ? trackSave(bridge.saveProject) : saveAs())),

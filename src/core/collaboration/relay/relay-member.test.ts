@@ -162,6 +162,90 @@ describe('a member of a plan shared through a relay', () => {
     expect([whileWaiting, editor.sent.length, nameOf(editor.session, 'a')]).toEqual([1, 2, 'Two']);
   });
 
+  it('puts the whole plan on the relay when asked once in, only for a member who may edit', () => {
+    const editor = harness(true, 1);
+    const reader = harness(false, 2);
+    rename(editor.session, 'a', 'Shared at once');
+    editor.member.caughtUp();
+    reader.member.caughtUp();
+    const before = editor.sent.length;
+    editor.member.shareWholePlan();
+    reader.member.shareWholePlan();
+    const copy = sessionOn(ORIGIN, 9);
+    const whole = editor.sent.at(-1);
+    const read = whole?.kind === 'message' ? readMessage(whole.message.bytes) : null;
+    if (read?.ok && read.value.kind === 'update') {
+      copy.merge(read.value.update);
+    }
+    expect([editor.sent.length - before, nameOf(copy, 'a'), reader.sent]).toEqual([
+      1,
+      'Shared at once',
+      [],
+    ]);
+  });
+
+  it('adds the state the relay holds on reopening, and shares the whole plan only when this computer holds more', () => {
+    const relayHolds = harness(true, 4);
+    rename(relayHolds.session, 'a', 'On the relay');
+    const relayState = relayHolds.session.encodeState();
+    const behind = harness(true, 5);
+    behind.member.catchUpWith(relayState, 0);
+    behind.member.caughtUp();
+    const ahead = harness(true, 6);
+    rename(ahead.session, 'b', 'Only here');
+    ahead.member.catchUpWith(relayState, 0);
+    ahead.member.caughtUp();
+    const sharedPlan = ahead.sent[0];
+    const read = sharedPlan?.kind === 'message' ? readMessage(sharedPlan.message.bytes) : null;
+    const copy = sessionOn(ORIGIN, 9);
+    if (read?.ok && read.value.kind === 'update') {
+      copy.merge(read.value.update);
+    }
+    expect([
+      nameOf(behind.session, 'a'),
+      behind.sent,
+      ahead.sent.length,
+      [nameOf(copy, 'a'), nameOf(copy, 'b')],
+    ]).toEqual(['On the relay', [], 1, ['On the relay', 'Only here']]);
+  });
+
+  it('shares the whole plan on reopening a room nothing was put in, and keeps apart in read only what the relay lacks', () => {
+    const editor = harness(true, 1);
+    editor.member.catchUpWith(null, 0);
+    editor.member.caughtUp();
+    const reader = harness(false, 2);
+    reader.member.catchUpWith(null, 0);
+    reader.member.caughtUp();
+    expect([editor.sent.length, reader.sent, reader.events]).toEqual([
+      1,
+      [],
+      [{ kind: 'unsharedChanges' }],
+    ]);
+  });
+
+  it('refuses a state of the relay that cannot be merged, sharing nothing for it', () => {
+    const editor = harness(true, 1);
+    editor.member.catchUpWith(Uint8Array.of(1, 2, 3), 0);
+    editor.member.caughtUp();
+    expect([editor.events, editor.sent]).toEqual([
+      [{ kind: 'refused', reason: 'malformedUpdate' }],
+      [],
+    ]);
+  });
+
+  it('counts from the bytes it is given on reopening toward the next snapshot', () => {
+    const editor = harness(true, 1);
+    editor.member.catchUpWith(editor.session.encodeState(), SNAPSHOT_AFTER_BYTES - 1);
+    editor.member.caughtUp();
+    rename(editor.session, 'b', 'Mine');
+    editor.member.receive(delivered(editor.sent[0], 2, 1));
+    const last = editor.sent.at(-1);
+    expect([editor.sent.length, last?.kind === 'message' ? last.message.kind : null]).toEqual([
+      2,
+      'snapshot',
+    ]);
+  });
+
   it('refuses a message that is not one, one of another kind, and a change that cannot be merged', () => {
     const editor = harness(true, 1);
     const base = {
