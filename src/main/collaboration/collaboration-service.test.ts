@@ -725,7 +725,6 @@ describe('a plan shared another way', () => {
       sharesElsewhere: (sender) => elsewhere.has(sender),
       leaveElsewhere: (sender) => {
         left.push(sender);
-        return Promise.resolve();
       },
     });
     const page = new FakePage();

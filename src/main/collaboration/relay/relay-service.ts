@@ -54,8 +54,7 @@ export interface RelayServices {
 
 export interface RelayHandlers {
   readonly isSharing: (sender: WebContents) => boolean;
-  readonly leave: (sender: WebContents) => Promise<void>;
-  readonly forgetWindow: (sender: WebContents) => void;
+  readonly leave: (sender: WebContents) => void;
 }
 
 type Mode = 'create' | 'join' | 'reopen';
@@ -82,7 +81,7 @@ interface WindowRelay {
 const MESSAGE_KINDS: readonly unknown[] = ['update', 'snapshot'];
 const ROOM_GONE: readonly RelayEnd[] = ['CLOSED', 'NO_ROOM'];
 
-/** Answers the requests of the bridge about plans shared through a relay, one relay session per window, the main process alone holding the links and keys, and returns how to know, leave or forget what a window shares. */
+/** Answers the requests of the bridge about plans shared through a relay, one relay session per window, the main process alone holding the links and keys, and returns how to know or leave what a window shares, its link staying kept. */
 export function registerRelayHandlers(services: RelayServices): RelayHandlers {
   const relays = new Map<WebContents, WindowRelay>();
   const randomBytes = services.randomBytes ?? systemRandomBytes;
@@ -115,7 +114,7 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
       return false;
     }
   };
-  /** Forgets the link of a plan, a failure being only logged since the plan is left either way. */
+  /** Forgets the link of a plan whose room is gone, a failure being only logged. */
   const forgetLink = (documentId: DocumentId): Promise<void> =>
     services.links.forget(documentId).catch((error: unknown) => {
       console.error('The link of a shared plan could not be forgotten:', error);
@@ -243,6 +242,7 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
     return success({
       editLink: encodeRelayLink(link),
       viewLink: encodeRelayLink({ address, access: viewAccessOf(link.access) }),
+      relay: hostLabelOf(address),
       kept: await keepLink(documentId, link),
     });
   };
@@ -351,13 +351,7 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
   });
   return {
     isSharing: (sender) => relays.has(sender),
-    leave: async (sender) => {
-      const documentId = stop(sender)?.documentId ?? null;
-      if (documentId !== null) {
-        await forgetLink(documentId);
-      }
-    },
-    forgetWindow: (sender) => {
+    leave: (sender) => {
       stop(sender);
     },
   };

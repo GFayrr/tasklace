@@ -155,7 +155,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   pages.splice(0).forEach((page) => {
-    handlers.forgetWindow(asSender(page));
+    handlers.leave(asSender(page));
   });
   await relayServer.close();
   await Promise.all(
@@ -276,6 +276,7 @@ describe('sharing a plan through a relay', () => {
     expect([
       Reflect.get(Object(answer), 'ok'),
       Reflect.get(Object(value), 'kept'),
+      Reflect.get(Object(value), 'relay'),
       edit.ok && edit.value.access.kind,
       view.ok && view.value.access.kind,
       links.kept.get(TEST_DOCUMENT_ID),
@@ -284,6 +285,7 @@ describe('sharing a plan through a relay', () => {
     ]).toEqual([
       true,
       true,
+      `127.0.0.1:${String(relayServer.port)}`,
       'edit',
       'view',
       value.editLink,
@@ -419,7 +421,7 @@ describe('joining a plan by its link', () => {
     const guest = openPage();
     const joining = invoke(guest, IPC_CHANNELS.joinByLink, viewLink);
     await until(() => tasks.length === 1);
-    await handlers.leave(asSender(guest));
+    handlers.leave(asSender(guest));
     open();
     expect(await joining).toEqual({ ok: false, error: { code: 'CANCELLED' } });
   });
@@ -469,7 +471,7 @@ describe('joining a plan by its link', () => {
     const guest = openPage();
     const joining = invoke(guest, IPC_CHANNELS.joinByLink, elsewhere);
     await until(() => handlers.isSharing(asSender(guest)));
-    await handlers.leave(asSender(guest));
+    handlers.leave(asSender(guest));
     expect(await joining).toEqual({ ok: false, error: { code: 'CANCELLED' } });
   });
 });
@@ -477,7 +479,7 @@ describe('joining a plan by its link', () => {
 describe('reopening a plan shared through a relay', () => {
   it('reads the log again from the start and hands the page the state it holds before anything after it', async () => {
     const { owner, editLink } = await sharedWithPlan();
-    handlers.forgetWindow(asSender(owner));
+    handlers.leave(asSender(owner));
     const again = openPage(TEST_DOCUMENT_ID);
     const answer = await invoke(again, IPC_CHANNELS.reopenSharedPlan, TEST_DOCUMENT_ID);
     await until(() => again.kinds().includes('relayCaughtUp'));
@@ -497,7 +499,7 @@ describe('reopening a plan shared through a relay', () => {
 
   it('holds what comes while the worker checks the state, handing it after the state', async () => {
     const { owner, viewLink } = await sharedWithPlan();
-    handlers.forgetWindow(asSender(owner));
+    handlers.leave(asSender(owner));
     const guest = openPage();
     await invoke(guest, IPC_CHANNELS.joinByLink, viewLink);
     const open = closeGate();
@@ -522,12 +524,12 @@ describe('reopening a plan shared through a relay', () => {
 
   it('hands nothing once the window left while the worker checked the state', async () => {
     const { owner } = await sharedWithPlan();
-    handlers.forgetWindow(asSender(owner));
+    handlers.leave(asSender(owner));
     const open = closeGate();
     const again = openPage(TEST_DOCUMENT_ID);
     await invoke(again, IPC_CHANNELS.reopenSharedPlan, TEST_DOCUMENT_ID);
     await until(() => tasks.length === 1);
-    await handlers.leave(asSender(again));
+    handlers.leave(asSender(again));
     open();
     await shortly();
     expect(again.kinds()).toEqual(['relayConnected']);
@@ -537,7 +539,7 @@ describe('reopening a plan shared through a relay', () => {
     const owner = openPage(TEST_DOCUMENT_ID);
     await shared(owner);
     await until(() => owner.kinds().includes('relayCaughtUp'));
-    handlers.forgetWindow(asSender(owner));
+    handlers.leave(asSender(owner));
     const again = openPage(TEST_DOCUMENT_ID);
     await invoke(again, IPC_CHANNELS.reopenSharedPlan, TEST_DOCUMENT_ID);
     await until(() => again.kinds().includes('relayCaughtUp'));
@@ -551,7 +553,7 @@ describe('reopening a plan shared through a relay', () => {
   it('ends a plan whose relay holds the log of another plan', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { owner, editLink } = await sharedWithPlan();
-    handlers.forgetWindow(asSender(owner));
+    handlers.leave(asSender(owner));
     const link = readRelayLink(editLink);
     links.kept.set(OTHER_PLAN, link.ok ? encodeRelayLink(link.value) : '');
     const other = openPage(OTHER_PLAN);
@@ -600,7 +602,7 @@ describe('reopening a plan shared through a relay', () => {
 
   it('refuses to reopen a plan the window already shares another way', async () => {
     const { owner, editLink } = await sharedWithPlan();
-    handlers.forgetWindow(asSender(owner));
+    handlers.leave(asSender(owner));
     links.kept.set(TEST_DOCUMENT_ID, editLink);
     const page = openPage(TEST_DOCUMENT_ID);
     busyElsewhere.add(page);
@@ -660,32 +662,38 @@ describe('the links of a plan shared through a relay', () => {
     ]);
   });
 
-  it('forgets the link of a plan once the window leaves it or its room is closed, never when the window only closes', async () => {
-    const { owner, viewLink } = await sharedWithPlan();
-    handlers.forgetWindow(asSender(owner));
-    const keptAfterClosing = links.kept.has(TEST_DOCUMENT_ID);
-    const guest = openPage();
-    await invoke(guest, IPC_CHANNELS.joinByLink, viewLink);
-    await handlers.leave(asSender(guest));
-    expect([
-      keptAfterClosing,
-      links.kept.has(TEST_DOCUMENT_ID),
-      handlers.isSharing(asSender(guest)),
-    ]).toEqual([true, false, false]);
+  it('keeps the link of a plan when the window leaves it, and forgets it once its room is gone', async () => {
+    const { owner, editLink } = await sharedWithPlan();
+    handlers.leave(asSender(owner));
+    const keptAfterLeaving = links.kept.get(TEST_DOCUMENT_ID) === editLink;
+    const gone = editLink.replace(/#e1\.[A-Za-z0-9_-]+$/, '#e1.' + 'A'.repeat(86));
+    const goneLink = readRelayLink(gone);
+    links.kept.set(OTHER_PLAN, goneLink.ok ? encodeRelayLink(goneLink.value) : '');
+    const page = openPage(OTHER_PLAN);
+    await invoke(page, IPC_CHANNELS.reopenSharedPlan, OTHER_PLAN);
+    await until(() => page.kinds().includes('relayEnded'));
+    await until(() => !links.kept.has(OTHER_PLAN));
+    expect([keptAfterLeaving, page.events.at(-1), handlers.isSharing(asSender(owner))]).toEqual([
+      true,
+      { kind: 'relayEnded', reason: 'NO_ROOM' },
+      false,
+    ]);
   });
 });
 
 describe('keeping and forgetting links, when the store fails', () => {
-  it('logs a link that cannot be forgotten, the window leaving anyway', async () => {
+  it('logs a link that cannot be forgotten once its room is gone', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const owner = openPage(TEST_DOCUMENT_ID);
-    await shared(owner);
+    const { editLink } = await sharedWithPlan();
+    const gone = readRelayLink(editLink.replace(/#e1\.[A-Za-z0-9_-]+$/, '#e1.' + 'A'.repeat(86)));
+    links.kept.set(OTHER_PLAN, gone.ok ? encodeRelayLink(gone.value) : '');
     links.state.forgetFails = new Error('Input/output error');
-    await handlers.leave(asSender(owner));
-    expect([
-      handlers.isSharing(asSender(owner)),
-      error.mock.calls.map(([message]: unknown[]) => message),
-    ]).toEqual([false, ['The link of a shared plan could not be forgotten:']]);
+    const page = openPage(OTHER_PLAN);
+    await invoke(page, IPC_CHANNELS.reopenSharedPlan, OTHER_PLAN);
+    await until(() => error.mock.calls.length > 0);
+    expect(error.mock.calls.map(([message]: unknown[]) => message)).toEqual([
+      'The link of a shared plan could not be forgotten:',
+    ]);
   });
 
   it('passes on a value thrown while keeping a link that is not an error', async () => {

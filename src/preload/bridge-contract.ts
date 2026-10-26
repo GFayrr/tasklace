@@ -151,6 +151,7 @@ export interface Sharing {
 export interface RelayLinks {
   readonly editLink: string;
   readonly viewLink: string;
+  readonly relay: string;
   readonly kept: boolean;
 }
 

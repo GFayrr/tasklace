@@ -106,7 +106,9 @@ function start(): void {
     createMdns,
     copyText: (text) => clipboard.writeText(text),
     sharesElsewhere: (sender) => relay.isSharing(sender),
-    leaveElsewhere: (sender) => relay.leave(sender),
+    leaveElsewhere: (sender) => {
+      relay.leave(sender);
+    },
   });
   const relay = registerRelayHandlers({
     assertTrusted,
@@ -129,17 +131,17 @@ function start(): void {
       forgetWindowProject(sender);
       pdf.forgetHeldPdf(sender);
       collaboration.forgetWindow(sender);
-      relay.forgetWindow(sender);
+      relay.leave(sender);
     },
     (sender) => {
       collaboration.forgetWindow(sender);
-      relay.forgetWindow(sender);
+      relay.leave(sender);
     },
   );
   const contents = window.webContents;
   window.once('closed', () => {
     collaboration.forgetWindow(contents);
-    relay.forgetWindow(contents);
+    relay.leave(contents);
   });
   let closing = false;
   window.once('close', () => {

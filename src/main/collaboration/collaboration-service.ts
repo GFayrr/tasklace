@@ -79,7 +79,7 @@ export interface CollaborationServices {
   readonly now?: () => number;
   readonly randomBytes?: (count: number) => Uint8Array;
   readonly sharesElsewhere?: (sender: WebContents) => boolean;
-  readonly leaveElsewhere?: (sender: WebContents) => Promise<void>;
+  readonly leaveElsewhere?: (sender: WebContents) => void;
 }
 
 interface CheckedJoinRequest {
@@ -247,7 +247,7 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
   });
   handle(IPC_CHANNELS.stopCollaboration, async (event) => {
     await stopWindow(event.sender);
-    await services.leaveElsewhere?.(event.sender);
+    services.leaveElsewhere?.(event.sender);
     return success(null);
   });
   handle(IPC_CHANNELS.joinPlan, async (event, value) => {

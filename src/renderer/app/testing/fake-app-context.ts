@@ -18,11 +18,15 @@ import type {
   ExportedFile,
   OpenedProject,
   RecentProject,
+  RelayJoined,
+  RelayLinks,
+  RelayReopened,
   SavedProject,
   Sharing,
   TasklaceBridge,
   PdfExport,
 } from '../../../preload/bridge-contract';
+import type { RelayOutgoing } from '../../../core/collaboration/relay/relay-member';
 import english from '../../locales/en.json';
 import type { Scheduler, ScheduleListener } from '../../schedule/scheduler';
 import { SAND_GRAPHITE } from '../../theme/sand-graphite';
@@ -81,6 +85,16 @@ export interface FakeCollaboration {
   listener: ((event: CollaborationEvent) => void) | null;
   readonly requests: (readonly [string, ...unknown[]])[];
   readonly sent: (readonly [CollaborationTarget, Uint8Array])[];
+  readonly relay: FakeRelay;
+}
+
+export interface FakeRelay {
+  shareResult: BridgeResult<RelayLinks>;
+  joinResult: BridgeResult<RelayJoined>;
+  reopenResult: BridgeResult<RelayReopened | null>;
+  newLinksResult: BridgeResult<RelayLinks>;
+  readonly requests: (readonly [string, ...unknown[]])[];
+  readonly sent: RelayOutgoing[];
 }
 
 export interface ManualScheduler {
@@ -159,9 +173,23 @@ export function fakeBridge(): {
       listener: null,
       requests: [],
       sent: [],
+      relay: {
+        shareResult: NOT_ANSWERED,
+        joinResult: NOT_ANSWERED,
+        reopenResult: { ok: true, value: null },
+        newLinksResult: NOT_ANSWERED,
+        requests: [],
+        sent: [],
+      },
     },
   };
   const { collaboration } = control;
+  const { relay } = collaboration;
+  /** Records a request about a relay and answers it with a value. */
+  const askedRelay = <T>(request: readonly [string, ...unknown[]], value: T): Promise<T> => {
+    relay.requests.push(request);
+    return Promise.resolve(value);
+  };
   /** Records a collaboration request and answers it with a value. */
   const asked = <T>(request: readonly [string, ...unknown[]], value: T): Promise<T> => {
     collaboration.requests.push(request);
@@ -247,13 +275,13 @@ export function fakeBridge(): {
       control.setAside.push(documentId);
       return called('setLocalCopyAside', control.setAsideResult);
     },
-    shareThroughRelay: (address) => asked(['shareThroughRelay', address], NOT_ANSWERED),
-    joinByLink: (link) => asked(['joinByLink', link], NOT_ANSWERED),
+    shareThroughRelay: (address) => askedRelay(['shareThroughRelay', address], relay.shareResult),
+    joinByLink: (link) => askedRelay(['joinByLink', link], relay.joinResult),
     reopenSharedPlan: (documentId) =>
-      asked(['reopenSharedPlan', documentId], { ok: true, value: null }),
-    makeNewLinks: () => asked(['makeNewLinks'], NOT_ANSWERED),
+      askedRelay(['reopenSharedPlan', documentId], relay.reopenResult),
+    makeNewLinks: () => askedRelay(['makeNewLinks'], relay.newLinksResult),
     sendToRelay: (outgoing) => {
-      collaboration.requests.push(['sendToRelay', outgoing]);
+      relay.sent.push(outgoing);
     },
     sendToCollaboration: (to, message) => {
       collaboration.sent.push([to, message]);

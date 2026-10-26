@@ -1,4 +1,5 @@
 import { bytesToHex } from '@noble/hashes/utils.js';
+import { holdsChangesMissingFrom } from '../../file/tasklace-file';
 import { MAX_PENDING_UPDATE_BYTES, SNAPSHOT_AFTER_BYTES } from '../../limits';
 import type { TaskId } from '../../model/project';
 import type { SharedRepair } from '../../shared/shared-project';
@@ -35,6 +36,8 @@ export interface RelayMember {
   readonly presence: (member: number, presence: OpenedPresence) => void;
   readonly left: (member: number) => void;
   readonly setPresence: (name: string, selectedTaskId: TaskId | null) => void;
+  readonly shareWholePlan: () => void;
+  readonly catchUpWith: (state: Uint8Array | null, bytesSinceSnapshot: number) => void;
   readonly stop: () => void;
 }
 
@@ -47,12 +50,14 @@ interface RelayMemberOptions {
   readonly report: (event: RelayMemberEvent) => void;
 }
 
+const EMPTY_UPDATE = Uint8Array.of(0, 0);
+
 interface Unconfirmed {
   readonly messageId: Uint8Array;
   readonly update: Uint8Array;
 }
 
-/** Runs a member of a plan shared through a relay, with no host: it sends its changes while it may edit until the relay passes them back, merges the others' changes, follows who is in and puts a snapshot on the relay once enough changed. */
+/** Runs a member of a plan shared through a relay, with no host: sends its changes while it may edit until passed back, merges the others', follows who is in, snapshots once enough changed and, on reopening, shares what only this computer holds. */
 export function createRelayMember(options: RelayMemberOptions): RelayMember {
   const { session, canEdit, send, report } = options;
   const merger = createMerger(session, (event) => {
@@ -99,6 +104,12 @@ export function createRelayMember(options: RelayMemberOptions): RelayMember {
     if (live) {
       sendUpdate(entry);
     }
+  };
+  /** Keeps the whole plan as the one change to send, in place of the changes kept so far, which it holds. */
+  const keepWhole = (): void => {
+    unconfirmed.clear();
+    unconfirmedBytes = 0;
+    keep(session.encodeState());
   };
   const stopUpdates = session.onUpdate((update, source) => {
     if (source === 'remote') {
@@ -203,6 +214,27 @@ export function createRelayMember(options: RelayMemberOptions): RelayMember {
           kind: 'presence',
           bytes: encodeMessage({ kind: 'presence', name, selectedTaskId }),
         });
+      }
+    },
+    shareWholePlan: () => {
+      if (canEdit) {
+        keepWhole();
+      }
+    },
+    catchUpWith: (state, bytes) => {
+      bytesSinceSnapshot = bytes;
+      const merged = state === null ? null : merger.merge(state);
+      if (merged?.ok === false && merged.error !== 'incompleteUpdate') {
+        report({ kind: 'refused', reason: merged.error });
+        return;
+      }
+      if (!holdsChangesMissingFrom(session.encodeState(), state ?? EMPTY_UPDATE)) {
+        return;
+      }
+      if (canEdit) {
+        keepWhole();
+      } else {
+        unshared = true;
       }
     },
     stop: stopUpdates,

@@ -68,6 +68,16 @@ function side(session: SharedSession | null, ids: readonly string[]) {
       state.attached(read.value);
       return Promise.resolve(true);
     },
+    openJoined: (project) => {
+      opened.push(project.state);
+      const read = openSharedSessionFromState(project.state);
+      if (!openSucceeds || !read.ok) {
+        return Promise.resolve(false);
+      }
+      current = read.value;
+      state.attached(read.value);
+      return Promise.resolve(true);
+    },
     repaired: (found) => repairs.push(...found),
     hostChanged: ({ left, next }) => hostChanges.push([left, next]),
     ownChangesKept: (result) => kept.push(result),
@@ -1110,5 +1120,81 @@ describe('joining and editing together', () => {
     host.select('a');
     await settle();
     expect(host.collaboration.sent).toEqual([]);
+  });
+});
+
+describe('a plan shared through a relay, seen from the page', () => {
+  const origin = createSharedDocument(project([workTask('a'), workTask('b')]), TEST_DOCUMENT_ID);
+
+  it('comes back to the relay of a plan opened with a kept link, following its events, in read only with the link that reads, and leaves it once stopped', async () => {
+    const session = sessionOn(origin, 1);
+    const reader = side(session, []);
+    reader.collaboration.relay.reopenResult = {
+      ok: true,
+      value: { canEdit: false, relay: 'relay.example.org' },
+    };
+    reader.state.attached(session);
+    await settle();
+    emit(reader.collaboration, { kind: 'relayConnected', member: 2, members: [] });
+    const connected = reader.state.relay.connection;
+    emit(reader.collaboration, { kind: 'offline' });
+    const offline = reader.state.relay.connection;
+    const readOnly = reader.state.isReadOnly;
+    await reader.state.stop();
+    expect([
+      reader.collaboration.relay.requests,
+      connected,
+      offline,
+      readOnly,
+      reader.state.relay.isActive,
+      reader.collaboration.requests.at(-1),
+    ]).toEqual([
+      [['reopenSharedPlan', TEST_DOCUMENT_ID]],
+      'connected',
+      'offline',
+      true,
+      false,
+      ['stop'],
+    ]);
+  });
+
+  it('joins a plan by its link, opening the plan the main process offered and sending its own changes', async () => {
+    const joiner = side(null, []);
+    await named(joiner.state, 'Léa');
+    joiner.collaboration.relay.joinResult = {
+      ok: true,
+      value: {
+        project: {
+          state: sessionOn(origin, 2).encodeState(),
+          documentId: TEST_DOCUMENT_ID,
+          fileName: '',
+          warnings: [],
+          localChanges: null,
+        },
+        canEdit: true,
+        relay: 'relay.example.org',
+        bytesSinceSnapshot: 0,
+        kept: true,
+      },
+    };
+    const answer = await joiner.state.relay.join('tasklace://relay.example.org/#e1.key');
+    rename(joiner.session(), 'a', 'Mine');
+    await settle();
+    expect([
+      answer,
+      joiner.opened.length,
+      joiner.collaboration.relay.sent.map((outgoing) =>
+        outgoing.kind === 'message' ? outgoing.message.kind : outgoing.kind,
+      ),
+    ]).toEqual([{ ok: true, value: null }, 1, ['presence', 'update']]);
+  });
+
+  it('warns about an event of a relay when the page shares nothing through one', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const idle = side(sessionOn(origin, 1), []);
+    emit(idle.collaboration, { kind: 'relayCaughtUp' });
+    expect(warn.mock.calls).toEqual([
+      ['An event of a plan shared through a relay came while none is: relayCaughtUp.'],
+    ]);
   });
 });
