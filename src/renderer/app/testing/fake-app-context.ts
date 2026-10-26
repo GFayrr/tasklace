@@ -38,6 +38,7 @@ export const FRENCH_FORMAT = {
 export const FIXED_NOW = new Date(2026, 8, 28, 10);
 
 const SAVED: BridgeResult<SavedProject> = { ok: true, value: { localCopySaved: true } };
+const NOT_ANSWERED: BridgeResult<never> = { ok: false, error: { code: 'TASK_FAILED' } };
 
 export interface FakeBridgeControl {
   openResult: BridgeResult<OpenedProject>;
@@ -245,6 +246,14 @@ export function fakeBridge(): {
     setLocalCopyAside: (documentId) => {
       control.setAside.push(documentId);
       return called('setLocalCopyAside', control.setAsideResult);
+    },
+    shareThroughRelay: (address) => asked(['shareThroughRelay', address], NOT_ANSWERED),
+    joinByLink: (link) => asked(['joinByLink', link], NOT_ANSWERED),
+    reopenSharedPlan: (documentId) =>
+      asked(['reopenSharedPlan', documentId], { ok: true, value: null }),
+    makeNewLinks: () => asked(['makeNewLinks'], NOT_ANSWERED),
+    sendToRelay: (outgoing) => {
+      collaboration.requests.push(['sendToRelay', outgoing]);
     },
     sendToCollaboration: (to, message) => {
       collaboration.sent.push([to, message]);

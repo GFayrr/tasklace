@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as Y from 'yjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { encodeMessage } from '../core/collaboration/messages';
 import { exportProjectCsv } from '../core/exchange/csv/project-csv-export';
 import { exportProjectJson } from '../core/exchange/project-json';
 import { encodeTasklaceFile, encodeTasklaceState } from '../core/file/tasklace-file';
@@ -513,6 +514,22 @@ describe('reading the state of a shared plan', () => {
       state.length,
     );
     expect(isResultOf({ kind: 'readSharedState', state }, read)).toBe(true);
+  });
+
+  it('gives the state of the log of a relay, read as a file, and refuses a log that is not one', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const task = {
+      kind: 'readRelayLog',
+      messages: [encodeMessage({ kind: 'update', update: state })],
+    } as const;
+    const read = await runFileTask(task);
+    const refused = await runFileTask({ kind: 'readRelayLog', messages: [Uint8Array.of(1)] });
+    expect([
+      read.ok && read.value.kind === 'loaded' && read.value.documentId,
+      isResultOf(task, read),
+      refused,
+    ]).toEqual([TEST_DOCUMENT_ID, true, { ok: false, error: { code: 'INVALID_CONTENT' } }]);
   });
 
   it('refuses and logs a state that cannot be decoded, keeping the inner error for the log only', async () => {

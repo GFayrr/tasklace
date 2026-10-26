@@ -78,6 +78,8 @@ export interface CollaborationServices {
   readonly startTimer?: StartTimer;
   readonly now?: () => number;
   readonly randomBytes?: (count: number) => Uint8Array;
+  readonly sharesElsewhere?: (sender: WebContents) => boolean;
+  readonly leaveElsewhere?: (sender: WebContents) => Promise<void>;
 }
 
 interface CheckedJoinRequest {
@@ -95,7 +97,7 @@ const HEX_BASE = 16;
 const HEX_DIGITS = 2;
 
 /** Starts a timer with the clock of the system, returning how to stop it. */
-const systemTimer: StartTimer = (milliseconds, onEnd) => {
+export const systemTimer: StartTimer = (milliseconds, onEnd) => {
   const timer = setTimeout(onEnd, milliseconds);
   return () => {
     clearTimeout(timer);
@@ -118,6 +120,7 @@ export function privateAddressesOf(
 /** Answers the collaboration requests of the bridge, passing the encoded messages of each window without reading the plan, and returns how to stop a window that reloads or closes. */
 export function registerCollaborationHandlers(services: CollaborationServices): {
   readonly forgetWindow: (sender: WebContents) => void;
+  readonly isBusy: (sender: WebContents) => boolean;
 } {
   const windows = new Map<WebContents, WindowSharing>();
   const searches = new Map<WebContents, () => void>();
@@ -158,9 +161,12 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
     windows.set(sender, created);
     return created;
   };
-  /** Tells whether a window already shares, joined or looks for a host. */
-  const isBusy = (sender: WebContents): boolean =>
+  /** Tells whether a window already shares, joined or looks for a host on the network. */
+  const isBusyHere = (sender: WebContents): boolean =>
     starting.has(sender) || (windows.get(sender)?.state().kind ?? 'idle') !== 'idle';
+  /** Tells whether a window already shares a plan, on the network or another way, a plan being shared one way only. */
+  const isBusy = (sender: WebContents): boolean =>
+    isBusyHere(sender) || (services.sharesElsewhere?.(sender) ?? false);
   /** Tells whether what a window started was stopped since, by its page or its window closing. */
   const stoppedSince = (sender: WebContents, generation: number): boolean =>
     (generations.get(sender) ?? 0) !== generation;
@@ -241,6 +247,7 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
   });
   handle(IPC_CHANNELS.stopCollaboration, async (event) => {
     await stopWindow(event.sender);
+    await services.leaveElsewhere?.(event.sender);
     return success(null);
   });
   handle(IPC_CHANNELS.joinPlan, async (event, value) => {
@@ -370,6 +377,7 @@ export function registerCollaborationHandlers(services: CollaborationServices): 
         console.error('The sharing of a closing window could not be stopped:', error);
       });
     },
+    isBusy: isBusyHere,
   };
 }
 

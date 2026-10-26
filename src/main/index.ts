@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Worker } from 'node:worker_threads';
 import { Bonjour } from 'bonjour-service';
-import { app, BrowserWindow, clipboard, dialog, protocol, session } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, protocol, safeStorage, session } from 'electron';
 import {
   APP_ENTRY_URL,
   APP_SCHEME,
@@ -10,7 +10,9 @@ import {
   isAppAddress,
 } from './app-files';
 import { MAX_PDF_RENDER_MILLISECONDS } from '../core/limits';
-import { registerCollaborationHandlers } from './collaboration/collaboration-service';
+import { registerCollaborationHandlers, systemTimer } from './collaboration/collaboration-service';
+import { createRelayLinkStore, vaultOf } from './collaboration/relay/relay-links';
+import { registerRelayHandlers } from './collaboration/relay/relay-service';
 import { mdnsOf } from './collaboration/discovery';
 import { contentSecurityPolicy } from './content-security-policy';
 import { flushBeforeClosing, registerFlushHandler } from './close-flush';
@@ -19,6 +21,7 @@ import { createTrustCheck } from './ipc-trust';
 import {
   forgetWindowProject,
   registerProjectFileHandlers,
+  windowDocumentOf,
   windowProjectKind,
 } from './project-files';
 import { CONTENT_SECURITY_POLICY_HEADER, hardenContents, hardenSession } from './security';
@@ -44,6 +47,7 @@ const preloadPath = join(import.meta.dirname, '../preload/index.cjs');
 const fileWorkerPath = join(import.meta.dirname, 'file-worker.js');
 const EXIT_AFTER_FAILURE = 1;
 const LOG_FOLDER = 'logs';
+const RELAY_LINK_STORE = 'relay-links.json';
 const log = createLogFile(
   join(app.getPath('userData'), LOG_FOLDER),
   () => new Date(),
@@ -101,6 +105,19 @@ function start(): void {
     runTask: (task) => runInFileWorker(createFileWorker, task),
     createMdns,
     copyText: (text) => clipboard.writeText(text),
+    sharesElsewhere: (sender) => relay.isSharing(sender),
+    leaveElsewhere: (sender) => relay.leave(sender),
+  });
+  const relay = registerRelayHandlers({
+    assertTrusted,
+    runTask: (task) => runInFileWorker(createFileWorker, task),
+    links: createRelayLinkStore(
+      join(app.getPath('userData'), RELAY_LINK_STORE),
+      vaultOf(safeStorage, process.platform),
+    ),
+    documentOf: windowDocumentOf,
+    busyElsewhere: (sender) => collaboration.isBusy(sender),
+    startTimer: systemTimer,
   });
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath);
@@ -112,14 +129,17 @@ function start(): void {
       forgetWindowProject(sender);
       pdf.forgetHeldPdf(sender);
       collaboration.forgetWindow(sender);
+      relay.forgetWindow(sender);
     },
     (sender) => {
       collaboration.forgetWindow(sender);
+      relay.forgetWindow(sender);
     },
   );
   const contents = window.webContents;
   window.once('closed', () => {
     collaboration.forgetWindow(contents);
+    relay.forgetWindow(contents);
   });
   let closing = false;
   window.once('close', () => {

@@ -100,6 +100,11 @@ export function forgetWindowProject(sender: WebContents): void {
   offered.delete(sender);
 }
 
+/** Gives the identifier of the plan the window of a page holds, or null when it holds none. */
+export function windowDocumentOf(sender: WebContents): DocumentId | null {
+  return projects.get(sender)?.documentId ?? null;
+}
+
 /** Tells what the window of a page holds: no project, a project saved to a file, a shared plan it joined, or a project kept only on this computer. */
 export function windowProjectKind(sender: WebContents): WindowProjectKind {
   const project = projects.get(sender);
