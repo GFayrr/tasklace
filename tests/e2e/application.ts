@@ -8,10 +8,17 @@ const NO_ANSWER = 'no answer';
 const CLOSED_TARGET = /closed|Target crashed/i;
 const closedApplications = new WeakSet<ElectronApplication>();
 
-/** Launches the application, with its own user data folder when one is given, remembering when it closes, and starts recording a trace, closing it again when the trace cannot start. */
-export async function launchApplication(userData?: string): Promise<ElectronApplication> {
+/** Launches the application, with its own user data folder and more environment variables when given, remembering when it closes, and starts recording a trace, closing it again when the trace cannot start. */
+export async function launchApplication(
+  userData?: string,
+  environment: Readonly<Record<string, string>> = {},
+): Promise<ElectronApplication> {
   const args = userData === undefined ? ['.'] : ['.', `--user-data-dir=${userData}`];
-  const application = await electron.launch({ args });
+  const inherited = Object.entries(process.env).flatMap(([name, value]) =>
+    value === undefined ? [] : [[name, value] as const],
+  );
+  const env = { ...Object.fromEntries(inherited), ...environment };
+  const application = await electron.launch({ args, env });
   application.once('close', () => {
     closedApplications.add(application);
   });

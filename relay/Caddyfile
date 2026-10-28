@@ -1,0 +1,5 @@
+# Caddy answers on the domain of the server over HTTPS, with a certificate it gets and renews on its own,
+# and passes every connection to the relay, which only sees encrypted plans.
+{$RELAY_DOMAIN} {
+	reverse_proxy relay:8080
+}

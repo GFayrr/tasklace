@@ -30,9 +30,7 @@ export type AddressRefusal = 'INVALID_ADDRESS' | 'NOT_SECURE';
 
 const MAX_HOST_LENGTH = 253;
 const MAX_PATH_LENGTH = 256;
-const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '[::1]']);
 const SECURE_SCHEME = 'wss';
-const LOOPBACK_SCHEME = 'ws';
 const LINK_SCHEME = 'tasklace';
 const EDIT_MARK = 'e1';
 const LINK_KEY_BYTES = RELAY_KEY_BYTES + RELAY_KEY_BYTES;
@@ -47,7 +45,7 @@ const NAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0
 const IPV6_PATTERN = /^\[[0-9a-f:.]{2,45}\]$/;
 const PATH_PATTERN = /^(\/[A-Za-z0-9._~-]*)+$/;
 
-/** Reads the address of a relay a person typed, refusing anything but wss:// to a host name or address with an optional port and path, ws:// being let through only to this computer, where there is nothing to encrypt the connection against. */
+/** Reads the address of a relay a person typed, refusing anything but wss:// to a host name or address with an optional port and path, this computer included. */
 export function readRelayAddress(text: string): Result<RelayAddress, AddressRefusal> {
   const trimmed = text.trim();
   const match = trimmed.length > MAX_RELAY_ADDRESS_LENGTH ? null : ADDRESS_PATTERN.exec(trimmed);
@@ -59,14 +57,12 @@ export function readRelayAddress(text: string): Result<RelayAddress, AddressRefu
   if (address === null) {
     return failure('INVALID_ADDRESS');
   }
-  const expected = isLoopback(address) ? [SECURE_SCHEME, LOOPBACK_SCHEME] : [SECURE_SCHEME];
-  return expected.includes(scheme.toLowerCase()) ? success(address) : failure('NOT_SECURE');
+  return scheme.toLowerCase() === SECURE_SCHEME ? success(address) : failure('NOT_SECURE');
 }
 
-/** Gives the address the connection to a relay opens: wss:// except to this computer. */
+/** Gives the address the connection to a relay opens, always over wss://. */
 export function relayUrlOf(address: RelayAddress): string {
-  const scheme = isLoopback(address) ? LOOPBACK_SCHEME : SECURE_SCHEME;
-  return `${scheme}://${hostLabelOf(address)}${address.path}`;
+  return `${SECURE_SCHEME}://${hostLabelOf(address)}${address.path}`;
 }
 
 /** Gives the relay as a person reads it: its host, and its port when there is one. */
@@ -119,11 +115,6 @@ export function shownRelayLink(link: RelayLink): string {
   const written = encodeRelayLink(link);
   const keysStart = written.indexOf('#') + `#${EDIT_MARK}.`.length;
   return `${written.slice(0, keysStart + SHOWN_KEY_CHARACTERS)}${LEFT_OUT}`;
-}
-
-/** Tells whether a relay runs on this computer. */
-export function isLoopback(address: RelayAddress): boolean {
-  return LOOPBACK_HOSTS.has(address.host);
 }
 
 /** Checks the host, port and path of an address, the host in lower case and the path / when none is given, or returns null for any part that is not one. */

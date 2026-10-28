@@ -1,6 +1,7 @@
 import { ipcMain as electronIpcMain, type WebContents } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
+import { createServer as createHttpsServer, type Server } from 'node:https';
 import { WebSocketServer } from 'ws';
 import { startRelayServer, type RunningRelay } from '../../../../relay/src/server.ts';
 import { testConfig } from '../../../../relay/src/testing/relay-client.ts';
@@ -24,6 +25,7 @@ import { IPC_CHANNELS, type CollaborationEvent } from '../../../preload/bridge-c
 import { runFileTask, type ResultOfTask, type FileTask } from '../../file-tasks';
 import type { FakeIpcMain } from '../../testing/fake-electron';
 import { freePort, LOOPBACK, until } from '../../testing/plan-host';
+import { TEST_CERTIFICATE, writeRelayCertificate } from '../../testing/test-certificate';
 import type { StartTimer } from '../secure-connection';
 import { zlibCompressor } from '../../zlib-compressor';
 import type { RelayLinkStore } from './relay-links';
@@ -32,6 +34,12 @@ import { readRelayOutgoing, registerRelayHandlers, type RelayHandlers } from './
 vi.mock('electron', async () => {
   const fakes = await import('../../testing/fake-electron');
   return { ipcMain: new fakes.FakeIpcMain() };
+});
+
+vi.mock('node:tls', async (importOriginal) => {
+  const tls = await importOriginal<typeof import('node:tls')>();
+  const { trustingTestCertificate } = await import('../../testing/test-certificate');
+  return { ...tls, getCACertificates: trustingTestCertificate(tls.getCACertificates) };
 });
 
 const ipcMain = electronIpcMain as unknown as FakeIpcMain;
@@ -128,11 +136,11 @@ let noted: [FakePage, string | null][];
 let offered: { page: FakePage; name: string; relay: string }[];
 let guideOpens: boolean;
 const pages: FakePage[] = [];
-const fakes: WebSocketServer[] = [];
+const fakes: Server[] = [];
 
 beforeEach(async () => {
   ({ folder, remove: removeFolder } = await temporaryFolder());
-  relayServer = await startRelayServer({ config: testConfig(folder) });
+  relayServer = await startedRelay();
   links = memoryLinks();
   documents = new Map();
   busyElsewhere = new Set();
@@ -192,6 +200,7 @@ afterEach(async () => {
     fakes.splice(0).map(
       (fake) =>
         new Promise((resolve) => {
+          fake.closeAllConnections();
           fake.close(resolve);
         }),
     ),
@@ -220,9 +229,16 @@ async function invoke(page: FakePage, channel: string, ...values: unknown[]): Pr
   return await Promise.resolve(ipcMain.invoke(channel, { sender: page }, ...values));
 }
 
+/** Starts the relay of the test over TLS, keeping its rooms in the folder of the test. */
+async function startedRelay(): Promise<RunningRelay> {
+  return await startRelayServer({
+    config: testConfig(folder, await writeRelayCertificate(folder)),
+  });
+}
+
 /** Gives the address of the relay of the test. */
 function relayAddress(port = relayServer.port): string {
-  return `ws://127.0.0.1:${String(port)}/`;
+  return `wss://127.0.0.1:${String(port)}/`;
 }
 
 /** Shares the plan of a page through the relay of the test, giving its two links as copied. */
@@ -301,12 +317,20 @@ function shortly(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 64));
 }
 
-/** Starts a relay of its own that lets a member in and never says it caught up. */
+/** Starts a relay of its own over TLS that lets a member in and never says it caught up. */
 async function silentRelay(): Promise<number> {
   const port = await freePort();
-  const fake = new WebSocketServer({ host: LOOPBACK, port });
-  fakes.push(fake);
-  await new Promise((resolve) => fake.once('listening', resolve));
+  const server = createHttpsServer({
+    cert: TEST_CERTIFICATE.certificate,
+    key: TEST_CERTIFICATE.key,
+  });
+  new WebSocketServer({ server });
+  fakes.push(server);
+  await new Promise((resolve) =>
+    server.listen(port, LOOPBACK, () => {
+      resolve(undefined);
+    }),
+  );
   return port;
 }
 
@@ -378,7 +402,7 @@ describe('sharing a plan through a relay', () => {
       await invoke(
         openPage(TEST_DOCUMENT_ID),
         IPC_CHANNELS.shareThroughRelay,
-        'ws://relay.example.org/',
+        relayAddress().replace('wss://', 'ws://'),
       ),
       await invoke(openPage(), IPC_CHANNELS.shareThroughRelay, relayAddress()),
       await invoke(owner, IPC_CHANNELS.shareThroughRelay, relayAddress()),
@@ -729,7 +753,7 @@ describe('the links of a plan shared through a relay', () => {
     await invoke(guest, IPC_CHANNELS.joinByLink, viewLink);
     await relayServer.close();
     await until(() => owner.kinds().includes('reconnecting'));
-    relayServer = await startRelayServer({ config: testConfig(folder) });
+    relayServer = await startedRelay();
     expect([
       await invoke(guest, IPC_CHANNELS.makeNewLinks),
       await invoke(owner, IPC_CHANNELS.makeNewLinks),

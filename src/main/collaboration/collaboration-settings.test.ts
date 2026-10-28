@@ -82,11 +82,11 @@ describe('the collaboration settings of this computer', () => {
     expect(
       [
         { name: 'Léa', port: 1, firewallNoticeSeen: false, relayAddress: null },
-        { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 'ws://localhost:8080' },
+        { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 'wss://localhost:8080' },
       ].map(readCollaborationSettings),
     ).toEqual([
       { name: 'Léa', port: 1, firewallNoticeSeen: false, relayAddress: null },
-      { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 'ws://localhost:8080' },
+      { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 'wss://localhost:8080' },
     ]);
     expect(
       [
@@ -99,10 +99,11 @@ describe('the collaboration settings of this computer', () => {
         { name: null, port: '1', firewallNoticeSeen: false },
         { name: null, port: 1, firewallNoticeSeen: 'no' },
         { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 'ws://relay.example' },
+        { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 'ws://localhost:8080' },
         { name: null, port: 1, firewallNoticeSeen: false, relayAddress: ' wss://relay.example' },
         { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 'relay.example' },
         { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 3 },
       ].map(readCollaborationSettings),
-    ).toEqual(Array.from({ length: 12 }, () => null));
+    ).toEqual(Array.from({ length: 13 }, () => null));
   });
 });

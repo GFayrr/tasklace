@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import english from '../../src/renderer/locales/en.json' with { type: 'json' };
 import { closeDiscarding, launchApplication } from './application';
+import { writeRelayCertificate } from '../../src/main/testing/test-certificate';
 import { picture } from './pictures';
 
 const RELAY_MAIN = join(import.meta.dirname, '..', '..', 'relay', 'src', 'main.ts');
@@ -24,6 +25,7 @@ interface RunningRelay {
   readonly child: ChildProcess;
   readonly port: number;
   readonly folder: string;
+  readonly certificateFile: string;
 }
 
 const instances: Instance[] = [];
@@ -49,11 +51,12 @@ async function temporaryFolder(prefix: string): Promise<string> {
   return folder;
 }
 
-/** Runs the relay of the repository as its own Node process on a free port of this computer, as a school would run it, and waits until it listens. */
+/** Runs the relay of the repository as its own Node process over TLS on a free port of this computer, as a school would run it without Caddy, and waits until it listens. */
 async function startRelay(): Promise<RunningRelay> {
   const folder = await temporaryFolder('tasklace-e2e-relay-');
+  const tls = await writeRelayCertificate(folder);
   const child = spawn(process.execPath, [RELAY_MAIN], {
-    env: { PATH: process.env['PATH'] ?? '', RELAY_PORT: '0', RELAY_DATA_DIR: folder },
+    env: { PATH: process.env['PATH'] ?? '', RELAY_PORT: '0', RELAY_DATA_DIR: folder, ...tls },
   });
   let output = '';
   const port = await new Promise<number>((resolve, reject) => {
@@ -68,15 +71,17 @@ async function startRelay(): Promise<RunningRelay> {
       reject(new Error(`The relay stopped before listening: ${output}`));
     });
   });
-  const relay = { child, port, folder };
+  const relay = { child, port, folder, certificateFile: tls.RELAY_TLS_CERT };
   relays.push(relay);
   return relay;
 }
 
-/** Launches the application on a user data folder, its own unless one is given, and waits until its interface runs. */
-async function launch(userData?: string): Promise<Instance> {
+/** Launches the application on a user data folder, its own unless one is given, trusting the certificate of the relay of the test, and waits until its interface runs. */
+async function launch(relay: RunningRelay, userData?: string): Promise<Instance> {
   const folder = userData ?? (await temporaryFolder('tasklace-e2e-relay-user-'));
-  const application = await launchApplication(folder);
+  const application = await launchApplication(folder, {
+    NODE_EXTRA_CA_CERTS: relay.certificateFile,
+  });
   const page = await application.firstWindow();
   await page.setViewportSize({ width: 1440, height: 800 });
   await expect(page.locator('#app')).toHaveAttribute('data-started', 'true');
@@ -102,7 +107,7 @@ async function shareThroughRelay(
   await page.getByRole('button', { name: 'Share', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Share “Thesis”' });
   await dialog.getByText(RELAY.throughRelay, { exact: true }).click();
-  await dialog.getByLabel(RELAY.address).fill(`ws://${LOOPBACK}:${String(relay.port)}`);
+  await dialog.getByLabel(RELAY.address).fill(`wss://${LOOPBACK}:${String(relay.port)}`);
   await dialog.getByLabel('Your name, shown to the others').fill('Camille');
   await dialog.getByRole('button', { name: 'Share the plan' }).click();
   await expect(dialog.locator('.link')).toHaveCount(2);
@@ -142,7 +147,7 @@ test('shares a plan through a relay, joined in read only with the link that read
   test.setTimeout(THREE_INSTANCES_TEST_MS);
   const relay = await startRelay();
   const relayLabel = `${LOOPBACK}:${String(relay.port)}`;
-  const host = await launch();
+  const host = await launch(relay);
   const { editLink, viewLink } = await shareThroughRelay(host, relay);
   expect([
     editLink.startsWith(`tasklace://${relayLabel}/#e1.`),
@@ -153,7 +158,7 @@ test('shares a plan through a relay, joined in read only with the link that read
     .getByRole('button', { name: 'Done' })
     .click();
   await expect(host.page.getByRole('button', { name: RELAY.shared })).toBeVisible();
-  const reader = await launch();
+  const reader = await launch(relay);
   await joinByLink(
     reader.page,
     viewLink,
@@ -167,7 +172,7 @@ test('shares a plan through a relay, joined in read only with the link that read
   await expect(reader.page.locator('.status-bar .read-only')).toHaveText(
     english.collaboration.readOnlyRight,
   );
-  const editor = await launch();
+  const editor = await launch(relay);
   await joinByLink(
     editor.page,
     editLink,
@@ -184,9 +189,9 @@ test('shares a plan through a relay, joined in read only with the link that read
 
 test('tells the others once new links empty the old place of the plan, the plan staying open', async () => {
   const relay = await startRelay();
-  const host = await launch();
+  const host = await launch(relay);
   const { viewLink } = await shareThroughRelay(host, relay);
-  const reader = await launch();
+  const reader = await launch(relay);
   await joinByLink(
     reader.page,
     viewLink,
@@ -211,9 +216,9 @@ test('tells the others once new links empty the old place of the plan, the plan 
 test('reopens a plan joined through a relay from the recent projects, coming back to the relay when this computer can keep its link', async () => {
   const relay = await startRelay();
   const relayLabel = `${LOOPBACK}:${String(relay.port)}`;
-  const host = await launch();
+  const host = await launch(relay);
   const { editLink } = await shareThroughRelay(host, relay);
-  const guest = await launch();
+  const guest = await launch(relay);
   await joinByLink(
     guest.page,
     editLink,
@@ -225,7 +230,7 @@ test('reopens a plan joined through a relay from the recent projects, coming bac
     await expect(guest.page.getByText(RELAY.linkNotKept)).toBeVisible();
   }
   await close(guest);
-  const again = await launch(guest.userData);
+  const again = await launch(relay, guest.userData);
   const recent = again.page.getByRole('button', { name: /^Thesis/ });
   await expect(recent).toContainText(`Shared through ${relayLabel}`);
   await recent.click();
