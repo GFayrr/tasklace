@@ -8,7 +8,6 @@ import { drawRelayAccess, viewAccessOf } from './relay-keys';
 import {
   encodeRelayLink,
   hostLabelOf,
-  isLoopback,
   previewRelayLink,
   readRelayAddress,
   readRelayLink,
@@ -39,7 +38,7 @@ describe('the address of a relay a person types', () => {
     ]);
   });
 
-  it('lets ws:// through only to this computer', () => {
+  it('refuses ws:// everywhere, this computer included', () => {
     expect(
       [
         'ws://localhost:47400',
@@ -49,13 +48,16 @@ describe('the address of a relay a person types', () => {
         'https://relay.example',
         'http://localhost',
       ].map(readRelayAddress),
+    ).toEqual(Array.from({ length: 6 }, () => failure('NOT_SECURE')));
+  });
+
+  it('accepts wss:// to this computer, as to any other', () => {
+    expect(
+      ['wss://localhost:47400', 'wss://127.0.0.1', 'wss://[::1]:47400/v1'].map(readRelayAddress),
     ).toEqual([
       success({ host: 'localhost', port: 47_400, path: '/' }),
-      success({ host: '127.0.0.1', port: 47_400, path: '/' }),
-      success({ host: '[::1]', port: 47_400, path: '/' }),
-      failure('NOT_SECURE'),
-      failure('NOT_SECURE'),
-      failure('NOT_SECURE'),
+      success({ host: '127.0.0.1', port: null, path: '/' }),
+      success({ host: '[::1]', port: 47_400, path: '/v1' }),
     ]);
   });
 
@@ -91,22 +93,18 @@ describe('the address of a relay a person types', () => {
     ]).toEqual([true, true, true]);
   });
 
-  it('connects to wss:// except on this computer, and shows the host with its port', () => {
+  it('connects to wss:// on this computer as elsewhere, and shows the host with its port', () => {
     const local = { host: 'localhost', port: 47_400, path: '/v1' };
     expect([
       relayUrlOf(SCHOOL),
       relayUrlOf(local),
       hostLabelOf(SCHOOL),
       hostLabelOf(local),
-      isLoopback(local),
-      isLoopback(SCHOOL),
     ]).toEqual([
       'wss://tasklace.my-school.example/',
-      'ws://localhost:47400/v1',
+      'wss://localhost:47400/v1',
       'tasklace.my-school.example',
       'localhost:47400',
-      true,
-      false,
     ]);
   });
 });

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createServer as createHttpsServer, type Server } from 'node:https';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { startRelayServer, type RunningRelay } from '../../../../relay/src/server.ts';
 import { testConfig } from '../../../../relay/src/testing/relay-client.ts';
@@ -20,6 +21,11 @@ import { seededRandom } from '../../../core/testing/test-crypto';
 import { aesGcm, systemRandomBytes } from '../aes-gcm';
 import { zlibCompressor } from '../../zlib-compressor';
 import { freePort, LOOPBACK, until } from '../../testing/plan-host';
+import {
+  makeTestCertificate,
+  TEST_CERTIFICATE,
+  writeRelayCertificate,
+} from '../../testing/test-certificate';
 import type { StartTimer } from '../secure-connection';
 import {
   endOfError,
@@ -27,6 +33,12 @@ import {
   type RelaySession,
   type RelaySessionEvent,
 } from './relay-connection';
+
+vi.mock('node:tls', async (importOriginal) => {
+  const tls = await importOriginal<typeof import('node:tls')>();
+  const { trustingTestCertificate } = await import('../../testing/test-certificate');
+  return { ...tls, getCACertificates: trustingTestCertificate(tls.getCACertificates) };
+});
 
 const SPEED_UP = 64;
 const ONE_MEBIBYTE = 1_048_576;
@@ -44,7 +56,7 @@ let folder: string;
 let removeFolder: () => Promise<void>;
 const relays: RunningRelay[] = [];
 const sessions: RelaySession[] = [];
-const fakes: WebSocketServer[] = [];
+const fakes: Server[] = [];
 
 beforeEach(async () => {
   ({ folder, remove: removeFolder } = await temporaryFolder());
@@ -59,6 +71,7 @@ afterEach(async () => {
     fakes.splice(0).map(
       (fake) =>
         new Promise((resolve) => {
+          fake.closeAllConnections();
           fake.close(resolve);
         }),
     ),
@@ -75,13 +88,14 @@ const fastTimer: StartTimer = (milliseconds, onEnd) => {
   };
 };
 
-/** Starts a real relay on a port of this computer, keeping its rooms in the folder of the test. */
+/** Starts a real relay over TLS on a port of this computer, keeping its rooms in the folder of the test. */
 async function startedRelay(
   port = 0,
   environment: Record<string, string> = {},
 ): Promise<RunningRelay> {
+  const tls = await writeRelayCertificate(folder);
   const relay = await startRelayServer({
-    config: testConfig(folder, { RELAY_PORT: String(port), ...environment }),
+    config: testConfig(folder, { RELAY_PORT: String(port), ...tls, ...environment }),
   });
   relays.push(relay);
   return relay;
@@ -145,11 +159,15 @@ function plainPresence(event: RelaySessionEvent) {
     : event;
 }
 
-/** Starts a relay of its own that sends each member who connects the frames a test gives, as a relay that lies would. */
-async function lyingRelay(frames: readonly (Uint8Array | string)[]): Promise<number> {
+/** Starts a relay of its own over TLS that sends each member who connects the frames a test gives, as a relay that lies would. */
+async function lyingRelay(
+  frames: readonly (Uint8Array | string)[],
+  certificate = TEST_CERTIFICATE,
+): Promise<number> {
   const port = await freePort();
-  const fake = new WebSocketServer({ host: LOOPBACK, port });
-  fakes.push(fake);
+  const server = createHttpsServer({ cert: certificate.certificate, key: certificate.key });
+  const fake = new WebSocketServer({ server });
+  fakes.push(server);
   fake.on('connection', (socket: WebSocket) => {
     socket.once('message', () => {
       frames.forEach((frame) => {
@@ -157,7 +175,11 @@ async function lyingRelay(frames: readonly (Uint8Array | string)[]): Promise<num
       });
     });
   });
-  await new Promise((resolve) => fake.once('listening', resolve));
+  await new Promise((resolve) =>
+    server.listen(port, LOOPBACK, () => {
+      resolve(undefined);
+    }),
+  );
   return port;
 }
 
@@ -270,6 +292,21 @@ describe('a session in a room of a relay', () => {
       { kind: 'ended', reason: 'CLOSED' },
       [{ kind: 'ended', reason: 'NO_ROOM' }],
     ]);
+  });
+
+  it('ends at once on a relay of this computer whose certificate it does not trust', async () => {
+    const port = await lyingRelay([encodeRelayFrame(WELCOME)], makeTestCertificate());
+    const member = joinRelay(port, EDIT_KEYS);
+    await until(() => member.kinds().includes('ended'));
+    expect(member.events).toEqual([{ kind: 'ended', reason: 'UNTRUSTED' }]);
+  });
+
+  it('never gets in a relay of this computer that does not encrypt its connections', async () => {
+    const plain = await startRelayServer({ config: testConfig(folder) });
+    relays.push(plain);
+    const member = joinRelay(plain.port, EDIT_KEYS, { creates: true });
+    await until(() => member.kinds().includes('ended'));
+    expect(member.events).toEqual([{ kind: 'ended', reason: 'UNREACHABLE' }]);
   });
 
   it('ends at once when the relay cannot be reached before it was ever in, unless the window keeps trying, which gets in once the relay is up', async () => {
