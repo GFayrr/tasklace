@@ -14,6 +14,7 @@ import {
   type RelayRefusal,
 } from '../../src/core/collaboration/relay/relay-wire.ts';
 import type { RelayConfig } from './config.ts';
+import { entriesAfter } from './room-file.ts';
 import { createAddressBuckets, createBucket, type Bucket, type Rate } from './rate.ts';
 import { openRoomStore, type Room, type RoomStore } from './rooms.ts';
 import { verifierOf } from './signature.ts';
@@ -200,11 +201,9 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
       enqueue(other, { type: 'joined', member: member.number });
     });
     place.members.set(member.number, member);
-    room.entries
-      .filter((entry) => entry.seq > since)
-      .forEach((entry) => {
-        enqueue(member, { type: 'record', seq: entry.seq, record: entry.record });
-      });
+    entriesAfter(room.entries, since).forEach((entry) => {
+      enqueue(member, { type: 'record', seq: entry.seq, record: entry.record });
+    });
     enqueue(member, { type: 'caughtUp' });
   };
   /** Takes a member out of a room, telling the others, and lets the store forget the room once nobody holds it. */
