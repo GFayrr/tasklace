@@ -18,8 +18,8 @@
   const text = $derived(app.messages.collaboration);
   const labels: Readonly<Record<GuestConnection, string>> = $derived({
     connected: text.shared,
-    reconnecting: text.reconnecting,
-    offline: app.collaboration.canEdit ? text.offline : text.offlineKeptApart,
+    reconnecting: text.reconnectingShort,
+    offline: app.collaboration.canEdit ? text.offlineShort : text.offlineReadOnlyShort,
     lost: text.connectionLost,
   });
 </script>

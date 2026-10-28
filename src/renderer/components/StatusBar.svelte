@@ -108,7 +108,6 @@
   {#if relay.isReadOnly}
     <span class="read-only">
       <span class="badge"><Icon name="eye" />{text.collaboration.readOnlyRight}</span>
-      <span class="hint">{text.relay.readOnlyHint}</span>
     </span>
   {:else if mode.kind === 'guest' && collaboration.isReadOnly}
     <span class="read-only">
