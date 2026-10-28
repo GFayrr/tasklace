@@ -1,8 +1,0 @@
-# Only what the relay runs goes into its image: its sources without tests, its lock file and the wire format it shares with the application.
-*
-!relay/package.json
-!relay/package-lock.json
-!relay/src
-relay/src/**/*.test.ts
-relay/src/testing/
-!src/core/collaboration/relay/relay-wire.ts
