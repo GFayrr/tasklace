@@ -34,6 +34,7 @@ import type {
   GuestEndReason,
   NearbyPlan,
   OpenedProject,
+  RelayEndReason,
   Sharing,
   TasklaceBridge,
 } from '../../preload/bridge-contract';
@@ -76,6 +77,8 @@ export interface CollaborationContext {
   readonly hostChanged: (change: HostChange) => void;
   readonly ownChangesKept: (kept: Result<KeptOwnChanges, FileFailure>) => void;
   readonly selectedTaskId: () => TaskId | null;
+  readonly relayEnded: (reason: RelayEndReason, relay: string) => void;
+  readonly relayLinkNotKept: () => void;
   readonly shareLater?: (share: () => void) => void;
   readonly randomBytes?: (count: number) => Uint8Array;
 }
@@ -95,9 +98,17 @@ export type GuestConnection = 'connected' | 'reconnecting' | 'offline' | 'lost';
 
 export type CollaborationFailure = FileFailure | { readonly code: 'NO_NAME' | 'NO_PROJECT' };
 
+export interface PresentPerson {
+  readonly id: string;
+  readonly name: string;
+  readonly color: number;
+}
+
 export const EMPTY_STATE_VECTOR = Uint8Array.of(0);
 
-const NOBODY_PLACED: ReadonlyMap<TaskId, readonly Participant[]> = new Map();
+const NOBODY_PLACED: ReadonlyMap<TaskId, readonly PresentPerson[]> = new Map();
+const MY_RELAY_ID = 'relay-me';
+const MY_RELAY_COLOR = 0;
 
 /** Draws random bytes from the generator of the page. */
 function pageRandomBytes(count: number): Uint8Array {
@@ -168,10 +179,21 @@ export class CollaborationState {
   #settings = $state.raw<CollaborationSettings | null>(null);
   #nearby = $state.raw<readonly NearbyPlan[]>([]);
   #lastEnd = $state.raw<GuestEndReason | null>(null);
-  readonly #presence = $derived.by(() =>
-    this.#phase.kind === 'guest' && this.#phase.connection !== 'connected'
+  readonly #presence = $derived.by(() => {
+    if (this.relay.isActive) {
+      return presenceOf(this.relay.others, null);
+    }
+    return this.#phase.kind === 'guest' && this.#phase.connection !== 'connected'
       ? NOBODY_PLACED
-      : presenceOf(this.#participants, this.me),
+      : presenceOf(this.#participants, this.me);
+  });
+  readonly #shownPeople = $derived.by((): readonly PresentPerson[] =>
+    this.relay.isActive
+      ? [
+          { id: MY_RELAY_ID, name: this.#settings?.name ?? '', color: MY_RELAY_COLOR },
+          ...this.relay.others,
+        ]
+      : this.#participants,
   );
   readonly #context: CollaborationContext;
   readonly relay: RelayState;
@@ -191,6 +213,8 @@ export class CollaborationState {
       name: () => this.#settings?.name ?? null,
       selectedTaskId: context.selectedTaskId,
       randomBytes: context.randomBytes ?? pageRandomBytes,
+      ended: context.relayEnded,
+      linkNotKept: context.relayLinkNotKept,
     });
     context.bridge.onCollaborationEvent((event) => {
       this.#receive(event);
@@ -251,9 +275,14 @@ export class CollaborationState {
     return !this.canEdit;
   }
 
-  /** Returns the other people in the shared plan by the task each one selected, in the order of the list, or nobody while the connection to the host is lost, since where they are is then unknown. */
-  get presence(): ReadonlyMap<TaskId, readonly Participant[]> {
+  /** Returns the other people in the shared plan by the task each one selected, in the order of the list, or nobody while the connection to the host or the relay is lost, since where they are is then unknown. */
+  get presence(): ReadonlyMap<TaskId, readonly PresentPerson[]> {
     return this.#presence;
+  }
+
+  /** Returns the people shown in the chip and the status bar: everyone in a plan shared on this network, or this person then the others in a plan shared through a relay. */
+  get shownPeople(): readonly PresentPerson[] {
+    return this.#shownPeople;
   }
 
   /** Returns the name of the host of the plan this page joined, or null. */
@@ -964,11 +993,11 @@ export class CollaborationState {
   }
 }
 
-/** Groups the people other than this page by the task each one selected, in the order of the list. */
-function presenceOf(
-  participants: readonly Participant[],
-  me: ParticipantId | null,
-): ReadonlyMap<TaskId, readonly Participant[]> {
+/** Groups the people other than this page by the task each one selected, in the order of the list, whether they share on this network or through a relay. */
+function presenceOf<Person extends PresentPerson & { readonly selectedTaskId: TaskId | null }>(
+  participants: readonly Person[],
+  me: string | null,
+): ReadonlyMap<TaskId, readonly Person[]> {
   const placed = participants.flatMap((participant) =>
     participant.id === me || participant.selectedTaskId === null
       ? []

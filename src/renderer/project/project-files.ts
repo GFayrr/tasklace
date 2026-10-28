@@ -326,7 +326,9 @@ export function createProjectFiles(
     importFile: (kind) => exclusive(() => load(() => bridge.importProject(kind), false)),
     openShared: (state) => onceFree(() => load(() => bridge.openSharedPlan(state), false)),
     openOffered: (opened) =>
-      onceFree(() => load(() => Promise.resolve({ ok: true, value: opened }), false)),
+      onceFree(() =>
+        load(() => Promise.resolve({ ok: true, value: opened }), opened.fileName !== ''),
+      ),
     openKept: () => exclusive(() => load(bridge.openKeptChanges, true)),
     save: () =>
       exclusive(() => (current?.hasFile === true ? trackSave(bridge.saveProject) : saveAs())),

@@ -320,6 +320,7 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
       return link;
     }
     if (link.value === null) {
+      await services.noteRelay(event.sender, null);
       return success(null);
     }
     if (isBusy(event.sender)) {

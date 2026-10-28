@@ -13,7 +13,6 @@
   import type { AppState } from '../app/app-state.svelte';
   import { collaborationFailureText, relayFailureText } from '../collaboration/collaboration-text';
   import type { RelayLinkKind } from '../../preload/bridge-contract';
-  import { PERSON_COLORS } from '../theme/person-colors';
   import { fillMessage } from '../i18n/messages';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import Icon from './Icon.svelte';
@@ -86,13 +85,6 @@
             copyLabel: relayText.copyViewLink,
           },
         ],
-  );
-  const relayPeople = $derived(
-    [...relay.people].map(([member, person], index) => ({
-      member,
-      ...person,
-      color: (index + 1) % PERSON_COLORS.length,
-    })),
   );
 
   /** Opens the dialog with the name and port of this computer when the share window opens, and closes it when it is closed elsewhere. */
@@ -308,7 +300,7 @@
               <span class="who">{fillMessage(relayText.you, { name: settings?.name ?? '' })}</span>
               <span class="right">{relay.canEdit ? text.canEdit : text.readOnlyRight}</span>
             </li>
-            {#each relayPeople as person (person.member)}
+            {#each relay.others as person (person.id)}
               <li class="person">
                 <PersonBadge name={person.name} color={person.color} locale={app.locale} />
                 <span class="who">{person.name}</span>

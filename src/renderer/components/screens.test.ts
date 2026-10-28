@@ -101,16 +101,21 @@ describe('Welcome', () => {
     expect(app.collaborationWindow).toBe('join');
   });
 
-  it('lists the recent projects with their folder, and opens one', async () => {
+  it('lists the recent projects with their folder, or the relay their plan is shared through, and opens one', async () => {
     const { context, control } = fakeAppContext();
     const app = new AppState(context);
     control.recent = [
       { name: 'Thesis', folder: '/school', relay: null },
       { name: 'Thesis', folder: '/work', relay: null },
+      { name: 'Lab', folder: 'Kept on this computer', relay: 'relay.example.org:8443' },
     ];
     await app.loadRecentProjects();
     const root = render(Welcome, { app });
-    expect(textsOf(root, '.recent-project')).toEqual(['Thesis /school', 'Thesis /work']);
+    expect(textsOf(root, '.recent-project')).toEqual([
+      'Thesis /school',
+      'Thesis /work',
+      'Lab Shared through relay.example.org:8443',
+    ]);
     click(nth(root, '.recent-project', 1));
     await settle();
     expect(control.openedRecent).toEqual([1]);

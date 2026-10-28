@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { AppState } from '../app/app-state.svelte';
   import type { GuestConnection } from '../collaboration/collaboration-state.svelte';
-  import { lostText } from '../collaboration/collaboration-text';
+  import type { RelayConnection } from '../collaboration/relay-state.svelte';
+  import { lostText, relayEndText } from '../collaboration/collaboration-text';
   import { fillMessage } from '../i18n/messages';
   import ConnectionFace from './ConnectionFace.svelte';
   import Icon from './Icon.svelte';
@@ -28,6 +29,29 @@
     offline: text.reconnectingDetail,
     lost: lostText(app.messages, collaboration.lastEnd, host),
   });
+  const relay = $derived(collaboration.relay);
+  const relayText = $derived(app.messages.relay);
+  const RELAY_DOTS: Readonly<Record<RelayConnection, GuestConnection>> = {
+    connecting: 'reconnecting',
+    connected: 'connected',
+    reconnecting: 'reconnecting',
+    offline: 'offline',
+    lost: 'lost',
+  };
+  const relayLabels: Readonly<Record<RelayConnection, string>> = $derived({
+    connecting: relayText.connecting,
+    connected: relay.canEdit ? relayText.shared : relayText.readOnly,
+    reconnecting: relayText.reconnecting,
+    offline: relay.canEdit ? relayText.offline : relayText.offlineReadOnly,
+    lost: text.connectionLost,
+  });
+  const relayHint = $derived.by(() => {
+    const end = relay.endOfOpenPlan;
+    if (end !== null) {
+      return relayEndText(app.messages, end.reason, end.relay);
+    }
+    return relay.canEdit ? undefined : relayText.readOnlyHint;
+  });
   const guestItems: readonly MenuItem[] = $derived([
     {
       key: 'leave',
@@ -42,7 +66,22 @@
   <ConnectionFace {app} {connection} />
 {/snippet}
 
-{#if mode.kind === 'idle'}
+{#if relay.connection !== null}
+  <button
+    type="button"
+    class="host"
+    aria-label={relayLabels[relay.connection]}
+    title={relayHint}
+    onclick={() => app.openShare()}
+  >
+    <ConnectionFace
+      {app}
+      connection={RELAY_DOTS[relay.connection]}
+      label={relayLabels[relay.connection]}
+      people={collaboration.shownPeople}
+    />
+  </button>
+{:else if mode.kind === 'idle'}
   <button type="button" class="share" onclick={() => app.openShare()}>
     <Icon name="share" />
     <span>{text.share}</span>

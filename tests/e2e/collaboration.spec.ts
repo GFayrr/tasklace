@@ -6,13 +6,13 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { closeDiscarding, launchApplication } from './application';
+import { picture } from './pictures';
 import { addTask, taskRow } from './table';
 
 const LOOPBACK = '127.0.0.1';
 const REMOVAL_RETRIES = 20;
 const REMOVAL_RETRY_STEP_MS = 100;
 const runFile = promisify(execFile);
-const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
 const CODE_PATTERN = /^[A-HJ-NP-Z2-9]{6}$/;
 const PORT_PATTERN = /port (\d+)/;
 const TOOLBAR_WIDTH = 1_280;
@@ -132,13 +132,6 @@ async function stopProcessTree(pid: number | undefined): Promise<void> {
     return;
   }
   process.kill(pid, 'SIGKILL');
-}
-
-/** Saves a picture of a window when a folder for pictures is given, to review the interface by eye. */
-async function picture(page: Page, name: string): Promise<void> {
-  if (SCREENSHOT_FOLDER !== undefined) {
-    await page.screenshot({ path: join(SCREENSHOT_FOLDER, `${name}.png`) });
-  }
 }
 
 /** Joins a plan from an instance the first time, by its address on this computer and its code, under a name. */

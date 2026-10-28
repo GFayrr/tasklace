@@ -39,6 +39,7 @@ function side(session: SharedSession | null, ids: readonly string[]) {
   const opened: Uint8Array[] = [];
   const repairs: unknown[] = [];
   const hostChanges: [string | null, string | null][] = [];
+  const relayTold: unknown[][] = [];
   const kept: unknown[] = [];
   let openSucceeds = true;
   let openingError: Error | null = null;
@@ -82,6 +83,8 @@ function side(session: SharedSession | null, ids: readonly string[]) {
     hostChanged: ({ left, next }) => hostChanges.push([left, next]),
     ownChangesKept: (result) => kept.push(result),
     selectedTaskId: () => (selected === null ? null : testId(selected)),
+    relayEnded: (reason, relay) => relayTold.push(['ended', reason, relay]),
+    relayLinkNotKept: () => relayTold.push(['linkNotKept']),
     shareLater: (share) => {
       laterShares.push(share);
       if (sharesAtOnce) {
@@ -99,6 +102,7 @@ function side(session: SharedSession | null, ids: readonly string[]) {
     repairs,
     hostChanges,
     kept,
+    relayTold,
     session: () => current,
     select: (id: string | null) => {
       selected = id;

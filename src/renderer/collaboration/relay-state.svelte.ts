@@ -19,6 +19,7 @@ import type {
   TasklaceBridge,
 } from '../../preload/bridge-contract';
 import type { KeptOwnChanges } from './collaboration-state.svelte';
+import { PERSON_COLORS } from '../theme/person-colors';
 
 export type RelayBridge = Pick<
   TasklaceBridge,
@@ -42,6 +43,16 @@ export interface RelayContext {
   readonly name: () => string | null;
   readonly selectedTaskId: () => TaskId | null;
   readonly randomBytes: (count: number) => Uint8Array;
+  readonly ended: (reason: RelayEndReason, relay: string) => void;
+  readonly linkNotKept: () => void;
+}
+
+export interface ShownRelayPerson {
+  readonly id: string;
+  readonly name: string;
+  readonly color: number;
+  readonly canEdit: boolean;
+  readonly selectedTaskId: TaskId | null;
 }
 
 export type RelayConnection = 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'lost';
@@ -64,6 +75,7 @@ interface InPlan {
   readonly links: ShownRelayLinks;
   readonly kept: boolean;
   readonly connection: RelayConnection;
+  readonly end: RelayEndReason | null;
   readonly member: RelayMember | null;
   readonly bytesSinceSnapshot: number;
   readonly due: Due;
@@ -72,6 +84,7 @@ interface InPlan {
 type RelayPhase = { readonly kind: 'idle' } | { readonly kind: 'starting' } | InPlan;
 
 const NOBODY: ReadonlyMap<number, RelayPerson> = new Map();
+const PERSON_ID_PREFIX = 'relay-';
 const RELAY_EVENT_KINDS: ReadonlySet<CollaborationEvent['kind']> = new Set<RelayEventKind>([
   'relayConnected',
   'relayState',
@@ -95,6 +108,13 @@ export class RelayState {
   #phase = $state.raw<RelayPhase>({ kind: 'idle' });
   #people = $state.raw<ReadonlyMap<number, RelayPerson>>(NOBODY);
   #lastEnd = $state.raw<RelayEndReason | null>(null);
+  readonly #others = $derived(
+    [...this.#people].map(([member, person], index) => ({
+      ...person,
+      id: `${PERSON_ID_PREFIX}${String(member)}`,
+      color: (index + 1) % PERSON_COLORS.length,
+    })),
+  );
   #held: RelayEvent[] = [];
   #generation = 0;
   readonly #context: RelayContext;
@@ -154,6 +174,19 @@ export class RelayState {
     return this.#people;
   }
 
+  /** Returns the other people in the plan as the interface shows them, in the order they came, each with a color after the first one, which is this person's own. */
+  get others(): readonly ShownRelayPerson[] {
+    return this.#others;
+  }
+
+  /** Returns why the relay ended the plan still open here, with that relay as a person reads it, or null while it has not. */
+  get endOfOpenPlan(): { readonly reason: RelayEndReason; readonly relay: string } | null {
+    const phase = this.#phase;
+    return phase.kind === 'in' && phase.end !== null
+      ? { reason: phase.end, relay: phase.relay }
+      : null;
+  }
+
   /** Returns why the latest plan shared through a relay ended, or null. */
   get lastEnd(): RelayEndReason | null {
     return this.#lastEnd;
@@ -198,6 +231,7 @@ export class RelayState {
       links: shown,
       kept,
       connection: 'connected',
+      end: null,
       member: null,
       bytesSinceSnapshot,
       due: null,
@@ -205,6 +239,9 @@ export class RelayState {
     if (!(await this.#context.openJoined(project))) {
       await this.stop();
       return failure({ code: 'CANCELLED' });
+    }
+    if (!kept) {
+      this.#context.linkNotKept();
     }
     return success(null);
   }
@@ -307,7 +344,7 @@ export class RelayState {
     this.#act(phase, phase.member, event);
   }
 
-  /** Acts on an event of the main process with the member of the plan. */
+  /** Acts on an event of the main process with the member of the plan, telling a newcomer where this person is. */
   #act(phase: InPlan, member: RelayMember, event: RelayEvent): void {
     switch (event.kind) {
       case 'relayConnected':
@@ -326,6 +363,7 @@ export class RelayState {
         member.presence(event.member, event.presence);
         return;
       case 'relayJoined':
+        this.selectionChanged();
         return;
       case 'relayLeft':
         member.left(event.member);
@@ -350,12 +388,13 @@ export class RelayState {
     this.selectionChanged();
   }
 
-  /** Keeps the plan open as it is once the relay ended it for good, its connection lost. */
+  /** Keeps the plan open as it is once the relay ended it for good, its connection lost, and tells the page why. */
   #ended(phase: InPlan, member: RelayMember, reason: RelayEndReason): void {
     this.#lastEnd = reason;
     member.disconnected();
     member.stop();
-    this.#phase = { ...phase, connection: 'lost' };
+    this.#phase = { ...phase, connection: 'lost', end: reason };
+    this.#context.ended(reason, phase.relay);
   }
 
   /** Starts a request to the main process, holding its events until it answers, and gives the generation it belongs to. */
@@ -375,6 +414,7 @@ export class RelayState {
       ...start,
       canEdit,
       connection: 'connecting',
+      end: null,
       member,
       bytesSinceSnapshot: 0,
     };

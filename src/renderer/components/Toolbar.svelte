@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { recentPlaceText } from '../collaboration/collaboration-text';
   import type { AppState } from '../app/app-state.svelte';
   import { indentTask, moveTask, outdentTask, toggleMilestone } from '../plan/task-commands';
   import Icon, { type IconName } from './Icon.svelte';
@@ -25,7 +26,7 @@
     ...app.recentProjects.map((recent, index) => ({
       key: `recent-${String(index)}`,
       label: recent.name,
-      hint: recent.folder,
+      hint: recentPlaceText(app.messages, recent),
       select: () => void app.openRecent(index),
     })),
   ]);

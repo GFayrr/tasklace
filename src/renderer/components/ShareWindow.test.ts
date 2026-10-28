@@ -583,7 +583,7 @@ describe('the share window of a plan joined with the link that reads', () => {
     };
     await app.joinByLink('tasklace://relay.example.org/#v1.key');
     await settle();
-    await clickAndSettle(button(root, TEXT.share));
+    await clickAndSettle(button(root, RELAY.readOnly));
     const dialog = shareWindow(root);
     expect([
       textsOf(dialog, '.link-part h3'),

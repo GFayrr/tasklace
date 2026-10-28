@@ -448,6 +448,30 @@ describe('a plan joined by its link', () => {
     ]);
   });
 
+  it('tells in a message that stays when this computer cannot keep the link of the plan joined', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    const offered = openedProjectOf(PLAN, { fileName: '' });
+    if (!offered.ok) {
+      throw new Error('The plan could not be offered.');
+    }
+    fake.control.collaboration.relay.joinResult = {
+      ok: true,
+      value: {
+        project: offered.value,
+        shown: { edit: null, view: 'tasklace://relay.example.org/#v1.P0dX8w…' },
+        relay: 'relay.example.org',
+        bytesSinceSnapshot: 0,
+        kept: false,
+      },
+    };
+    await app.joinByLink('tasklace://relay.example.org/#v1.key');
+    await settle();
+    expect(app.notices.map((notice) => [notice.kind, notice.text, notice.lasting])).toEqual([
+      ['warning', english.relay.linkNotKept, true],
+    ]);
+  });
+
   it('asks first about a changed project without file, joining nothing when the user cancels', async () => {
     const fake = fakeAppContext();
     const app = new AppState(fake.context);

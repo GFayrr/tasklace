@@ -1,4 +1,9 @@
-import type { GuestEndReason, NearbyPlan, RelayEndReason } from '../../preload/bridge-contract';
+import type {
+  GuestEndReason,
+  NearbyPlan,
+  RecentProject,
+  RelayEndReason,
+} from '../../preload/bridge-contract';
 import { fileErrorMessage, fillMessage, type Messages } from '../i18n/messages';
 import type { CollaborationFailure } from './collaboration-state.svelte';
 
@@ -63,6 +68,13 @@ export function collaborationFailureText(
     return messages.collaboration.noName;
   }
   return fileErrorMessage(messages, failure.code);
+}
+
+/** Gives where a recent project lives as the person reads it: the relay its plan is shared through, or its folder. */
+export function recentPlaceText(messages: Messages, recent: RecentProject): string {
+  return recent.relay === null
+    ? recent.folder
+    : fillMessage(messages.relay.sharedThrough, { relay: recent.relay });
 }
 
 /** Gives the text that tells why a relay refused or left a plan, or could not be reached, naming the relay. */

@@ -94,6 +94,7 @@ import type { ZoomLevel } from '../plan/time-scale';
 import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
 import type { Theme } from '../theme/theme';
 import { SettingsPanel } from './settings-panel.svelte';
+import { relayEndText } from '../collaboration/collaboration-text';
 import {
   CollaborationState,
   type CollaborationFailure,
@@ -297,6 +298,12 @@ export class AppState {
       },
       hostChanged: ({ left, next }) => {
         this.#tellHostChanged(left, next);
+      },
+      relayEnded: (reason, relay) => {
+        this.#notify('error', relayEndText(this.messages, reason, relay), null, true);
+      },
+      relayLinkNotKept: () => {
+        this.#notify('warning', this.messages.relay.linkNotKept, null, true);
       },
       ownChangesKept: (kept) => {
         this.#ownChangesKept(kept);

@@ -23,8 +23,16 @@
   );
   const collaboration = $derived(app.collaboration);
   const mode = $derived(collaboration.mode);
-  const away = $derived(
-    mode.kind === 'guest' && mode.connection !== 'connected' ? mode.connection : null,
+  const relay = $derived(collaboration.relay);
+  const away = $derived.by(() => {
+    const connection = relay.connection;
+    if (connection !== null) {
+      return connection === 'connecting' || connection === 'connected' ? null : connection;
+    }
+    return mode.kind === 'guest' && mode.connection !== 'connected' ? mode.connection : null;
+  });
+  const inPlan = $derived(
+    relay.connection === 'connected' || mode.kind === 'hosting' || mode.kind === 'guest',
   );
   const awayTexts = $derived({
     reconnecting: text.collaboration.reconnectingShort,
@@ -33,11 +41,13 @@
   });
   const names = $derived(
     new Intl.ListFormat(app.locale, { type: 'unit', style: 'short' }).format(
-      collaboration.participants.map((person) =>
-        person.isHost
-          ? fillMessage(text.collaboration.hostName, { name: person.name })
-          : person.name,
-      ),
+      relay.isActive
+        ? collaboration.shownPeople.map((person) => person.name)
+        : collaboration.participants.map((person) =>
+            person.isHost
+              ? fillMessage(text.collaboration.hostName, { name: person.name })
+              : person.name,
+          ),
     ),
   );
   const span = $derived.by(() => {
@@ -95,7 +105,12 @@
     </button>
   {/if}
   <div class="spacer"></div>
-  {#if mode.kind === 'guest' && collaboration.isReadOnly}
+  {#if relay.isReadOnly}
+    <span class="read-only">
+      <span class="badge"><Icon name="eye" />{text.collaboration.readOnlyRight}</span>
+      <span class="hint">{text.relay.readOnlyHint}</span>
+    </span>
+  {:else if mode.kind === 'guest' && collaboration.isReadOnly}
     <span class="read-only">
       <span class="badge"><Icon name="eye" />{text.collaboration.readOnlyRight}</span>
       <span class="hint"
@@ -107,10 +122,10 @@
   {/if}
   {#if away !== null}
     <span class={['badge', away]}><Icon name="alert" />{awayTexts[away]}</span>
-  {:else if mode.kind === 'hosting' || mode.kind === 'guest'}
+  {:else if inPlan}
     <div class="people" role="group" aria-label={text.collaboration.peopleLabel}>
       <PeopleFaces
-        people={collaboration.participants}
+        people={collaboration.shownPeople}
         locale={app.locale}
         limit={FACES_SHOWN}
         more={text.collaboration.moreFaces}

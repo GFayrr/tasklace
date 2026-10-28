@@ -630,22 +630,27 @@ describe('reopening a plan shared through a relay', () => {
     ]);
   });
 
-  it('answers nothing for a plan without a kept link, and refuses a plan the window does not hold or an unreadable store', async () => {
+  it('answers nothing for a plan without a kept link, clearing its relay among the recent projects, and refuses a plan the window does not hold or an unreadable store', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const page = openPage(TEST_DOCUMENT_ID);
     const withoutLink = await invoke(page, IPC_CHANNELS.reopenSharedPlan, TEST_DOCUMENT_ID);
+    const clearedRelay = noted.splice(0);
     const notHeld = await invoke(page, IPC_CHANNELS.reopenSharedPlan, OTHER_PLAN);
     links.state.findFails = Object.assign(new Error('Input/output error'), { code: 'EIO' });
     const unreadable = await invoke(page, IPC_CHANNELS.reopenSharedPlan, TEST_DOCUMENT_ID);
     expect([
       withoutLink,
+      clearedRelay,
       notHeld,
       unreadable,
+      noted,
       error.mock.calls.map(([message]: unknown[]) => message),
     ]).toEqual([
       { ok: true, value: null },
+      [[page, null]],
       { ok: false, error: { code: 'TASK_FAILED' } },
       { ok: false, error: { code: 'READ_FAILED' } },
+      [],
       [
         'A page reopened a shared plan it does not hold.',
         'The links of shared plans could not be read:',

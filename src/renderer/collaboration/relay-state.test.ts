@@ -4,7 +4,13 @@ import type { RelayDelivery, RelayOutgoing } from '../../core/collaboration/rela
 import { failure, success } from '../../core/result';
 import { createSharedDocument } from '../../core/shared/shared-document';
 import { openSharedSessionFromState, type SharedSession } from '../../core/shared/shared-session';
-import { link, project, TEST_DOCUMENT_ID, workTask } from '../../core/testing/project-builder';
+import {
+  link,
+  project,
+  TEST_DOCUMENT_ID,
+  testId,
+  workTask,
+} from '../../core/testing/project-builder';
 import { sessionOn } from '../../core/testing/session-copy';
 import { seededRandom } from '../../core/testing/test-crypto';
 import type {
@@ -77,6 +83,7 @@ function page(session: SharedSession | null = sessionOn(ORIGIN, 1)) {
   const repairs: unknown[] = [];
   const kept: unknown[] = [];
   const opened: OpenedProject[] = [];
+  const told: unknown[][] = [];
   let current = session;
   const answers = {
     share: success(LINKS) as BridgeResult<RelayLinks>,
@@ -148,6 +155,8 @@ function page(session: SharedSession | null = sessionOn(ORIGIN, 1)) {
     name: () => 'Léa',
     selectedTaskId: () => null,
     randomBytes: seededRandom(3),
+    ended: (reason, relay) => told.push(['ended', reason, relay]),
+    linkNotKept: () => told.push(['linkNotKept']),
   });
   return {
     relay,
@@ -157,6 +166,7 @@ function page(session: SharedSession | null = sessionOn(ORIGIN, 1)) {
     kept,
     opened,
     answers,
+    told,
     session: () => current,
     close: () => {
       current = null;
@@ -269,6 +279,16 @@ describe('joining a plan by its link from the page', () => {
       joining.relay.isOpening,
       joining.kinds(),
     ]).toEqual([success(null), 1, 'From Camille', 'connected', false, ['presence']]);
+  });
+
+  it('tells the page when this computer cannot keep the link of the plan joined, and only then', async () => {
+    const kept = page(null);
+    kept.answers.join = joined(false);
+    await kept.relay.join('tasklace://relay.example.org/#v1.view');
+    const unkept = page(null);
+    unkept.answers.join = joined(false, false);
+    await unkept.relay.join('tasklace://relay.example.org/#v1.view');
+    expect([kept.told, unkept.told]).toEqual([[], [['linkNotKept']]]);
   });
 
   it('stays in read only with the link that reads', async () => {
@@ -416,6 +436,20 @@ describe('a plan shared through a relay while it lives', () => {
     return shared;
   }
 
+  it('tells a newcomer where this person is, as the relay passes presences only as they are sent', async () => {
+    const shared = await sharedPage();
+    const before = shared.kinds().length;
+    shared.relay.receive({ kind: 'relayJoined', member: 2 });
+    const presence = shared.sent.at(-1);
+    expect([
+      shared.kinds().slice(before),
+      presence?.kind === 'presence' && readMessage(presence.bytes),
+    ]).toEqual([
+      ['presence'],
+      { ok: true, value: { kind: 'presence', name: 'Léa', selectedTaskId: null } },
+    ]);
+  });
+
   it('follows who is in, who leaves and the connection coming and going', async () => {
     const shared = await sharedPage();
     shared.relay.receive({ kind: 'relayJoined', member: 2 });
@@ -427,11 +461,26 @@ describe('a plan shared through a relay while it lives', () => {
         canEdit: false,
       },
     });
+    shared.relay.receive({ kind: 'relayJoined', member: 5 });
+    shared.relay.receive({
+      kind: 'relayPresence',
+      member: 5,
+      presence: {
+        bytes: encodeMessage({ kind: 'presence', name: 'Noah', selectedTaskId: testId('a') }),
+        canEdit: true,
+      },
+    });
+    const shown = shared.relay.others;
+    shared.relay.receive({ kind: 'relayLeft', member: 5 });
     const withCamille = [...shared.relay.people.values()];
     shared.relay.receive({ kind: 'relayLeft', member: 2 });
     const afterLeaving = shared.relay.people.size;
     shared.relay.receive({ kind: 'offline' });
-    expect([withCamille, afterLeaving, shared.relay.connection]).toEqual([
+    expect([shown, withCamille, afterLeaving, shared.relay.connection]).toEqual([
+      [
+        { id: 'relay-2', name: 'Camille', color: 1, canEdit: false, selectedTaskId: null },
+        { id: 'relay-5', name: 'Noah', color: 2, canEdit: true, selectedTaskId: 'a' },
+      ],
       [{ name: 'Camille', selectedTaskId: null, canEdit: false }],
       0,
       'offline',
@@ -488,10 +537,18 @@ describe('a plan shared through a relay while it lives', () => {
     if (session !== null) {
       rename(session, 'b', 'After the end');
     }
-    expect([shared.relay.connection, shared.relay.lastEnd, shared.sent.length]).toEqual([
+    expect([
+      shared.relay.connection,
+      shared.relay.lastEnd,
+      shared.relay.endOfOpenPlan,
+      shared.sent.length,
+      shared.told,
+    ]).toEqual([
       'lost',
       'CLOSED',
+      { reason: 'CLOSED', relay: 'relay.example.org' },
       sentBefore,
+      [['ended', 'CLOSED', 'relay.example.org']],
     ]);
   });
 
@@ -567,7 +624,8 @@ describe('a page that shares nothing through a relay', () => {
       idle.relay.isReadOnly,
       idle.relay.people.size,
       idle.relay.lastEnd,
-    ]).toEqual([false, false, null, null, null, false, false, 0, null]);
+      idle.relay.endOfOpenPlan,
+    ]).toEqual([false, false, null, null, null, false, false, 0, null, null]);
   });
 
   it('keeps the links it has when new ones cannot be made', async () => {
