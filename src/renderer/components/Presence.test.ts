@@ -47,6 +47,7 @@ async function renderHosting(guestCount: number) {
     value: { name: 'Camille', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
   };
   await opened.app.openShare();
+  await opened.app.startSharing();
   opened.app.closeCollaborationWindow();
   GUESTS.slice(0, guestCount).forEach((name, index) => {
     collaboration.listener?.({

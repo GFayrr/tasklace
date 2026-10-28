@@ -84,6 +84,8 @@ function page(session: SharedSession | null = sessionOn(ORIGIN, 1)) {
     reopen: success(null) as BridgeResult<RelayReopened | null>,
     newLinks: success(NEW_LINKS) as BridgeResult<RelayLinks>,
     stop: DONE,
+    copy: DONE,
+    guide: DONE,
     keep: success({ localCopySaved: true }) as BridgeResult<{ readonly localCopySaved: boolean }>,
     opens: true,
     meanwhile: (): void => undefined,
@@ -111,6 +113,14 @@ function page(session: SharedSession | null = sessionOn(ORIGIN, 1)) {
     stopCollaboration: () => {
       requests.push(['stopCollaboration']);
       return Promise.resolve(answers.stop);
+    },
+    copyRelayLink: (kind) => {
+      requests.push(['copyRelayLink', kind]);
+      return Promise.resolve(answers.copy);
+    },
+    openGuide: () => {
+      requests.push(['openGuide']);
+      return Promise.resolve(answers.guide);
     },
     sendToRelay: (outgoing) => {
       sent.push(outgoing);
@@ -156,8 +166,8 @@ function page(session: SharedSession | null = sessionOn(ORIGIN, 1)) {
   };
 }
 
-/** Gives what joining by a link answers: the original plan to open, with the right of the link. */
-function joined(canEdit: boolean): BridgeResult<RelayJoined> {
+/** Gives what joining by a link answers: the original plan to open, with the right of the link and whether this computer keeps it. */
+function joined(canEdit: boolean, kept = true): BridgeResult<RelayJoined> {
   return success({
     project: {
       state: sessionOn(ORIGIN, 2).encodeState(),
@@ -169,7 +179,7 @@ function joined(canEdit: boolean): BridgeResult<RelayJoined> {
     shown: canEdit ? BOTH_LINKS : VIEW_LINK,
     relay: 'relay.example.org',
     bytesSinceSnapshot: 0,
-    kept: true,
+    kept,
   });
 }
 
@@ -598,5 +608,67 @@ describe('the events a plan shared through a relay follows', () => {
     [{ kind: 'hostLeft' }, false],
   ] as const)('tells whether %o is one', (event, followed) => {
     expect(isRelayEvent(event)).toBe(followed);
+  });
+});
+
+describe('the links and the guide of a plan shared through a relay', () => {
+  it('copies a link and opens the guide through the main process, telling whether it could', async () => {
+    const shared = page();
+    await shared.relay.share('wss://relay.example.org');
+    const copied = await shared.relay.copyLink('edit');
+    const guided = await shared.relay.openGuide();
+    shared.answers.copy = failure({ code: 'TASK_FAILED' });
+    shared.answers.guide = failure({ code: 'TASK_FAILED' });
+    expect([
+      copied,
+      guided,
+      await shared.relay.copyLink('view'),
+      await shared.relay.openGuide(),
+      shared.requests.slice(1),
+    ]).toEqual([
+      true,
+      true,
+      false,
+      false,
+      [['copyRelayLink', 'edit'], ['openGuide'], ['copyRelayLink', 'view'], ['openGuide']],
+    ]);
+  });
+
+  it('tells whether this computer keeps the link, after sharing, joining, making new links and coming back', async () => {
+    const shared = page();
+    shared.answers.share = success({ ...LINKS, kept: false });
+    await shared.relay.share('wss://relay.example.org');
+    const afterSharing = shared.relay.isLinkKept;
+    await shared.relay.makeNewLinks();
+    const reader = page(null);
+    reader.answers.join = joined(false, false);
+    await reader.relay.join('tasklace://relay.example.org/#v1.view');
+    const reopened = page();
+    reopened.answers.reopen = success({ shown: BOTH_LINKS, relay: 'relay.example.org' });
+    const session = reopened.session();
+    if (session !== null) {
+      await reopened.relay.reopen(session);
+    }
+    expect([
+      page().relay.isLinkKept,
+      afterSharing,
+      shared.relay.isLinkKept,
+      reader.relay.isLinkKept,
+      reopened.relay.isLinkKept,
+    ]).toEqual([false, false, true, false, true]);
+  });
+
+  it('tells that it waits for the main process only while a request is unanswered', async () => {
+    const shared = page();
+    let waiting: boolean | null = null;
+    shared.answers.meanwhile = () => {
+      waiting = shared.relay.isStarting;
+    };
+    await shared.relay.share('wss://relay.example.org');
+    expect([waiting, shared.relay.isStarting, page().relay.isStarting]).toEqual([
+      true,
+      false,
+      false,
+    ]);
   });
 });

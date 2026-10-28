@@ -6,7 +6,10 @@ import {
   joinEndText,
   lostText,
   preferredAddress,
+  relayEndText,
+  relayFailureText,
 } from './collaboration-text';
+import { RELAY_ENDS } from '../../preload/bridge-contract';
 
 const PLAN = { key: 'k', planName: 'Thesis', hostName: 'Camille', port: 47_313 };
 
@@ -73,5 +76,39 @@ describe('the texts of a shared plan', () => {
       preferredAddress({ ...PLAN, addresses: ['fe80::1', 'fd00::2'] }),
       preferredAddress({ ...PLAN, addresses: [] }),
     ]).toEqual(['192.168.1.24', 'fe80::1', null]);
+  });
+});
+
+describe('the texts of a plan shared through a relay', () => {
+  it('tells why a relay refused or left a plan, one text for each reason, naming the relay', () => {
+    expect(RELAY_ENDS.map((reason) => relayEndText(english, reason, 'relay.example'))).toEqual([
+      'The relay relay.example uses another version of Tasklace, so it cannot take this plan.',
+      'The relay relay.example sent something Tasklace could not read, so Tasklace left it.',
+      'This plan is no longer on the relay: it was given new links, or nobody opened it for a long time. Ask who sent you the link for a new one.',
+      'The relay relay.example already holds a plan in that place. Share the plan again.',
+      'The relay relay.example refused a change that the link to edit did not sign.',
+      'The relay keeps no more for this plan: it reached the size its owner allows. Your changes are kept on this computer.',
+      'This plan already has as many people as the relay relay.example takes. Try again later.',
+      'The relay relay.example takes no more plans for now. Try again later, or ask its owner.',
+      'Too many connections come from your network to the relay relay.example. Try again later.',
+      'Tasklace sent too much to the relay relay.example at once. Try again in a moment.',
+      'This plan was given new links, so its old place on the relay is empty. Ask who shared it for the new links.',
+      'The relay relay.example did not answer. Check your connection, or ask who sent you the link.',
+      'The relay relay.example could not prove who it is, so Tasklace does not use it. Ask its owner to check its certificate.',
+    ]);
+  });
+
+  it('tells why a plan could not be shared or joined through a relay, an address of its own included, and nothing for a cancelled choice', () => {
+    expect([
+      relayFailureText(english, { code: 'RELAY_ENDED', reason: 'UNREACHABLE' }, 'relay.example'),
+      relayFailureText(english, { code: 'INVALID_ADDRESS' }, 'relay'),
+      relayFailureText(english, { code: 'NOT_SECURE' }, 'relay.example'),
+      relayFailureText(english, { code: 'CANCELLED' }, 'relay.example'),
+    ]).toEqual([
+      'The relay relay.example did not answer. Check your connection, or ask who sent you the link.',
+      english.relay.invalidAddress,
+      english.fileErrors.NOT_SECURE,
+      null,
+    ]);
   });
 });

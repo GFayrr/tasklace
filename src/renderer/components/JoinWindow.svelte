@@ -1,5 +1,6 @@
 <script lang="ts">
   import { FIRST_PORT, isPort, LAST_PORT } from '../../core/collaboration/ports';
+  import { previewRelayLink } from '../../core/collaboration/relay/relay-link';
   import { readJoinCode } from '../../core/collaboration/secure/join-code';
   import { MAX_PARTICIPANT_NAME_LENGTH } from '../../core/limits';
   import type { NearbyPlan } from '../../preload/bridge-contract';
@@ -8,12 +9,15 @@
     collaborationFailureText,
     joinEndText,
     preferredAddress,
+    relayFailureText,
   } from '../collaboration/collaboration-text';
   import { fillMessage } from '../i18n/messages';
   import Icon from './Icon.svelte';
 
   let { app }: { app: AppState } = $props();
 
+  let linkDraft = $state('');
+  let joiningByLink = $state(false);
   let codeDraft = $state('');
   let addressDraft = $state('');
   let portDraft = $state<number | null>(null);
@@ -24,7 +28,9 @@
 
   const text = $derived(app.messages.collaboration);
   const collaboration = $derived(app.collaboration);
-  const joining = $derived(collaboration.mode.kind === 'joining');
+  const relayText = $derived(app.messages.relay);
+  const joining = $derived(collaboration.mode.kind === 'joining' || joiningByLink);
+  const preview = $derived(previewRelayLink(linkDraft));
   const ended = $derived.by(() => {
     const reason = collaboration.lastEnd;
     if (!attempted || collaboration.mode.kind !== 'idle' || reason === null) {
@@ -38,6 +44,7 @@
   function followOpening(dialog: HTMLDialogElement): void {
     const isOpen = app.collaborationWindow === 'join';
     if (isOpen && !dialog.open) {
+      linkDraft = '';
       codeDraft = '';
       addressDraft = '';
       portDraft = collaboration.settings?.port ?? null;
@@ -75,16 +82,55 @@
     return null;
   }
 
-  /** Joins the plan with what was typed, keeping the name on this computer first, and shows why it could not be joined. */
+  /** Keeps the name typed on this computer when it changed, telling whether it is kept. */
+  async function keepName(name: string): Promise<boolean> {
+    if (name === collaboration.settings?.name || (await collaboration.rename(name)).ok) {
+      return true;
+    }
+    refusal = text.nameNotKept;
+    return false;
+  }
+
+  /** Joins the plan of the link pasted, or the plan nearby with its code, and shows why it could not be joined. */
   async function join(): Promise<void> {
+    if (linkDraft.trim() === '') {
+      await joinNearby();
+      return;
+    }
+    await joinByLink();
+  }
+
+  /** Joins a plan shared through a relay by the link pasted, keeping the name on this computer first. */
+  async function joinByLink(): Promise<void> {
+    const name = nameDraft.trim();
+    refusal = name === '' ? text.noName : null;
+    if (refusal !== null) {
+      return;
+    }
+    if (preview === null) {
+      refusal = app.messages.fileErrors.INVALID_LINK;
+      return;
+    }
+    if (!(await keepName(name))) {
+      return;
+    }
+    const relay = preview.relay;
+    joiningByLink = true;
+    const joined = await app.joinByLink(linkDraft);
+    joiningByLink = false;
+    refusal =
+      joined === null || joined.ok ? null : relayFailureText(app.messages, joined.error, relay);
+  }
+
+  /** Joins the plan nearby with what was typed, keeping the name on this computer first. */
+  async function joinNearby(): Promise<void> {
     const name = nameDraft.trim();
     const code = readJoinCode(codeDraft);
     refusal = typingRefusal(name, code);
     if (refusal !== null || code === null) {
       return;
     }
-    if (name !== collaboration.settings?.name && !(await collaboration.rename(name)).ok) {
-      refusal = text.nameNotKept;
+    if (!(await keepName(name))) {
       return;
     }
     attempted = true;
@@ -130,69 +176,91 @@
       </button>
     </div>
     <fieldset class="body" disabled={joining}>
-      <section aria-labelledby="join-nearby-title">
-        <h3 id="join-nearby-title">{text.nearby}</h3>
-        {#if collaboration.nearbyPlans.length === 0}
-          <p class="hint">{text.noneNearby}</p>
-        {:else}
-          <ul class="plans">
-            {#each collaboration.nearbyPlans as plan (plan.key)}
-              <li>
-                <button
-                  type="button"
-                  class={['plan', { chosen: chosen?.key === plan.key }]}
-                  aria-pressed={chosen?.key === plan.key}
-                  onclick={() => {
-                    choose(plan);
-                  }}
-                >
-                  <span class="plan-name">{plan.planName}</span>
-                  <span class="host">{plan.hostName}</span>
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </section>
       <label class="field">
-        <span>{text.code}</span>
+        <span>{relayText.linkLabel}</span>
         <input
-          id="join-code"
-          class="code"
-          bind:value={codeDraft}
+          id="join-link"
+          bind:value={linkDraft}
           autocomplete="off"
           spellcheck="false"
+          placeholder={relayText.linkPlaceholder}
         />
+        {#if preview !== null}
+          <small
+            >{fillMessage(preview.canEdit ? relayText.willEdit : relayText.willView, {
+              relay: preview.relay,
+            })}</small
+          >
+        {/if}
       </label>
-      <details class="address">
-        <summary>{text.byAddress}</summary>
-        <div class="address-fields">
-          <label class="field grow">
-            <span>{text.hostAddress}</span>
+      <details class="nearby">
+        <summary>{relayText.nearYou}</summary>
+        <div class="nearby-fields">
+          <section aria-labelledby="join-nearby-title">
+            <h3 id="join-nearby-title">{text.nearby}</h3>
+            {#if collaboration.nearbyPlans.length === 0}
+              <p class="hint">{text.noneNearby}</p>
+            {:else}
+              <ul class="plans">
+                {#each collaboration.nearbyPlans as plan (plan.key)}
+                  <li>
+                    <button
+                      type="button"
+                      class={['plan', { chosen: chosen?.key === plan.key }]}
+                      aria-pressed={chosen?.key === plan.key}
+                      onclick={() => {
+                        choose(plan);
+                      }}
+                    >
+                      <span class="plan-name">{plan.planName}</span>
+                      <span class="host">{plan.hostName}</span>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </section>
+          <label class="field">
+            <span>{text.code}</span>
             <input
-              id="join-address"
-              bind:value={addressDraft}
+              id="join-code"
+              class="code"
+              bind:value={codeDraft}
               autocomplete="off"
               spellcheck="false"
-              oninput={() => {
-                chosen = null;
-              }}
             />
           </label>
-          <label class="field">
-            <span>{text.port}</span>
-            <input
-              id="join-port"
-              class="port"
-              type="number"
-              min={FIRST_PORT}
-              max={LAST_PORT}
-              bind:value={portDraft}
-              oninput={() => {
-                chosen = null;
-              }}
-            />
-          </label>
+          <details class="address">
+            <summary>{text.byAddress}</summary>
+            <div class="address-fields">
+              <label class="field grow">
+                <span>{text.hostAddress}</span>
+                <input
+                  id="join-address"
+                  bind:value={addressDraft}
+                  autocomplete="off"
+                  spellcheck="false"
+                  oninput={() => {
+                    chosen = null;
+                  }}
+                />
+              </label>
+              <label class="field">
+                <span>{text.port}</span>
+                <input
+                  id="join-port"
+                  class="port"
+                  type="number"
+                  min={FIRST_PORT}
+                  max={LAST_PORT}
+                  bind:value={portDraft}
+                  oninput={() => {
+                    chosen = null;
+                  }}
+                />
+              </label>
+            </div>
+          </details>
         </div>
       </details>
       <label class="field">
@@ -322,6 +390,25 @@
   }
 
   .host {
+    color: var(--color-text-secondary);
+  }
+
+  .nearby > summary {
+    font-size: var(--font-size-small);
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .nearby-fields {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    margin-top: var(--space-3);
+  }
+
+  .field small {
+    font-size: 12px;
+    font-weight: 400;
     color: var(--color-text-secondary);
   }
 

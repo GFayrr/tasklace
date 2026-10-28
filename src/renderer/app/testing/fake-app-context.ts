@@ -304,6 +304,11 @@ export function fakeBridge(): {
   return { bridge, control };
 }
 
+/** Gives the requests the page made about a relay, leaving out the one every opened plan makes to come back to its relay. */
+export function relayRequests(control: FakeBridgeControl): (readonly [string, ...unknown[]])[] {
+  return control.collaboration.relay.requests.filter(([name]) => name !== 'reopenSharedPlan');
+}
+
 /** Reads the name of the project a saved state holds, or null when it holds none. */
 function projectNameIn(state: Uint8Array): string | null {
   const document = new Y.Doc();

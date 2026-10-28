@@ -293,6 +293,7 @@ export class CollaborationState {
     const saved = await this.saveSettings({ name });
     if (saved.ok) {
       this.#queuePresence();
+      this.relay.selectionChanged();
     }
     return saved;
   }

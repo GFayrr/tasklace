@@ -13,6 +13,7 @@ import type {
   FileFailure,
   OpenedProject,
   RelayEndReason,
+  RelayLinkKind,
   RelayLinks,
   ShownRelayLinks,
   TasklaceBridge,
@@ -25,6 +26,8 @@ export type RelayBridge = Pick<
   | 'joinByLink'
   | 'reopenSharedPlan'
   | 'makeNewLinks'
+  | 'copyRelayLink'
+  | 'openGuide'
   | 'stopCollaboration'
   | 'sendToRelay'
   | 'keepOwnChanges'
@@ -59,6 +62,7 @@ interface InPlan {
   readonly canEdit: boolean;
   readonly relay: string;
   readonly links: ShownRelayLinks;
+  readonly kept: boolean;
   readonly connection: RelayConnection;
   readonly member: RelayMember | null;
   readonly bytesSinceSnapshot: number;
@@ -105,6 +109,11 @@ export class RelayState {
     return this.#phase.kind !== 'idle';
   }
 
+  /** Tells whether the page waits for the main process to answer a request to share, join or come back to a plan. */
+  get isStarting(): boolean {
+    return this.#phase.kind === 'starting';
+  }
+
   /** Tells whether the page waits for a plan it joined by a link to open. */
   get isOpening(): boolean {
     return this.#phase.kind === 'in' && this.#phase.member === null;
@@ -123,6 +132,11 @@ export class RelayState {
   /** Returns the links of the plan as this page may show them, the link that edits only when it holds it, or null outside a plan shared through a relay. */
   get links(): ShownRelayLinks | null {
     return this.#phase.kind === 'in' ? this.#phase.links : null;
+  }
+
+  /** Tells whether this computer keeps the link of the plan shared through a relay, so that it comes back to it once reopened, which it does not without a safe place for it. */
+  get isLinkKept(): boolean {
+    return this.#phase.kind === 'in' && this.#phase.kept;
   }
 
   /** Tells whether this page holds the link that edits the plan it shares through a relay. */
@@ -160,11 +174,8 @@ export class RelayState {
       this.#forget();
       return shared;
     }
-    this.#enter(session, {
-      relay: shared.value.relay,
-      links: shared.value.shown,
-      due: 'wholePlan',
-    });
+    const { relay, shown, kept } = shared.value;
+    this.#enter(session, { relay, links: shown, kept, due: 'wholePlan' });
     return shared;
   }
 
@@ -179,12 +190,13 @@ export class RelayState {
       this.#forget();
       return joined;
     }
-    const { project, shown, relay, bytesSinceSnapshot } = joined.value;
+    const { project, shown, relay, bytesSinceSnapshot, kept } = joined.value;
     this.#phase = {
       kind: 'in',
       canEdit: shown.edit !== null,
       relay,
       links: shown,
+      kept,
       connection: 'connected',
       member: null,
       bytesSinceSnapshot,
@@ -224,7 +236,8 @@ export class RelayState {
       this.#forget();
       return false;
     }
-    this.#enter(session, { relay: reopened.value.relay, links: reopened.value.shown, due: null });
+    const { relay, shown } = reopened.value;
+    this.#enter(session, { relay, links: shown, kept: true, due: null });
     return true;
   }
 
@@ -241,11 +254,22 @@ export class RelayState {
       this.#phase = {
         ...current,
         links: made.value.shown,
+        kept: made.value.kept,
         connection: 'connecting',
         due: 'wholePlan',
       };
     }
     return made;
+  }
+
+  /** Copies a link of the plan this page shares through a relay, the main process holding it, and gives whether it was copied. */
+  async copyLink(kind: RelayLinkKind): Promise<boolean> {
+    return (await this.#context.bridge.copyRelayLink(kind)).ok;
+  }
+
+  /** Opens in the browser the guide that explains how to set up a relay, giving whether it opened. */
+  async openGuide(): Promise<boolean> {
+    return (await this.#context.bridge.openGuide()).ok;
   }
 
   /** Tells the others the task this person selected. */
@@ -343,7 +367,7 @@ export class RelayState {
   }
 
   /** Follows the plan of the open session through a relay with a new member, which edits when the page holds the link that does, then hands it what came meanwhile. */
-  #enter(session: SharedSession, start: Pick<InPlan, 'relay' | 'links' | 'due'>): void {
+  #enter(session: SharedSession, start: Pick<InPlan, 'relay' | 'links' | 'kept' | 'due'>): void {
     const canEdit = start.links.edit !== null;
     const member = this.#member(session, canEdit, 0);
     this.#phase = {
