@@ -10,6 +10,7 @@ import {
   hostLabelOf,
   readRelayAddress,
   readRelayLink,
+  shownRelayLink,
   type RelayAddress,
   type RelayLink,
 } from '../../../core/collaboration/relay/relay-link';
@@ -22,14 +23,15 @@ import {
   type BridgeResult,
   type CollaborationEvent,
   type InvokeChannel,
+  type OpenedProject,
   type RelayJoined,
   type RelayLinks,
   type RelayReopened,
+  type ShownRelayLinks,
 } from '../../../preload/bridge-contract';
-import type { FileTask, ResultOfTask } from '../../file-tasks';
+import type { FileTask, RelayPlan, ResultOfTask } from '../../file-tasks';
 import { handleChannel, type ChannelHandler } from '../../ipc-channels';
 import { refuseMessage, type TrustCheck } from '../../ipc-trust';
-import { offerSharedProject } from '../../project-files';
 import { isSystemError } from '../../stored-files';
 import { zlibCompressor } from '../../zlib-compressor';
 import { aesGcm, systemRandomBytes } from '../aes-gcm';
@@ -49,6 +51,14 @@ export interface RelayServices {
   readonly documentOf: (sender: WebContents) => DocumentId | null;
   readonly busyElsewhere: (sender: WebContents) => boolean;
   readonly startTimer: StartTimer;
+  readonly offerRelayPlan: (
+    sender: WebContents,
+    plan: RelayPlan,
+    relay: string,
+  ) => Promise<OpenedProject>;
+  readonly noteRelay: (sender: WebContents, relay: string | null) => Promise<void>;
+  readonly copyText: (text: string) => Promise<void>;
+  readonly openGuide: () => Promise<boolean>;
   readonly randomBytes?: (count: number) => Uint8Array;
 }
 
@@ -79,6 +89,7 @@ interface WindowRelay {
 }
 
 const MESSAGE_KINDS: readonly unknown[] = ['update', 'snapshot'];
+const LINK_KINDS: readonly unknown[] = ['edit', 'view'];
 const ROOM_GONE: readonly RelayEnd[] = ['CLOSED', 'NO_ROOM'];
 
 /** Answers the requests of the bridge about plans shared through a relay, one relay session per window, the main process alone holding the links and keys, and returns how to know or leave what a window shares, its link staying kept. */
@@ -198,11 +209,12 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
       }
       forward(eventForPage(event));
     };
-    /** Forgets a window whose session ended for good, and the link of its plan when its room is gone. */
+    /** Forgets a window whose session ended for good, and the link of its plan and its relay among the recent projects when its room is gone. */
     const ended = (reason: RelayEnd): void => {
       relays.delete(sender);
       if (ROOM_GONE.includes(reason) && relay.documentId !== null) {
         void forgetLink(relay.documentId);
+        void services.noteRelay(sender, null);
       }
     };
     const session = startRelaySession({
@@ -239,12 +251,9 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
     if (outcome.kind !== 'in') {
       return refusalOf(outcome);
     }
-    return success({
-      editLink: encodeRelayLink(link),
-      viewLink: encodeRelayLink({ address, access: viewAccessOf(link.access) }),
-      relay: hostLabelOf(address),
-      kept: await keepLink(documentId, link),
-    });
+    const kept = await keepLink(documentId, link);
+    await services.noteRelay(sender, hostLabelOf(address));
+    return success({ shown: shownLinksOf(link), relay: hostLabelOf(address), kept });
   };
   /** Opens in the window the plan a link joined, once the worker checked the log it caught up to, keeping the link under the plan it holds. */
   const openJoined = async (
@@ -261,12 +270,14 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
       return loaded;
     }
     relay.documentId = loaded.value.documentId;
+    const label = hostLabelOf(relay.link.address);
+    const kept = await keepLink(loaded.value.documentId, relay.link);
     return success({
-      project: offerSharedProject(sender, loaded.value),
-      canEdit: relay.link.access.kind === 'edit',
-      relay: hostLabelOf(relay.link.address),
+      project: await services.offerRelayPlan(sender, loaded.value, label),
+      shown: shownLinksOf(relay.link),
+      relay: label,
       bytesSinceSnapshot: gathered.bytesSinceSnapshot,
-      kept: await keepLink(loaded.value.documentId, relay.link),
+      kept,
     });
   };
   handle(IPC_CHANNELS.shareThroughRelay, async (event, value) => {
@@ -309,16 +320,16 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
       return link;
     }
     if (link.value === null) {
+      await services.noteRelay(event.sender, null);
       return success(null);
     }
     if (isBusy(event.sender)) {
       return failure({ code: 'ALREADY_SHARING' });
     }
     start(event.sender, link.value, 'reopen').documentId = documentId;
-    return success<RelayReopened>({
-      canEdit: link.value.access.kind === 'edit',
-      relay: hostLabelOf(link.value.address),
-    });
+    const label = hostLabelOf(link.value.address);
+    await services.noteRelay(event.sender, label);
+    return success<RelayReopened>({ shown: shownLinksOf(link.value), relay: label });
   });
   handle(IPC_CHANNELS.makeNewLinks, async (event) => {
     const relay = relays.get(event.sender);
@@ -334,6 +345,25 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
     stop(event.sender);
     return shareInNewRoom(event.sender, relay.link.address, relay.documentId);
   });
+  handle(IPC_CHANNELS.copyRelayLink, async (event, value) => {
+    const kind = LINK_KINDS.includes(value) ? value : refuseMessage();
+    const link = relays.get(event.sender)?.link;
+    if (link === undefined || (kind === 'edit' && link.access.kind !== 'edit')) {
+      console.error('A page asked to copy a link of a plan it does not share with that link.');
+      return failure({ code: 'TASK_FAILED' });
+    }
+    const access = kind === 'edit' ? link.access : viewAccessOf(link.access);
+    try {
+      await services.copyText(encodeRelayLink({ address: link.address, access }));
+    } catch (error) {
+      console.error('The link of a shared plan could not be copied:', error);
+      return failure({ code: 'TASK_FAILED' });
+    }
+    return success(null);
+  });
+  handle(IPC_CHANNELS.openGuide, async () =>
+    (await services.openGuide()) ? success(null) : failure({ code: 'TASK_FAILED' }),
+  );
   ipcMain.on(IPC_CHANNELS.relaySend, (event: IpcMainEvent, value: unknown) => {
     services.assertTrusted(event);
     const outgoing = readRelayOutgoing(value);
@@ -371,6 +401,12 @@ async function foundLink(
     console.error('The links of shared plans could not be read:', error);
     return failure({ code: 'READ_FAILED' });
   }
+}
+
+/** Gives the links of a plan as a person sees them, the link that edits only to whoever holds it, and the link that reads to everyone. */
+function shownLinksOf(link: RelayLink): ShownRelayLinks {
+  const view = shownRelayLink({ address: link.address, access: viewAccessOf(link.access) });
+  return { edit: link.access.kind === 'edit' ? shownRelayLink(link) : null, view };
 }
 
 /** Gives the failure a request ends with when it did not get what it waited for: the refusal of the relay, or the window stopping meanwhile. */

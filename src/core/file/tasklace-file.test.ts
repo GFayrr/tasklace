@@ -564,9 +564,11 @@ describe('checking a state before saving it', () => {
 });
 
 describe('reading a state received from a shared plan', () => {
-  it('gives back the state and its document identifier when it holds a valid project', () => {
+  it('gives back the state, its document identifier and the name of its plan when it holds a valid project', () => {
     const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
-    expect(readSharedState(state)).toEqual(success({ state, documentId: TEST_DOCUMENT_ID }));
+    expect(readSharedState(state)).toEqual(
+      success({ state, documentId: TEST_DOCUMENT_ID, name: SAMPLE.name }),
+    );
   });
 
   it('refuses an empty state, one above the limit and one that cannot be decoded', () => {

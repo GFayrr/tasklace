@@ -13,10 +13,13 @@ import type {
   FileFailure,
   OpenedProject,
   RelayEndReason,
+  RelayLinkKind,
   RelayLinks,
+  ShownRelayLinks,
   TasklaceBridge,
 } from '../../preload/bridge-contract';
 import type { KeptOwnChanges } from './collaboration-state.svelte';
+import { PERSON_COLORS } from '../theme/person-colors';
 
 export type RelayBridge = Pick<
   TasklaceBridge,
@@ -24,6 +27,8 @@ export type RelayBridge = Pick<
   | 'joinByLink'
   | 'reopenSharedPlan'
   | 'makeNewLinks'
+  | 'copyRelayLink'
+  | 'openGuide'
   | 'stopCollaboration'
   | 'sendToRelay'
   | 'keepOwnChanges'
@@ -38,6 +43,16 @@ export interface RelayContext {
   readonly name: () => string | null;
   readonly selectedTaskId: () => TaskId | null;
   readonly randomBytes: (count: number) => Uint8Array;
+  readonly ended: (reason: RelayEndReason, relay: string) => void;
+  readonly linkNotKept: () => void;
+}
+
+export interface ShownRelayPerson {
+  readonly id: string;
+  readonly name: string;
+  readonly color: number;
+  readonly canEdit: boolean;
+  readonly selectedTaskId: TaskId | null;
 }
 
 export type RelayConnection = 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'lost';
@@ -57,8 +72,10 @@ interface InPlan {
   readonly kind: 'in';
   readonly canEdit: boolean;
   readonly relay: string;
-  readonly links: RelayLinks | null;
+  readonly links: ShownRelayLinks;
+  readonly kept: boolean;
   readonly connection: RelayConnection;
+  readonly end: RelayEndReason | null;
   readonly member: RelayMember | null;
   readonly bytesSinceSnapshot: number;
   readonly due: Due;
@@ -67,6 +84,7 @@ interface InPlan {
 type RelayPhase = { readonly kind: 'idle' } | { readonly kind: 'starting' } | InPlan;
 
 const NOBODY: ReadonlyMap<number, RelayPerson> = new Map();
+const PERSON_ID_PREFIX = 'relay-';
 const RELAY_EVENT_KINDS: ReadonlySet<CollaborationEvent['kind']> = new Set<RelayEventKind>([
   'relayConnected',
   'relayState',
@@ -90,6 +108,13 @@ export class RelayState {
   #phase = $state.raw<RelayPhase>({ kind: 'idle' });
   #people = $state.raw<ReadonlyMap<number, RelayPerson>>(NOBODY);
   #lastEnd = $state.raw<RelayEndReason | null>(null);
+  readonly #others = $derived(
+    [...this.#people].map(([member, person], index) => ({
+      ...person,
+      id: `${PERSON_ID_PREFIX}${String(member)}`,
+      color: (index + 1) % PERSON_COLORS.length,
+    })),
+  );
   #held: RelayEvent[] = [];
   #generation = 0;
   readonly #context: RelayContext;
@@ -102,6 +127,11 @@ export class RelayState {
   /** Tells whether the page shares a plan through a relay, or is about to. */
   get isActive(): boolean {
     return this.#phase.kind !== 'idle';
+  }
+
+  /** Tells whether the page waits for the main process to answer a request to share, join or come back to a plan. */
+  get isStarting(): boolean {
+    return this.#phase.kind === 'starting';
   }
 
   /** Tells whether the page waits for a plan it joined by a link to open. */
@@ -119,9 +149,14 @@ export class RelayState {
     return this.#phase.kind === 'in' ? this.#phase.relay : null;
   }
 
-  /** Returns the links of the plan this page shared, or null when it joined by a link or shares nothing. */
-  get links(): RelayLinks | null {
+  /** Returns the links of the plan as this page may show them, the link that edits only when it holds it, or null outside a plan shared through a relay. */
+  get links(): ShownRelayLinks | null {
     return this.#phase.kind === 'in' ? this.#phase.links : null;
+  }
+
+  /** Tells whether this computer keeps the link of the plan shared through a relay, so that it comes back to it once reopened, which it does not without a safe place for it. */
+  get isLinkKept(): boolean {
+    return this.#phase.kind === 'in' && this.#phase.kept;
   }
 
   /** Tells whether this page holds the link that edits the plan it shares through a relay. */
@@ -137,6 +172,19 @@ export class RelayState {
   /** Returns the other people in the plan by their number on the relay. */
   get people(): ReadonlyMap<number, RelayPerson> {
     return this.#people;
+  }
+
+  /** Returns the other people in the plan as the interface shows them, in the order they came, each with a color after the first one, which is this person's own. */
+  get others(): readonly ShownRelayPerson[] {
+    return this.#others;
+  }
+
+  /** Returns why the relay ended the plan still open here, with that relay as a person reads it, or null while it has not. */
+  get endOfOpenPlan(): { readonly reason: RelayEndReason; readonly relay: string } | null {
+    const phase = this.#phase;
+    return phase.kind === 'in' && phase.end !== null
+      ? { reason: phase.end, relay: phase.relay }
+      : null;
   }
 
   /** Returns why the latest plan shared through a relay ended, or null. */
@@ -159,12 +207,8 @@ export class RelayState {
       this.#forget();
       return shared;
     }
-    this.#enter(session, {
-      canEdit: true,
-      relay: shared.value.relay,
-      links: shared.value,
-      due: 'wholePlan',
-    });
+    const { relay, shown, kept } = shared.value;
+    this.#enter(session, { relay, links: shown, kept, due: 'wholePlan' });
     return shared;
   }
 
@@ -179,13 +223,15 @@ export class RelayState {
       this.#forget();
       return joined;
     }
-    const { project, canEdit, relay, bytesSinceSnapshot } = joined.value;
+    const { project, shown, relay, bytesSinceSnapshot, kept } = joined.value;
     this.#phase = {
       kind: 'in',
-      canEdit,
+      canEdit: shown.edit !== null,
       relay,
-      links: null,
+      links: shown,
+      kept,
       connection: 'connected',
+      end: null,
       member: null,
       bytesSinceSnapshot,
       due: null,
@@ -193,6 +239,9 @@ export class RelayState {
     if (!(await this.#context.openJoined(project))) {
       await this.stop();
       return failure({ code: 'CANCELLED' });
+    }
+    if (!kept) {
+      this.#context.linkNotKept();
     }
     return success(null);
   }
@@ -224,7 +273,8 @@ export class RelayState {
       this.#forget();
       return false;
     }
-    this.#enter(session, { ...reopened.value, links: null, due: null });
+    const { relay, shown } = reopened.value;
+    this.#enter(session, { relay, links: shown, kept: true, due: null });
     return true;
   }
 
@@ -238,9 +288,25 @@ export class RelayState {
     const current = this.#phase;
     if (made.ok && current.kind === 'in') {
       current.member?.disconnected();
-      this.#phase = { ...current, links: made.value, connection: 'connecting', due: 'wholePlan' };
+      this.#phase = {
+        ...current,
+        links: made.value.shown,
+        kept: made.value.kept,
+        connection: 'connecting',
+        due: 'wholePlan',
+      };
     }
     return made;
+  }
+
+  /** Copies a link of the plan this page shares through a relay, the main process holding it, and gives whether it was copied. */
+  async copyLink(kind: RelayLinkKind): Promise<boolean> {
+    return (await this.#context.bridge.copyRelayLink(kind)).ok;
+  }
+
+  /** Opens in the browser the guide that explains how to set up a relay, giving whether it opened. */
+  async openGuide(): Promise<boolean> {
+    return (await this.#context.bridge.openGuide()).ok;
   }
 
   /** Tells the others the task this person selected. */
@@ -278,7 +344,7 @@ export class RelayState {
     this.#act(phase, phase.member, event);
   }
 
-  /** Acts on an event of the main process with the member of the plan. */
+  /** Acts on an event of the main process with the member of the plan, telling a newcomer where this person is. */
   #act(phase: InPlan, member: RelayMember, event: RelayEvent): void {
     switch (event.kind) {
       case 'relayConnected':
@@ -297,6 +363,7 @@ export class RelayState {
         member.presence(event.member, event.presence);
         return;
       case 'relayJoined':
+        this.selectionChanged();
         return;
       case 'relayLeft':
         member.left(event.member);
@@ -321,12 +388,13 @@ export class RelayState {
     this.selectionChanged();
   }
 
-  /** Keeps the plan open as it is once the relay ended it for good, its connection lost. */
+  /** Keeps the plan open as it is once the relay ended it for good, its connection lost, and tells the page why. */
   #ended(phase: InPlan, member: RelayMember, reason: RelayEndReason): void {
     this.#lastEnd = reason;
     member.disconnected();
     member.stop();
-    this.#phase = { ...phase, connection: 'lost' };
+    this.#phase = { ...phase, connection: 'lost', end: reason };
+    this.#context.ended(reason, phase.relay);
   }
 
   /** Starts a request to the main process, holding its events until it answers, and gives the generation it belongs to. */
@@ -337,10 +405,19 @@ export class RelayState {
     return this.#generation;
   }
 
-  /** Follows the plan of the open session through a relay with a new member, then hands it what came meanwhile. */
-  #enter(session: SharedSession, start: Pick<InPlan, 'canEdit' | 'relay' | 'links' | 'due'>): void {
-    const member = this.#member(session, start.canEdit, 0);
-    this.#phase = { kind: 'in', ...start, connection: 'connecting', member, bytesSinceSnapshot: 0 };
+  /** Follows the plan of the open session through a relay with a new member, which edits when the page holds the link that does, then hands it what came meanwhile. */
+  #enter(session: SharedSession, start: Pick<InPlan, 'relay' | 'links' | 'kept' | 'due'>): void {
+    const canEdit = start.links.edit !== null;
+    const member = this.#member(session, canEdit, 0);
+    this.#phase = {
+      kind: 'in',
+      ...start,
+      canEdit,
+      connection: 'connecting',
+      end: null,
+      member,
+      bytesSinceSnapshot: 0,
+    };
     this.#release();
   }
 

@@ -1,10 +1,17 @@
 <script lang="ts">
   import type { AppState } from '../app/app-state.svelte';
-  import type { GuestConnection } from '../collaboration/collaboration-state.svelte';
+  import type { GuestConnection, PresentPerson } from '../collaboration/collaboration-state.svelte';
   import Icon from './Icon.svelte';
   import PeopleFaces from './PeopleFaces.svelte';
 
-  let { app, connection }: { app: AppState; connection: GuestConnection } = $props();
+  interface Props {
+    readonly app: AppState;
+    readonly connection: GuestConnection;
+    readonly label?: string;
+    readonly people?: readonly PresentPerson[];
+  }
+
+  let { app, connection, label, people }: Props = $props();
 
   const FACES_SHOWN = 3;
 
@@ -22,10 +29,10 @@
   {#if connection === 'lost'}
     <span class="lost-icon"><Icon name="alert" /></span>
   {/if}
-  <span class="label">{labels[connection]}</span>
+  <span class="label">{label ?? labels[connection]}</span>
   {#if connection === 'connected'}
     <PeopleFaces
-      people={app.collaboration.participants}
+      people={people ?? app.collaboration.participants}
       locale={app.locale}
       limit={FACES_SHOWN}
       more={text.moreFaces}

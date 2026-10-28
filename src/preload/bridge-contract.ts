@@ -50,6 +50,8 @@ export const IPC_CHANNELS = {
   joinByLink: 'relay:join',
   reopenSharedPlan: 'relay:reopen',
   makeNewLinks: 'relay:new-links',
+  copyRelayLink: 'relay:copy-link',
+  openGuide: 'relay:open-guide',
   relaySend: 'relay:send',
 } as const;
 
@@ -133,12 +135,14 @@ export type PdfExport =
 export interface RecentProject {
   readonly name: string;
   readonly folder: string;
+  readonly relay: string | null;
 }
 
 export interface CollaborationSettings {
   readonly name: string | null;
   readonly port: number;
   readonly firewallNoticeSeen: boolean;
+  readonly relayAddress: string | null;
 }
 
 export interface Sharing {
@@ -148,23 +152,29 @@ export interface Sharing {
   readonly tokenDigest: TokenDigest;
 }
 
+export interface ShownRelayLinks {
+  readonly edit: string | null;
+  readonly view: string;
+}
+
+export type RelayLinkKind = 'edit' | 'view';
+
 export interface RelayLinks {
-  readonly editLink: string;
-  readonly viewLink: string;
+  readonly shown: ShownRelayLinks;
   readonly relay: string;
   readonly kept: boolean;
 }
 
 export interface RelayJoined {
   readonly project: OpenedProject;
-  readonly canEdit: boolean;
+  readonly shown: ShownRelayLinks;
   readonly relay: string;
   readonly bytesSinceSnapshot: number;
   readonly kept: boolean;
 }
 
 export interface RelayReopened {
-  readonly canEdit: boolean;
+  readonly shown: ShownRelayLinks;
   readonly relay: string;
 }
 
@@ -322,6 +332,8 @@ export interface TasklaceBridge {
     documentId: DocumentId,
   ) => Promise<BridgeResult<RelayReopened | null>>;
   readonly makeNewLinks: () => Promise<BridgeResult<RelayLinks>>;
+  readonly copyRelayLink: (kind: RelayLinkKind) => Promise<BridgeResult<null>>;
+  readonly openGuide: () => Promise<BridgeResult<null>>;
   readonly sendToRelay: (outgoing: RelayOutgoing) => void;
   readonly sendToCollaboration: (to: CollaborationTarget, message: Uint8Array) => void;
   readonly onCollaborationEvent: (listener: (event: CollaborationEvent) => void) => void;
@@ -363,6 +375,8 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.joinByLink]: BridgeResult<RelayJoined>;
   readonly [IPC_CHANNELS.reopenSharedPlan]: BridgeResult<RelayReopened | null>;
   readonly [IPC_CHANNELS.makeNewLinks]: BridgeResult<RelayLinks>;
+  readonly [IPC_CHANNELS.copyRelayLink]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.openGuide]: BridgeResult<null>;
 }
 
 export interface ChannelArguments {
@@ -412,6 +426,8 @@ export interface ChannelArguments {
   readonly [IPC_CHANNELS.joinByLink]: readonly [link: string];
   readonly [IPC_CHANNELS.reopenSharedPlan]: readonly [documentId: DocumentId];
   readonly [IPC_CHANNELS.makeNewLinks]: readonly [];
+  readonly [IPC_CHANNELS.copyRelayLink]: readonly [kind: RelayLinkKind];
+  readonly [IPC_CHANNELS.openGuide]: readonly [];
 }
 
 export type InvokeChannel = keyof ChannelAnswers & keyof ChannelArguments;

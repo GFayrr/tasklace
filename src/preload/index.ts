@@ -83,6 +83,8 @@ const bridge: TasklaceBridge = {
   joinByLink: (link) => request(IPC_CHANNELS.joinByLink, link),
   reopenSharedPlan: (documentId) => request(IPC_CHANNELS.reopenSharedPlan, documentId),
   makeNewLinks: () => request(IPC_CHANNELS.makeNewLinks),
+  copyRelayLink: (kind) => request(IPC_CHANNELS.copyRelayLink, kind),
+  openGuide: () => request(IPC_CHANNELS.openGuide),
   sendToRelay: (outgoing) => {
     ipcRenderer.send(IPC_CHANNELS.relaySend, outgoing);
   },
@@ -170,8 +172,10 @@ function isRegionalFormat(value: unknown): value is RegionalFormat {
 
 /** Tells whether an answer has the shape of a recent project. */
 function isRecentProject(value: unknown): value is RecentProject {
+  const relay: unknown = Reflect.get(Object(value), 'relay');
   return (
     typeof Reflect.get(Object(value), 'name') === 'string' &&
-    typeof Reflect.get(Object(value), 'folder') === 'string'
+    typeof Reflect.get(Object(value), 'folder') === 'string' &&
+    (relay === null || typeof relay === 'string')
   );
 }

@@ -39,6 +39,7 @@ function side(session: SharedSession | null, ids: readonly string[]) {
   const opened: Uint8Array[] = [];
   const repairs: unknown[] = [];
   const hostChanges: [string | null, string | null][] = [];
+  const relayTold: unknown[][] = [];
   const kept: unknown[] = [];
   let openSucceeds = true;
   let openingError: Error | null = null;
@@ -82,6 +83,8 @@ function side(session: SharedSession | null, ids: readonly string[]) {
     hostChanged: ({ left, next }) => hostChanges.push([left, next]),
     ownChangesKept: (result) => kept.push(result),
     selectedTaskId: () => (selected === null ? null : testId(selected)),
+    relayEnded: (reason, relay) => relayTold.push(['ended', reason, relay]),
+    relayLinkNotKept: () => relayTold.push(['linkNotKept']),
     shareLater: (share) => {
       laterShares.push(share);
       if (sharesAtOnce) {
@@ -99,6 +102,7 @@ function side(session: SharedSession | null, ids: readonly string[]) {
     repairs,
     hostChanges,
     kept,
+    relayTold,
     session: () => current,
     select: (id: string | null) => {
       selected = id;
@@ -947,14 +951,19 @@ describe('the settings and the plans nearby', () => {
     expect(page.state.settings).toBeNull();
     page.collaboration.settingsResult = {
       ok: true,
-      value: { name: null, port: 47_313, firewallNoticeSeen: false },
+      value: { name: null, port: 47_313, firewallNoticeSeen: false, relayAddress: null },
     };
     page.collaboration.saveSettingsResult = { ok: false, error: { code: 'WRITE_FAILED' } };
     expect(await page.state.saveSettings({ name: 'Léa' })).toEqual({
       ok: false,
       error: { code: 'WRITE_FAILED' },
     });
-    expect(page.state.settings).toEqual({ name: null, port: 47_313, firewallNoticeSeen: false });
+    expect(page.state.settings).toEqual({
+      name: null,
+      port: 47_313,
+      firewallNoticeSeen: false,
+      relayAddress: null,
+    });
   });
 
   it('lists the plans nearby while searching, and forgets them once it stops', async () => {
@@ -1131,7 +1140,10 @@ describe('a plan shared through a relay, seen from the page', () => {
     const reader = side(session, []);
     reader.collaboration.relay.reopenResult = {
       ok: true,
-      value: { canEdit: false, relay: 'relay.example.org' },
+      value: {
+        shown: { edit: null, view: 'tasklace://relay.example.org/#v1.P0dX8w…' },
+        relay: 'relay.example.org',
+      },
     };
     reader.state.attached(session);
     await settle();
@@ -1171,7 +1183,10 @@ describe('a plan shared through a relay, seen from the page', () => {
           warnings: [],
           localChanges: null,
         },
-        canEdit: true,
+        shown: {
+          edit: 'tasklace://relay.example.org/#e1.Hq7Lm2…',
+          view: 'tasklace://relay.example.org/#v1.P0dX8w…',
+        },
         relay: 'relay.example.org',
         bytesSinceSnapshot: 0,
         kept: true,

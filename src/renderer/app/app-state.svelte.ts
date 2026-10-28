@@ -94,6 +94,7 @@ import type { ZoomLevel } from '../plan/time-scale';
 import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
 import type { Theme } from '../theme/theme';
 import { SettingsPanel } from './settings-panel.svelte';
+import { relayEndText } from '../collaboration/collaboration-text';
 import {
   CollaborationState,
   type CollaborationFailure,
@@ -297,6 +298,12 @@ export class AppState {
       },
       hostChanged: ({ left, next }) => {
         this.#tellHostChanged(left, next);
+      },
+      relayEnded: (reason, relay) => {
+        this.#notify('error', relayEndText(this.messages, reason, relay), null, true);
+      },
+      relayLinkNotKept: () => {
+        this.#notify('warning', this.messages.relay.linkNotKept, null, true);
       },
       ownChangesKept: (kept) => {
         this.#ownChangesKept(kept);
@@ -611,6 +618,14 @@ export class AppState {
     return this.collaboration.join(target);
   }
 
+  /** Joins a plan shared through a relay by its link once the user agreed about the open project, the plan opening when the relay passed it on, and returns why it could not be joined, or null. */
+  async joinByLink(link: string): Promise<Result<null, CollaborationFailure> | null> {
+    if (!(await this.#readyToReplace())) {
+      return null;
+    }
+    return this.collaboration.relay.join(link);
+  }
+
   /** Asks for a project file and opens it. */
   async open(): Promise<void> {
     if (await this.#readyToReplace()) {
@@ -838,18 +853,18 @@ export class AppState {
     return this.#shareFailure;
   }
 
-  /** Opens the window that shares the open project, sharing it at once when this person already gave a name and saw the word about the network. */
+  /** Opens the window that shares the open project, which first asks whether to share it on this network or through a relay. */
   async openShare(): Promise<void> {
     if (this.project === null || !(await this.#settingsRead())) {
       return;
     }
     this.#shareFailure = null;
     this.#collaborationWindow = 'share';
-    const settings = this.collaboration.settings;
-    const ready = settings?.name !== null && settings?.firewallNoticeSeen === true;
-    if (this.collaboration.mode.kind === 'idle' && ready) {
-      await this.startSharing();
-    }
+  }
+
+  /** Forgets why the open plan could not be shared, once the person chose another way to share it. */
+  clearShareFailure(): void {
+    this.#shareFailure = null;
   }
 
   /** Shares the open project, keeping why it could not be shared for the window. */
@@ -857,6 +872,20 @@ export class AppState {
     this.#shareFailure = null;
     const shared = await this.collaboration.share();
     this.#shareFailure = shared.ok ? null : shared.error;
+  }
+
+  /** Shares the open project through a relay, keeping its address on this computer once shared, a failure to keep it being only logged, and why it could not be shared for the window. */
+  async shareThroughRelay(address: string): Promise<void> {
+    this.#shareFailure = null;
+    const shared = await this.collaboration.relay.share(address);
+    if (!shared.ok) {
+      this.#shareFailure = shared.error;
+      return;
+    }
+    const kept = await this.collaboration.saveSettings({ relayAddress: address.trim() });
+    if (!kept.ok) {
+      console.error('The address of the relay could not be kept on this computer:', kept.error);
+    }
   }
 
   /** Opens the window that joins a shared plan and starts looking for the plans shared nearby. */
@@ -868,7 +897,7 @@ export class AppState {
     await this.collaboration.findPlans(true);
   }
 
-  /** Closes the window of the shared plan and, for the join window, stops looking for plans nearby and gives up a join still in progress. */
+  /** Closes the window of the shared plan and, for the join window, stops looking for plans nearby and gives up a join still in progress, nearby or by a link. */
   closeCollaborationWindow(): void {
     const closed = this.#collaborationWindow;
     this.#collaborationWindow = null;
@@ -876,7 +905,7 @@ export class AppState {
       return;
     }
     void this.collaboration.findPlans(false);
-    if (this.collaboration.mode.kind === 'joining') {
+    if (this.collaboration.mode.kind === 'joining' || this.collaboration.relay.isStarting) {
       void this.collaboration.stop();
     }
   }

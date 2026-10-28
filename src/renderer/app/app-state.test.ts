@@ -273,7 +273,7 @@ describe('closing a project', () => {
 describe('opening and importing', () => {
   it('opens a project from its file, its schedule following, and lists the recent projects', async () => {
     const { app, control } = createApp();
-    control.recent = [{ name: 'Thesis', folder: '/projects' }];
+    control.recent = [{ name: 'Thesis', folder: '/projects', relay: null }];
     control.openResult = openedProjectOf(PLAN);
     await app.open();
     expect(byId(app.project?.tasks ?? [])).toEqual(byId(PLAN.tasks));
@@ -1028,7 +1028,7 @@ describe('local copies and recent projects', () => {
 
   it('keeps the previous recent projects and warns when the main process cannot read them', async () => {
     const { app, control } = await withOpenPlan();
-    control.recent = [{ name: 'Thesis', folder: '/projects' }];
+    control.recent = [{ name: 'Thesis', folder: '/projects', relay: null }];
     await app.loadRecentProjects();
     control.recent = 'unreadable';
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -1040,13 +1040,13 @@ describe('local copies and recent projects', () => {
     } finally {
       logged.mockRestore();
     }
-    expect(app.recentProjects).toEqual([{ name: 'Thesis', folder: '/projects' }]);
+    expect(app.recentProjects).toEqual([{ name: 'Thesis', folder: '/projects', relay: null }]);
     expect(noticeTexts(app)).toEqual([english.notices.recentUnavailable]);
   });
 
   it('keeps the previous recent projects and warns when they cannot be loaded, the save still succeeding', async () => {
     const { app, control } = await withOpenPlan();
-    control.recent = [{ name: 'Thesis', folder: '/projects' }];
+    control.recent = [{ name: 'Thesis', folder: '/projects', relay: null }];
     await app.loadRecentProjects();
     control.recent = new Error('bridge gone');
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -1060,7 +1060,7 @@ describe('local copies and recent projects', () => {
       logged.mockRestore();
     }
     expect(app.saveStatus).toBe('saved');
-    expect(app.recentProjects).toEqual([{ name: 'Thesis', folder: '/projects' }]);
+    expect(app.recentProjects).toEqual([{ name: 'Thesis', folder: '/projects', relay: null }]);
     expect(noticeTexts(app)).toEqual([english.notices.recentUnavailable]);
   });
 

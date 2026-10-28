@@ -229,9 +229,14 @@ describe('the collaboration service', () => {
   it('reads and keeps the settings, refusing settings of another shape', async () => {
     const page = new FakePage();
     expect(await invoke(page, IPC_CHANNELS.collaborationSettings)).toEqual(
-      success({ name: null, port: 47_313, firewallNoticeSeen: false }),
+      success({ name: null, port: 47_313, firewallNoticeSeen: false, relayAddress: null }),
     );
-    const settings = { name: 'Léa', port: 50_000, firewallNoticeSeen: true };
+    const settings = {
+      name: 'Léa',
+      port: 50_000,
+      firewallNoticeSeen: true,
+      relayAddress: 'wss://tasklace.my-school.example',
+    };
     expect(await invoke(page, IPC_CHANNELS.saveCollaborationSettings, settings)).toEqual(
       success(null),
     );

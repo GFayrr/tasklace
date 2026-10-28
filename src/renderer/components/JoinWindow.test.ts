@@ -3,12 +3,20 @@ import { encodeMessage } from '../../core/collaboration/messages';
 import { project, workTask } from '../../core/testing/project-builder';
 import type { CollaborationSettings, NearbyPlan } from '../../preload/bridge-contract';
 import { AppState } from '../app/app-state.svelte';
-import { fakeAppContext, openedProjectOf, settle } from '../app/testing/fake-app-context';
+import {
+  fakeAppContext,
+  openedProjectOf,
+  relayRequests,
+  settle,
+} from '../app/testing/fake-app-context';
 import english from '../locales/en.json';
 import App from './App.svelte';
 import { button, click, render, single, update } from './testing/render';
 
 const TEXT = english.collaboration;
+const RELAY = english.relay;
+const EDIT_LINK = `tasklace://relay.example.org/#e1.${'A'.repeat(86)}`;
+const VIEW_LINK = `tasklace://relay.example.org:8443/#v1.${'B'.repeat(86)}`;
 const PLAN = project([workTask('a', { name: 'Survey' })], [], { name: 'Thesis' });
 const NEARBY: NearbyPlan = {
   key: 'thesis',
@@ -23,7 +31,13 @@ async function renderJoin(settings: Partial<CollaborationSettings> = {}) {
   const fake = fakeAppContext();
   fake.control.collaboration.settingsResult = {
     ok: true,
-    value: { name: 'Noah', port: 47_313, firewallNoticeSeen: false, ...settings },
+    value: {
+      name: 'Noah',
+      port: 47_313,
+      firewallNoticeSeen: false,
+      relayAddress: null,
+      ...settings,
+    },
   };
   const app = new AppState(fake.context);
   const root = render(App, { app });
@@ -169,8 +183,14 @@ describe('joining a shared plan', () => {
     await pressJoin(root);
     expect(messageOf(root)).toBe(english.fileErrors.INVALID_ADDRESS);
     expect(control.collaboration.requests.slice(2)).toEqual([
-      ['saveSettings', { name: 'Noah', port: 47_313, firewallNoticeSeen: false }],
-      ['saveSettings', { name: 'Noah', port: 47_313, firewallNoticeSeen: false }],
+      [
+        'saveSettings',
+        { name: 'Noah', port: 47_313, firewallNoticeSeen: false, relayAddress: null },
+      ],
+      [
+        'saveSettings',
+        { name: 'Noah', port: 47_313, firewallNoticeSeen: false, relayAddress: null },
+      ],
       [
         'join',
         {
@@ -188,7 +208,7 @@ describe('joining a shared plan', () => {
     const fake = fakeAppContext();
     fake.control.collaboration.settingsResult = {
       ok: true,
-      value: { name: 'Noah', port: 47_313, firewallNoticeSeen: false },
+      value: { name: 'Noah', port: 47_313, firewallNoticeSeen: false, relayAddress: null },
     };
     const app = new AppState(fake.context);
     await app.newProject();
@@ -260,5 +280,115 @@ describe('joining a shared plan', () => {
       expect(app.collaborationWindow).toBeNull();
     }
     expect(app.collaboration.mode).toEqual({ kind: 'guest', connection: 'connected' });
+  });
+});
+
+describe('joining a plan by its link', () => {
+  it('asks for the link first, telling where it leads and what it lets you do, the plans nearby folded below', async () => {
+    const { root } = await renderJoin();
+    const dialog = joinWindow(root);
+    const first = dialog.querySelector('.body > .field span')?.textContent;
+    const nearby = single(dialog, 'details.nearby');
+    const hints: (string | null)[] = [];
+    for (const typed of [EDIT_LINK, `  ${VIEW_LINK} `, 'tasklace://relay.example.org/#e1.short']) {
+      typeIn(root, '#join-link', typed);
+      hints.push(
+        single(dialog, '#join-link').closest('.field')?.querySelector('small')?.textContent ?? null,
+      );
+    }
+    expect([
+      first,
+      single(nearby, ':scope > summary').textContent,
+      nearby.hasAttribute('open'),
+      hints,
+    ]).toEqual([
+      RELAY.linkLabel,
+      RELAY.nearYou,
+      false,
+      [
+        'Through relay.example.org · you will be able to edit',
+        'Through relay.example.org:8443 · you will be able to view the plan',
+        null,
+      ],
+    ]);
+  });
+
+  it('joins by the link pasted, the code and the plans nearby left aside, and closes once the plan opens', async () => {
+    const { root, app, control } = await renderJoin();
+    const offered = openedProjectOf(PLAN, { fileName: '' });
+    if (!offered.ok) {
+      throw new Error('The plan could not be offered.');
+    }
+    control.collaboration.relay.joinResult = {
+      ok: true,
+      value: {
+        project: offered.value,
+        shown: { edit: null, view: 'tasklace://relay.example.org:8443/#v1.BBBBBB…' },
+        relay: 'relay.example.org:8443',
+        bytesSinceSnapshot: 0,
+        kept: true,
+      },
+    };
+    typeIn(root, '#join-code', 'K7Q4MZ');
+    typeIn(root, '#join-link', VIEW_LINK);
+    await pressJoin(root);
+    expect([
+      app.project?.name,
+      app.collaborationWindow,
+      relayRequests(control),
+      control.collaboration.requests.filter(([name]) => name === 'join'),
+    ]).toEqual([PLAN.name, null, [['joinByLink', VIEW_LINK]], []]);
+  });
+
+  it('refuses a text that is not a link or a missing name before asking the main process', async () => {
+    const { root, control } = await renderJoin({ name: null });
+    typeIn(root, '#join-link', EDIT_LINK);
+    await pressJoin(root);
+    const noName = messageOf(root);
+    typeIn(root, '#join-name', 'Noah');
+    typeIn(root, '#join-link', 'tasklace://relay.example.org/');
+    await pressJoin(root);
+    expect([noName, messageOf(root), relayRequests(control)]).toEqual([
+      TEXT.noName,
+      english.fileErrors.INVALID_LINK,
+      [],
+    ]);
+  });
+
+  it('keeps a new name first, and tells why the relay did not let the person in, naming the relay', async () => {
+    const { root, control } = await renderJoin();
+    control.collaboration.relay.joinResult = {
+      ok: false,
+      error: { code: 'RELAY_ENDED', reason: 'UNREACHABLE' },
+    };
+    typeIn(root, '#join-name', 'Noah B.');
+    typeIn(root, '#join-link', VIEW_LINK);
+    await pressJoin(root);
+    const unreachable = messageOf(root);
+    control.collaboration.relay.joinResult = {
+      ok: false,
+      error: { code: 'RELAY_ENDED', reason: 'NO_ROOM' },
+    };
+    await pressJoin(root);
+    const noRoom = messageOf(root);
+    control.collaboration.saveSettingsResult = { ok: false, error: { code: 'WRITE_FAILED' } };
+    typeIn(root, '#join-name', 'Noah C.');
+    await pressJoin(root);
+    expect([
+      unreachable,
+      noRoom,
+      messageOf(root),
+      control.collaboration.requests.filter(([name]) => name === 'saveSettings').length,
+      relayRequests(control),
+    ]).toEqual([
+      'The relay relay.example.org:8443 did not answer. Check your connection, or ask who sent you the link.',
+      RELAY.ends.NO_ROOM,
+      TEXT.nameNotKept,
+      2,
+      [
+        ['joinByLink', VIEW_LINK],
+        ['joinByLink', VIEW_LINK],
+      ],
+    ]);
   });
 });
