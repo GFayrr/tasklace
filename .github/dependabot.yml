@@ -1,0 +1,22 @@
+# Dependabot proposes a pull request when a newer version of what the relay runs on is out:
+# the Node and Caddy images, pinned by version and digest, and the packages of its lock file.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /relay
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(relay)
+  - package-ecosystem: docker-compose
+    directory: /relay
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(relay)
+  - package-ecosystem: npm
+    directory: /relay
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(relay)
