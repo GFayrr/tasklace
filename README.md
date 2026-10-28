@@ -35,7 +35,7 @@ Most Gantt tools are either heavyweight project-management suites or online serv
 
 - **Strict Gantt rules**: tasks, milestones, summary tasks, the four dependency types, working calendars, progress and critical path.
 - **Quarter-hour precision**: durations are expressed in hours and minutes, by quarter hours, and spread over working days, with optional hours per day.
-- **Collaboration without an account**: people join a project with a sharing code, on the local network, or through an optional end-to-end encrypted relay that any school or company can host.
+- **Collaboration without an account**: people join a project with a sharing code, on the local network, or through an optional end-to-end encrypted relay that any school or company can host ([Working remotely: setting up a relay](docs/working-remotely.md)).
 - **Offline first**: every member keeps a local copy and changes are merged when they reconnect.
 - **Lightweight exports**: vector PDF files with selectable text.
 
@@ -136,7 +136,7 @@ src/core/            pure logic, independent of any user interface
 src/main/            Electron main process: window, security, files, file worker, PDF printing, host server and discovery
 src/preload/         minimal typed bridge between the page and the main process
 src/renderer/        Svelte user interface: theme, messages, schedule worker, components, printed pages
-docs/                roadmap, and user documentation to come
+docs/                roadmap, and the guide to setting up a relay
 tests/e2e/           end-to-end journeys in the running application (Playwright)
 tests/file/          .tasklace files with real compression and generated decompression bombs
 tests/fixtures/      large test projects and PDF sample plans generated from fixed seeds
