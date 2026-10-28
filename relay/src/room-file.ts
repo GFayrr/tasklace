@@ -78,3 +78,21 @@ function hasRoomHeader(bytes: Uint8Array): boolean {
     bytes[VERSION_OFFSET] === FILE_VERSION
   );
 }
+
+/** Gives the records of a room that come after a sequence, the ones a member who holds the records up to it still lacks, found by halving since a room keeps its records in the order of their sequences. */
+export function entriesAfter<Entry extends StoredRecord>(
+  entries: readonly Entry[],
+  since: number,
+): readonly Entry[] {
+  let low = 0;
+  let high = entries.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if ((entries[middle]?.seq ?? Number.POSITIVE_INFINITY) > since) {
+      high = middle;
+    } else {
+      low = middle + 1;
+    }
+  }
+  return entries.slice(low);
+}

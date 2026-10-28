@@ -1,3 +1,4 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   encodeRelayRecord,
@@ -7,8 +8,10 @@ import {
   encodeRoomEntry,
   encodeRoomHeader,
   ENTRY_HEADER_BYTES,
+  entriesAfter,
   readRoomFile,
   ROOM_HEADER_BYTES,
+  type StoredRecord,
 } from './room-file.ts';
 
 const KEY = new Uint8Array(32).fill(9);
@@ -79,5 +82,42 @@ describe('the file of a room', () => {
     expect(
       [otherMark, otherVersion, header.subarray(0, ROOM_HEADER_BYTES - 1)].map(readRoomFile),
     ).toEqual([null, null, null]);
+  });
+});
+
+/** Gives records numbered by the sequences given, in their order. */
+function numbered(sequences: readonly number[]): readonly StoredRecord[] {
+  return sequences.map((seq) => ({ seq, record: recordOf(seq % 256) }));
+}
+
+describe('the records a member coming back lacks', () => {
+  it('are those after the sequence it holds, with gaps a snapshot left, none, or all', () => {
+    const room = numbered([2, 3, 7, 8, 12]);
+    expect(
+      [-1, 0, 2, 4, 7, 11, 12, 99].map((since) => entriesAfter(room, since).map(({ seq }) => seq)),
+    ).toEqual([
+      [2, 3, 7, 8, 12],
+      [2, 3, 7, 8, 12],
+      [3, 7, 8, 12],
+      [7, 8, 12],
+      [8, 12],
+      [12],
+      [],
+      [],
+    ]);
+    expect(entriesAfter([], 0)).toEqual([]);
+  });
+
+  it('are the same as when every record of the room is looked at', () => {
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(fc.integer({ min: 1, max: 1_000 }), { maxLength: 64 }),
+        fc.integer({ min: -1, max: 1_001 }),
+        (sequences, since) => {
+          const room = numbered([...sequences].sort((left, right) => left - right));
+          expect(entriesAfter(room, since)).toEqual(room.filter(({ seq }) => seq > since));
+        },
+      ),
+    );
   });
 });

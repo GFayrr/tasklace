@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import english from '../../src/renderer/locales/en.json' with { type: 'json' };
 import { closeDiscarding, launchApplication } from './application';
+import { startTcpRelay, type TcpRelay } from '../../src/main/testing/tcp-relay';
 import { writeRelayCertificate } from '../../src/main/testing/test-certificate';
 import { picture } from './pictures';
 
@@ -14,6 +15,7 @@ const LOOPBACK = '127.0.0.1';
 const UNPROTECTED_BACKENDS: readonly string[] = ['basic_text', 'unknown'];
 const RELAY = english.relay;
 const THREE_INSTANCES_TEST_MS = 120_000;
+const RELAY_DOWN_TEST_MS = 120_000;
 
 interface Instance {
   readonly application: ElectronApplication;
@@ -31,6 +33,7 @@ interface RunningRelay {
 const instances: Instance[] = [];
 const relays: RunningRelay[] = [];
 const folders: string[] = [];
+const networks: TcpRelay[] = [];
 
 test.afterEach(async () => {
   for (const { application, page } of instances.splice(0)) {
@@ -38,6 +41,10 @@ test.afterEach(async () => {
   }
   for (const { child } of relays.splice(0)) {
     child.kill();
+  }
+  for (const network of networks.splice(0)) {
+    network.cut();
+    await network.close();
   }
   for (const folder of folders.splice(0)) {
     await rm(folder, { recursive: true, force: true, maxRetries: 20 });
@@ -51,12 +58,17 @@ async function temporaryFolder(prefix: string): Promise<string> {
   return folder;
 }
 
-/** Runs the relay of the repository as its own Node process over TLS on a free port of this computer, as a school would run it without Caddy, and waits until it listens. */
-async function startRelay(): Promise<RunningRelay> {
-  const folder = await temporaryFolder('tasklace-e2e-relay-');
+/** Runs the relay of the repository as its own Node process over TLS on a free port of this computer, as a school would run it without Caddy, or again on the port and folder of a relay that stopped, and waits until it listens. */
+async function startRelay(previous?: RunningRelay): Promise<RunningRelay> {
+  const folder = previous?.folder ?? (await temporaryFolder('tasklace-e2e-relay-'));
   const tls = await writeRelayCertificate(folder);
   const child = spawn(process.execPath, [RELAY_MAIN], {
-    env: { PATH: process.env['PATH'] ?? '', RELAY_PORT: '0', RELAY_DATA_DIR: folder, ...tls },
+    env: {
+      PATH: process.env['PATH'] ?? '',
+      RELAY_PORT: String(previous?.port ?? 0),
+      RELAY_DATA_DIR: folder,
+      ...tls,
+    },
   });
   let output = '';
   const port = await new Promise<number>((resolve, reject) => {
@@ -74,6 +86,13 @@ async function startRelay(): Promise<RunningRelay> {
   const relay = { child, port, folder, certificateFile: tls.RELAY_TLS_CERT };
   relays.push(relay);
   return relay;
+}
+
+/** Stops a relay as its server would, and waits until its process ended. */
+async function stopRelay(relay: RunningRelay): Promise<void> {
+  const ended = new Promise((resolve) => relay.child.once('exit', resolve));
+  relay.child.kill();
+  await ended;
 }
 
 /** Launches the application on a user data folder, its own unless one is given, trusting the certificate of the relay of the test, and waits until its interface runs. */
@@ -96,10 +115,10 @@ async function close(instance: Instance): Promise<void> {
   await closeDiscarding(instance.application, instance.page);
 }
 
-/** Creates a plan named Thesis on an instance and shares it through a relay under a name, giving the two links the clipboard received. */
+/** Creates a plan named Thesis on an instance and shares it through the relay on a port of this computer under a name, giving the two links the clipboard received. */
 async function shareThroughRelay(
   { application, page }: Instance,
-  relay: RunningRelay,
+  port: number,
 ): Promise<{ readonly editLink: string; readonly viewLink: string }> {
   await page.getByRole('button', { name: /New project/ }).click();
   await page.getByRole('textbox', { name: 'Project name' }).fill('Thesis');
@@ -107,7 +126,7 @@ async function shareThroughRelay(
   await page.getByRole('button', { name: 'Share', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Share “Thesis”' });
   await dialog.getByText(RELAY.throughRelay, { exact: true }).click();
-  await dialog.getByLabel(RELAY.address).fill(`wss://${LOOPBACK}:${String(relay.port)}`);
+  await dialog.getByLabel(RELAY.address).fill(`wss://${LOOPBACK}:${String(port)}`);
   await dialog.getByLabel('Your name, shown to the others').fill('Camille');
   await dialog.getByRole('button', { name: 'Share the plan' }).click();
   await expect(dialog.locator('.link')).toHaveCount(2);
@@ -148,7 +167,7 @@ test('shares a plan through a relay, joined in read only with the link that read
   const relay = await startRelay();
   const relayLabel = `${LOOPBACK}:${String(relay.port)}`;
   const host = await launch(relay);
-  const { editLink, viewLink } = await shareThroughRelay(host, relay);
+  const { editLink, viewLink } = await shareThroughRelay(host, relay.port);
   expect([
     editLink.startsWith(`tasklace://${relayLabel}/#e1.`),
     viewLink.startsWith(`tasklace://${relayLabel}/#v1.`),
@@ -190,7 +209,7 @@ test('shares a plan through a relay, joined in read only with the link that read
 test('tells the others once new links empty the old place of the plan, the plan staying open', async () => {
   const relay = await startRelay();
   const host = await launch(relay);
-  const { viewLink } = await shareThroughRelay(host, relay);
+  const { viewLink } = await shareThroughRelay(host, relay.port);
   const reader = await launch(relay);
   await joinByLink(
     reader.page,
@@ -217,7 +236,7 @@ test('reopens a plan joined through a relay from the recent projects, coming bac
   const relay = await startRelay();
   const relayLabel = `${LOOPBACK}:${String(relay.port)}`;
   const host = await launch(relay);
-  const { editLink } = await shareThroughRelay(host, relay);
+  const { editLink } = await shareThroughRelay(host, relay.port);
   const guest = await launch(relay);
   await joinByLink(
     guest.page,
@@ -241,4 +260,54 @@ test('reopens a plan joined through a relay from the recent projects, coming bac
       protects ? { name: RELAY.shared } : { name: 'Share', exact: true },
     ),
   ).toBeVisible();
+});
+
+test('keeps the changes made while the relay was down and shares them once it is back', async () => {
+  test.setTimeout(RELAY_DOWN_TEST_MS);
+  const relay = await startRelay();
+  const host = await launch(relay);
+  const { editLink } = await shareThroughRelay(host, relay.port);
+  await host.page
+    .getByRole('dialog', { name: 'Share “Thesis”' })
+    .getByRole('button', { name: 'Done' })
+    .click();
+  const editor = await launch(relay);
+  await joinByLink(
+    editor.page,
+    editLink,
+    'Noah',
+    `Through ${LOOPBACK}:${String(relay.port)} · you will be able to edit`,
+  );
+  await expect(editor.page.getByRole('button', { name: RELAY.shared })).toBeVisible();
+  await stopRelay(relay);
+  const reconnecting = english.collaboration.reconnectingShort;
+  await expect(host.page.getByRole('button', { name: reconnecting })).toBeVisible();
+  await expect(editor.page.getByRole('button', { name: reconnecting })).toBeVisible();
+  await editor.page.getByRole('textbox', { name: 'Project name' }).fill('Thesis offline');
+  await editor.page.getByRole('textbox', { name: 'Project name' }).press('Enter');
+  await expect(host.page.getByRole('textbox', { name: 'Project name' })).toHaveValue('Thesis');
+  await startRelay(relay);
+  await expect(host.page.getByRole('textbox', { name: 'Project name' })).toHaveValue(
+    'Thesis offline',
+  );
+  await expect(host.page.getByRole('button', { name: RELAY.shared })).toBeVisible();
+  await expect(editor.page.getByRole('button', { name: RELAY.shared })).toBeVisible();
+});
+
+test('notices a relay that stops answering without closing anything', async () => {
+  test.setTimeout(RELAY_DOWN_TEST_MS);
+  const relay = await startRelay();
+  const network = await startTcpRelay(() => relay.port);
+  networks.push(network);
+  const host = await launch(relay);
+  await shareThroughRelay(host, network.port);
+  await host.page
+    .getByRole('dialog', { name: 'Share “Thesis”' })
+    .getByRole('button', { name: 'Done' })
+    .click();
+  await expect(host.page.getByRole('button', { name: RELAY.shared })).toBeVisible();
+  network.freeze();
+  await expect(
+    host.page.getByRole('button', { name: english.collaboration.reconnectingShort }),
+  ).toBeVisible({ timeout: RELAY_DOWN_TEST_MS / 2 });
 });

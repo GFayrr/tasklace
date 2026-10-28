@@ -28,6 +28,7 @@ const OBJECT_IDENTIFIER_BASE = 128;
 const FIRST_ARCS_FACTOR = 40;
 const SERIAL_BYTES = 16;
 const POSITIVE_MASK = 0x7f;
+const LEADING_BIT = 0x40;
 const ECDSA_WITH_SHA256 = [1, 2, 840, 10045, 4, 3, 2];
 const COMMON_NAME = [2, 5, 4, 3];
 const SUBJECT_ALTERNATIVE_NAME = [2, 5, 29, 17];
@@ -104,7 +105,7 @@ function alternativeNames(): Uint8Array {
 /** Writes the part of the certificate its key signs. */
 function certificateBody(publicKey: KeyObject, now: number): Uint8Array {
   const serial = randomBytes(SERIAL_BYTES);
-  serial[0] = (serial[0] ?? 0) & POSITIVE_MASK;
+  serial[0] = ((serial[0] ?? 0) & POSITIVE_MASK) | LEADING_BIT;
   return der(
     SEQUENCE,
     der(EXPLICIT_VERSION, der(INTEGER, Uint8Array.of(VERSION_3))),

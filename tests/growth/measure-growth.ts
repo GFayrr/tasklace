@@ -32,3 +32,27 @@ export function batched(times: number, operation: (index: number) => void): () =
     }
   };
 }
+
+/** Runs an asynchronous operation once to warm it up, then returns the median of several timed runs in milliseconds, each run receiving its index and the warm-up the number of runs. */
+export async function medianDurationOf(
+  run: (index: number) => Promise<void>,
+  runs: number = MEASURED_RUNS,
+): Promise<number> {
+  await run(runs);
+  const durations: number[] = [];
+  for (let index = 0; index < runs; index += 1) {
+    const start = performance.now();
+    await run(index);
+    durations.push(performance.now() - start);
+  }
+  durations.sort((left, right) => left - right);
+  return durations[Math.floor(runs / 2)] ?? Number.POSITIVE_INFINITY;
+}
+
+/** Returns how many times longer the same asynchronous operation takes on the large input than on the small one. */
+export async function growthRatioOf(
+  onSmall: (index: number) => Promise<void>,
+  onLarge: (index: number) => Promise<void>,
+): Promise<number> {
+  return (await medianDurationOf(onLarge)) / (await medianDurationOf(onSmall));
+}
