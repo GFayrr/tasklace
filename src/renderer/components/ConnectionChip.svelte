@@ -26,7 +26,7 @@
   const hints: Readonly<Record<GuestConnection, string>> = $derived({
     connected: text.sharedBy,
     reconnecting: text.reconnectingDetail,
-    offline: text.reconnectingDetail,
+    offline: collaboration.canEdit ? text.reconnectingDetail : text.offlineKeptApart,
     lost: lostText(app.messages, collaboration.lastEnd, host),
   });
   const relay = $derived(collaboration.relay);
@@ -41,16 +41,23 @@
   const relayLabels: Readonly<Record<RelayConnection, string>> = $derived({
     connecting: relayText.connecting,
     connected: relay.canEdit ? relayText.shared : relayText.readOnly,
-    reconnecting: relayText.reconnecting,
-    offline: relay.canEdit ? relayText.offline : relayText.offlineReadOnly,
+    reconnecting: text.reconnectingShort,
+    offline: relay.canEdit ? text.offlineShort : text.offlineReadOnlyShort,
     lost: text.connectionLost,
+  });
+  const relayDetails: Readonly<Record<RelayConnection, string | undefined>> = $derived({
+    connecting: undefined,
+    connected: relay.canEdit ? undefined : relayText.readOnlyHint,
+    reconnecting: relayText.reconnecting,
+    offline: relay.canEdit ? relayText.offline : relayText.readOnlyHint,
+    lost: undefined,
   });
   const relayHint = $derived.by(() => {
     const end = relay.endOfOpenPlan;
     if (end !== null) {
       return relayEndText(app.messages, end.reason, end.relay);
     }
-    return relay.canEdit ? undefined : relayText.readOnlyHint;
+    return relay.connection === null ? undefined : relayDetails[relay.connection];
   });
   const guestItems: readonly MenuItem[] = $derived([
     {

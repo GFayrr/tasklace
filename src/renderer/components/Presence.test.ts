@@ -229,14 +229,19 @@ describe('the chip of the connection', () => {
     expect([
       textsOf(root, '.status-bar .badge.offline'),
       textsOf(single(root, 'header.toolbar'), '.label'),
-    ]).toEqual([[TEXT.offlineShort], [TEXT.offline]]);
+    ]).toEqual([[TEXT.offlineShort], [TEXT.offlineShort]]);
   });
 
   it('says to a person in read only who is offline that the changes will be kept in their own copy', async () => {
     const { root, control } = await renderJoined();
     control.collaboration.listener?.({ kind: 'offline' });
     update();
-    expect(textsOf(single(root, 'header.toolbar'), '.label')).toEqual([TEXT.offlineKeptApart]);
+    const label = textsOf(single(root, 'header.toolbar'), '.label');
+    click(button(root, TEXT.offlineKeptApart));
+    expect([label, textsOf(root, '[role="menuitem"]')]).toEqual([
+      [TEXT.offlineReadOnlyShort],
+      [`${TEXT.leave} ${TEXT.offlineKeptApart}`],
+    ]);
   });
 
   it('says when and why the connection to the host is lost, the plan staying open', async () => {
@@ -322,8 +327,11 @@ describe('a plan shared through a relay', () => {
     const { root, control } = await renderRelay(true);
     control.collaboration.listener?.({ kind: 'reconnecting' });
     update();
+    /** Gives the chip of the connection to the relay as it is now. */
+    const chip = () => single(root, 'header.toolbar button.host');
     const reconnecting = [
       textsOf(single(root, 'header.toolbar'), '.label'),
+      chip().getAttribute('title'),
       textsOf(root, '.status-bar .badge.reconnecting'),
       textsOf(root, '.presence'),
     ];
@@ -332,11 +340,13 @@ describe('a plan shared through a relay', () => {
     expect([
       reconnecting,
       textsOf(single(root, 'header.toolbar'), '.label'),
+      chip().getAttribute('title'),
       textsOf(root, '.status-bar .badge.offline'),
       root.querySelector('.people'),
     ]).toEqual([
-      [[RELAY.reconnecting], [TEXT.reconnectingShort], []],
-      [RELAY.offline],
+      [[TEXT.reconnectingShort], RELAY.reconnecting, [TEXT.reconnectingShort], []],
+      [TEXT.offlineShort],
+      RELAY.offline,
       [TEXT.offlineShort],
       null,
     ]);
@@ -351,9 +361,14 @@ describe('a plan shared through a relay', () => {
     ];
     control.collaboration.listener?.({ kind: 'offline' });
     update();
-    expect([connected, textsOf(single(root, 'header.toolbar'), '.label')]).toEqual([
-      [[RELAY.readOnly], RELAY.readOnlyHint, [`${TEXT.readOnlyRight} ${RELAY.readOnlyHint}`]],
-      [RELAY.offlineReadOnly],
+    expect([
+      connected,
+      textsOf(single(root, 'header.toolbar'), '.label'),
+      single(root, 'header.toolbar button.host').getAttribute('title'),
+    ]).toEqual([
+      [[RELAY.readOnly], RELAY.readOnlyHint, [TEXT.readOnlyRight]],
+      [TEXT.offlineReadOnlyShort],
+      RELAY.readOnlyHint,
     ]);
   });
 

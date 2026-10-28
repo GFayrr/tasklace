@@ -62,7 +62,7 @@
     "importHint": "A CSV or JSON file",
     "recent": "Recent projects",
     "join": "Join…",
-    "joinHint": "A plan shared near you"
+    "joinHint": "A plan shared with you"
   },
   "toolbar": {
     "fileActions": "File",
@@ -707,6 +707,7 @@
     "reconnectingShort": "Reconnecting…",
     "offline": "Offline · your changes are shared once you are back in the plan",
     "offlineShort": "Offline",
+    "offlineReadOnlyShort": "Offline · read only",
     "offlineKeptApart": "Offline · you are in read only, so your changes will be kept in your own copy",
     "reconnectingDetail": "Tasklace keeps trying to reach {host}. Your changes are kept on this computer.",
     "hostChanged": "{left} left. {next} now hosts the plan; you are still in.",
@@ -754,7 +755,6 @@
     "readOnly": "Read only",
     "reconnecting": "Reconnecting to the relay… your changes are kept",
     "offline": "Offline · your changes are shared once the relay answers",
-    "offlineReadOnly": "Offline · read only",
     "readOnlyHint": "You joined with a link to view.",
     "sharedThrough": "Shared through {relay}",
     "ends": {

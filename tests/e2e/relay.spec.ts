@@ -165,7 +165,7 @@ test('shares a plan through a relay, joined in read only with the link that read
   await expect(reader.page.locator('.status-bar .names')).toHaveText('Léa, Camille');
   await picture(reader.page, 'relay-read-only');
   await expect(reader.page.locator('.status-bar .read-only')).toHaveText(
-    `${english.collaboration.readOnlyRight} ${RELAY.readOnlyHint}`,
+    english.collaboration.readOnlyRight,
   );
   const editor = await launch();
   await joinByLink(
