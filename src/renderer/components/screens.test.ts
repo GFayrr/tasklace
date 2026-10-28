@@ -105,8 +105,8 @@ describe('Welcome', () => {
     const { context, control } = fakeAppContext();
     const app = new AppState(context);
     control.recent = [
-      { name: 'Thesis', folder: '/school' },
-      { name: 'Thesis', folder: '/work' },
+      { name: 'Thesis', folder: '/school', relay: null },
+      { name: 'Thesis', folder: '/work', relay: null },
     ];
     await app.loadRecentProjects();
     const root = render(Welcome, { app });
@@ -257,7 +257,7 @@ describe('Toolbar', () => {
 
   it('offers new, open, recent, import and export through its menus', async () => {
     const { app, control } = await withOpenPlan();
-    control.recent = [{ name: 'Old', folder: '/school' }];
+    control.recent = [{ name: 'Old', folder: '/school', relay: null }];
     await app.loadRecentProjects();
     const root = render(Toolbar, { app });
     /** Opens a menu of the toolbar and chooses the item that starts with a text. */

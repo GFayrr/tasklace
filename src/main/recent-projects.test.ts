@@ -5,10 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_FILE_PATH_LENGTH, MAX_RECENT_PROJECTS } from '../core/limits';
 import {
   formatRecentProjects,
+  noteRecentRelay,
   readRecentProjects,
   readRecentStore,
   recordRecentProject,
   withRecentProject,
+  withRelayOf,
+  type RecentEntry,
 } from './recent-projects';
 
 const writing = vi.hoisted((): { failure: Error | null } => ({ failure: null }));
@@ -28,6 +31,12 @@ const A = resolve('/projects/a.tasklace');
 const B = resolve('/projects/b.tasklace');
 const C = resolve('/projects/c.tasklace');
 const D = resolve('/projects/d.tasklace');
+const RELAY = 'relay.example:8443';
+
+/** Gives the entries of projects shared through no relay. */
+function local(...paths: string[]): RecentEntry[] {
+  return paths.map((path) => ({ path, relay: null }));
+}
 
 let folder: string;
 
@@ -41,36 +50,39 @@ afterEach(async () => {
 
 describe('recent projects', () => {
   it('puts the last opened project first, without duplicate, keeping only the limit', () => {
-    expect(withRecentProject([A, B, C], B)).toEqual([B, A, C]);
-    expect(withRecentProject([A, B, C], D)).toEqual([D, A, B]);
-    expect(withRecentProject([A, B, C], D)).toHaveLength(MAX_RECENT_PROJECTS);
+    expect(withRecentProject(local(A, B, C), B)).toEqual(local(B, A, C));
+    expect(withRecentProject(local(A, B, C), D)).toEqual(local(D, A, B));
+    expect(withRecentProject(local(A, B, C), D)).toHaveLength(MAX_RECENT_PROJECTS);
   });
 
   it('lists a project once whatever way its path is written, in the store or when recorded', () => {
     const unnormalized = A.replace('a.tasklace', join('.', 'x', '..', 'a.tasklace'));
-    expect(withRecentProject([A, B], unnormalized)).toEqual([A, B]);
-    expect(readRecentStore(formatRecentProjects([A, B, A, unnormalized, C]))).toEqual({
-      paths: [A, B, C],
+    expect(withRecentProject(local(A, B), unnormalized)).toEqual(local(A, B));
+    expect(readRecentStore(formatRecentProjects(local(A, B, A, unnormalized, C)))).toEqual({
+      entries: local(A, B, C),
       damaged: false,
     });
   });
 
   it('reads back what it writes', () => {
-    expect(readRecentStore(formatRecentProjects([A, B]))).toEqual({
-      paths: [A, B],
+    const shared = [{ path: A, relay: RELAY }, ...local(B)];
+    expect(readRecentStore(formatRecentProjects(shared))).toEqual({
+      entries: shared,
       damaged: false,
     });
-    expect(readRecentStore('')).toEqual({ paths: [], damaged: false });
+    expect(readRecentStore('')).toEqual({ entries: [], damaged: false });
   });
 
   it.each([
     'not json',
     '[]',
     'null',
+    JSON.stringify({ version: 3, projects: local(A) }),
     JSON.stringify({ version: 2, paths: [A] }),
     JSON.stringify({ version: 1, paths: 'a' }),
+    JSON.stringify({ version: 1, projects: local(A) }),
   ])('reads the damaged store %j as empty and damaged', (text) => {
-    expect(readRecentStore(text)).toEqual({ paths: [], damaged: true });
+    expect(readRecentStore(text)).toEqual({ entries: [], damaged: true });
   });
 
   it('keeps only well-formed absolute paths, within the limit, telling that some were dropped', () => {
@@ -87,9 +99,9 @@ describe('recent projects', () => {
         D,
       ],
     });
-    expect(readRecentStore(text)).toEqual({ paths: [A, B, C], damaged: true });
-    const tooMany = formatRecentProjects([A, B, C, D]);
-    expect(readRecentStore(tooMany)).toEqual({ paths: [A, B, C], damaged: false });
+    expect(readRecentStore(text)).toEqual({ entries: local(A, B, C), damaged: true });
+    const tooMany = formatRecentProjects(local(A, B, C, D));
+    expect(readRecentStore(tooMany)).toEqual({ entries: local(A, B, C), damaged: false });
   });
 
   it('records projects in its store, a missing store meaning none', async () => {
@@ -97,7 +109,7 @@ describe('recent projects', () => {
     expect(await readRecentProjects(store)).toEqual([]);
     await recordRecentProject(store, A);
     await recordRecentProject(store, B);
-    expect(await readRecentProjects(store)).toEqual([B, A]);
+    expect(await readRecentProjects(store)).toEqual(local(B, A));
     expect(await readdir(folder)).toEqual(['recent-projects.json']);
   });
 
@@ -106,13 +118,16 @@ describe('recent projects', () => {
     await writeFile(store, JSON.stringify({ version: 1, paths: [A, 'relative/plan.tasklace', B] }));
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      expect(await readRecentProjects(store)).toEqual([A, B]);
+      expect(await readRecentProjects(store)).toEqual(local(A, B));
       expect(logged).toHaveBeenCalledTimes(1);
     } finally {
       logged.mockRestore();
     }
-    expect(await readRecentProjects(store)).toEqual([A, B]);
-    expect(JSON.parse(await readFile(store, 'utf8'))).toEqual({ version: 1, paths: [A, B] });
+    expect(await readRecentProjects(store)).toEqual(local(A, B));
+    expect(JSON.parse(await readFile(store, 'utf8'))).toEqual({
+      version: 2,
+      projects: local(A, B),
+    });
   });
 
   it('logs a repaired list that cannot be written back, still giving its valid entries', async () => {
@@ -122,7 +137,7 @@ describe('recent projects', () => {
     writing.failure = refusal;
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      expect(await readRecentProjects(store)).toEqual([A]);
+      expect(await readRecentProjects(store)).toEqual(local(A));
       expect(logged.mock.calls.slice(1)).toEqual([
         ['The repaired list of recent projects could not be written:', refusal],
       ]);
@@ -153,6 +168,69 @@ describe('recent projects', () => {
     expect(aside).toHaveLength(1);
     expect(await readFile(join(folder, aside[0] ?? ''), 'utf8')).toBe('{broken');
     await recordRecentProject(store, A);
-    expect(await readRecentProjects(store)).toEqual([A]);
+    expect(await readRecentProjects(store)).toEqual(local(A));
+  });
+});
+
+describe('the relay of a recent project', () => {
+  it('reads a list of paths alone as projects shared through no relay', () => {
+    expect(readRecentStore(JSON.stringify({ version: 1, paths: [A, B] }))).toEqual({
+      entries: local(A, B),
+      damaged: false,
+    });
+  });
+
+  it('keeps the relay a project is shared through when it comes first again, unless another one or none is given', () => {
+    const shared = [...local(A), { path: B, relay: RELAY }];
+    expect([
+      withRecentProject(shared, B),
+      withRecentProject(shared, B, 'other.example'),
+      withRecentProject(shared, B, null),
+      withRecentProject(shared, A, RELAY),
+    ]).toEqual([
+      [{ path: B, relay: RELAY }, ...local(A)],
+      [{ path: B, relay: 'other.example' }, ...local(A)],
+      local(B, A),
+      [
+        { path: A, relay: RELAY },
+        { path: B, relay: RELAY },
+      ],
+    ]);
+  });
+
+  it('notes or clears the relay of a listed project without moving it, and ignores a project not listed', () => {
+    const listed = local(A, B);
+    expect([
+      withRelayOf(listed, B, RELAY),
+      withRelayOf([{ path: A, relay: RELAY }], A, null),
+      withRelayOf(listed, C, RELAY),
+    ]).toEqual([[...local(A), { path: B, relay: RELAY }], local(A), listed]);
+  });
+
+  it.each([
+    ['a relay that is not text', 7],
+    ['an address with its scheme', 'wss://relay.example'],
+    ['a host in capitals, not written as the application shows it', 'Relay.example'],
+    ['a relay with a path', 'relay.example/v1'],
+  ])('drops an entry with %s, telling that the store was damaged', (_case, relay) => {
+    const text = JSON.stringify({ version: 2, projects: [{ path: A, relay }, ...local(B)] });
+    expect(readRecentStore(text)).toEqual({ entries: local(B), damaged: true });
+  });
+
+  it('writes the relay of a recent project to its store only when that changes it', async () => {
+    const store = join(folder, 'recent-projects.json');
+    await recordRecentProject(store, A);
+    await recordRecentProject(store, B);
+    await noteRecentRelay(store, A, RELAY);
+    expect(await readRecentProjects(store)).toEqual([...local(B), { path: A, relay: RELAY }]);
+    writing.failure = new Error('No write was expected.');
+    try {
+      await noteRecentRelay(store, A, RELAY);
+      await noteRecentRelay(store, C, RELAY);
+    } finally {
+      writing.failure = null;
+    }
+    await noteRecentRelay(store, A, null);
+    expect(await readRecentProjects(store)).toEqual(local(B, A));
   });
 });

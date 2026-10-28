@@ -9,9 +9,11 @@ import {
   encodeRelayLink,
   hostLabelOf,
   isLoopback,
+  previewRelayLink,
   readRelayAddress,
   readRelayLink,
   relayUrlOf,
+  shownRelayLink,
   type RelayAddress,
 } from './relay-link';
 
@@ -192,5 +194,47 @@ describe('the link of a plan shared through a relay', () => {
         readRelayAddress(`wss://${text}`);
       }),
     );
+  });
+});
+
+describe('what a person sees of a link', () => {
+  it('tells the relay and whether a pasted link edits, from its form alone', () => {
+    const address = { host: 'relay.example', port: 8443, path: '/tasklace' };
+    expect([
+      previewRelayLink(` ${encodeRelayLink({ address: SCHOOL, access: EDIT })}\n`),
+      previewRelayLink(encodeRelayLink({ address, access: viewAccessOf(EDIT) })),
+    ]).toEqual([
+      { relay: 'tasklace.my-school.example', canEdit: true },
+      { relay: 'relay.example:8443', canEdit: false },
+    ]);
+  });
+
+  it('tells nothing for text that cannot be a link: another scheme, a broken relay, no keys or keys of another length', () => {
+    const edit = encodeRelayLink({ address: SCHOOL, access: EDIT });
+    const [base = '', keys = ''] = edit.split('#e1.');
+    expect(
+      [
+        edit.replace('tasklace://', 'https://'),
+        edit.replace('tasklace://', 'tasklace://-'),
+        base,
+        `${base}#e2.${keys}`,
+        `${base}#e1.${keys.slice(0, -1)}`,
+        `${base}#e1.${keys}A`,
+        `${base}#e1.${'A'.repeat(MAX_RELAY_LINK_LENGTH)}`,
+      ].map(previewRelayLink),
+    ).toEqual(Array.from({ length: 7 }, () => null));
+  });
+
+  it('shows a link with its keys cut after their first characters', () => {
+    const editKeys = encodeRelayLink({ address: SCHOOL, access: EDIT }).split('#e1.')[1] ?? '';
+    const viewKeys =
+      encodeRelayLink({ address: SCHOOL, access: viewAccessOf(EDIT) }).split('#v1.')[1] ?? '';
+    expect([
+      shownRelayLink({ address: SCHOOL, access: EDIT }),
+      shownRelayLink({ address: SCHOOL, access: viewAccessOf(EDIT) }),
+    ]).toEqual([
+      `tasklace://tasklace.my-school.example/#e1.${editKeys.slice(0, 6)}…`,
+      `tasklace://tasklace.my-school.example/#v1.${viewKeys.slice(0, 6)}…`,
+    ]);
   });
 });

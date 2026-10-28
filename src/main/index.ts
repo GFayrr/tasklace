@@ -24,7 +24,13 @@ import {
   windowDocumentOf,
   windowProjectKind,
 } from './project-files';
-import { CONTENT_SECURITY_POLICY_HEADER, hardenContents, hardenSession } from './security';
+import { WORKING_REMOTELY_GUIDE_URL } from './external-links';
+import {
+  CONTENT_SECURITY_POLICY_HEADER,
+  hardenContents,
+  hardenSession,
+  openInBrowser,
+} from './security';
 import { MESSAGES } from './messages';
 import { installApplicationMenu } from './platform/application-menu';
 import {
@@ -86,7 +92,7 @@ function start(): void {
   );
   const assertTrusted = createTrustCheck((address) => isAppAddress(address, developmentOrigin));
   registerFlushHandler(assertTrusted);
-  registerProjectFileHandlers({
+  const files = registerProjectFileHandlers({
     assertTrusted,
     runTask: (task) => runInFileWorker(createFileWorker, task),
     userDataFolder: app.getPath('userData'),
@@ -120,6 +126,10 @@ function start(): void {
     documentOf: windowDocumentOf,
     busyElsewhere: (sender) => collaboration.isBusy(sender),
     startTimer: systemTimer,
+    offerRelayPlan: files.offerRelayPlan,
+    noteRelay: files.noteRelay,
+    copyText: (text) => clipboard.writeText(text),
+    openGuide: () => openInBrowser(WORKING_REMOTELY_GUIDE_URL),
   });
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath);

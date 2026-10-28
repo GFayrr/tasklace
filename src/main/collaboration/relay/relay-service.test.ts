@@ -7,7 +7,11 @@ import { testConfig } from '../../../../relay/src/testing/relay-client.ts';
 import { temporaryFolder } from '../../../../relay/src/testing/relay-records.ts';
 import { encodeMessage } from '../../../core/collaboration/messages';
 import { AEAD_TAG_BYTES } from '../../../core/collaboration/secure/channel';
-import { encodeRelayLink, readRelayLink } from '../../../core/collaboration/relay/relay-link';
+import {
+  encodeRelayLink,
+  readRelayLink,
+  shownRelayLink,
+} from '../../../core/collaboration/relay/relay-link';
 import { failure, success } from '../../../core/result';
 import { createSharedDocument, type DocumentId } from '../../../core/shared/shared-document';
 import {
@@ -29,16 +33,6 @@ vi.mock('electron', async () => {
   const fakes = await import('../../testing/fake-electron');
   return { ipcMain: new fakes.FakeIpcMain() };
 });
-
-vi.mock('../../project-files', () => ({
-  offerSharedProject: (_sender: unknown, loaded: { state: Uint8Array; documentId: string }) => ({
-    state: loaded.state,
-    documentId: loaded.documentId,
-    fileName: '',
-    warnings: [],
-    localChanges: null,
-  }),
-}));
 
 const ipcMain = electronIpcMain as unknown as FakeIpcMain;
 const OTHER_PLAN = forgedDocumentId('1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d');
@@ -128,6 +122,11 @@ let busyElsewhere = new Set<FakePage>();
 let handlers: RelayHandlers;
 let tasks: FileTask[];
 let gate: { readonly held: Promise<undefined>; readonly open: () => void } | null = null;
+let copied: string[];
+let copyFails: Error | null;
+let noted: [FakePage, string | null][];
+let offered: { page: FakePage; name: string; relay: string }[];
+let guideOpens: boolean;
 const pages: FakePage[] = [];
 const fakes: WebSocketServer[] = [];
 
@@ -139,6 +138,11 @@ beforeEach(async () => {
   busyElsewhere = new Set();
   tasks = [];
   gate = null;
+  copied = [];
+  copyFails = null;
+  noted = [];
+  offered = [];
+  guideOpens = true;
   handlers = registerRelayHandlers({
     assertTrusted: () => undefined,
     runTask: async <T extends FileTask>(task: T) => {
@@ -150,6 +154,32 @@ beforeEach(async () => {
     documentOf: (sender) => documents.get(sender as unknown as FakePage) ?? null,
     busyElsewhere: (sender) => busyElsewhere.has(sender as unknown as FakePage),
     startTimer: fastTimer,
+    offerRelayPlan: async (sender, plan, relay) => {
+      await Promise.resolve();
+      offered.push({ page: sender as unknown as FakePage, name: plan.name, relay });
+      return {
+        state: plan.state,
+        documentId: plan.documentId,
+        fileName: `${plan.name}.tasklace`,
+        warnings: [],
+        localChanges: null,
+      };
+    },
+    noteRelay: async (sender, relay) => {
+      noted.push([sender as unknown as FakePage, relay]);
+      await Promise.resolve();
+    },
+    copyText: async (text) => {
+      await Promise.resolve();
+      if (copyFails !== null) {
+        throw copyFails;
+      }
+      copied.push(text);
+    },
+    openGuide: async () => {
+      await Promise.resolve();
+      return guideOpens;
+    },
   });
 });
 
@@ -195,14 +225,29 @@ function relayAddress(port = relayServer.port): string {
   return `ws://127.0.0.1:${String(port)}/`;
 }
 
-/** Shares the plan of a page through the relay of the test, giving its two links. */
+/** Shares the plan of a page through the relay of the test, giving its two links as copied. */
 async function shared(page: FakePage): Promise<{ editLink: string; viewLink: string }> {
-  const answer = await invoke(page, IPC_CHANNELS.shareThroughRelay, relayAddress());
-  const value: unknown = Reflect.get(Object(answer), 'value');
-  return {
-    editLink: String(Reflect.get(Object(value), 'editLink')),
-    viewLink: String(Reflect.get(Object(value), 'viewLink')),
-  };
+  await invoke(page, IPC_CHANNELS.shareThroughRelay, relayAddress());
+  return await copiedLinks(page);
+}
+
+/** Copies both links of the plan a page shares, giving them as the clipboard received them. */
+async function copiedLinks(page: FakePage): Promise<{ editLink: string; viewLink: string }> {
+  await invoke(page, IPC_CHANNELS.copyRelayLink, 'edit');
+  await invoke(page, IPC_CHANNELS.copyRelayLink, 'view');
+  const [editLink = '', viewLink = ''] = copied.splice(-2);
+  return { editLink, viewLink };
+}
+
+/** Gives a link as a person sees it on screen. */
+function shownOf(text: string): string {
+  const link = readRelayLink(text);
+  return link.ok ? shownRelayLink(link.value) : 'not a link';
+}
+
+/** Gives the relay of the test as the application shows it. */
+function relayLabel(): string {
+  return `127.0.0.1:${String(relayServer.port)}`;
 }
 
 /** Sends a message of the plan from a page to the relay, as its member would. */
@@ -270,25 +315,30 @@ describe('sharing a plan through a relay', () => {
     const owner = openPage(TEST_DOCUMENT_ID);
     const answer = await invoke(owner, IPC_CHANNELS.shareThroughRelay, relayAddress());
     await until(() => owner.kinds().includes('relayCaughtUp'));
-    const value = Reflect.get(Object(answer), 'value') as { editLink: string; viewLink: string };
-    const edit = readRelayLink(value.editLink);
-    const view = readRelayLink(value.viewLink);
+    const { editLink, viewLink } = await copiedLinks(owner);
+    const edit = readRelayLink(editLink);
+    const view = readRelayLink(viewLink);
     expect([
-      Reflect.get(Object(answer), 'ok'),
-      Reflect.get(Object(value), 'kept'),
-      Reflect.get(Object(value), 'relay'),
+      answer,
       edit.ok && edit.value.access.kind,
       view.ok && view.value.access.kind,
       links.kept.get(TEST_DOCUMENT_ID),
+      noted,
       owner.events.slice(0, 2),
       handlers.isSharing(asSender(owner)),
     ]).toEqual([
-      true,
-      true,
-      `127.0.0.1:${String(relayServer.port)}`,
+      {
+        ok: true,
+        value: {
+          shown: { edit: shownOf(editLink), view: shownOf(viewLink) },
+          relay: relayLabel(),
+          kept: true,
+        },
+      },
       'edit',
       'view',
-      value.editLink,
+      editLink,
+      [[owner, relayLabel()]],
       [{ kind: 'relayConnected', member: 1, members: [] }, { kind: 'relayCaughtUp' }],
       true,
     ]);
@@ -363,29 +413,31 @@ describe('joining a plan by its link', () => {
     const { owner, viewLink } = await sharedWithPlan();
     const guest = openPage();
     const answer = await invoke(guest, IPC_CHANNELS.joinByLink, viewLink);
-    const value = Reflect.get(Object(answer), 'value') as {
-      project: { documentId: string };
-      canEdit: boolean;
-      relay: string;
-      kept: boolean;
-      bytesSinceSnapshot: number;
-    };
     await until(() => owner.kinds().includes('relayJoined'));
     expect([
-      value.project.documentId,
-      value.canEdit,
-      value.relay,
-      value.kept,
-      value.bytesSinceSnapshot,
+      answer,
+      offered,
       links.kept.get(TEST_DOCUMENT_ID) === viewLink,
       tasks.map((task) => task.kind),
       guest.kinds().slice(0, 1),
     ]).toEqual([
-      TEST_DOCUMENT_ID,
-      false,
-      `127.0.0.1:${String(relayServer.port)}`,
-      true,
-      0,
+      {
+        ok: true,
+        value: {
+          project: {
+            state: PLAN_STATE,
+            documentId: TEST_DOCUMENT_ID,
+            fileName: 'Test project.tasklace',
+            warnings: [],
+            localChanges: null,
+          },
+          shown: { edit: null, view: shownOf(viewLink) },
+          relay: relayLabel(),
+          bytesSinceSnapshot: 0,
+          kept: true,
+        },
+      },
+      [{ page: guest, name: 'Test project', relay: relayLabel() }],
       true,
       ['readRelayLog'],
       ['relayConnected'],
@@ -478,7 +530,7 @@ describe('joining a plan by its link', () => {
 
 describe('reopening a plan shared through a relay', () => {
   it('reads the log again from the start and hands the page the state it holds before anything after it', async () => {
-    const { owner, editLink } = await sharedWithPlan();
+    const { owner, editLink, viewLink } = await sharedWithPlan();
     handlers.leave(asSender(owner));
     const again = openPage(TEST_DOCUMENT_ID);
     const answer = await invoke(again, IPC_CHANNELS.reopenSharedPlan, TEST_DOCUMENT_ID);
@@ -487,11 +539,19 @@ describe('reopening a plan shared through a relay', () => {
     expect([
       answer,
       links.kept.get(TEST_DOCUMENT_ID) === editLink,
+      noted.at(-1),
       again.kinds(),
       stateEvent?.kind === 'relayState' && stateEvent.state !== null,
     ]).toEqual([
-      { ok: true, value: { canEdit: true, relay: `127.0.0.1:${String(relayServer.port)}` } },
+      {
+        ok: true,
+        value: {
+          shown: { edit: shownOf(editLink), view: shownOf(viewLink) },
+          relay: relayLabel(),
+        },
+      },
       true,
+      [again, relayLabel()],
       ['relayConnected', 'relayState', 'relayCaughtUp'],
       true,
     ]);
@@ -634,13 +694,27 @@ describe('the links of a plan shared through a relay', () => {
     await invoke(guest, IPC_CHANNELS.joinByLink, viewLink);
     const answer = await invoke(owner, IPC_CHANNELS.makeNewLinks);
     await until(() => guest.kinds().includes('relayEnded'));
-    const fresh: unknown = Reflect.get(Object(Reflect.get(Object(answer), 'value')), 'editLink');
+    const fresh = await copiedLinks(owner);
     expect([
-      fresh !== editLink,
-      links.kept.get(TEST_DOCUMENT_ID) === fresh,
+      answer,
+      fresh.editLink !== editLink,
+      links.kept.get(TEST_DOCUMENT_ID) === fresh.editLink,
       guest.events.at(-1),
       handlers.isSharing(asSender(owner)),
-    ]).toEqual([true, true, { kind: 'relayEnded', reason: 'CLOSED' }, true]);
+    ]).toEqual([
+      {
+        ok: true,
+        value: {
+          shown: { edit: shownOf(fresh.editLink), view: shownOf(fresh.viewLink) },
+          relay: relayLabel(),
+          kept: true,
+        },
+      },
+      true,
+      true,
+      { kind: 'relayEnded', reason: 'CLOSED' },
+      true,
+    ]);
   });
 
   it('refuses new links to a window that does not share with the link that edits, or is not connected', async () => {
@@ -673,10 +747,77 @@ describe('the links of a plan shared through a relay', () => {
     await invoke(page, IPC_CHANNELS.reopenSharedPlan, OTHER_PLAN);
     await until(() => page.kinds().includes('relayEnded'));
     await until(() => !links.kept.has(OTHER_PLAN));
-    expect([keptAfterLeaving, page.events.at(-1), handlers.isSharing(asSender(owner))]).toEqual([
-      true,
-      { kind: 'relayEnded', reason: 'NO_ROOM' },
-      false,
+    expect([
+      keptAfterLeaving,
+      page.events.at(-1),
+      noted.at(-1),
+      handlers.isSharing(asSender(owner)),
+    ]).toEqual([true, { kind: 'relayEnded', reason: 'NO_ROOM' }, [page, null], false]);
+  });
+});
+
+describe('copying a link and opening the guide', () => {
+  it('copies the whole link that edits and the link that reads of the plan a window shares, which join the same plan', async () => {
+    const { editLink, viewLink } = await sharedWithPlan();
+    const edit = readRelayLink(editLink);
+    const view = readRelayLink(viewLink);
+    expect([
+      editLink.startsWith(`tasklace://${relayLabel()}/#e1.`),
+      viewLink.startsWith(`tasklace://${relayLabel()}/#v1.`),
+      edit.ok && view.ok && view.value.access.readKey.join() === edit.value.access.readKey.join(),
+    ]).toEqual([true, true, true]);
+  });
+
+  it('copies only the link that reads for a window that joined with it, and nothing for a window sharing nothing', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { viewLink } = await sharedWithPlan();
+    const guest = openPage();
+    await invoke(guest, IPC_CHANNELS.joinByLink, viewLink);
+    expect([
+      await invoke(guest, IPC_CHANNELS.copyRelayLink, 'edit'),
+      await invoke(guest, IPC_CHANNELS.copyRelayLink, 'view'),
+      await invoke(openPage(), IPC_CHANNELS.copyRelayLink, 'view'),
+      copied,
+      error.mock.calls,
+    ]).toEqual([
+      { ok: false, error: { code: 'TASK_FAILED' } },
+      { ok: true, value: null },
+      { ok: false, error: { code: 'TASK_FAILED' } },
+      [viewLink],
+      [
+        ['A page asked to copy a link of a plan it does not share with that link.'],
+        ['A page asked to copy a link of a plan it does not share with that link.'],
+      ],
+    ]);
+  });
+
+  it('refuses a kind of link that is not one', async () => {
+    const owner = openPage(TEST_DOCUMENT_ID);
+    await shared(owner);
+    await expect(invoke(owner, IPC_CHANNELS.copyRelayLink, 'secret')).rejects.toThrow(
+      'Request refused',
+    );
+  });
+
+  it('tells a link that the clipboard did not take, logging why', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const owner = openPage(TEST_DOCUMENT_ID);
+    await shared(owner);
+    const refusal = new Error('The clipboard is busy.');
+    copyFails = refusal;
+    expect([await invoke(owner, IPC_CHANNELS.copyRelayLink, 'edit'), error.mock.calls]).toEqual([
+      { ok: false, error: { code: 'TASK_FAILED' } },
+      [['The link of a shared plan could not be copied:', refusal]],
+    ]);
+  });
+
+  it('opens the guide to set up a relay, telling when the browser could not', async () => {
+    const page = openPage();
+    const opened = await invoke(page, IPC_CHANNELS.openGuide);
+    guideOpens = false;
+    expect([opened, await invoke(page, IPC_CHANNELS.openGuide)]).toEqual([
+      { ok: true, value: null },
+      { ok: false, error: { code: 'TASK_FAILED' } },
     ]);
   });
 });

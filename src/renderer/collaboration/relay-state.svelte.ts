@@ -14,6 +14,7 @@ import type {
   OpenedProject,
   RelayEndReason,
   RelayLinks,
+  ShownRelayLinks,
   TasklaceBridge,
 } from '../../preload/bridge-contract';
 import type { KeptOwnChanges } from './collaboration-state.svelte';
@@ -57,7 +58,7 @@ interface InPlan {
   readonly kind: 'in';
   readonly canEdit: boolean;
   readonly relay: string;
-  readonly links: RelayLinks | null;
+  readonly links: ShownRelayLinks;
   readonly connection: RelayConnection;
   readonly member: RelayMember | null;
   readonly bytesSinceSnapshot: number;
@@ -119,8 +120,8 @@ export class RelayState {
     return this.#phase.kind === 'in' ? this.#phase.relay : null;
   }
 
-  /** Returns the links of the plan this page shared, or null when it joined by a link or shares nothing. */
-  get links(): RelayLinks | null {
+  /** Returns the links of the plan as this page may show them, the link that edits only when it holds it, or null outside a plan shared through a relay. */
+  get links(): ShownRelayLinks | null {
     return this.#phase.kind === 'in' ? this.#phase.links : null;
   }
 
@@ -160,9 +161,8 @@ export class RelayState {
       return shared;
     }
     this.#enter(session, {
-      canEdit: true,
       relay: shared.value.relay,
-      links: shared.value,
+      links: shared.value.shown,
       due: 'wholePlan',
     });
     return shared;
@@ -179,12 +179,12 @@ export class RelayState {
       this.#forget();
       return joined;
     }
-    const { project, canEdit, relay, bytesSinceSnapshot } = joined.value;
+    const { project, shown, relay, bytesSinceSnapshot } = joined.value;
     this.#phase = {
       kind: 'in',
-      canEdit,
+      canEdit: shown.edit !== null,
       relay,
-      links: null,
+      links: shown,
       connection: 'connected',
       member: null,
       bytesSinceSnapshot,
@@ -224,7 +224,7 @@ export class RelayState {
       this.#forget();
       return false;
     }
-    this.#enter(session, { ...reopened.value, links: null, due: null });
+    this.#enter(session, { relay: reopened.value.relay, links: reopened.value.shown, due: null });
     return true;
   }
 
@@ -238,7 +238,12 @@ export class RelayState {
     const current = this.#phase;
     if (made.ok && current.kind === 'in') {
       current.member?.disconnected();
-      this.#phase = { ...current, links: made.value, connection: 'connecting', due: 'wholePlan' };
+      this.#phase = {
+        ...current,
+        links: made.value.shown,
+        connection: 'connecting',
+        due: 'wholePlan',
+      };
     }
     return made;
   }
@@ -337,10 +342,18 @@ export class RelayState {
     return this.#generation;
   }
 
-  /** Follows the plan of the open session through a relay with a new member, then hands it what came meanwhile. */
-  #enter(session: SharedSession, start: Pick<InPlan, 'canEdit' | 'relay' | 'links' | 'due'>): void {
-    const member = this.#member(session, start.canEdit, 0);
-    this.#phase = { kind: 'in', ...start, connection: 'connecting', member, bytesSinceSnapshot: 0 };
+  /** Follows the plan of the open session through a relay with a new member, which edits when the page holds the link that does, then hands it what came meanwhile. */
+  #enter(session: SharedSession, start: Pick<InPlan, 'relay' | 'links' | 'due'>): void {
+    const canEdit = start.links.edit !== null;
+    const member = this.#member(session, canEdit, 0);
+    this.#phase = {
+      kind: 'in',
+      ...start,
+      canEdit,
+      connection: 'connecting',
+      member,
+      bytesSinceSnapshot: 0,
+    };
     this.#release();
   }
 

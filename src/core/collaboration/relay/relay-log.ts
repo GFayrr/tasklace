@@ -1,17 +1,13 @@
 import * as Y from 'yjs';
-import { readSharedState, type FileError } from '../../file/tasklace-file';
+import { readSharedState, type FileError, type SharedStateReading } from '../../file/tasklace-file';
 import { MAX_UNCOMPRESSED_BYTES } from '../../limits';
 import { failure, type Result } from '../../result';
-import type { DocumentId } from '../../shared/shared-document';
 import { readMessage } from '../messages';
 
-export interface RelayLogState {
-  readonly state: Uint8Array;
-  readonly documentId: DocumentId;
-}
-
 /** Reads the log a relay passed on up to where a member caught up: the changes of its messages merged in order into one state, read as untrusted like a file, refusing a message that is not a change of the plan and a log larger than a file. */
-export function readRelayLog(messages: readonly Uint8Array[]): Result<RelayLogState, FileError> {
+export function readRelayLog(
+  messages: readonly Uint8Array[],
+): Result<SharedStateReading, FileError> {
   const updates: Uint8Array[] = [];
   let bytes = 0;
   for (const message of messages) {

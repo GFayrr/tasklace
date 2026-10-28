@@ -93,6 +93,8 @@ export interface FakeRelay {
   joinResult: BridgeResult<RelayJoined>;
   reopenResult: BridgeResult<RelayReopened | null>;
   newLinksResult: BridgeResult<RelayLinks>;
+  copyLinkResult: BridgeResult<null>;
+  guideResult: BridgeResult<null>;
   readonly requests: (readonly [string, ...unknown[]])[];
   readonly sent: RelayOutgoing[];
 }
@@ -148,7 +150,10 @@ export function fakeBridge(): {
     pdfExports: [],
     setAside: [],
     collaboration: {
-      settingsResult: { ok: true, value: { name: null, port: 47_313, firewallNoticeSeen: false } },
+      settingsResult: {
+        ok: true,
+        value: { name: null, port: 47_313, firewallNoticeSeen: false, relayAddress: null },
+      },
       saveSettingsResult: { ok: true, value: null },
       shareResult: {
         ok: true,
@@ -178,6 +183,8 @@ export function fakeBridge(): {
         joinResult: NOT_ANSWERED,
         reopenResult: { ok: true, value: null },
         newLinksResult: NOT_ANSWERED,
+        copyLinkResult: { ok: true, value: null },
+        guideResult: { ok: true, value: null },
         requests: [],
         sent: [],
       },
@@ -280,6 +287,8 @@ export function fakeBridge(): {
     reopenSharedPlan: (documentId) =>
       askedRelay(['reopenSharedPlan', documentId], relay.reopenResult),
     makeNewLinks: () => askedRelay(['makeNewLinks'], relay.newLinksResult),
+    copyRelayLink: (kind) => askedRelay(['copyRelayLink', kind], relay.copyLinkResult),
+    openGuide: () => askedRelay(['openGuide'], relay.guideResult),
     sendToRelay: (outgoing) => {
       relay.sent.push(outgoing);
     },

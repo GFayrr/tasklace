@@ -49,6 +49,12 @@ export type StateCheckError =
   | { readonly code: 'INVALID_STATE'; readonly issues: readonly ValidationIssue[] }
   | { readonly code: 'WRONG_DOCUMENT' };
 
+export interface SharedStateReading {
+  readonly state: Uint8Array;
+  readonly documentId: DocumentId;
+  readonly name: string;
+}
+
 interface ValidatedFile {
   readonly state: Uint8Array;
   readonly document: Y.Doc;
@@ -122,12 +128,16 @@ function readValidatedFile(
   return state.ok ? validatedState(state.value) : state;
 }
 
-/** Reads an untrusted Yjs state received from a shared plan with the checks of a file once decompressed: its size, its decoding, its project and its document identifier. */
-export function readSharedState(
-  state: Uint8Array,
-): Result<{ readonly state: Uint8Array; readonly documentId: DocumentId }, FileError> {
+/** Reads an untrusted Yjs state received from a shared plan with the checks of a file once decompressed: its size, its decoding, its project and its document identifier, giving the name of its plan too. */
+export function readSharedState(state: Uint8Array): Result<SharedStateReading, FileError> {
   const read = checkedSharedState(state);
-  return read.ok ? success({ state: read.value.state, documentId: read.value.documentId }) : read;
+  return read.ok
+    ? success({
+        state: read.value.state,
+        documentId: read.value.documentId,
+        name: read.value.project.name,
+      })
+    : read;
 }
 
 /** Reads the state of a shared plan received from another process or the network within the size of an uncompressed file, refusing an empty one, then decodes and checks it as the content of a file. */

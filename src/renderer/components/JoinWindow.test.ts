@@ -23,7 +23,13 @@ async function renderJoin(settings: Partial<CollaborationSettings> = {}) {
   const fake = fakeAppContext();
   fake.control.collaboration.settingsResult = {
     ok: true,
-    value: { name: 'Noah', port: 47_313, firewallNoticeSeen: false, ...settings },
+    value: {
+      name: 'Noah',
+      port: 47_313,
+      firewallNoticeSeen: false,
+      relayAddress: null,
+      ...settings,
+    },
   };
   const app = new AppState(fake.context);
   const root = render(App, { app });
@@ -169,8 +175,14 @@ describe('joining a shared plan', () => {
     await pressJoin(root);
     expect(messageOf(root)).toBe(english.fileErrors.INVALID_ADDRESS);
     expect(control.collaboration.requests.slice(2)).toEqual([
-      ['saveSettings', { name: 'Noah', port: 47_313, firewallNoticeSeen: false }],
-      ['saveSettings', { name: 'Noah', port: 47_313, firewallNoticeSeen: false }],
+      [
+        'saveSettings',
+        { name: 'Noah', port: 47_313, firewallNoticeSeen: false, relayAddress: null },
+      ],
+      [
+        'saveSettings',
+        { name: 'Noah', port: 47_313, firewallNoticeSeen: false, relayAddress: null },
+      ],
       [
         'join',
         {
@@ -188,7 +200,7 @@ describe('joining a shared plan', () => {
     const fake = fakeAppContext();
     fake.control.collaboration.settingsResult = {
       ok: true,
-      value: { name: 'Noah', port: 47_313, firewallNoticeSeen: false },
+      value: { name: 'Noah', port: 47_313, firewallNoticeSeen: false, relayAddress: null },
     };
     const app = new AppState(fake.context);
     await app.newProject();

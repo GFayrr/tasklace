@@ -21,6 +21,11 @@ export interface RelayLink {
   readonly access: RelayAccess;
 }
 
+export interface RelayLinkPreview {
+  readonly relay: string;
+  readonly canEdit: boolean;
+}
+
 export type AddressRefusal = 'INVALID_ADDRESS' | 'NOT_SECURE';
 
 const MAX_HOST_LENGTH = 253;
@@ -32,6 +37,9 @@ const LINK_SCHEME = 'tasklace';
 const EDIT_MARK = 'e1';
 const LINK_KEY_BYTES = RELAY_KEY_BYTES + RELAY_KEY_BYTES;
 const VIEW_MARK = 'v1';
+const LINK_KEYS_TEXT_LENGTH = encodeBase64Url(new Uint8Array(LINK_KEY_BYTES)).length;
+const SHOWN_KEY_CHARACTERS = 6;
+const LEFT_OUT = '…';
 const ADDRESS_PATTERN = /^([a-z]+):\/\/([^/:[\]]+|\[[^\]]*\])(?::(\d{1,5}))?(\/[^#?]*)?$/i;
 const LINK_PATTERN =
   /^tasklace:\/\/([^/:[\]]+|\[[^\]]*\])(?::(\d{1,5}))?(\/[^#?]*)?#([ev]1)\.([A-Za-z0-9_-]+)$/;
@@ -90,6 +98,27 @@ export function readRelayLink(text: string): Result<RelayLink, 'INVALID_LINK'> {
   return address === null || access === null
     ? failure('INVALID_LINK')
     : success({ address, access });
+}
+
+/** Tells what a link a person pasted leads to, its relay and whether it edits, from its form alone without ever reading its keys, or returns null for text that cannot be such a link. */
+export function previewRelayLink(text: string): RelayLinkPreview | null {
+  const trimmed = text.trim();
+  const match = trimmed.length > MAX_RELAY_LINK_LENGTH ? null : LINK_PATTERN.exec(trimmed);
+  if (match === null) {
+    return null;
+  }
+  const [, host = '', port, path, mark, keys = ''] = match;
+  const address = addressOf(host, port, path);
+  return address === null || keys.length !== LINK_KEYS_TEXT_LENGTH
+    ? null
+    : { relay: hostLabelOf(address), canEdit: mark === EDIT_MARK };
+}
+
+/** Writes a link as a person may see it on screen, its keys cut after their first characters so that the page never holds them. */
+export function shownRelayLink(link: RelayLink): string {
+  const written = encodeRelayLink(link);
+  const keysStart = written.indexOf('#') + `#${EDIT_MARK}.`.length;
+  return `${written.slice(0, keysStart + SHOWN_KEY_CHARACTERS)}${LEFT_OUT}`;
 }
 
 /** Tells whether a relay runs on this computer. */

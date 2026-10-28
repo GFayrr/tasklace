@@ -38,10 +38,11 @@ describe('reading the log a relay passed on', () => {
     expect(
       read.ok && [
         read.value.documentId,
+        read.value.name,
         holdsChangesMissingFrom(read.value.state, session.encodeState()),
         holdsChangesMissingFrom(session.encodeState(), read.value.state),
       ],
-    ).toEqual([TEST_DOCUMENT_ID, false, false]);
+    ).toEqual([TEST_DOCUMENT_ID, 'Test project', false, false]);
   });
 
   it.each([

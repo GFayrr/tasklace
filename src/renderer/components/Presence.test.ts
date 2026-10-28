@@ -44,7 +44,7 @@ async function renderHosting(guestCount: number) {
   const { collaboration } = opened.control;
   collaboration.settingsResult = {
     ok: true,
-    value: { name: 'Camille', port: 47_313, firewallNoticeSeen: true },
+    value: { name: 'Camille', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
   };
   await opened.app.openShare();
   opened.app.closeCollaborationWindow();
@@ -76,7 +76,7 @@ async function renderJoined(canEdit = false) {
   const { collaboration } = fake.control;
   collaboration.settingsResult = {
     ok: true,
-    value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true },
+    value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
   };
   collaboration.openSharedResult = openedProjectOf(PLAN, { fileName: '' });
   await app.collaboration.loadSettings();
@@ -183,7 +183,7 @@ describe('the chip of the connection', () => {
     const { collaboration } = opened.control;
     collaboration.settingsResult = {
       ok: true,
-      value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true },
+      value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
     };
     collaboration.openSharedResult = openedProjectOf(PLAN, { fileName: '' });
     await opened.app.collaboration.loadSettings();

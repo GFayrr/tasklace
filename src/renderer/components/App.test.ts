@@ -141,7 +141,7 @@ describe('the window that tells where changes made in read only are kept', () =>
     const { collaboration } = fake.control;
     collaboration.settingsResult = {
       ok: true,
-      value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true },
+      value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
     };
     collaboration.openSharedResult = openedProjectOf(PLAN, { fileName: '' });
     await app.collaboration.loadSettings();

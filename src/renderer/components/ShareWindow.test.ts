@@ -20,7 +20,7 @@ async function renderApp(settings: Partial<CollaborationSettings> = {}) {
   const opened = await openedAppOf(PLAN);
   opened.control.collaboration.settingsResult = {
     ok: true,
-    value: { name: null, port: 47_313, firewallNoticeSeen: false, ...settings },
+    value: { name: null, port: 47_313, firewallNoticeSeen: false, relayAddress: null, ...settings },
   };
   const root = render(App, { app: opened.app });
   return { ...opened, root };
@@ -95,8 +95,14 @@ describe('sharing the open plan', () => {
     );
     expect(control.collaboration.requests).toEqual([
       ['settings'],
-      ['saveSettings', { name: 'Camille', port: 47_313, firewallNoticeSeen: false }],
-      ['saveSettings', { name: 'Camille', port: 47_313, firewallNoticeSeen: true }],
+      [
+        'saveSettings',
+        { name: 'Camille', port: 47_313, firewallNoticeSeen: false, relayAddress: null },
+      ],
+      [
+        'saveSettings',
+        { name: 'Camille', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
+      ],
       ['share', 'Thesis', 'Camille'],
     ]);
     expect([textsOf(dialog, '.character').join(''), textsOf(dialog, '.address')]).toEqual([
@@ -240,8 +246,11 @@ describe('sharing the open plan', () => {
     await typeIn(dialog, '#share-name', 'Camille M.');
     expect(textsOf(dialog, '.field .message')).toEqual([TEXT.nameNotKept]);
     expect(control.collaboration.requests.filter(([name]) => name === 'saveSettings')).toEqual([
-      ['saveSettings', { name: 'Cam', port: 47_313, firewallNoticeSeen: true }],
-      ['saveSettings', { name: 'Camille M.', port: 47_313, firewallNoticeSeen: true }],
+      ['saveSettings', { name: 'Cam', port: 47_313, firewallNoticeSeen: true, relayAddress: null }],
+      [
+        'saveSettings',
+        { name: 'Camille M.', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
+      ],
     ]);
   });
 
@@ -262,8 +271,14 @@ describe('sharing the open plan', () => {
     await typeIn(dialog, '#share-port', '47401');
     expect(textsOf(dialog, '.network .message')).toEqual([TEXT.portNotKept]);
     expect(control.collaboration.requests.filter(([name]) => name === 'saveSettings')).toEqual([
-      ['saveSettings', { name: 'Camille', port: 47_400, firewallNoticeSeen: false }],
-      ['saveSettings', { name: 'Camille', port: 47_401, firewallNoticeSeen: false }],
+      [
+        'saveSettings',
+        { name: 'Camille', port: 47_400, firewallNoticeSeen: false, relayAddress: null },
+      ],
+      [
+        'saveSettings',
+        { name: 'Camille', port: 47_401, firewallNoticeSeen: false, relayAddress: null },
+      ],
     ]);
   });
 

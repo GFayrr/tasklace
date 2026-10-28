@@ -131,25 +131,36 @@ describe('the bridge exposed to the page', () => {
     const bridge = await loadBridge();
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      const entries = [
-        { name: 'Plan', folder: '/projects' },
-        { name: 3, folder: '/projects' },
-        { name: 'Other' },
+      const single = { name: 'Plan', folder: '/projects', relay: null };
+      const malformed = [
+        { name: 3, folder: '/projects', relay: null },
+        { name: 'Other', relay: null },
+        { name: 'Shared', folder: '/projects', relay: 7 },
+        { name: 'Shared', folder: '/projects' },
         null,
       ];
-      electron.invoke.mockResolvedValueOnce({ ok: true, value: entries });
-      expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
-      const single = { name: 'Plan', folder: '/projects' };
+      const refusals = [];
+      for (const entry of malformed) {
+        electron.invoke.mockResolvedValueOnce({ ok: true, value: [single, entry] });
+        refusals.push(await bridge.recentProjects());
+      }
+      expect(refusals).toEqual(
+        malformed.map(() => ({ ok: false, error: { code: 'TASK_FAILED' } })),
+      );
       electron.invoke.mockResolvedValueOnce({ ok: true, value: single });
       expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
-      electron.invoke.mockResolvedValueOnce({ ok: true, value: [single] });
-      expect(await bridge.recentProjects()).toEqual({ ok: true, value: [single] });
+      const both = [single, { name: 'Thesis', folder: '/projects', relay: 'relay.example' }];
+      electron.invoke.mockResolvedValueOnce({ ok: true, value: both });
+      expect(await bridge.recentProjects()).toEqual({ ok: true, value: both });
       electron.invoke.mockResolvedValueOnce({ ok: false, error: { code: 'READ_FAILED' } });
       expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'READ_FAILED' } });
       electron.invoke.mockResolvedValueOnce([single]);
       expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
       expect(logged.mock.calls).toEqual([
-        ['The main process sent recent projects of an unexpected shape:', entries],
+        ...malformed.map((entry) => [
+          'The main process sent recent projects of an unexpected shape:',
+          [single, entry],
+        ]),
         ['The main process sent recent projects that are not a list:', single],
         [
           `The main process answered ${IPC_CHANNELS.recentProjects} with an unexpected shape:`,
@@ -221,7 +232,7 @@ describe('the shared plan through the bridge', () => {
   it('sends each collaboration request on its own channel with its values', async () => {
     const bridge = await loadBridge();
     electron.invoke.mockResolvedValue({ ok: true, value: null });
-    const settings = { name: 'Léa', port: 47_313, firewallNoticeSeen: true };
+    const settings = { name: 'Léa', port: 47_313, firewallNoticeSeen: true, relayAddress: null };
     const joining = {
       address: '192.168.1.24',
       port: 47_313,
@@ -272,6 +283,8 @@ describe('the shared plan through the bridge', () => {
     await bridge.joinByLink('tasklace://relay.example.org/#v1.key');
     await bridge.reopenSharedPlan(documentId);
     await bridge.makeNewLinks();
+    await bridge.copyRelayLink('view');
+    await bridge.openGuide();
     const outgoing = { kind: 'presence', bytes: Uint8Array.of(1) } as const;
     bridge.sendToRelay(outgoing);
     expect([electron.invoke.mock.calls, electron.sent]).toEqual([
@@ -280,6 +293,8 @@ describe('the shared plan through the bridge', () => {
         [IPC_CHANNELS.joinByLink, 'tasklace://relay.example.org/#v1.key'],
         [IPC_CHANNELS.reopenSharedPlan, documentId],
         [IPC_CHANNELS.makeNewLinks],
+        [IPC_CHANNELS.copyRelayLink, 'view'],
+        [IPC_CHANNELS.openGuide],
       ],
       [[IPC_CHANNELS.relaySend, outgoing]],
     ]);

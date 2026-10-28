@@ -1,4 +1,5 @@
 import { DEFAULT_COLLABORATION_PORT, isPort } from '../../core/collaboration/ports';
+import { readRelayAddress } from '../../core/collaboration/relay/relay-link';
 import { MAX_PARTICIPANT_NAME_LENGTH } from '../../core/limits';
 import { createIssueList } from '../../core/validation/validation-issues';
 import { readText } from '../../core/validation/value-readers';
@@ -10,12 +11,13 @@ export const DEFAULT_COLLABORATION_SETTINGS: CollaborationSettings = {
   name: null,
   port: DEFAULT_COLLABORATION_PORT,
   firewallNoticeSeen: false,
+  relayAddress: null,
 };
 
 const STORE_VERSION = 1;
-const SETTINGS_KEYS = ['name', 'port', 'firewallNoticeSeen'];
+const SETTINGS_KEYS = ['name', 'port', 'firewallNoticeSeen', 'relayAddress'];
 
-/** Reads collaboration settings from an untrusted value, as the page or the store gives them: a name that is null or a well-formed name of a participant, a port and whether the note about the firewall was seen, nothing else. */
+/** Reads collaboration settings from an untrusted value, as the page or the store gives them: a name of a participant or null, a port, whether the note about the firewall was seen and the address of a relay, missing meaning none. */
 export function readCollaborationSettings(value: unknown): CollaborationSettings | null {
   if (
     typeof value !== 'object' ||
@@ -27,6 +29,7 @@ export function readCollaborationSettings(value: unknown): CollaborationSettings
   const name: unknown = Reflect.get(value, 'name');
   const port: unknown = Reflect.get(value, 'port');
   const firewallNoticeSeen: unknown = Reflect.get(value, 'firewallNoticeSeen');
+  const relayAddress: unknown = Reflect.get(value, 'relayAddress') ?? null;
   const issues = createIssueList();
   const readName =
     name === null
@@ -36,11 +39,17 @@ export function readCollaborationSettings(value: unknown): CollaborationSettings
     readName === undefined ||
     typeof port !== 'number' ||
     !isPort(port) ||
-    typeof firewallNoticeSeen !== 'boolean'
+    typeof firewallNoticeSeen !== 'boolean' ||
+    !(relayAddress === null || isRelayAddress(relayAddress))
   ) {
     return null;
   }
-  return { name: readName, port, firewallNoticeSeen };
+  return { name: readName, port, firewallNoticeSeen, relayAddress };
+}
+
+/** Tells whether a value is the address of a relay the application connects to, exactly as a person typed it without spaces around. */
+function isRelayAddress(value: unknown): value is string {
+  return typeof value === 'string' && value === value.trim() && readRelayAddress(value).ok;
 }
 
 /** Reads the collaboration settings of this computer from their store, a missing store giving the defaults and a damaged one being set aside before the defaults are used. */

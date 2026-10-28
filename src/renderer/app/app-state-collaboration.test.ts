@@ -27,7 +27,7 @@ async function joinedApp(canEdit = false, fake = fakeAppContext()) {
   const { collaboration } = fake.control;
   collaboration.settingsResult = {
     ok: true,
-    value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true },
+    value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
   };
   collaboration.openSharedResult = openedProjectOf(PLAN, { fileName: '' });
   await app.collaboration.loadSettings();
@@ -106,7 +106,7 @@ describe('a plan joined in read only', () => {
     await app.open();
     fake.control.collaboration.settingsResult = {
       ok: true,
-      value: { name: 'Léa', port: 1, firewallNoticeSeen: true },
+      value: { name: 'Léa', port: 1, firewallNoticeSeen: true, relayAddress: null },
     };
     await app.collaboration.loadSettings();
     await app.join(TARGET);
@@ -134,7 +134,7 @@ describe('joining from the application', () => {
     const { app, control } = await openedAppOf(PLAN);
     control.collaboration.settingsResult = {
       ok: true,
-      value: { name: 'Camille', port: 47_313, firewallNoticeSeen: true },
+      value: { name: 'Camille', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
     };
     await app.collaboration.loadSettings();
     expect((await app.collaboration.share()).ok).toBe(true);
@@ -161,7 +161,7 @@ describe('the windows of a shared plan', () => {
   ): void => {
     fake.control.collaboration.settingsResult = {
       ok: true,
-      value: { name, port: 47_313, firewallNoticeSeen },
+      value: { name, port: 47_313, firewallNoticeSeen, relayAddress: null },
     };
   };
 
@@ -425,7 +425,7 @@ describe('a plan joined by its link', () => {
       ok: true,
       value: {
         project: offered.value,
-        canEdit: false,
+        shown: { edit: null, view: 'tasklace://relay.example.org/#v1.P0dX8w…' },
         relay: 'relay.example.org',
         bytesSinceSnapshot: 0,
         kept: true,

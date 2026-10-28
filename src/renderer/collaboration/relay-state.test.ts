@@ -13,15 +13,20 @@ import type {
   RelayJoined,
   RelayLinks,
   RelayReopened,
+  ShownRelayLinks,
 } from '../../preload/bridge-contract';
 import { isRelayEvent, RelayState, type RelayBridge } from './relay-state.svelte';
 
 const ORIGIN = createSharedDocument(project([workTask('a'), workTask('b')]), TEST_DOCUMENT_ID);
-const LINKS: RelayLinks = {
-  editLink: 'tasklace://relay.example.org/#e1.edit',
-  viewLink: 'tasklace://relay.example.org/#v1.view',
-  relay: 'relay.example.org',
-  kept: true,
+const BOTH_LINKS: ShownRelayLinks = {
+  edit: 'tasklace://relay.example.org/#e1.Hq7Lm2…',
+  view: 'tasklace://relay.example.org/#v1.P0dX8w…',
+};
+const VIEW_LINK: ShownRelayLinks = { edit: null, view: BOTH_LINKS.view };
+const LINKS: RelayLinks = { shown: BOTH_LINKS, relay: 'relay.example.org', kept: true };
+const NEW_LINKS: RelayLinks = {
+  ...LINKS,
+  shown: { edit: 'tasklace://relay.example.org/#e1.Zk3Rt9…', view: BOTH_LINKS.view },
 };
 const DONE: BridgeResult<null> = { ok: true, value: null };
 
@@ -77,10 +82,7 @@ function page(session: SharedSession | null = sessionOn(ORIGIN, 1)) {
     share: success(LINKS) as BridgeResult<RelayLinks>,
     join: failure({ code: 'INVALID_LINK' }) as BridgeResult<RelayJoined>,
     reopen: success(null) as BridgeResult<RelayReopened | null>,
-    newLinks: success({
-      ...LINKS,
-      editLink: 'tasklace://relay.example.org/#e1.new',
-    }) as BridgeResult<RelayLinks>,
+    newLinks: success(NEW_LINKS) as BridgeResult<RelayLinks>,
     stop: DONE,
     keep: success({ localCopySaved: true }) as BridgeResult<{ readonly localCopySaved: boolean }>,
     opens: true,
@@ -164,7 +166,7 @@ function joined(canEdit: boolean): BridgeResult<RelayJoined> {
       warnings: [],
       localChanges: null,
     },
-    canEdit,
+    shown: canEdit ? BOTH_LINKS : VIEW_LINK,
     relay: 'relay.example.org',
     bytesSinceSnapshot: 0,
     kept: true,
@@ -209,7 +211,7 @@ describe('sharing a plan through a relay from the page', () => {
       nameOf(planOf(shared.sent[0]), 'a'),
     ]).toEqual([
       success(LINKS),
-      LINKS,
+      BOTH_LINKS,
       'relay.example.org',
       'connected',
       true,
@@ -263,7 +265,11 @@ describe('joining a plan by its link from the page', () => {
     const reader = page(null);
     reader.answers.join = joined(false);
     await reader.relay.join('tasklace://relay.example.org/#v1.view');
-    expect([reader.relay.isReadOnly, reader.relay.canEdit]).toEqual([true, false]);
+    expect([reader.relay.isReadOnly, reader.relay.canEdit, reader.relay.links]).toEqual([
+      true,
+      false,
+      VIEW_LINK,
+    ]);
   });
 
   it('gives back the refusal of the main process, and leaves a plan that cannot open', async () => {
@@ -318,7 +324,7 @@ describe('reopening a plan shared through a relay from the page', () => {
 
   it('adds what the relay holds, then shares the whole plan only when this computer holds more', async () => {
     const reopened = page();
-    reopened.answers.reopen = success({ canEdit: true, relay: 'relay.example.org' });
+    reopened.answers.reopen = success({ shown: BOTH_LINKS, relay: 'relay.example.org' });
     const session = reopened.session();
     if (session === null) {
       throw new Error('A plan is open.');
@@ -344,7 +350,7 @@ describe('reopening a plan shared through a relay from the page', () => {
 
   it('keeps apart what this computer holds that the relay lacks with the link that reads, telling where', async () => {
     const reader = page();
-    reader.answers.reopen = success({ canEdit: false, relay: 'relay.example.org' });
+    reader.answers.reopen = success({ shown: VIEW_LINK, relay: 'relay.example.org' });
     const session = reader.session();
     if (session === null) {
       throw new Error('A plan is open.');
@@ -363,7 +369,7 @@ describe('reopening a plan shared through a relay from the page', () => {
   it('tells when what this computer holds could not be kept apart', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const reader = page();
-    reader.answers.reopen = success({ canEdit: false, relay: 'relay.example.org' });
+    reader.answers.reopen = success({ shown: VIEW_LINK, relay: 'relay.example.org' });
     reader.answers.keep = failure({ code: 'WRITE_FAILED' });
     const session = reader.session();
     if (session === null) {
@@ -381,7 +387,7 @@ describe('reopening a plan shared through a relay from the page', () => {
 
   it('answers false once another plan was asked for meanwhile', async () => {
     const reopened = page();
-    reopened.answers.reopen = success({ canEdit: true, relay: 'relay.example.org' });
+    reopened.answers.reopen = success({ shown: BOTH_LINKS, relay: 'relay.example.org' });
     reopened.answers.meanwhile = () => {
       void reopened.relay.stop();
     };
@@ -491,13 +497,13 @@ describe('a plan shared through a relay while it lives', () => {
     expect([
       made,
       connecting,
-      shared.relay.links?.editLink,
+      shared.relay.links?.edit,
       shared.kinds().filter((kind) => kind === 'update').length,
       await reader.relay.makeNewLinks(),
     ]).toEqual([
-      success({ ...LINKS, editLink: 'tasklace://relay.example.org/#e1.new' }),
+      success(NEW_LINKS),
       'connecting',
-      'tasklace://relay.example.org/#e1.new',
+      NEW_LINKS.shown.edit,
       2,
       failure({ code: 'TASK_FAILED' }),
     ]);
@@ -560,13 +566,13 @@ describe('a page that shares nothing through a relay', () => {
     shared.answers.newLinks = failure({ code: 'NOT_CONNECTED' });
     expect([await shared.relay.makeNewLinks(), shared.relay.links]).toEqual([
       failure({ code: 'NOT_CONNECTED' }),
-      LINKS,
+      BOTH_LINKS,
     ]);
   });
 
   it('keeps nothing apart once the plan is no longer open', async () => {
     const reader = page();
-    reader.answers.reopen = success({ canEdit: false, relay: 'relay.example.org' });
+    reader.answers.reopen = success({ shown: VIEW_LINK, relay: 'relay.example.org' });
     const session = reader.session();
     if (session === null) {
       throw new Error('A plan is open.');
