@@ -11,7 +11,7 @@ Tasklace is built in nine steps.
 | 5    | Secure Electron shell and Svelte user interface      | Done    |
 | 6    | PDF export                                           | Done    |
 | 7    | Real-time collaboration on the local network         | Done    |
-| 8    | End-to-end encrypted relay                           | Planned |
+| 8    | End-to-end encrypted relay                           | Done    |
 | 9    | Distribution                                         | Planned |
 
 Each step is developed on its own branch, one sub-step at a time, each merged into that branch through its own reviewed pull request; interfaces are approved as mockups first, and the whole step is reviewed and corrected before being merged into `main`. Once a step is done, only its status is kept here; the history of its pull requests tells the rest.

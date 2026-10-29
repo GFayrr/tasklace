@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, plans tasks in a table and on a timeline, and has its project settings: name and start, working calendar, tags, and the critical path, date constraints and baseline among the advanced options. It exports plans to PDF, and several people can edit the same plan at the same time on a local network. The encrypted relay for working remotely is still to come, and there is no downloadable release yet.
+> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, plans tasks in a table and on a timeline, and has its project settings: name and start, working calendar, tags, and the critical path, date constraints and baseline among the advanced options. It exports plans to PDF, and several people can edit the same plan at the same time on a local network or from anywhere through an end-to-end encrypted relay that a school or a company hosts. There is no downloadable release yet.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -35,7 +35,7 @@ Most Gantt tools are either heavyweight project-management suites or online serv
 
 - **Strict Gantt rules**: tasks, milestones, summary tasks, the four dependency types, working calendars, progress and critical path.
 - **Quarter-hour precision**: durations are expressed in hours and minutes, by quarter hours, and spread over working days, with optional hours per day.
-- **Collaboration without an account**: people join a project with a sharing code, on the local network, or through an optional end-to-end encrypted relay that any school or company can host ([Working remotely: setting up a relay](docs/working-remotely.md)).
+- **Collaboration without an account**: people join a plan with a code on the local network, or with a link through an optional end-to-end encrypted relay that any school or company can host ([Working remotely: setting up a relay](docs/working-remotely.md)).
 - **Offline first**: every member keeps a local copy and changes are merged when they reconnect.
 - **Lightweight exports**: vector PDF files with selectable text.
 
@@ -69,6 +69,8 @@ What Tasklace already supports:
 - Real-time collaboration on the local network, without an account: share a plan and give the people near you its six-character code; they find it nearby or type the address of the host. Everything sent is encrypted, after a key exchange based on the code (CPace), and only computers on a private network are accepted.
 - People in a shared plan see who is there and which task each one has selected; newcomers are in read only until the host lets them edit.
 - A shared plan keeps going on its own: a lost connection comes back without any action, the person connected the longest takes over when the host leaves or their computer is switched off, and changes made offline are shared on return, or kept in a copy of your own when you were in read only.
+- Collaboration from anywhere through a relay, without an account: share a plan through the relay of your school or company and send one of its two links, to edit or to view. The relay only stores and passes on encrypted, signed messages: it never sees the plan, the names or who is looking at what. A plan joined this way is kept on your computer and its link in the system vault, so it reopens from the recent projects, and changes made offline are shared once the relay answers. If a link went to the wrong person, new links replace both.
+- A relay that any school or company can host: a small Node.js server, delivered as a hardened Docker image with Caddy for HTTPS, or to run behind Apache or nginx, or on its own with systemd, with quotas set by environment variables and a [step-by-step guide](docs/working-remotely.md).
 - Advanced options, off by default, turned on in the project settings: with the critical path on, the table shows total and free floats, the timeline underlines critical tasks and draws how far the others can slip; with date constraints on, a task can have a date it must finish on and a deadline, each date missed is listed with the conflicts, marked in the table and on the timeline, and each deadline is drawn on its row; with the baseline on, the plan can be frozen, each task then shows where it was planned and how many working days later or earlier it now ends.
 
 ## Roadmap
@@ -80,7 +82,7 @@ What Tasklace already supports:
 - [x] Desktop application and user interface
 - [x] PDF export
 - [x] Real-time collaboration on the local network
-- [ ] End-to-end encrypted relay and deployment guide
+- [x] End-to-end encrypted relay and deployment guide
 - [ ] Portable Windows executable
 
 Windows comes first; the code stays cross-platform so that macOS and Linux versions can follow. The [roadmap](docs/roadmap.md) gives the status of each step.
@@ -123,7 +125,8 @@ The test suite covers edge cases extensively and uses property-based testing to 
 src/core/            pure logic, independent of any user interface
   baseline/          baseline plan snapshots
   calendar/          working-time calendar and task time slots
-  collaboration/     shared plan protocol, people and rights, succession, join code, CPace and encrypted channel
+  collaboration/     shared plan protocol, people and rights, succession, join code, CPace and encrypted channel,
+                     relay links, keys, encrypted envelopes and members
   exchange/          JSON and CSV import and export
   file/              .tasklace project file: header, checksum and defensive reading
   model/             project data types
@@ -133,9 +136,11 @@ src/core/            pure logic, independent of any user interface
   tags/              tag colors, patterns and person or team conflicts
   testing/           test helpers and random data generators
   validation/        validation of untrusted project data
-src/main/            Electron main process: window, security, files, file worker, PDF printing, host server and discovery
+src/main/            Electron main process: window, security, files, file worker, PDF printing, host server, discovery,
+                     relay connection and links kept in the system vault
 src/preload/         minimal typed bridge between the page and the main process
 src/renderer/        Svelte user interface: theme, messages, schedule worker, components, printed pages
+relay/               relay server (Node.js and ws), its Dockerfile and Docker Compose file with Caddy
 docs/                roadmap, and the guide to setting up a relay
 tests/e2e/           end-to-end journeys in the running application (Playwright)
 tests/file/          .tasklace files with real compression and generated decompression bombs
