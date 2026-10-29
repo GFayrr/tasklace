@@ -158,5 +158,7 @@ function switchOf(environment: Environment, name: string): boolean {
   if (FALSE_WORDS.includes(text)) {
     return false;
   }
-  throw new WrongSetting(`${name} must be 1 or 0.`);
+  throw new WrongSetting(
+    `${name} must be 1, true or yes to turn it on, or 0, false or no to turn it off.`,
+  );
 }

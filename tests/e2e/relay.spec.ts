@@ -196,7 +196,7 @@ test('shares a plan through a relay, joined in read only with the link that read
     editor.page,
     editLink,
     'Noah',
-    `Through ${relayLabel} · you will be able to edit`,
+    `Through ${relayLabel} · you will be able to edit the plan`,
   );
   await expect(editor.page.getByRole('button', { name: RELAY.shared })).toBeVisible();
   await editor.page.getByRole('textbox', { name: 'Project name' }).fill('Thesis v2');
@@ -242,7 +242,7 @@ test('reopens a plan joined through a relay from the recent projects, coming bac
     guest.page,
     editLink,
     'Noah',
-    `Through ${relayLabel} · you will be able to edit`,
+    `Through ${relayLabel} · you will be able to edit the plan`,
   );
   const protects = await vaultProtects(guest);
   if (!protects) {
@@ -276,7 +276,7 @@ test('keeps the changes made while the relay was down and shares them once it is
     editor.page,
     editLink,
     'Noah',
-    `Through ${LOOPBACK}:${String(relay.port)} · you will be able to edit`,
+    `Through ${LOOPBACK}:${String(relay.port)} · you will be able to edit the plan`,
   );
   await expect(editor.page.getByRole('button', { name: RELAY.shared })).toBeVisible();
   await stopRelay(relay);

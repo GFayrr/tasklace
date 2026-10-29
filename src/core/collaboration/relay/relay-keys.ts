@@ -122,7 +122,7 @@ export function messageKeyOf(encryptionKey: RelayEncryptionKey, salt: Uint8Array
   return hkdf(sha256, encryptionKey, salt, MESSAGE_INFO, RELAY_KEY_BYTES);
 }
 
-/** Tells whether a signature of bytes was made with the seed of a key, checked strictly so that no key or signature of small order passes. */
+/** Tells whether a signature of bytes holds for a verify key, checked strictly so that no key or signature of small order passes. */
 export function isSignedBy(
   verifyKey: RelayVerifyKey,
   bytes: Uint8Array,

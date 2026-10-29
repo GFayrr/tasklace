@@ -308,7 +308,7 @@ describe('joining a plan by its link', () => {
       RELAY.nearYou,
       false,
       [
-        'Through relay.example.org · you will be able to edit',
+        'Through relay.example.org · you will be able to edit the plan',
         'Through relay.example.org:8443 · you will be able to view the plan',
         null,
       ],

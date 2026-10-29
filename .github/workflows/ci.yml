@@ -99,7 +99,7 @@ jobs:
         run: npm audit --omit=dev --audit-level=low
       - name: Build the image of the relay
         run: docker build --file relay/Dockerfile --tag tasklace-relay:ci .
-      - name: Run the relay as the compose file runs it
+      - name: Run the relay with the restrictions of the compose file
         run: >
           docker run --detach --name relay --read-only --cap-drop ALL
           --security-opt no-new-privileges:true --publish 127.0.0.1:8080:8080
