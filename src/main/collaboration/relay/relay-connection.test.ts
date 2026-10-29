@@ -31,6 +31,7 @@ import {
   type RelayFrame,
 } from '../../../core/collaboration/relay/relay-wire';
 import { MAX_OPEN_RELAY_MESSAGES } from '../../../core/limits';
+import { AEAD_TAG_BYTES } from '../../../core/collaboration/secure/channel';
 import { seededRandom } from '../../../core/testing/test-crypto';
 import { aesGcm, systemRandomBytes } from '../aes-gcm';
 import { zlibCompressor } from '../../zlib-compressor';
@@ -180,6 +181,20 @@ function firstOfTwoChunks(id: number): Uint8Array {
   return record;
 }
 
+/** Gives an event with the bytes of a delivery as plain lists, whatever kind of array carried them. */
+function plainDelivery(event: RelaySessionEvent) {
+  return event.kind === 'delivery'
+    ? {
+        ...event,
+        delivery: {
+          ...event.delivery,
+          messageId: [...event.delivery.messageId],
+          bytes: [...event.delivery.bytes],
+        },
+      }
+    : event;
+}
+
 /** Gives what the page sees of the messages a session handed it: their kind, first byte, length and the sequence settled. */
 function deliveriesOf(events: readonly RelaySessionEvent[]) {
   return events.flatMap((event) =>
@@ -208,12 +223,14 @@ async function lyingRelay(
   frames: readonly (Uint8Array | string)[],
   certificate = TEST_CERTIFICATE,
   heard: ClientFrame[] = [],
+  closings: number[] = [],
 ): Promise<number> {
   const port = await freePort();
   const server = createHttpsServer({ cert: certificate.certificate, key: certificate.key });
   const fake = new WebSocketServer({ server });
   fakes.push(server);
   fake.on('connection', (socket: WebSocket) => {
+    socket.on('close', (code) => closings.push(code));
     socket.once('message', (data: Buffer) => {
       const frame = readClientFrame(new Uint8Array(data));
       if (frame !== null && frame !== 'UNSUPPORTED_VERSION') {
@@ -283,7 +300,7 @@ describe('a session in a room of a relay', () => {
     viewer.session.close();
     await until(() => editor.kinds().includes('left'));
     expect([
-      viewer.events.slice(0, 3),
+      viewer.events.slice(0, 3).map(plainDelivery),
       viewer.events.filter((event) => event.kind === 'presence').map(plainPresence),
       editor.events
         .filter((event) => ['joined', 'left', 'presence'].includes(event.kind))
@@ -291,7 +308,18 @@ describe('a session in a room of a relay', () => {
     ]).toEqual([
       [
         { kind: 'connected', member: 2, members: [1] },
-        expect.objectContaining({ kind: 'delivery' }),
+        {
+          kind: 'delivery',
+          delivery: {
+            kind: 'update',
+            messageId: Array.from({ length: 16 }, () => 3),
+            covers: 0,
+            bytes: Array.from({ length: 8 }, () => 3),
+            compressedBytes:
+              zlibCompressor.compress(new Uint8Array(8).fill(3)).length + AEAD_TAG_BYTES,
+            settled: 1,
+          },
+        },
         { kind: 'caughtUp' },
       ],
       [{ kind: 'presence', member: 1, presence: { bytes: [1, 2], canEdit: true } }],
@@ -359,11 +387,25 @@ describe('a session in a room of a relay', () => {
     expect(await editor.session.closeRoom()).toEqual({ ok: false, error: 'UNREACHABLE' });
   });
 
-  it('ends at once on a relay of this computer whose certificate it does not trust', async () => {
+  it('ends at once on a relay of this computer whose certificate it does not trust, logging why', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const port = await lyingRelay([encodeRelayFrame(WELCOME)], makeTestCertificate());
     const member = joinRelay(port, EDIT_KEYS);
     await until(() => member.kinds().includes('ended'));
-    expect(member.events).toEqual([{ kind: 'ended', reason: 'UNTRUSTED' }]);
+    const relay = `127.0.0.1:${String(port)}`;
+    expect([
+      member.events,
+      warn.mock.calls.map(([message, error]: unknown[]): unknown[] => [
+        message,
+        error instanceof Error ? Reflect.get(error, 'code') : error,
+      ]),
+    ]).toEqual([
+      [{ kind: 'ended', reason: 'UNTRUSTED' }],
+      [
+        [`The connection to the relay ${relay} failed:`, 'DEPTH_ZERO_SELF_SIGNED_CERT'],
+        [`The plan shared through the relay ${relay} stopped: UNTRUSTED.`, undefined],
+      ],
+    ]);
   });
 
   it('never gets in a relay of this computer that does not encrypt its connections', async () => {
@@ -523,15 +565,20 @@ describe('a session with a relay that lies', () => {
   });
 
   it('tells nothing more once a refusal ended it, even what the relay sent after', async () => {
-    const port = await lyingRelay([
-      encodeRelayFrame(WELCOME),
-      encodeRelayFrame({ type: 'refused', reason: 'NO_ROOM' }),
-      encodeRelayFrame({ type: 'caughtUp' }),
-      encodeRelayFrame({ type: 'joined', member: 2 }),
-    ]);
+    const closings: number[] = [];
+    const port = await lyingRelay(
+      [
+        encodeRelayFrame(WELCOME),
+        encodeRelayFrame({ type: 'refused', reason: 'NO_ROOM' }),
+        encodeRelayFrame({ type: 'caughtUp' }),
+        encodeRelayFrame({ type: 'joined', member: 2 }),
+      ],
+      TEST_CERTIFICATE,
+      [],
+      closings,
+    );
     const member = joinRelay(port, OTHER_KEYS);
-    await until(() => member.kinds().includes('ended'));
-    await new Promise((resolve) => setTimeout(resolve, 64));
+    await until(() => member.kinds().includes('ended') && closings.length === 1);
     expect(member.events).toEqual([
       { kind: 'connected', member: 1, members: [] },
       { kind: 'ended', reason: 'NO_ROOM' },

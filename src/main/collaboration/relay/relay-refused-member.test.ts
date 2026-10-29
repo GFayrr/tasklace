@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startRelayServer, type RunningRelay } from '../../../../relay/src/server.ts';
 import { testConfig } from '../../../../relay/src/testing/relay-client.ts';
@@ -7,7 +9,8 @@ import {
   relayKeysOf,
   viewAccessOf,
 } from '../../../core/collaboration/relay/relay-keys';
-import { RELAY_CHUNK_BYTES } from '../../../core/collaboration/relay/relay-wire';
+import { readRoomFile } from '../../../../relay/src/room-file.ts';
+import { readRelayRecord, RELAY_CHUNK_BYTES } from '../../../core/collaboration/relay/relay-wire';
 import type { TaskId } from '../../../core/model/project';
 import { createSharedDocument } from '../../../core/shared/shared-document';
 import type { SharedSession } from '../../../core/shared/shared-session';
@@ -33,6 +36,7 @@ vi.mock('../../../core/limits', async (importOriginal) => ({
 const ROOM_CHUNKS = 4;
 const REFUSED_PLAN_TASKS = 12_000;
 const EDITS_AFTER_REFUSAL = 64;
+const SNAPSHOTS_OF_THE_EDITS = 2;
 const NAME_DIGITS = 5;
 const REFUSAL_TIMEOUT_MS = 120_000;
 const ACCESS = drawRelayAccess(seededRandom(89));
@@ -67,6 +71,13 @@ function join(session: SharedSession, creates = false): RelayTeamMember {
   const member = joinThroughRelay({ port: relay.port, session, keys: EDIT_KEYS, creates });
   members.push(member);
   return member;
+}
+
+/** Gives the kinds of the records the room of the test keeps on disk, in order. */
+async function recordKindsOfRoom(): Promise<readonly (string | null)[]> {
+  const file = path.join(folder, `${Buffer.from(EDIT_KEYS.roomId).toString('hex')}.room`);
+  const read = readRoomFile(new Uint8Array(await readFile(file)));
+  return read?.entries.map((entry) => readRelayRecord(entry.record)?.kind ?? null) ?? [];
 }
 
 describe('a member the relay refuses alone', () => {
@@ -105,14 +116,28 @@ describe('a member the relay refuses alone', () => {
       );
       const expected = other.session.project();
       const newcomer = await newcomerPlan(relay.port, VIEW_KEYS);
+      const problems = [...owner.problems, ...other.problems, ...newcomer.problems];
+      await relay.close();
+      const kinds = await recordKindsOfRoom();
       expect([
         newcomer.session.project(),
         owner.session.project(),
-        other.snapshotsSent() > 0,
+        other.snapshotsSent(),
+        kinds.filter((kind) => kind === 'snapshot').length,
+        kinds.length < EDITS_AFTER_REFUSAL,
         refused.problems,
-        [...owner.problems, ...other.problems, ...newcomer.problems],
+        problems,
         refused.session.project().tasks.length,
-      ]).toEqual([expected, expected, true, ['ended TOO_LARGE'], [], REFUSED_PLAN_TASKS + 1]);
+      ]).toEqual([
+        expected,
+        expected,
+        SNAPSHOTS_OF_THE_EDITS,
+        1,
+        true,
+        ['ended TOO_LARGE'],
+        [],
+        REFUSED_PLAN_TASKS + 1,
+      ]);
     },
   );
 });

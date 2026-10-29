@@ -272,7 +272,7 @@ describe('the rooms of a relay when the disk fails', () => {
     const steps: string[] = [];
     const released = store.release(room).then(() => steps.push('released'));
     const settled = store.settle().then(() => steps.push('settled'));
-    await new Promise((resolve) => setTimeout(resolve, 16));
+    await new Promise((resolve) => setImmediate(resolve));
     letGo();
     await Promise.all([released, settled]);
     expect(steps).toEqual(['released', 'settled']);
