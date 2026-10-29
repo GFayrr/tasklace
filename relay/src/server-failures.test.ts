@@ -2,10 +2,22 @@ import { utimes } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startRelayServer, type RelayTimings, type RunningRelay } from './server.ts';
-import { closeFrame, connectTo, createFrame, testConfig } from './testing/relay-client.ts';
+import {
+  closeFrame,
+  connectTo,
+  createFrame,
+  testConfig,
+  type TestClient,
+} from './testing/relay-client.ts';
 import { ROOM_KEYS, sealedRecord, temporaryFolder } from './testing/relay-records.ts';
 
-const failing = vi.hoisted(() => ({ appendFile: false, readFile: false, rm: false }));
+const failing = vi.hoisted(() => ({
+  append: false,
+  readFile: false,
+  rm: false,
+  heldAppend: null as Promise<void> | null,
+  appends: 0,
+}));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:fs/promises')>();
@@ -13,8 +25,13 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   const broken = (): Error => Object.assign(new Error('Input/output error'), { code: 'EIO' });
   return {
     ...original,
-    appendFile: (...args: Parameters<typeof original.appendFile>) =>
-      failing.appendFile ? Promise.reject(broken()) : original.appendFile(...args),
+    open: async (...args: Parameters<typeof original.open>) => {
+      if (args[1] === 'a') {
+        failing.appends += 1;
+        await failing.heldAppend;
+      }
+      return failing.append && args[1] === 'a' ? Promise.reject(broken()) : original.open(...args);
+    },
     readFile: (...args: Parameters<typeof original.readFile>) =>
       failing.readFile ? Promise.reject(broken()) : original.readFile(...args),
     rm: (...args: Parameters<typeof original.rm>) =>
@@ -36,11 +53,23 @@ const running: RunningRelay[] = [];
 
 beforeEach(async () => {
   ({ folder, remove: removeFolder } = await temporaryFolder());
-  Object.assign(failing, { appendFile: false, readFile: false, rm: false });
+  Object.assign(failing, {
+    append: false,
+    readFile: false,
+    rm: false,
+    heldAppend: null,
+    appends: 0,
+  });
 });
 
 afterEach(async () => {
-  Object.assign(failing, { appendFile: false, readFile: false, rm: false });
+  Object.assign(failing, {
+    append: false,
+    readFile: false,
+    rm: false,
+    heldAppend: null,
+    appends: 0,
+  });
   await Promise.all(running.splice(0).map((relay) => relay.close()));
   vi.restoreAllMocks();
   await removeFolder();
@@ -53,6 +82,11 @@ async function started(timings: RelayTimings = TIMINGS): Promise<RunningRelay> {
   return relay;
 }
 
+/** Gives the type of a frame a relay sent, or what it was when it was not one. */
+function typeOf(frame: Awaited<ReturnType<TestClient['next']>>): string | null {
+  return frame === null || frame === 'UNSUPPORTED_VERSION' ? frame : frame.type;
+}
+
 describe('a relay whose disk fails', () => {
   it('turns every member of a room away once a record of it cannot be written', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -61,11 +95,40 @@ describe('a relay whose disk fails', () => {
     first.send(createFrame(ROOM_KEYS));
     await first.next();
     await first.next();
-    failing.appendFile = true;
+    failing.append = true;
     first.send({ type: 'append', record: sealedRecord('update', 1) });
     expect([await first.next(), error.mock.calls.length]).toEqual([
-      { type: 'refused', reason: 'RELAY_FULL' },
+      { type: 'refused', reason: 'RELAY_FAILED' },
       1,
+    ]);
+  });
+
+  it('passes a record written slowly to a member who came in meanwhile, after everyone else had left', async () => {
+    const relay = await started();
+    const author = await connectTo(relay.port);
+    author.send(createFrame(ROOM_KEYS));
+    await author.next();
+    await author.next();
+    let letGo = (): void => undefined;
+    failing.heldAppend = new Promise((resolve) => {
+      letGo = resolve;
+    });
+    const record = sealedRecord('update', 1);
+    author.send({ type: 'append', record });
+    await vi.waitFor(() => {
+      expect(failing.appends).toBe(1);
+    });
+    author.socket.close();
+    await author.closed;
+    const newcomer = await connectTo(relay.port);
+    newcomer.send({ type: 'hello', roomId: ROOM_KEYS.roomId, since: 0 });
+    const welcome = await newcomer.next();
+    const caughtUp = await newcomer.next();
+    letGo();
+    expect([typeOf(welcome), caughtUp, await newcomer.next()]).toEqual([
+      'welcome',
+      { type: 'caughtUp' },
+      { type: 'record', seq: 1, record },
     ]);
   });
 
@@ -81,12 +144,12 @@ describe('a relay whose disk fails', () => {
     const back = await connectTo(relay.port);
     back.send({ type: 'hello', roomId: ROOM_KEYS.roomId, since: 0 });
     expect([await back.next(), error.mock.calls.map(([message]: unknown[]) => message)]).toEqual([
-      { type: 'refused', reason: 'RELAY_FULL' },
+      { type: 'refused', reason: 'RELAY_FAILED' },
       ['A room could not be opened:'],
     ]);
   });
 
-  it('still tells every member a room closed when its file cannot be removed', async () => {
+  it('turns every member of a room away as for a failure of the relay, the room staying, when its file cannot be removed to close it', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const relay = await started();
     const first = await connectTo(relay.port);
@@ -96,8 +159,17 @@ describe('a relay whose disk fails', () => {
     failing.rm = true;
     first.send(closeFrame(ROOM_KEYS));
     const name = Buffer.from(ROOM_KEYS.roomId).toString('hex');
-    expect([await first.next(), error.mock.calls.map(([message]: unknown[]) => message)]).toEqual([
-      { type: 'closed' },
+    const answer = await first.next();
+    failing.rm = false;
+    const back = await connectTo(relay.port);
+    back.send({ type: 'hello', roomId: ROOM_KEYS.roomId, since: 0 });
+    expect([
+      answer,
+      typeOf(await back.next()),
+      error.mock.calls.map(([message]: unknown[]) => message),
+    ]).toEqual([
+      { type: 'refused', reason: 'RELAY_FAILED' },
+      'welcome',
       [`The room ${name} could not be removed:`],
     ]);
   });
@@ -125,7 +197,7 @@ describe('a relay whose disk fails', () => {
       expect(info.mock.calls.length).toBeGreaterThan(0);
     });
     expect([error.mock.calls[0]?.[0], info.mock.calls]).toEqual([
-      'The rooms nobody opens could not be removed:',
+      `The room ${Buffer.from(ROOM_KEYS.roomId).toString('hex')} nobody opens could not be removed:`,
       [['1 rooms nobody opened for a long time were removed.']],
     ]);
   });

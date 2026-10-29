@@ -114,6 +114,15 @@ export async function saveLocalCopy(
   });
 }
 
+/** Gives where the file of a document was last saved, as the local copy index records it, or null when it was never saved to a file. */
+export async function lastSavedPath(
+  folder: string,
+  documentId: DocumentId,
+): Promise<string | null> {
+  const index = await readIndex(join(folder, INDEX_FILE), new Date());
+  return index[documentId]?.path ?? null;
+}
+
 /** Reads the local copy index from its store, a missing index meaning no copy yet, and sets a damaged index aside under a name ending with the time in milliseconds before it is rewritten, so that what it held can still be recovered, an index that cannot be set aside being only logged and then rewritten with its well-formed entries. */
 async function readIndex(indexPath: string, now: Date): Promise<LocalCopyIndex> {
   const { index, damaged } = readIndexText(await readStoredText(indexPath));

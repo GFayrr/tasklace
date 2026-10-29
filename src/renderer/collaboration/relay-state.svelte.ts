@@ -27,6 +27,7 @@ export type RelayBridge = Pick<
   | 'joinByLink'
   | 'reopenSharedPlan'
   | 'makeNewLinks'
+  | 'forgetSharedPlan'
   | 'copyRelayLink'
   | 'openGuide'
   | 'stopCollaboration'
@@ -45,6 +46,8 @@ export interface RelayContext {
   readonly randomBytes: (count: number) => Uint8Array;
   readonly ended: (reason: RelayEndReason, relay: string) => void;
   readonly linkNotKept: () => void;
+  readonly changeRefused: () => void;
+  readonly notReopened: (failure: FileFailure) => void;
 }
 
 export interface ShownRelayPerson {
@@ -68,14 +71,19 @@ type RelayEvent = Extract<CollaborationEvent, { readonly kind: RelayEventKind }>
 
 type Due = 'wholePlan' | null;
 
+interface LostConnection {
+  readonly kind: 'lost';
+  readonly reason: RelayEndReason;
+}
+
+type PlanConnection = Exclude<RelayConnection, 'lost'> | LostConnection;
+
 interface InPlan {
   readonly kind: 'in';
-  readonly canEdit: boolean;
   readonly relay: string;
   readonly links: ShownRelayLinks;
   readonly kept: boolean;
-  readonly connection: RelayConnection;
-  readonly end: RelayEndReason | null;
+  readonly connection: PlanConnection;
   readonly member: RelayMember | null;
   readonly bytesSinceSnapshot: number;
   readonly due: Due;
@@ -141,7 +149,11 @@ export class RelayState {
 
   /** Returns the state of the connection to the relay, or null outside a plan shared through one. */
   get connection(): RelayConnection | null {
-    return this.#phase.kind === 'in' ? this.#phase.connection : null;
+    if (this.#phase.kind !== 'in') {
+      return null;
+    }
+    const { connection } = this.#phase;
+    return typeof connection === 'string' ? connection : connection.kind;
   }
 
   /** Returns the relay as a person reads it, or null. */
@@ -161,12 +173,12 @@ export class RelayState {
 
   /** Tells whether this page holds the link that edits the plan it shares through a relay. */
   get canEdit(): boolean {
-    return this.#phase.kind === 'in' && this.#phase.canEdit;
+    return this.#phase.kind === 'in' && this.#phase.links.edit !== null;
   }
 
   /** Tells whether this page holds only the link that reads the plan, which then never changes here. */
   get isReadOnly(): boolean {
-    return this.#phase.kind === 'in' && !this.#phase.canEdit;
+    return this.#phase.kind === 'in' && this.#phase.links.edit === null;
   }
 
   /** Returns the other people in the plan by their number on the relay. */
@@ -182,8 +194,8 @@ export class RelayState {
   /** Returns why the relay ended the plan still open here, with that relay as a person reads it, or null while it has not. */
   get endOfOpenPlan(): { readonly reason: RelayEndReason; readonly relay: string } | null {
     const phase = this.#phase;
-    return phase.kind === 'in' && phase.end !== null
-      ? { reason: phase.end, relay: phase.relay }
+    return phase.kind === 'in' && typeof phase.connection !== 'string'
+      ? { reason: phase.connection.reason, relay: phase.relay }
       : null;
   }
 
@@ -226,12 +238,10 @@ export class RelayState {
     const { project, shown, relay, bytesSinceSnapshot, kept } = joined.value;
     this.#phase = {
       kind: 'in',
-      canEdit: shown.edit !== null,
       relay,
       links: shown,
       kept,
       connection: 'connected',
-      end: null,
       member: null,
       bytesSinceSnapshot,
       due: null,
@@ -252,7 +262,7 @@ export class RelayState {
     if (phase.kind !== 'in' || phase.member !== null) {
       return;
     }
-    const member = this.#member(session, phase.canEdit, phase.bytesSinceSnapshot);
+    const member = this.#member(session, phase.links.edit !== null, phase.bytesSinceSnapshot);
     this.#phase = { ...phase, member };
     member.caughtUp();
     this.selectionChanged();
@@ -269,6 +279,7 @@ export class RelayState {
     if (!reopened.ok || reopened.value === null) {
       if (!reopened.ok) {
         console.error('The plan could not come back to its relay:', reopened.error);
+        this.#context.notReopened(reopened.error);
       }
       this.#forget();
       return false;
@@ -281,7 +292,7 @@ export class RelayState {
   /** Makes new links for the plan this page shares, the old ones no longer letting anyone in, and puts the whole plan in the new room once in. */
   async makeNewLinks(): Promise<Result<RelayLinks, FileFailure>> {
     const phase = this.#phase;
-    if (phase.kind !== 'in' || !phase.canEdit) {
+    if (phase.kind !== 'in' || phase.links.edit === null) {
       return failure({ code: 'TASK_FAILED' });
     }
     const made = await this.#context.bridge.makeNewLinks();
@@ -327,6 +338,25 @@ export class RelayState {
     if (!stopped.ok) {
       console.error('The plan shared through a relay could not be left:', stopped.error);
     }
+  }
+
+  /** Forgets for good a plan whose room the relay no longer finds, with the link this computer kept for it, giving whether it was forgotten. */
+  async forgetPlan(): Promise<boolean> {
+    const phase = this.#phase;
+    if (
+      phase.kind !== 'in' ||
+      typeof phase.connection === 'string' ||
+      phase.connection.reason !== 'NO_ROOM'
+    ) {
+      return false;
+    }
+    const forgotten = await this.#context.bridge.forgetSharedPlan();
+    if (!forgotten.ok) {
+      console.error('The shared plan could not be forgotten:', forgotten.error);
+      return false;
+    }
+    this.#forget();
+    return true;
   }
 
   /** Forgets the plan shared through a relay without telling the main process, which already stopped it. */
@@ -393,7 +423,7 @@ export class RelayState {
     this.#lastEnd = reason;
     member.disconnected();
     member.stop();
-    this.#phase = { ...phase, connection: 'lost', end: reason };
+    this.#phase = { ...phase, connection: { kind: 'lost', reason } };
     this.#context.ended(reason, phase.relay);
   }
 
@@ -407,14 +437,11 @@ export class RelayState {
 
   /** Follows the plan of the open session through a relay with a new member, which edits when the page holds the link that does, then hands it what came meanwhile. */
   #enter(session: SharedSession, start: Pick<InPlan, 'relay' | 'links' | 'kept' | 'due'>): void {
-    const canEdit = start.links.edit !== null;
-    const member = this.#member(session, canEdit, 0);
+    const member = this.#member(session, start.links.edit !== null, 0);
     this.#phase = {
       kind: 'in',
       ...start,
-      canEdit,
       connection: 'connecting',
-      end: null,
       member,
       bytesSinceSnapshot: 0,
     };
@@ -465,6 +492,7 @@ export class RelayState {
         return;
       case 'refused':
         console.warn(`The plan shared through a relay refused a message: ${event.reason}.`);
+        this.#context.changeRefused();
         return;
       case 'people':
         this.#people = event.people;

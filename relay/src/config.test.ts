@@ -93,7 +93,7 @@ describe('the settings of the relay', () => {
       'RELAY_MAX_ROOM_BYTES must be a whole number from 1048576 to 9007199254740991.',
       'RELAY_MAX_ROOM_BYTES must not be above RELAY_MAX_STORED_BYTES.',
       'RELAY_ROOM_EXPIRY_DAYS must be a whole number from 1 to 36500.',
-      'RELAY_TRUST_PROXY must be 1 or 0.',
+      'RELAY_TRUST_PROXY must be 1, true or yes to turn it on, or 0, false or no to turn it off.',
       'RELAY_TLS_CERT and RELAY_TLS_KEY must be set together.',
       'RELAY_TLS_CERT and RELAY_TLS_KEY must be set together.',
     ]);

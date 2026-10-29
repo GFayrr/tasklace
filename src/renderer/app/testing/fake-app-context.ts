@@ -93,6 +93,7 @@ export interface FakeRelay {
   joinResult: BridgeResult<RelayJoined>;
   reopenResult: BridgeResult<RelayReopened | null>;
   newLinksResult: BridgeResult<RelayLinks>;
+  forgetResult: BridgeResult<null>;
   copyLinkResult: BridgeResult<null>;
   guideResult: BridgeResult<null>;
   readonly requests: (readonly [string, ...unknown[]])[];
@@ -183,6 +184,7 @@ export function fakeBridge(): {
         joinResult: NOT_ANSWERED,
         reopenResult: { ok: true, value: null },
         newLinksResult: NOT_ANSWERED,
+        forgetResult: { ok: true, value: null },
         copyLinkResult: { ok: true, value: null },
         guideResult: { ok: true, value: null },
         requests: [],
@@ -287,6 +289,7 @@ export function fakeBridge(): {
     reopenSharedPlan: (documentId) =>
       askedRelay(['reopenSharedPlan', documentId], relay.reopenResult),
     makeNewLinks: () => askedRelay(['makeNewLinks'], relay.newLinksResult),
+    forgetSharedPlan: () => askedRelay(['forgetSharedPlan'], relay.forgetResult),
     copyRelayLink: (kind) => askedRelay(['copyRelayLink', kind], relay.copyLinkResult),
     openGuide: () => askedRelay(['openGuide'], relay.guideResult),
     sendToRelay: (outgoing) => {

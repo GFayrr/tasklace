@@ -10,11 +10,16 @@ import {
   sealRelayMessage,
   sealRelayPresence,
   type OpenedPresence,
+  type RecordRefusal,
   type RelayCrypto,
   type SealRefusal,
 } from '../../../core/collaboration/relay/relay-envelope';
-import type { RelayKeys } from '../../../core/collaboration/relay/relay-keys';
-import { relayUrlOf, type RelayAddress } from '../../../core/collaboration/relay/relay-link';
+import type { EditRelayKeys, RelayKeys } from '../../../core/collaboration/relay/relay-keys';
+import {
+  hostLabelOf,
+  relayUrlOf,
+  type RelayAddress,
+} from '../../../core/collaboration/relay/relay-link';
 import type { RelayDelivery, RelayOutgoing } from '../../../core/collaboration/relay/relay-member';
 import {
   encodeClientFrame,
@@ -45,28 +50,35 @@ export type RelaySessionEvent =
   | { readonly kind: 'offline' }
   | { readonly kind: 'ended'; readonly reason: RelayEnd };
 
-export interface RelaySessionOptions {
+interface RelaySessionBasics {
   readonly address: RelayAddress;
-  readonly keys: RelayKeys;
-  readonly creates: boolean;
   readonly keepTrying: boolean;
   readonly crypto: RelayCrypto;
   readonly startTimer: StartTimer;
   readonly tell: (event: RelaySessionEvent) => void;
 }
 
+export type RelaySessionOptions = RelaySessionBasics &
+  (
+    | { readonly creates: true; readonly keys: EditRelayKeys }
+    | { readonly creates: false; readonly keys: RelayKeys }
+  );
+
 export interface RelaySession {
   readonly send: (outgoing: RelayOutgoing) => Result<void, SealRefusal | 'NOT_OPEN'>;
-  readonly closeRoom: () => Result<void, 'READ_ONLY' | 'NOT_OPEN'>;
+  readonly closeRoom: () => Promise<Result<void, 'READ_ONLY' | 'NOT_OPEN' | RelayEnd>>;
   readonly close: () => void;
 }
 
 const RETRIED_ENDS = [
   'RELAY_FULL',
+  'RELAY_FAILED',
   'TOO_MANY',
   'TOO_FAST',
+  'STALE',
   'UNREACHABLE',
 ] as const satisfies readonly RelayEnd[];
+const LOST_RECORDS: readonly RecordRefusal[] = ['TOO_MANY', 'TOO_LARGE'];
 const CERTIFICATE_ERRORS: ReadonlySet<string> = new Set([
   'UNABLE_TO_GET_ISSUER_CERT',
   'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
@@ -116,16 +128,19 @@ export function endOfError(error: Error): RelayEnd {
 /** Keeps a window in a plan shared through a relay: creates or opens its room, seals what the page sends, opens what the relay passes on and comes back from the last record it has after a lost connection, until a refusal or the page ends it. */
 export function startRelaySession(options: RelaySessionOptions): RelaySession {
   const { keys, crypto, startTimer, tell } = options;
-  const assembler = createRelayAssembler(keys, crypto);
-  const creation = options.creates ? creationOf(keys) : null;
+  const relay = hostLabelOf(options.address);
+  const creation = options.creates ? creationOf(options.keys) : null;
+  let assembler = createRelayAssembler(keys, crypto);
   let socket: WebSocket | null = null;
   let isIn = false;
   let wasIn = false;
   let isStopped = false;
   let since = 0;
+  let member = 0;
   let attempts = 0;
   let stopRetry: (() => void) | null = null;
   let stopOffline: (() => void) | null = null;
+  let closing: ((result: Result<void, RelayEnd>) => void) | null = null;
   /** Stops waiting to try again and to say that nobody answers. */
   const stopTimers = (): void => {
     stopRetry?.();
@@ -137,6 +152,7 @@ export function startRelaySession(options: RelaySessionOptions): RelaySession {
   const endForGood = (reason: RelayEnd): void => {
     isStopped = true;
     stopTimers();
+    console.warn(`The plan shared through the relay ${relay} stopped: ${reason}.`);
     tell({ kind: 'ended', reason });
   };
   /** Waits before trying again, telling the page the first time the connection is lost and again once nobody answered for a while. */
@@ -161,6 +177,8 @@ export function startRelaySession(options: RelaySessionOptions): RelaySession {
     socket = null;
     isIn = false;
     current.terminate();
+    closing?.(failure(reason));
+    closing = null;
     if (isOneOf(RETRIED_ENDS, reason) && (wasIn || options.keepTrying)) {
       retryLater();
       return;
@@ -170,19 +188,31 @@ export function startRelaySession(options: RelaySessionOptions): RelaySession {
   /** Gives the frame that lets this window in: the signed creation of the room the first time it creates one, or a hello after the last record it has. */
   const opening = (): ClientFrame =>
     creation === null || wasIn ? { type: 'hello', roomId: keys.roomId, since } : creation;
-  /** Takes a record the relay passed on, handing the page each message once all its chunks are in and setting aside what does not open. */
-  const take = (seq: number, record: Uint8Array): void => {
+  /** Takes a record the relay passed on, handing the page each message once all its chunks are in, and counting a record as had only once it joined its message or will never open. */
+  const take = (current: WebSocket, seq: number, record: Uint8Array): void => {
     if (seq <= since) {
       return;
     }
-    since = seq;
     const taken = assembler.take(seq, record);
     if (!taken.ok) {
-      console.warn(`A record of the shared plan was set aside: ${taken.error}.`);
+      setAside(current, seq, taken.error);
       return;
     }
+    since = seq;
     if (taken.value !== null) {
       tell({ kind: 'delivery', delivery: { ...taken.value, settled: assembler.settled() } });
+    }
+  };
+  /** Sets aside a record that did not join its message: a record the room did not sign is ignored, one that does not open is counted as had since no retry would open it, and one dropped for lack of room makes the window come back from the first record. */
+  const setAside = (current: WebSocket, seq: number, refusal: RecordRefusal): void => {
+    console.warn(`A record of the shared plan was set aside: ${refusal}.`);
+    if (refusal === 'UNREADABLE') {
+      since = seq;
+    }
+    if (LOST_RECORDS.includes(refusal)) {
+      since = 0;
+      assembler = createRelayAssembler(keys, crypto);
+      fail(current, 'UNREACHABLE');
     }
   };
   /** Acts on a frame the relay sent. */
@@ -191,12 +221,13 @@ export function startRelaySession(options: RelaySessionOptions): RelaySession {
       case 'welcome':
         isIn = true;
         wasIn = true;
+        member = frame.member;
         attempts = 0;
         stopTimers();
         tell({ kind: 'connected', member: frame.member, members: frame.members });
         return;
       case 'record':
-        take(frame.seq, frame.record);
+        take(current, frame.seq, frame.record);
         return;
       case 'caughtUp':
         tell({ kind: 'caughtUp' });
@@ -212,17 +243,27 @@ export function startRelaySession(options: RelaySessionOptions): RelaySession {
         fail(current, frame.reason);
         return;
       case 'closed':
-        fail(current, 'CLOSED');
+        closedOnRequest(current);
     }
   };
+  /** Ends the session quietly once the relay closed the room this window asked to close, or as a room closed by someone else otherwise. */
+  const closedOnRequest = (current: WebSocket): void => {
+    if (closing === null) {
+      fail(current, 'CLOSED');
+      return;
+    }
+    closing(success(undefined));
+    closing = null;
+    stop();
+  };
   /** Hands the page the presence of another member, setting aside one that does not open. */
-  const tellPresence = (member: number, bytes: Uint8Array): void => {
-    const presence = openRelayPresence(keys, bytes, crypto);
+  const tellPresence = (from: number, bytes: Uint8Array): void => {
+    const presence = openRelayPresence(keys, from, bytes, crypto);
     if (presence === null) {
       console.warn('A presence in the shared plan did not open and was set aside.');
       return;
     }
-    tell({ kind: 'presence', member, presence });
+    tell({ kind: 'presence', member: from, presence });
   };
   /** Opens a socket to the relay, lets this window in once open and follows what the relay sends. */
   const connect = (): void => {
@@ -249,6 +290,7 @@ export function startRelaySession(options: RelaySessionOptions): RelaySession {
       receive(current, frame);
     });
     current.on('error', (error) => {
+      console.warn(`The connection to the relay ${relay} failed:`, error);
       fail(current, endOfError(error));
     });
     current.on('close', () => {
@@ -263,6 +305,30 @@ export function startRelaySession(options: RelaySessionOptions): RelaySession {
     socket.send(encodeClientFrame(frame));
     return success(undefined);
   };
+  /** Stops the session for good without telling the page, closing its socket. */
+  const stop = (): void => {
+    isStopped = true;
+    isIn = false;
+    stopTimers();
+    socket?.close(CLOSE_NORMAL);
+    socket = null;
+  };
+  /** Asks the relay to close the room for good and waits for its answer, a relay that does not answer in time counting as not reached. */
+  const closeRoom = async (signature: Uint8Array): Promise<Result<void, 'NOT_OPEN' | RelayEnd>> => {
+    const sent = sendFrame({ type: 'close', signature });
+    if (!sent.ok) {
+      return sent;
+    }
+    const { promise, resolve } = Promise.withResolvers<Result<void, RelayEnd>>();
+    closing = resolve;
+    const stopWaiting = startTimer(MAX_HANDSHAKE_MILLISECONDS, () => {
+      closing = null;
+      resolve(failure('UNREACHABLE'));
+    });
+    const answer = await promise;
+    stopWaiting();
+    return answer;
+  };
   connect();
   return {
     send: (outgoing) => {
@@ -270,37 +336,26 @@ export function startRelaySession(options: RelaySessionOptions): RelaySession {
         return failure('NOT_OPEN');
       }
       if (outgoing.kind === 'presence') {
-        const sealed = sealRelayPresence(keys, outgoing.bytes, crypto);
+        const sealed = sealRelayPresence(keys, member, outgoing.bytes, crypto);
         return sealed.ok ? sendFrame({ type: 'presence', bytes: sealed.value }) : sealed;
       }
-      const sealed = sealRelayMessage(keys, outgoing.message, crypto);
+      const sealed = sealRelayMessage(keys, { ...outgoing.message, seen: since }, crypto);
       if (!sealed.ok) {
         return sealed;
       }
       sealed.value.forEach((record) => sendFrame({ type: 'append', record }));
       return success(undefined);
     },
-    closeRoom: () => {
-      if (keys.sign === null) {
-        return failure('READ_ONLY');
-      }
-      return sendFrame({ type: 'close', signature: keys.sign(signedCloseBytes(keys.roomId)) });
-    },
-    close: () => {
-      isStopped = true;
-      isIn = false;
-      stopTimers();
-      socket?.close(CLOSE_NORMAL);
-      socket = null;
-    },
+    closeRoom: () =>
+      keys.kind === 'view'
+        ? Promise.resolve(failure('READ_ONLY'))
+        : closeRoom(keys.sign(signedCloseBytes(keys.roomId))),
+    close: stop,
   };
 }
 
-/** Gives the signed frame that creates the room of some keys, throwing for keys that cannot sign since only the link that edits a plan creates its room. */
-function creationOf(keys: RelayKeys): ClientFrame {
-  if (keys.sign === null) {
-    throw new Error('Only the link that edits a plan can create its room.');
-  }
+/** Gives the signed frame that creates the room of some keys, which only the link that edits a plan has. */
+function creationOf(keys: EditRelayKeys): ClientFrame {
   return {
     type: 'create',
     roomId: keys.roomId,

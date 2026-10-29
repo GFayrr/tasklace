@@ -12,6 +12,7 @@ import {
   readRelayAddress,
   readRelayLink,
   relayUrlOf,
+  isShownRelayLink,
   shownRelayLink,
   type RelayAddress,
 } from './relay-link';
@@ -234,5 +235,18 @@ describe('what a person sees of a link', () => {
       `tasklace://tasklace.my-school.example/#e1.${editKeys.slice(0, 6)}…`,
       `tasklace://tasklace.my-school.example/#v1.${viewKeys.slice(0, 6)}…`,
     ]);
+  });
+
+  it('tells a link cut as it is shown on screen from one holding its keys, or cut elsewhere', () => {
+    const whole = encodeRelayLink({ address: SCHOOL, access: EDIT });
+    expect(
+      [
+        shownRelayLink({ address: SCHOOL, access: EDIT }),
+        whole,
+        `${whole.slice(0, -1)}…`,
+        'tasklace://tasklace.my-school.example/#e1.ab…',
+        'https://tasklace.my-school.example/#e1.abcdef…',
+      ].map(isShownRelayLink),
+    ).toEqual([true, false, false, false, false]);
   });
 });

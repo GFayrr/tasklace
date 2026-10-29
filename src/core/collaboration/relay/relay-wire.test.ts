@@ -21,7 +21,9 @@ import {
   signedRecordBytes,
   type ClientFrame,
   type RelayFrame,
+  coveredSequence,
   type RelayRecord,
+  type RelayRecordKind,
 } from './relay-wire';
 
 const ROOM = new Uint8Array(32).fill(3);
@@ -33,16 +35,46 @@ const RECORD: RelayRecord = {
   index: 1,
   count: 3,
   covers: 41,
+  seen: 43,
   signature: new Uint8Array(64).fill(9),
   chunk: Uint8Array.of(5, 6, 7),
 };
 const HEADER_BYTES = 2;
+const INDEX_OFFSET = 33;
 const COUNT_OFFSET = 35;
 const COVERS_OFFSET = 37;
+const SEEN_OFFSET = 45;
 
-/** Writes a record with some fields changed. */
-function recordWith(change: Partial<RelayRecord>): Uint8Array {
-  return encodeRelayRecord({ ...RECORD, ...change });
+/** Writes a record with some fields changed, what it covers following its kind. */
+function recordWith(
+  change: Partial<Omit<RelayRecord, 'kind' | 'covers'>> & {
+    readonly kind?: RelayRecordKind;
+    readonly covers?: number;
+  },
+): Uint8Array {
+  const merged = { ...RECORD, ...change };
+  return encodeRelayRecord({ ...merged, ...coveredSequence(merged.kind, merged.covers) });
+}
+
+/** Changes the count of chunks a record tells, to forge what no encoder writes. */
+function withCount(bytes: Uint8Array, count: number): Uint8Array {
+  const changed = Uint8Array.from(bytes);
+  new DataView(changed.buffer).setUint16(COUNT_OFFSET, count);
+  return changed;
+}
+
+/** Changes the place of the chunk of a record, to forge what no encoder writes. */
+function withIndex(bytes: Uint8Array, index: number): Uint8Array {
+  const changed = Uint8Array.from(bytes);
+  new DataView(changed.buffer).setUint16(INDEX_OFFSET, index);
+  return changed;
+}
+
+/** Changes eight bytes of a record to a number, to forge what no encoder writes. */
+function withNumber(bytes: Uint8Array, offset: number, value: bigint): Uint8Array {
+  const changed = Uint8Array.from(bytes);
+  new DataView(changed.buffer).setBigUint64(offset, value);
+  return changed;
 }
 
 /** Writes a frame from a version, a type code and content, to forge what no encoder writes. */
@@ -67,7 +99,7 @@ describe('the records the relay keeps', () => {
     expect([readRelayRecord(bytes), bytes.length, RECORD_SIGNATURE_OFFSET]).toEqual([
       RECORD,
       RECORD_SIGNATURE_OFFSET + 64 + 3,
-      45,
+      53,
     ]);
   });
 
@@ -76,11 +108,11 @@ describe('the records the relay keeps', () => {
     expect([
       largest.length,
       readRelayRecord(largest)?.chunk.length,
-      readRelayRecord(recordWith({ chunk: new Uint8Array(RELAY_CHUNK_BYTES + 1) })),
+      readRelayRecord(Uint8Array.from([...largest, 0])),
     ]).toEqual([MAX_RELAY_RECORD_BYTES, RELAY_CHUNK_BYTES, null]);
   });
 
-  it('refuses a record too short, of an unknown kind, out of place, of no or too many chunks, or covering a sequence it may not', () => {
+  it('refuses a record too short, of an unknown kind, out of place, of no or too many chunks, covering a sequence it may not, or more than its author had seen', () => {
     const unknownKind = encodeRelayRecord(RECORD);
     unknownKind[0] = 3;
     const noKind = encodeRelayRecord(RECORD);
@@ -92,13 +124,40 @@ describe('the records the relay keeps', () => {
         encodeRelayRecord(RECORD).subarray(0, RECORD_SIGNATURE_OFFSET + 63),
         unknownKind,
         noKind,
-        recordWith({ count: 0, index: 0 }),
+        withCount(recordWith({ index: 0 }), 0),
         tooManyChunks,
-        recordWith({ index: 3 }),
-        recordWith({ kind: 'update', covers: 1 }),
+        withIndex(recordWith({}), 3),
+        withNumber(recordWith({ kind: 'update', seen: 1 }), COVERS_OFFSET, 1n),
         withHugeNumber(encodeRelayRecord(RECORD), COVERS_OFFSET),
+        withHugeNumber(encodeRelayRecord(RECORD), SEEN_OFFSET),
+        recordWith({ seen: 40 }),
       ].map(readRelayRecord),
-    ).toEqual([null, null, null, null, null, null, null, null]);
+    ).toEqual([null, null, null, null, null, null, null, null, null, null]);
+  });
+
+  it('refuses to write a record whose fields do not have the lengths of the format or whose chunk is out of place', () => {
+    expect(
+      [
+        { messageId: new Uint8Array(17) },
+        { salt: new Uint8Array(15) },
+        { signature: new Uint8Array(63) },
+        { chunk: new Uint8Array(RELAY_CHUNK_BYTES + 1) },
+        { count: 0, index: 0 },
+        { count: MAX_RELAY_CHUNKS + 1 },
+        { index: 3 },
+      ].map((change) => {
+        try {
+          return recordWith(change).length;
+        } catch (error) {
+          return error instanceof RangeError ? error.message : error;
+        }
+      }),
+    ).toEqual(
+      Array.from(
+        { length: 7 },
+        () => 'A record has a field of the wrong length or a chunk out of place.',
+      ),
+    );
   });
 
   it('accepts as many chunks as a message may have, and a record with an empty chunk', () => {
@@ -119,10 +178,12 @@ describe('the records the relay keeps', () => {
       signedRecordBytes(ROOM, recordWith({ index: 2 })),
       signedRecordBytes(ROOM, recordWith({ count: 4 })),
       signedRecordBytes(ROOM, recordWith({ covers: 40 })),
+      signedRecordBytes(ROOM, recordWith({ seen: 44 })),
       signedRecordBytes(ROOM, recordWith({ chunk: Uint8Array.of(5, 6, 8) })),
     ];
     expect([otherSignature, ...changes.map((bytes) => bytesEqual(bytes, signed))]).toEqual([
       signed,
+      false,
       false,
       false,
       false,
@@ -166,7 +227,7 @@ describe('what a member sends the relay', () => {
 
   it('tells a frame of another version apart from one it cannot read', () => {
     expect([
-      readClientFrame(rawFrame(2, [], 2)),
+      readClientFrame(rawFrame(2, [], 3)),
       readClientFrame(rawFrame(2, [], 0)),
       readClientFrame(Uint8Array.of(RELAY_WIRE_VERSION)),
       readClientFrame(new Uint8Array(MAX_RELAY_FRAME_BYTES + 1)),
@@ -234,6 +295,8 @@ describe('what the relay sends a member', () => {
           'RELAY_FULL',
           'TOO_MANY',
           'TOO_FAST',
+          'STALE',
+          'RELAY_FAILED',
         ] as const
       ).map((reason): RelayFrame => ({ type: 'refused', reason })),
     ];
@@ -242,7 +305,7 @@ describe('what the relay sends a member', () => {
 
   it('writes each refusal with its own code', () => {
     expect(encodeRelayFrame({ type: 'refused', reason: 'TOO_FAST' })).toEqual(
-      Uint8Array.of(1, 7, 9),
+      Uint8Array.of(2, 7, 9),
     );
   });
 
@@ -286,7 +349,7 @@ describe('what the relay sends a member', () => {
         rawFrame(5, [0, 0, 0]),
         rawFrame(6, [0, 0, 0, 0, 0]),
         rawFrame(7, []),
-        rawFrame(7, [10]),
+        rawFrame(7, [12]),
         rawFrame(7, [0, 0]),
         rawFrame(9, []),
       ].map(readRelayFrame),
@@ -303,7 +366,7 @@ describe('what the relay sends a member', () => {
   });
 
   it('tells a frame of another version apart from one it cannot read', () => {
-    expect([readRelayFrame(rawFrame(3, [], 2)), readRelayFrame(Uint8Array.of(1))]).toEqual([
+    expect([readRelayFrame(rawFrame(3, [], 3)), readRelayFrame(Uint8Array.of(1))]).toEqual([
       'UNSUPPORTED_VERSION',
       null,
     ]);

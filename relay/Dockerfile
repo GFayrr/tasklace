@@ -9,7 +9,7 @@ COPY relay/package.json relay/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 
 FROM node:24.22.1-alpine3.24@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53
-# The relay needs Node alone: npm, npx and yarn are removed so that nothing else can install code.
+# The relay needs Node alone: npm, npx, corepack and yarn are removed so that nothing else can install code.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
       /usr/local/bin/corepack /usr/local/lib/node_modules/corepack /opt/yarn-* \
       /usr/local/bin/yarn /usr/local/bin/yarnpkg \

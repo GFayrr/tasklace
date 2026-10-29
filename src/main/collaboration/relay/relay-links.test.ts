@@ -61,13 +61,16 @@ async function storedPlans(): Promise<string[]> {
   return readLinkStore(await readFile(storePath, 'utf8')).links.map((link) => link.documentId);
 }
 
-/** Gives the link a store finds for a plan as text, or null. */
+/** Gives the link a store finds for a plan as text, null when it keeps none, or why it cannot be read. */
 async function foundText(
   store: ReturnType<typeof createRelayLinkStore>,
   documentId: DocumentId,
 ): Promise<string | null> {
-  const link = await store.find(documentId);
-  return link === null ? null : encodeRelayLink(link);
+  const found = await store.find(documentId);
+  if (!found.ok) {
+    return found.error;
+  }
+  return found.value === null ? null : encodeRelayLink(found.value);
 }
 
 describe('the links of shared plans kept on this computer', () => {
@@ -92,16 +95,25 @@ describe('the links of shared plans kept on this computer', () => {
     ]);
   });
 
-  it('keeps nothing and finds nothing while the vault does not protect what it holds', async () => {
+  it('keeps nothing while the vault does not protect what it holds, and tells a link kept before that it cannot open from no link at all', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { vault, state } = fakeVault();
     const store = createRelayLinkStore(storePath, vault);
     await store.keep(PLAN, EDIT_LINK);
     state.available = false;
     expect([
       await store.keep(OTHER_PLAN, VIEW_LINK),
-      await store.find(PLAN),
+      await foundText(store, PLAN),
+      await foundText(store, OTHER_PLAN),
       (await storedPlans()).length,
-    ]).toEqual([{ ok: false, error: 'NO_SAFE_STORAGE' }, null, 1]);
+      warn.mock.calls,
+    ]).toEqual([
+      { ok: false, error: 'NO_SAFE_STORAGE' },
+      'LINK_UNREADABLE',
+      null,
+      1,
+      [['The link of a shared plan is kept, but the vault of the system cannot open it now.']],
+    ]);
   });
 
   it('keeps one link per plan, the one kept last, and the most recent plans first', async () => {
@@ -131,14 +143,14 @@ describe('the links of shared plans kept on this computer', () => {
     await store.keep(PLAN, EDIT_LINK);
     await store.keep(OTHER_PLAN, EDIT_LINK);
     await store.forget(PLAN);
-    expect([before, await store.find(PLAN), await foundText(store, OTHER_PLAN)]).toEqual([
+    expect([before, await foundText(store, PLAN), await foundText(store, OTHER_PLAN)]).toEqual([
       [],
       null,
       encodeRelayLink(EDIT_LINK),
     ]);
   });
 
-  it('warns and finds nothing for a link the vault no longer opens or that is not a link', async () => {
+  it('warns and cannot read a link the vault no longer opens or that is not a link', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { vault, state } = fakeVault();
     const store = createRelayLinkStore(storePath, vault);
@@ -148,16 +160,16 @@ describe('the links of shared plans kept on this computer', () => {
       storePath,
       JSON.stringify({ version: 1, links: [{ documentId: OTHER_PLAN, sealed: notALink }] }),
     );
-    const notOpened = await store.find(OTHER_PLAN);
+    const notOpened = await foundText(store, OTHER_PLAN);
     await store.keep(PLAN, EDIT_LINK);
     state.opens = false;
     expect([
       notOpened,
-      await store.find(PLAN),
+      await foundText(store, PLAN),
       warn.mock.calls.map(([message]: unknown[]) => message),
     ]).toEqual([
-      null,
-      null,
+      'LINK_UNREADABLE',
+      'LINK_UNREADABLE',
       [
         'The link kept for a shared plan is not a link.',
         'The link of a shared plan could not be opened:',

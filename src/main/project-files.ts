@@ -43,7 +43,7 @@ import {
   projectNameFromPath,
   withExtension,
 } from './project-names';
-import { setLocalCopyAside } from './local-copies';
+import { lastSavedPath, setLocalCopyAside } from './local-copies';
 import {
   noteRecentRelay,
   readRecentProjects,
@@ -302,7 +302,7 @@ async function offerRelayPlan(
   };
 }
 
-/** Writes a plan joined through a relay to a file of its own in the folder of shared plans, under the name of its plan, giving its path or null when it could not be written. */
+/** Writes a plan joined through a relay to a file of its own in the folder of shared plans, the file this computer already keeps for the same plan or a new one under the name of its plan, giving its path or null when it could not be written. */
 async function keepRelayPlan(
   services: ProjectFileServices,
   plan: RelayPlan,
@@ -311,16 +311,19 @@ async function keepRelayPlan(
   if (!(await createdFolder(folder, 'shared plans'))) {
     return null;
   }
-  const path = await freePathIn(
-    folder,
-    fileNameForProject(plan.name, 'tasklace', MESSAGES.projects.untitled),
-  );
+  const localCopyFolder = join(services.userDataFolder, LOCAL_COPY_FOLDER);
+  const path =
+    (await keptSharedPlan(localCopyFolder, folder, plan.documentId)) ??
+    (await freePathIn(
+      folder,
+      fileNameForProject(plan.name, 'tasklace', MESSAGES.projects.untitled),
+    ));
   const written = await services.runTask({
     kind: 'saveProject',
     path,
     state: plan.state,
     documentId: plan.documentId,
-    localCopyFolder: join(services.userDataFolder, LOCAL_COPY_FOLDER),
+    localCopyFolder,
     savedAt: new Date(),
   });
   if (!written.ok) {
@@ -330,6 +333,21 @@ async function keepRelayPlan(
     return null;
   }
   return path;
+}
+
+/** Gives the file in the folder of shared plans where a plan joined before was last saved, or null when it has none there, an index that cannot be read being only logged. */
+async function keptSharedPlan(
+  localCopyFolder: string,
+  folder: string,
+  documentId: DocumentId,
+): Promise<string | null> {
+  try {
+    const path = await lastSavedPath(localCopyFolder, documentId);
+    return path !== null && dirname(path) === folder ? path : null;
+  } catch (error) {
+    console.error('The file of a plan joined before could not be looked for:', error);
+    return null;
+  }
 }
 
 /** Notes the relay the plan of a window is shared through, or that it is shared through none, in the recent projects when the plan has a file, a list that cannot be written being only logged. */

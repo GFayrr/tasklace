@@ -53,6 +53,7 @@ function seal(length: number, id = 1) {
       kind: 'update',
       messageId: new Uint8Array(16).fill(id),
       covers: 0,
+      seen: 0,
       bytes: new Uint8Array(length),
     },
     CRYPTO,

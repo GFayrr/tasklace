@@ -16,7 +16,9 @@ import {
 import type { RelayConfig } from './config.ts';
 import { entriesAfter } from './room-file.ts';
 import { createAddressBuckets, createBucket, type Bucket, type Rate } from './rate.ts';
-import { openRoomStore, type Room, type RoomStore } from './rooms.ts';
+import { openRoomStore, type Room, type RoomStore, type Staging } from './rooms.ts';
+import type { StoredRecord } from './room-file.ts';
+import { createSendQueue, type SendQueue } from './send-queue.ts';
 import { verifierOf } from './signature.ts';
 
 export interface RelayTimings {
@@ -47,14 +49,22 @@ interface Member {
   readonly socket: WebSocket;
   readonly address: string;
   readonly frames: Bucket;
-  readonly queue: RelayFrame[];
-  phase: 'waiting' | 'joining' | 'in' | 'gone';
-  place: Place | null;
-  number: number;
-  queuedBytes: number;
+  readonly queue: SendQueue;
+  staging: Staging | null;
+  state: MemberState;
   alive: boolean;
   helloTimer: NodeJS.Timeout | undefined;
 }
+
+interface Seat {
+  readonly place: Place;
+  readonly number: number;
+}
+
+type MemberState =
+  | { readonly phase: 'waiting' | 'joining' }
+  | { readonly phase: 'in'; readonly seat: Seat }
+  | { readonly phase: 'gone'; readonly seat: Seat | null };
 
 interface Place {
   readonly room: Room;
@@ -110,7 +120,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
     now,
     roomFailed: (room) => {
       places.get(room.name)?.members.forEach((member) => {
-        refuse(member, 'RELAY_FULL');
+        refuse(member, 'RELAY_FAILED');
       });
     },
   });
@@ -125,13 +135,12 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
   /** Sends what waits for a member as fast as its connection takes it, so that a member catching up on a large room never holds it all in memory twice. */
   const pump = (member: Member): void => {
     while (
-      member.queue.length > 0 &&
+      !member.queue.isEmpty() &&
       member.socket.readyState === member.socket.OPEN &&
       member.socket.bufferedAmount < sending.highWaterBytes
     ) {
-      const frame = member.queue.shift();
+      const frame = member.queue.next();
       if (frame !== undefined) {
-        member.queuedBytes -= sizeOf(frame);
         member.socket.send(encodeRelayFrame(frame), (error) => {
           afterSend(member, error);
         });
@@ -147,11 +156,17 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
     console.warn('A frame could not be sent to a member of a room:', error.message);
     member.socket.terminate();
   };
-  /** Adds a frame to what waits for a member, cutting a member so slow that more than a whole room waits for it, as it will catch up once back. */
+  /** Adds a frame to what waits for a member, cutting a member so slow that more than two whole rooms wait for it, as it will catch up once back. */
   const enqueue = (member: Member, frame: RelayFrame): void => {
-    member.queue.push(frame);
-    member.queuedBytes += sizeOf(frame);
-    if (member.queuedBytes > sending.maxQueuedBytes) {
+    keepUp(member, member.queue.push(frame));
+  };
+  /** Adds the presence of another member to what waits for a member, a presence still waiting being replaced by the newer one so that a flood of presences never piles up. */
+  const enqueuePresence = (member: Member, from: number, bytes: Uint8Array): void => {
+    keepUp(member, member.queue.pushPresence(from, bytes));
+  };
+  /** Sends what waits for a member, or cuts it when more waits than the relay keeps for one member. */
+  const keepUp = (member: Member, fits: boolean): void => {
+    if (!fits) {
       console.warn('A member of a room fell too far behind and was cut.');
       member.socket.terminate();
       return;
@@ -160,12 +175,13 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
   };
   /** Tells a member why the relay refuses it and closes its connection. */
   const refuse = (member: Member, reason: RelayRefusal): void => {
-    if (member.phase === 'gone') {
+    if (member.state.phase === 'gone') {
       return;
     }
-    member.phase = 'gone';
-    member.queue.length = 0;
-    member.queuedBytes = 0;
+    member.state = { phase: 'gone', seat: seatOf(member) };
+    member.staging?.cancel();
+    member.staging = null;
+    member.queue.clear();
     sendNow(member.socket, { type: 'refused', reason });
     member.socket.close(CLOSE_REFUSED);
   };
@@ -177,41 +193,40 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
       nextMember: 1,
     };
     places.set(room.name, place);
-    if (member.phase !== 'joining') {
-      leavePlace(place, member);
+    if (member.state.phase !== 'joining') {
+      leavePlace(place, member, null);
       return;
     }
     if (place.members.size >= MAX_RELAY_MEMBERS) {
-      leavePlace(place, member);
+      leavePlace(place, member, null);
       refuse(member, 'ROOM_FULL');
       return;
     }
     const others = [...place.members.keys()];
-    member.number = place.nextMember;
+    const number = place.nextMember;
     place.nextMember += 1;
-    member.place = place;
-    member.phase = 'in';
+    member.state = { phase: 'in', seat: { place, number } };
     enqueue(member, {
       type: 'welcome',
-      member: member.number,
+      member: number,
       verifyKey: room.verifyKey,
       members: others,
     });
     place.members.forEach((other) => {
-      enqueue(other, { type: 'joined', member: member.number });
+      enqueue(other, { type: 'joined', member: number });
     });
-    place.members.set(member.number, member);
+    place.members.set(number, member);
     entriesAfter(room.entries, since).forEach((entry) => {
       enqueue(member, { type: 'record', seq: entry.seq, record: entry.record });
     });
     enqueue(member, { type: 'caughtUp' });
   };
-  /** Takes a member out of a room, telling the others, and lets the store forget the room once nobody holds it. */
-  const leavePlace = (place: Place, member: Member): void => {
-    if (place.members.get(member.number) === member) {
-      place.members.delete(member.number);
+  /** Takes a member out of a room under the number it had there, if it had one, telling the others, and lets the store forget the room once nobody holds it. */
+  const leavePlace = (place: Place, member: Member, number: number | null): void => {
+    if (number !== null && place.members.get(number) === member) {
+      place.members.delete(number);
       place.members.forEach((other) => {
-        enqueue(other, { type: 'left', member: member.number });
+        enqueue(other, { type: 'left', member: number });
       });
     }
     if (place.members.size === 0 && places.get(place.room.name) === place) {
@@ -223,7 +238,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
   };
   /** Opens or creates the room a member asks for, refusing it when the room is not there, already there, or the relay cannot hold it. */
   const join = async (member: Member, frame: ClientFrame): Promise<void> => {
-    member.phase = 'joining';
+    member.state = { phase: 'joining' };
     clearTimeout(member.helloTimer);
     try {
       const room = await roomFor(frame);
@@ -234,7 +249,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
       enter(member, room, frame.type === 'hello' ? frame.since : 0);
     } catch (error) {
       console.error('A room could not be opened:', error);
-      refuse(member, 'RELAY_FULL');
+      refuse(member, 'RELAY_FAILED');
     }
   };
   /** Gives the room a frame opens or creates, or why it cannot. */
@@ -251,63 +266,82 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
       ? store.create(frame.roomId, frame.verifyKey)
       : 'BAD_SIGNATURE';
   };
-  /** Keeps a record a member sent and passes it to every member once written, its author included so that it knows the record is kept. */
-  const append = (member: Member, place: Place, record: Uint8Array): void => {
-    const written = store.append(place.room, record);
-    if (typeof written === 'string') {
-      refuse(member, written);
+  /** Takes a chunk a member sent into the message it is sending, and once the message is whole and written, passes its records to every member then in the room, its author included so that it knows the message is kept. */
+  const append = (member: Member, { place }: Seat, record: Uint8Array): void => {
+    const staging = member.staging ?? store.stage(place.room);
+    const taken = staging.take(record);
+    member.staging = taken === null ? staging : null;
+    if (taken === null) {
       return;
     }
-    void written.then((stored) => {
+    if (typeof taken === 'string') {
+      refuse(member, taken);
+      return;
+    }
+    void taken.then((stored) => {
       if (stored !== null) {
-        place.members.forEach((other) => {
-          enqueue(other, { type: 'record', seq: stored.seq, record: stored.record });
-        });
+        passOn(place.room.name, stored);
       }
     });
   };
+  /** Passes records just written to the members in their room now, who may have come in while they were written. */
+  const passOn = (name: string, stored: readonly StoredRecord[]): void => {
+    places.get(name)?.members.forEach((other) => {
+      stored.forEach((entry) => {
+        enqueue(other, { type: 'record', seq: entry.seq, record: entry.record });
+      });
+    });
+  };
   /** Closes a room for good when its key signed it, telling every member. */
-  const closeRoom = async (member: Member, place: Place, signature: Uint8Array): Promise<void> => {
+  const closeRoom = async (
+    member: Member,
+    { place }: Seat,
+    signature: Uint8Array,
+  ): Promise<void> => {
     if (!place.room.verify(signedCloseBytes(place.room.roomId), signature)) {
       refuse(member, 'BAD_SIGNATURE');
       return;
     }
-    places.delete(place.room.name);
     try {
       await store.remove(place.room);
     } catch (error) {
       console.error(`The room ${place.room.name} could not be removed:`, error);
+      place.members.forEach((other) => {
+        refuse(other, 'RELAY_FAILED');
+      });
+      return;
     }
+    places.delete(place.room.name);
     place.members.forEach((other) => {
-      other.phase = 'gone';
+      other.state = { phase: 'gone', seat: seatOf(other) };
       sendNow(other.socket, { type: 'closed' });
       other.socket.close(CLOSE_NORMAL);
     });
   };
   /** Acts on a frame a member sent, by what it may do at this point. */
   const act = (member: Member, frame: ClientFrame): void => {
-    const { place } = member;
-    if (member.phase === 'waiting') {
+    const { state } = member;
+    if (state.phase === 'waiting') {
       void join(member, frame);
       return;
     }
-    if (member.phase !== 'in' || place === null) {
+    if (state.phase !== 'in') {
       refuse(member, 'MALFORMED');
       return;
     }
     switch (frame.type) {
       case 'append':
-        append(member, place, frame.record);
+        append(member, state.seat, frame.record);
         return;
       case 'presence':
-        place.members.forEach((other) => {
+        state.seat.place.members.forEach((other) => {
           if (other !== member) {
-            enqueue(other, { type: 'presence', member: member.number, bytes: frame.bytes });
+            enqueuePresence(other, state.seat.number, frame.bytes);
           }
         });
         return;
       case 'close':
-        void closeRoom(member, place, frame.signature);
+        void closeRoom(member, state.seat, frame.signature);
         return;
       default:
         refuse(member, 'MALFORMED');
@@ -316,7 +350,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
   /** Reads a frame a member sent, refusing text, another version, bytes that are not a frame and a member sending too fast. */
   const receive = (member: Member, data: RawData, isBinary: boolean): void => {
     member.alive = true;
-    if (member.phase === 'gone') {
+    if (member.state.phase === 'gone') {
       return;
     }
     if (!member.frames()) {
@@ -337,7 +371,10 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
   /** Forgets a member whose connection closed or that the relay stops for. */
   const forget = (member: Member): void => {
     clearTimeout(member.helloTimer);
-    member.phase = 'gone';
+    const seat = seatOf(member);
+    member.state = { phase: 'gone', seat: null };
+    member.staging?.cancel();
+    member.staging = null;
     members.delete(member);
     const count = (perAddress.get(member.address) ?? 1) - 1;
     if (count === 0) {
@@ -345,8 +382,8 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
     } else {
       perAddress.set(member.address, count);
     }
-    if (member.place !== null) {
-      leavePlace(member.place, member);
+    if (seat !== null) {
+      leavePlace(seat.place, member, seat.number);
     }
   };
   /** Takes a new connection, refusing it beyond the connections of the relay, of one address, or how fast an address may connect. */
@@ -356,11 +393,9 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
       socket,
       address,
       frames: createBucket(FRAME_RATE, now),
-      queue: [],
-      phase: 'waiting',
-      place: null,
-      number: 0,
-      queuedBytes: 0,
+      queue: createSendQueue(sending.maxQueuedBytes),
+      staging: null,
+      state: { phase: 'waiting' },
       alive: true,
       helloTimer: undefined,
     };
@@ -384,7 +419,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
       return;
     }
     member.helloTimer = setTimeout(() => {
-      if (member.phase === 'waiting') {
+      if (member.state.phase === 'waiting') {
         refuse(member, 'MALFORMED');
       }
     }, timings.helloMilliseconds);
@@ -464,6 +499,12 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
   };
 }
 
+/** Gives the place and number a member holds in a room, in it or gone from it, or null when it never got in. */
+function seatOf(member: Member): Seat | null {
+  const { state } = member;
+  return state.phase === 'in' || state.phase === 'gone' ? state.seat : null;
+}
+
 /** Makes the web server the relay listens on, with the certificate of its settings when it has one. */
 async function serverOf(config: RelayConfig): Promise<Server> {
   if (config.tls === null) {
@@ -505,11 +546,6 @@ function bytesOf(data: RawData): Uint8Array {
     return new Uint8Array(Buffer.concat(data));
   }
   return new Uint8Array(data);
-}
-
-/** Gives the bytes a frame waiting for a member holds, its record when it has one. */
-function sizeOf(frame: RelayFrame): number {
-  return frame.type === 'record' ? frame.record.length : 0;
 }
 
 /** Sends a frame at once to a connection still open, ahead of what waits. */

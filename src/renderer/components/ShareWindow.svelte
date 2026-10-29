@@ -35,6 +35,7 @@
   let askingNewLinks = $state(false);
   let newLinksMade = $state(false);
   let newLinksFailure = $state<string | null>(null);
+  let forgetFailed = $state(false);
 
   const text = $derived(app.messages.collaboration);
   const collaboration = $derived(app.collaboration);
@@ -103,6 +104,7 @@
       linkCopied = null;
       newLinksMade = false;
       newLinksFailure = null;
+      forgetFailed = false;
       dialog.showModal();
     } else if (!isOpen && dialog.open) {
       dialog.close();
@@ -221,6 +223,11 @@
     }
   }
 
+  /** Forgets the shared plan the relay no longer finds, telling when it could not. */
+  async function forgetPlan(): Promise<void> {
+    forgetFailed = !(await app.forgetSharedPlan());
+  }
+
   /** Stops sharing and closes the window. */
   async function stopSharing(): Promise<void> {
     await collaboration.stop();
@@ -310,7 +317,21 @@
           </ul>
           <p class="hint">{relayText.rightsHint}</p>
         </section>
-        {#if relay.canEdit}
+        {#if relay.endOfOpenPlan?.reason === 'NO_ROOM'}
+          <section class="gone">
+            <p class="hint">{relayText.notOnRelay}</p>
+            <button
+              type="button"
+              class="button"
+              onclick={() => {
+                void forgetPlan();
+              }}>{relayText.forgetPlan}</button
+            >
+            {#if forgetFailed}
+              <p class="message error" role="alert">{relayText.notForgotten}</p>
+            {/if}
+          </section>
+        {:else if relay.canEdit}
           <details class="new-links">
             <summary>{relayText.wrongPerson}</summary>
             <p class="hint">{relayText.newLinksBody}</p>

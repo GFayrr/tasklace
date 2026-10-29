@@ -6,21 +6,46 @@ import { ROOM_ID_BYTES, SIGNATURE_BYTES, VERIFY_KEY_BYTES } from './relay-wire';
 declare const READ_KEY_BRAND: unique symbol;
 declare const SIGNING_SEED_BRAND: unique symbol;
 declare const VERIFY_KEY_BRAND: unique symbol;
+declare const ROOM_ID_BRAND: unique symbol;
+declare const ENCRYPTION_KEY_BRAND: unique symbol;
 
 export type RelayReadKey = Uint8Array & { readonly [READ_KEY_BRAND]: true };
 export type RelaySigningSeed = Uint8Array & { readonly [SIGNING_SEED_BRAND]: true };
 export type RelayVerifyKey = Uint8Array & { readonly [VERIFY_KEY_BRAND]: true };
+export type RelayRoomId = Uint8Array & { readonly [ROOM_ID_BRAND]: true };
+export type RelayEncryptionKey = Uint8Array & { readonly [ENCRYPTION_KEY_BRAND]: true };
 
-export type RelayAccess =
-  | { readonly kind: 'edit'; readonly readKey: RelayReadKey; readonly seed: RelaySigningSeed }
-  | { readonly kind: 'view'; readonly readKey: RelayReadKey; readonly verifyKey: RelayVerifyKey };
-
-export interface RelayKeys {
-  readonly roomId: Uint8Array;
-  readonly encryptionKey: Uint8Array;
-  readonly verifyKey: RelayVerifyKey;
-  readonly sign: ((bytes: Uint8Array) => Uint8Array) | null;
+export interface EditRelayAccess {
+  readonly kind: 'edit';
+  readonly readKey: RelayReadKey;
+  readonly seed: RelaySigningSeed;
 }
+
+export interface ViewRelayAccess {
+  readonly kind: 'view';
+  readonly readKey: RelayReadKey;
+  readonly verifyKey: RelayVerifyKey;
+}
+
+export type RelayAccess = EditRelayAccess | ViewRelayAccess;
+
+interface DerivedRelayKeys {
+  readonly roomId: RelayRoomId;
+  readonly encryptionKey: RelayEncryptionKey;
+  readonly verifyKey: RelayVerifyKey;
+}
+
+export interface EditRelayKeys extends DerivedRelayKeys {
+  readonly kind: 'edit';
+  readonly sign: (bytes: Uint8Array) => Uint8Array;
+}
+
+export interface ViewRelayKeys extends DerivedRelayKeys {
+  readonly kind: 'view';
+  readonly sign: null;
+}
+
+export type RelayKeys = EditRelayKeys | ViewRelayKeys;
 
 export const RELAY_KEY_BYTES = 32;
 
@@ -32,7 +57,7 @@ const MESSAGE_INFO = ENCODER.encode('Tasklace relay message v1');
 const NO_SALT = new Uint8Array();
 
 /** Draws the keys of a new plan shared through a relay: a key to read it and a seed to sign its changes. */
-export function drawRelayAccess(randomBytes: (count: number) => Uint8Array): RelayAccess {
+export function drawRelayAccess(randomBytes: (count: number) => Uint8Array): EditRelayAccess {
   const readKey = readRelayReadKey(randomBytes(RELAY_KEY_BYTES));
   const seed = readSigningSeed(randomBytes(RELAY_KEY_BYTES));
   if (readKey === null || seed === null) {
@@ -42,21 +67,25 @@ export function drawRelayAccess(randomBytes: (count: number) => Uint8Array): Rel
 }
 
 /** Gives the access of the link to view a plan from the access of the link to edit it: the same key to read, and the key that checks signatures instead of the seed that makes them. */
-export function viewAccessOf(access: RelayAccess): RelayAccess {
+export function viewAccessOf(access: RelayAccess): ViewRelayAccess {
   return access.kind === 'view'
     ? access
     : { kind: 'view', readKey: access.readKey, verifyKey: verifyKeyOf(access.seed) };
 }
 
+export function relayKeysOf(access: EditRelayAccess): EditRelayKeys;
+export function relayKeysOf(access: ViewRelayAccess): ViewRelayKeys;
+export function relayKeysOf(access: RelayAccess): RelayKeys;
 /** Derives what a member needs from its access: the room on the relay, the key that encrypts the plan, the key that checks signatures and, with the link to edit, how to sign. */
 export function relayKeysOf(access: RelayAccess): RelayKeys {
-  const roomId = hkdf(sha256, access.readKey, NO_SALT, ROOM_INFO, ROOM_ID_BYTES);
-  const encryptionKey = hkdf(sha256, access.readKey, NO_SALT, ENCRYPTION_INFO, RELAY_KEY_BYTES);
+  const roomId = derived(access.readKey, ROOM_INFO, ROOM_ID_BYTES, isRoomId);
+  const encryptionKey = derived(access.readKey, ENCRYPTION_INFO, RELAY_KEY_BYTES, isEncryptionKey);
   if (access.kind === 'view') {
-    return { roomId, encryptionKey, verifyKey: access.verifyKey, sign: null };
+    return { kind: 'view', roomId, encryptionKey, verifyKey: access.verifyKey, sign: null };
   }
   const { seed } = access;
   return {
+    kind: 'edit',
     roomId,
     encryptionKey,
     verifyKey: verifyKeyOf(seed),
@@ -64,12 +93,36 @@ export function relayKeysOf(access: RelayAccess): RelayKeys {
   };
 }
 
+/** Derives a key of some length from the key that reads a plan under the name of its use, so that the keys of two uses never meet. */
+function derived<Key extends Uint8Array>(
+  readKey: RelayReadKey,
+  info: Uint8Array,
+  length: number,
+  isKey: (bytes: Uint8Array) => bytes is Key,
+): Key {
+  const key = hkdf(sha256, readKey, NO_SALT, info, length);
+  if (!isKey(key)) {
+    throw new RangeError('A key was derived with a length of another use.');
+  }
+  return key;
+}
+
+/** Tells whether bytes have the length of the identifier of a room on the relay. */
+function isRoomId(bytes: Uint8Array): bytes is RelayRoomId {
+  return bytes.length === ROOM_ID_BYTES;
+}
+
+/** Tells whether bytes have the length of the key that encrypts a plan. */
+function isEncryptionKey(bytes: Uint8Array): bytes is RelayEncryptionKey {
+  return bytes.length === RELAY_KEY_BYTES;
+}
+
 /** Derives the key of one message from the key of the plan and the random salt of that message, so that no two messages ever share a key. */
-export function messageKeyOf(encryptionKey: Uint8Array, salt: Uint8Array): Uint8Array {
+export function messageKeyOf(encryptionKey: RelayEncryptionKey, salt: Uint8Array): Uint8Array {
   return hkdf(sha256, encryptionKey, salt, MESSAGE_INFO, RELAY_KEY_BYTES);
 }
 
-/** Tells whether a signature of bytes was made with the seed of a key, checked strictly so that no key or signature of small order passes. */
+/** Tells whether a signature of bytes holds for a verify key, checked strictly so that no key or signature of small order passes. */
 export function isSignedBy(
   verifyKey: RelayVerifyKey,
   bytes: Uint8Array,

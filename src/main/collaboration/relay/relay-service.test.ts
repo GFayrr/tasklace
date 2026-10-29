@@ -28,6 +28,7 @@ import { freePort, LOOPBACK, until } from '../../testing/plan-host';
 import { TEST_CERTIFICATE, writeRelayCertificate } from '../../testing/test-certificate';
 import type { StartTimer } from '../secure-connection';
 import { zlibCompressor } from '../../zlib-compressor';
+import { systemRandomBytes } from '../aes-gcm';
 import type { RelayLinkStore } from './relay-links';
 import { readRelayOutgoing, registerRelayHandlers, type RelayHandlers } from './relay-service';
 
@@ -35,6 +36,11 @@ vi.mock('electron', async () => {
   const fakes = await import('../../testing/fake-electron');
   return { ipcMain: new fakes.FakeIpcMain() };
 });
+
+vi.mock('../../../core/limits', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../core/limits')>()),
+  MAX_UNCOMPRESSED_BYTES: SMALL_PLAN_BYTES,
+}));
 
 vi.mock('node:tls', async (importOriginal) => {
   const tls = await importOriginal<typeof import('node:tls')>();
@@ -48,6 +54,8 @@ const PLAN_STATE = Y.encodeStateAsUpdate(
   createSharedDocument(project([workTask('a')]), TEST_DOCUMENT_ID),
 );
 const SPEED_UP = 64;
+const SMALL_PLAN_BYTES = vi.hoisted(() => 1_048_576);
+const NOISE_BYTES = 400_000;
 
 /** A fake page that records the events the main process sends it. */
 class FakePage {
@@ -80,6 +88,7 @@ function memoryLinks() {
     thrown: undefined as unknown,
     vault: true,
     findFails: null as Error | null,
+    linkUnreadable: false,
     forgetFails: null as Error | null,
   };
   const store: RelayLinkStore = {
@@ -98,9 +107,12 @@ function memoryLinks() {
       if (state.findFails !== null) {
         return Promise.reject(state.findFails);
       }
+      if (state.linkUnreadable) {
+        return Promise.resolve(failure('LINK_UNREADABLE'));
+      }
       const text = kept.get(documentId);
       const link = text === undefined ? null : readRelayLink(text);
-      return Promise.resolve(link?.ok === true ? link.value : null);
+      return Promise.resolve(success(link?.ok === true ? link.value : null));
     },
     forget: (documentId) => {
       if (state.forgetFails !== null) {
@@ -130,6 +142,8 @@ let busyElsewhere = new Set<FakePage>();
 let handlers: RelayHandlers;
 let tasks: FileTask[];
 let gate: { readonly held: Promise<undefined>; readonly open: () => void } | null = null;
+let taskEnds: Promise<unknown>[] = [];
+let taskThrows: Error | null = null;
 let copied: string[];
 let copyFails: Error | null;
 let noted: [FakePage, string | null][];
@@ -146,6 +160,8 @@ beforeEach(async () => {
   busyElsewhere = new Set();
   tasks = [];
   gate = null;
+  taskEnds = [];
+  taskThrows = null;
   copied = [];
   copyFails = null;
   noted = [];
@@ -153,10 +169,19 @@ beforeEach(async () => {
   guideOpens = true;
   handlers = registerRelayHandlers({
     assertTrusted: () => undefined,
-    runTask: async <T extends FileTask>(task: T) => {
+    runTask: <T extends FileTask>(task: T) => {
       tasks.push(task);
-      await gate?.held;
-      return (await runFileTask(task)) as ResultOfTask<T>;
+      /** Runs the task once the gate of the test lets it, or fails as a worker that cannot start. */
+      const run = async (): Promise<ResultOfTask<T>> => {
+        await gate?.held;
+        if (taskThrows !== null) {
+          throw taskThrows;
+        }
+        return (await runFileTask(task)) as ResultOfTask<T>;
+      };
+      const ended = run();
+      taskEnds.push(ended.catch(() => undefined));
+      return ended;
     },
     links: links.store,
     documentOf: (sender) => documents.get(sender as unknown as FakePage) ?? null,
@@ -310,11 +335,6 @@ function closeGate(): () => void {
   return () => {
     resolve(undefined);
   };
-}
-
-/** Lets a little time pass, for what should not come to show it does not. */
-function shortly(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 64));
 }
 
 /** Starts a relay of its own over TLS that lets a member in and never says it caught up. */
@@ -586,16 +606,18 @@ describe('reopening a plan shared through a relay', () => {
     handlers.leave(asSender(owner));
     const guest = openPage();
     await invoke(guest, IPC_CHANNELS.joinByLink, viewLink);
+    const witness = openPage();
+    await invoke(witness, IPC_CHANNELS.joinByLink, viewLink);
     const open = closeGate();
     const again = openPage(TEST_DOCUMENT_ID);
     await invoke(again, IPC_CHANNELS.reopenSharedPlan, TEST_DOCUMENT_ID);
-    await until(() => tasks.length === 2);
+    await until(() => tasks.length === 3);
     ipcMain.send(
       IPC_CHANNELS.relaySend,
       { sender: guest },
       { kind: 'presence', bytes: Uint8Array.of(4) },
     );
-    await shortly();
+    await until(() => witness.kinds().includes('relayPresence'));
     const beforeState = again.kinds();
     open();
     await until(() => again.kinds().includes('relayPresence'));
@@ -615,8 +637,47 @@ describe('reopening a plan shared through a relay', () => {
     await until(() => tasks.length === 1);
     handlers.leave(asSender(again));
     open();
-    await shortly();
+    await Promise.all(taskEnds);
     expect(again.kinds()).toEqual(['relayConnected']);
+  });
+
+  it('ends a reopened plan whose state the worker could not check, handing what it held, and logs why', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { owner } = await sharedWithPlan();
+    handlers.leave(asSender(owner));
+    taskThrows = new Error('The worker could not start.');
+    const again = openPage(TEST_DOCUMENT_ID);
+    await invoke(again, IPC_CHANNELS.reopenSharedPlan, TEST_DOCUMENT_ID);
+    await until(() => again.kinds().includes('relayEnded'));
+    expect([
+      again.kinds(),
+      handlers.isSharing(asSender(again)),
+      error.mock.calls.map(([message]: unknown[]) => message),
+    ]).toEqual([
+      ['relayConnected', 'relayEnded'],
+      false,
+      ['The plan could not come back to its relay:'],
+    ]);
+  });
+
+  it('ends a reopened plan and refuses a join whose log cannot be read, logging why', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { owner, viewLink } = await sharedWithPlan();
+    sendPlan(owner, Uint8Array.of(9));
+    await until(() => owner.kinds().filter((kind) => kind === 'relayDelivery').length === 2);
+    handlers.leave(asSender(owner));
+    const again = openPage(TEST_DOCUMENT_ID);
+    await invoke(again, IPC_CHANNELS.reopenSharedPlan, TEST_DOCUMENT_ID);
+    await until(() => again.kinds().includes('relayEnded'));
+    const joined = await invoke(openPage(), IPC_CHANNELS.joinByLink, viewLink);
+    expect([again.events.at(-1), joined, error.mock.calls]).toEqual([
+      { kind: 'relayEnded', reason: 'MALFORMED' },
+      { ok: false, error: { code: 'INVALID_CONTENT' } },
+      [
+        ['The log the relay gave for the reopened plan could not be read: INVALID_CONTENT.'],
+        ['The log of the plan a link joined could not be read: INVALID_CONTENT.'],
+      ],
+    ]);
   });
 
   it('hands an empty state for a room nothing was put in yet', async () => {
@@ -654,18 +715,22 @@ describe('reopening a plan shared through a relay', () => {
     ]);
   });
 
-  it('answers nothing for a plan without a kept link, clearing its relay among the recent projects, and refuses a plan the window does not hold or an unreadable store', async () => {
+  it('answers nothing for a plan without a kept link, clearing its relay among the recent projects, and refuses a plan the window does not hold, a kept link it cannot open or an unreadable store, keeping its relay', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const page = openPage(TEST_DOCUMENT_ID);
     const withoutLink = await invoke(page, IPC_CHANNELS.reopenSharedPlan, TEST_DOCUMENT_ID);
     const clearedRelay = noted.splice(0);
     const notHeld = await invoke(page, IPC_CHANNELS.reopenSharedPlan, OTHER_PLAN);
+    links.state.linkUnreadable = true;
+    const notOpened = await invoke(page, IPC_CHANNELS.reopenSharedPlan, TEST_DOCUMENT_ID);
+    links.state.linkUnreadable = false;
     links.state.findFails = Object.assign(new Error('Input/output error'), { code: 'EIO' });
     const unreadable = await invoke(page, IPC_CHANNELS.reopenSharedPlan, TEST_DOCUMENT_ID);
     expect([
       withoutLink,
       clearedRelay,
       notHeld,
+      notOpened,
       unreadable,
       noted,
       error.mock.calls.map(([message]: unknown[]) => message),
@@ -673,11 +738,14 @@ describe('reopening a plan shared through a relay', () => {
       { ok: true, value: null },
       [[page, null]],
       { ok: false, error: { code: 'TASK_FAILED' } },
+      { ok: false, error: { code: 'LINK_UNREADABLE' } },
       { ok: false, error: { code: 'READ_FAILED' } },
       [],
       [
         'A page reopened a shared plan it does not hold.',
+        'The plan could not come back to its relay: LINK_UNREADABLE.',
         'The links of shared plans could not be read:',
+        'The plan could not come back to its relay: READ_FAILED.',
       ],
     ]);
     await expect(invoke(page, IPC_CHANNELS.reopenSharedPlan, 'not an identifier')).rejects.toThrow(
@@ -761,11 +829,14 @@ describe('the links of a plan shared through a relay', () => {
     ]).toEqual([
       { ok: false, error: { code: 'TASK_FAILED' } },
       { ok: false, error: { code: 'NOT_CONNECTED' } },
-      ['A page asked for new links of a plan it does not share with the link that edits.'],
+      [
+        'A page asked for new links of a plan it does not share with the link that edits.',
+        'The room of a plan could not be closed for new links: NOT_OPEN.',
+      ],
     ]);
   });
 
-  it('keeps the link of a plan when the window leaves it, and forgets it once its room is gone', async () => {
+  it('keeps the link of a plan when the window leaves it or the relay no longer finds its room, until the page forgets it', async () => {
     const { owner, editLink } = await sharedWithPlan();
     handlers.leave(asSender(owner));
     const keptAfterLeaving = links.kept.get(TEST_DOCUMENT_ID) === editLink;
@@ -775,13 +846,59 @@ describe('the links of a plan shared through a relay', () => {
     const page = openPage(OTHER_PLAN);
     await invoke(page, IPC_CHANNELS.reopenSharedPlan, OTHER_PLAN);
     await until(() => page.kinds().includes('relayEnded'));
-    await until(() => !links.kept.has(OTHER_PLAN));
+    const keptWhenGone = links.kept.has(OTHER_PLAN);
+    const notedWhenGone = noted.at(-1);
+    const forgotten = await invoke(page, IPC_CHANNELS.forgetSharedPlan);
     expect([
       keptAfterLeaving,
       page.events.at(-1),
+      keptWhenGone,
+      notedWhenGone,
+      forgotten,
+      links.kept.has(OTHER_PLAN),
       noted.at(-1),
       handlers.isSharing(asSender(owner)),
-    ]).toEqual([true, { kind: 'relayEnded', reason: 'NO_ROOM' }, [page, null], false]);
+    ]).toEqual([
+      true,
+      { kind: 'relayEnded', reason: 'NO_ROOM' },
+      true,
+      [page, relayLabel()],
+      { ok: true, value: null },
+      false,
+      [page, null],
+      false,
+    ]);
+  });
+
+  it('forgets the link of a plan for the other members once its owner closed its room for new links', async () => {
+    const { owner, viewLink } = await sharedWithPlan();
+    const guest = openPage();
+    await invoke(guest, IPC_CHANNELS.joinByLink, viewLink);
+    const made = await invoke(owner, IPC_CHANNELS.makeNewLinks);
+    await until(() => guest.kinds().includes('relayEnded'));
+    await until(() => noted.some(([page, relay]) => page === guest && relay === null));
+    expect([
+      Reflect.get(Object(made), 'ok'),
+      guest.events.at(-1),
+      owner.kinds().includes('relayEnded'),
+    ]).toEqual([true, { kind: 'relayEnded', reason: 'CLOSED' }, false]);
+  });
+
+  it('refuses to forget a plan a page does not hold or still follows through its relay', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { owner } = await sharedWithPlan();
+    expect([
+      await invoke(openPage(null), IPC_CHANNELS.forgetSharedPlan),
+      await invoke(owner, IPC_CHANNELS.forgetSharedPlan),
+      error.mock.calls.map(([message]: unknown[]) => message),
+    ]).toEqual([
+      { ok: false, error: { code: 'TASK_FAILED' } },
+      { ok: false, error: { code: 'TASK_FAILED' } },
+      [
+        'A page asked to forget a shared plan it does not hold or still follows.',
+        'A page asked to forget a shared plan it does not hold or still follows.',
+      ],
+    ]);
   });
 });
 
@@ -852,7 +969,7 @@ describe('copying a link and opening the guide', () => {
 });
 
 describe('keeping and forgetting links, when the store fails', () => {
-  it('logs a link that cannot be forgotten once its room is gone', async () => {
+  it('logs a link that cannot be forgotten once the page forgets its plan', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { editLink } = await sharedWithPlan();
     const gone = readRelayLink(editLink.replace(/#e1\.[A-Za-z0-9_-]+$/, '#e1.' + 'A'.repeat(86)));
@@ -860,9 +977,24 @@ describe('keeping and forgetting links, when the store fails', () => {
     links.state.forgetFails = new Error('Input/output error');
     const page = openPage(OTHER_PLAN);
     await invoke(page, IPC_CHANNELS.reopenSharedPlan, OTHER_PLAN);
-    await until(() => error.mock.calls.length > 0);
+    await until(() => page.kinds().includes('relayEnded'));
+    await invoke(page, IPC_CHANNELS.forgetSharedPlan);
     expect(error.mock.calls.map(([message]: unknown[]) => message)).toEqual([
       'The link of a shared plan could not be forgotten:',
+    ]);
+  });
+
+  it('ends a join whose relay sends more before it caught up than any plan holds', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { owner, viewLink } = await sharedWithPlan();
+    for (let count = 0; count < 3; count += 1) {
+      sendPlan(owner, encodeMessage({ kind: 'update', update: systemRandomBytes(NOISE_BYTES) }));
+    }
+    await until(() => owner.kinds().filter((kind) => kind === 'relayDelivery').length === 4);
+    const joined = await invoke(openPage(), IPC_CHANNELS.joinByLink, viewLink);
+    expect([joined, error.mock.calls]).toEqual([
+      { ok: false, error: { code: 'RELAY_ENDED', reason: 'TOO_LARGE' } },
+      [['The relay gave a log larger than any plan.']],
     ]);
   });
 
@@ -934,6 +1066,19 @@ describe('what a page sends a relay', () => {
         },
       },
       true,
+    ],
+    [
+      'a change covering a sequence, which only a snapshot does',
+      {
+        kind: 'message',
+        message: {
+          kind: 'update',
+          messageId: new Uint8Array(16),
+          covers: 1,
+          bytes: Uint8Array.of(1),
+        },
+      },
+      false,
     ],
     ['a presence without bytes', { kind: 'presence', bytes: 'text' }, false],
     [

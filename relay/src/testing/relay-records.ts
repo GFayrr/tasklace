@@ -7,7 +7,10 @@ import {
   relayKeysOf,
   type RelayKeys,
 } from '../../../src/core/collaboration/relay/relay-keys';
-import type { RelayRecordKind } from '../../../src/core/collaboration/relay/relay-wire';
+import {
+  coveredSequence,
+  type RelayRecordKind,
+} from '../../../src/core/collaboration/relay/relay-wire';
 import { plainCompression, seededRandom, testAead } from '../../../src/core/testing/test-crypto';
 
 export const ROOM_KEYS: RelayKeys = relayKeysOf(drawRelayAccess(seededRandom(5)));
@@ -20,13 +23,14 @@ export function sealedRecords(
   length: number,
   covers = 0,
   keys: RelayKeys = ROOM_KEYS,
+  seen = covers,
 ): readonly Uint8Array[] {
   const sealed = sealRelayMessage(
     keys,
     {
-      kind,
+      ...coveredSequence(kind, covers),
       messageId: new Uint8Array(16).fill(byte),
-      covers,
+      seen,
       bytes: new Uint8Array(length).fill(byte),
     },
     { aead: testAead, compression: plainCompression, randomBytes: seededRandom(byte) },

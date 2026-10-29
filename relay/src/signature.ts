@@ -6,7 +6,7 @@ import {
 
 export type Verifier = (bytes: Uint8Array, signature: Uint8Array) => boolean;
 
-/** Gives what checks Ed25519 signatures made with the seed of a key, or null for bytes that are not the length of a key, any other bytes being taken and simply never matching a signature. */
+/** Gives what checks Ed25519 signatures against a verify key, or null for bytes that are not the length of a key, any other bytes being taken and simply never matching a signature. */
 export function verifierOf(verifyKey: Uint8Array): Verifier | null {
   if (verifyKey.length !== VERIFY_KEY_BYTES) {
     return null;

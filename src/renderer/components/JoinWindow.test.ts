@@ -1,3 +1,5 @@
+import { testShownLink } from '../../core/testing/secrets';
+import { fillMessage } from '../i18n/messages';
 import { describe, expect, it } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
 import { project, workTask } from '../../core/testing/project-builder';
@@ -306,7 +308,7 @@ describe('joining a plan by its link', () => {
       RELAY.nearYou,
       false,
       [
-        'Through relay.example.org · you will be able to edit',
+        'Through relay.example.org · you will be able to edit the plan',
         'Through relay.example.org:8443 · you will be able to view the plan',
         null,
       ],
@@ -323,7 +325,7 @@ describe('joining a plan by its link', () => {
       ok: true,
       value: {
         project: offered.value,
-        shown: { edit: null, view: 'tasklace://relay.example.org:8443/#v1.BBBBBB…' },
+        shown: { edit: null, view: testShownLink('tasklace://relay.example.org:8443/#v1.BBBBBB…') },
         relay: 'relay.example.org:8443',
         bytesSinceSnapshot: 0,
         kept: true,
@@ -382,7 +384,7 @@ describe('joining a plan by its link', () => {
       relayRequests(control),
     ]).toEqual([
       'The relay relay.example.org:8443 did not answer. Check your connection, or ask who sent you the link.',
-      RELAY.ends.NO_ROOM,
+      fillMessage(RELAY.ends.NO_ROOM, { relay: 'relay.example.org:8443' }),
       TEXT.nameNotKept,
       2,
       [

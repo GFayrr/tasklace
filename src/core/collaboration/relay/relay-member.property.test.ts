@@ -175,7 +175,11 @@ function playScenario(editorCount: number, steps: readonly Step[]): void {
           if (!client.connected || outgoing.kind !== 'message') {
             return;
           }
-          const sealed = sealRelayMessage(keys, outgoing.message, crypto);
+          const sealed = sealRelayMessage(
+            keys,
+            { ...outgoing.message, seen: client.lastSeq },
+            crypto,
+          );
           if (sealed.ok) {
             sealed.value.forEach(relay.append);
           }
@@ -190,7 +194,7 @@ function playScenario(editorCount: number, steps: readonly Step[]): void {
     ...Array.from({ length: editorCount }, (_unused, index) => startClient(editKeys, index + 1)),
     startClient(viewKeys, editorCount + 1),
   ];
-  /** Hands the next frame waiting for a member to it, as its main process does. */
+  /** Hands the next frame waiting for a member to it, as its main process does: skipping a sequence it already had and counting a record as had only once it joined its message. */
   const deliver = (client: Client): void => {
     const frame = client.inbox.shift();
     if (frame?.type === 'caughtUp') {
@@ -200,9 +204,15 @@ function playScenario(editorCount: number, steps: readonly Step[]): void {
     if (frame === undefined) {
       return;
     }
-    client.lastSeq = Math.max(client.lastSeq, frame.seq);
+    if (frame.seq <= client.lastSeq) {
+      return;
+    }
     const opened = client.assembler.take(frame.seq, frame.record);
-    if (opened.ok && opened.value !== null) {
+    if (!opened.ok) {
+      return;
+    }
+    client.lastSeq = frame.seq;
+    if (opened.value !== null) {
       client.member.receive({ ...opened.value, settled: client.assembler.settled() });
     }
   };
@@ -227,6 +237,7 @@ function playScenario(editorCount: number, steps: readonly Step[]): void {
         kind: 'update',
         messageId: new Uint8Array(16).fill(7),
         covers: 0,
+        seen: 0,
         bytes: encodeMessage({ kind: 'update', update: forger.encodeState() }),
       },
       { aead: testAead, compression: plainCompression, randomBytes: seededRandom(78) },

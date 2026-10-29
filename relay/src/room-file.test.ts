@@ -25,6 +25,7 @@ function recordOf(byte: number): Uint8Array {
     index: 0,
     count: 1,
     covers: 0,
+    seen: 0,
     signature: new Uint8Array(64),
     chunk: Uint8Array.of(byte),
   });
@@ -73,15 +74,19 @@ describe('the file of a room', () => {
     ).toEqual([1, 1, 1, 1]);
   });
 
-  it('refuses a file without the mark or the version of a room, or too short to hold its key', () => {
+  it('refuses a file without the mark of a room, of the version before the records told what their author had seen or of a newer one, or too short to hold its key', () => {
     const header = encodeRoomHeader(KEY);
     const otherMark = header.slice();
     otherMark[0] = 0;
-    const otherVersion = header.slice();
-    otherVersion[4] = 2;
+    const olderVersion = header.slice();
+    olderVersion[4] = 1;
+    const newerVersion = header.slice();
+    newerVersion[4] = 3;
     expect(
-      [otherMark, otherVersion, header.subarray(0, ROOM_HEADER_BYTES - 1)].map(readRoomFile),
-    ).toEqual([null, null, null]);
+      [otherMark, olderVersion, newerVersion, header.subarray(0, ROOM_HEADER_BYTES - 1)].map(
+        readRoomFile,
+      ),
+    ).toEqual([null, null, null, null]);
   });
 });
 

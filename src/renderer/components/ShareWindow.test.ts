@@ -1,3 +1,4 @@
+import { testShownLink } from '../../core/testing/secrets';
 import { encodeMessage } from '../../core/collaboration/messages';
 import { requireParticipantId } from '../../core/collaboration/participants';
 import { testDigest, testJoinCode } from '../../core/testing/secrets';
@@ -17,8 +18,8 @@ import { button, click, render, single, update } from './testing/render';
 const TEXT = english.collaboration;
 const RELAY = english.relay;
 const SHOWN = {
-  edit: 'tasklace://relay.example.org/#e1.Hq7Lm2…',
-  view: 'tasklace://relay.example.org/#v1.P0dX8w…',
+  edit: testShownLink('tasklace://relay.example.org/#e1.Hq7Lm2…'),
+  view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…'),
 };
 const PLAN = project([workTask('a', { name: 'Survey' })], [], { name: 'Thesis' });
 
@@ -523,7 +524,10 @@ describe('sharing the open plan through a relay', () => {
       button(single(root, '.confirm[aria-labelledby="new-links-title"]'), TEXT.cancel),
     );
     const cancelled = relayRequests(control).length;
-    const fresh = { edit: 'tasklace://relay.example.org/#e1.Zk3Rt9…', view: SHOWN.view };
+    const fresh = {
+      edit: testShownLink('tasklace://relay.example.org/#e1.Zk3Rt9…'),
+      view: SHOWN.view,
+    };
     control.collaboration.relay.newLinksResult = {
       ok: true,
       value: { shown: fresh, relay: 'relay.example.org', kept: true },
@@ -550,6 +554,40 @@ describe('sharing the open plan through a relay', () => {
       [[fresh.edit, fresh.view], [RELAY.newLinksMade]],
       [english.fileErrors.NOT_CONNECTED],
       [['shareThroughRelay', 'wss://relay.example.org'], ['makeNewLinks'], ['makeNewLinks']],
+    ]);
+  });
+
+  it('offers to forget a plan the relay no longer finds in place of new links, telling when it could not', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { root, app, control } = await renderRelaySharing();
+    const listener = control.collaboration.listener;
+    listener?.({ kind: 'relayConnected', member: 1, members: [] });
+    listener?.({ kind: 'relayCaughtUp' });
+    listener?.({ kind: 'relayEnded', reason: 'NO_ROOM' });
+    await settle();
+    update();
+    const dialog = shareWindow(root);
+    const shown = [
+      textsOf(dialog, '.gone .hint'),
+      dialog.querySelectorAll('details.new-links').length,
+    ];
+    control.collaboration.relay.forgetResult = { ok: false, error: { code: 'TASK_FAILED' } };
+    await clickAndSettle(button(dialog, RELAY.forgetPlan));
+    const refused = textsOf(dialog, '.gone [role="alert"]');
+    control.collaboration.relay.forgetResult = { ok: true, value: null };
+    await clickAndSettle(button(dialog, RELAY.forgetPlan));
+    expect([
+      shown,
+      refused,
+      app.collaboration.relay.isActive,
+      relayRequests(control).slice(-2),
+      error.mock.calls,
+    ]).toEqual([
+      [[RELAY.notOnRelay], 0],
+      [RELAY.notForgotten],
+      false,
+      [['forgetSharedPlan'], ['forgetSharedPlan']],
+      [['The shared plan could not be forgotten:', { code: 'TASK_FAILED' }]],
     ]);
   });
 

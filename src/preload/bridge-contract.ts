@@ -1,5 +1,7 @@
 import type { Endpoint, ParticipantId } from '../core/collaboration/participants';
 import type { OpenedPresence } from '../core/collaboration/relay/relay-envelope';
+import type { ShownRelayLink } from '../core/collaboration/relay/relay-link';
+import { RELAY_REFUSALS } from '../core/collaboration/relay/relay-wire';
 import type { RelayDelivery, RelayOutgoing } from '../core/collaboration/relay/relay-member';
 import type { JoinCode } from '../core/collaboration/secure/join-code';
 import type { TokenDigest } from '../core/collaboration/secure/token-digest';
@@ -50,6 +52,7 @@ export const IPC_CHANNELS = {
   joinByLink: 'relay:join',
   reopenSharedPlan: 'relay:reopen',
   makeNewLinks: 'relay:new-links',
+  forgetSharedPlan: 'relay:forget',
   copyRelayLink: 'relay:copy-link',
   openGuide: 'relay:open-guide',
   relaySend: 'relay:send',
@@ -78,6 +81,7 @@ export type FileFailureCode =
   | 'INVALID_ADDRESS'
   | 'NOT_SECURE'
   | 'INVALID_LINK'
+  | 'LINK_UNREADABLE'
   | 'NOT_CONNECTED'
   | 'TASK_FAILED';
 
@@ -85,21 +89,7 @@ export const ISSUE_FAILURE_CODES = ['INVALID_PROJECT', 'INVALID_IMPORT', 'INVALI
 
 export type IssueFailureCode = (typeof ISSUE_FAILURE_CODES)[number];
 
-export const RELAY_ENDS = [
-  'UNSUPPORTED_VERSION',
-  'MALFORMED',
-  'NO_ROOM',
-  'ROOM_EXISTS',
-  'BAD_SIGNATURE',
-  'TOO_LARGE',
-  'ROOM_FULL',
-  'RELAY_FULL',
-  'TOO_MANY',
-  'TOO_FAST',
-  'CLOSED',
-  'UNREACHABLE',
-  'UNTRUSTED',
-] as const;
+export const RELAY_ENDS = [...RELAY_REFUSALS, 'CLOSED', 'UNREACHABLE', 'UNTRUSTED'] as const;
 
 export type RelayEndReason = (typeof RELAY_ENDS)[number];
 
@@ -153,8 +143,8 @@ export interface Sharing {
 }
 
 export interface ShownRelayLinks {
-  readonly edit: string | null;
-  readonly view: string;
+  readonly edit: ShownRelayLink | null;
+  readonly view: ShownRelayLink;
 }
 
 export type RelayLinkKind = 'edit' | 'view';
@@ -332,6 +322,7 @@ export interface TasklaceBridge {
     documentId: DocumentId,
   ) => Promise<BridgeResult<RelayReopened | null>>;
   readonly makeNewLinks: () => Promise<BridgeResult<RelayLinks>>;
+  readonly forgetSharedPlan: () => Promise<BridgeResult<null>>;
   readonly copyRelayLink: (kind: RelayLinkKind) => Promise<BridgeResult<null>>;
   readonly openGuide: () => Promise<BridgeResult<null>>;
   readonly sendToRelay: (outgoing: RelayOutgoing) => void;
@@ -375,6 +366,7 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.joinByLink]: BridgeResult<RelayJoined>;
   readonly [IPC_CHANNELS.reopenSharedPlan]: BridgeResult<RelayReopened | null>;
   readonly [IPC_CHANNELS.makeNewLinks]: BridgeResult<RelayLinks>;
+  readonly [IPC_CHANNELS.forgetSharedPlan]: BridgeResult<null>;
   readonly [IPC_CHANNELS.copyRelayLink]: BridgeResult<null>;
   readonly [IPC_CHANNELS.openGuide]: BridgeResult<null>;
 }
@@ -426,6 +418,7 @@ export interface ChannelArguments {
   readonly [IPC_CHANNELS.joinByLink]: readonly [link: string];
   readonly [IPC_CHANNELS.reopenSharedPlan]: readonly [documentId: DocumentId];
   readonly [IPC_CHANNELS.makeNewLinks]: readonly [];
+  readonly [IPC_CHANNELS.forgetSharedPlan]: readonly [];
   readonly [IPC_CHANNELS.copyRelayLink]: readonly [kind: RelayLinkKind];
   readonly [IPC_CHANNELS.openGuide]: readonly [];
 }

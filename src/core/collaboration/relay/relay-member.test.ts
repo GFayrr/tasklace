@@ -223,12 +223,12 @@ describe('a member of a plan shared through a relay', () => {
     ]);
   });
 
-  it('refuses a state of the relay that cannot be merged, sharing nothing for it', () => {
+  it('refuses a state of the relay that cannot be merged, sharing nothing for it and keeping the plan of this computer apart', () => {
     const editor = harness(true, 1);
     editor.member.catchUpWith(Uint8Array.of(1, 2, 3), 0);
     editor.member.caughtUp();
     expect([editor.events, editor.sent]).toEqual([
-      [{ kind: 'refused', reason: 'malformedUpdate' }],
+      [{ kind: 'refused', reason: 'malformedUpdate' }, { kind: 'unsharedChanges' }],
       [],
     ]);
   });
@@ -246,12 +246,31 @@ describe('a member of a plan shared through a relay', () => {
     ]);
   });
 
+  it('sends no other snapshot while its own is on its way, and may again once it came back or the connection was lost', () => {
+    const editor = harness(true, 1);
+    editor.member.catchUpWith(editor.session.encodeState(), SNAPSHOT_AFTER_BYTES - 1);
+    editor.member.caughtUp();
+    rename(editor.session, 'b', 'Mine');
+    editor.member.receive(delivered(editor.sent[0], 2, SNAPSHOT_AFTER_BYTES));
+    rename(editor.session, 'b', 'Again');
+    editor.member.receive(delivered(editor.sent[2], 3, SNAPSHOT_AFTER_BYTES));
+    const whileOnItsWay = editor.sent.length;
+    editor.member.disconnected();
+    editor.member.caughtUp();
+    rename(editor.session, 'b', 'Once more');
+    editor.member.receive(delivered(editor.sent.at(-1), 4, SNAPSHOT_AFTER_BYTES));
+    expect([whileOnItsWay, summary(editor.sent).map((entry) => entry.split(':')[0])]).toEqual([
+      3,
+      ['update', 'snapshot', 'update', 'update', 'snapshot'],
+    ]);
+  });
+
   it('refuses a message that is not one, one of another kind, and a change that cannot be merged', () => {
     const editor = harness(true, 1);
     const base = {
       kind: 'update' as const,
       messageId: new Uint8Array(16),
-      covers: 0,
+      covers: 0 as const,
       compressedBytes: 1,
       settled: 1,
     };

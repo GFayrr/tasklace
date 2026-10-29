@@ -2,7 +2,13 @@ import { readdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeRoomEntry, ENTRY_HEADER_BYTES, ROOM_HEADER_BYTES } from './room-file.ts';
-import { openRoomStore, type Room, type RoomLimits, type RoomStore } from './rooms.ts';
+import {
+  openRoomStore,
+  type AppendRefusal,
+  type Room,
+  type RoomLimits,
+  type RoomStore,
+} from './rooms.ts';
 import {
   OTHER_KEYS,
   ROOM_KEYS,
@@ -63,17 +69,39 @@ async function createdRoom(store: RoomStore): Promise<Room> {
   return room;
 }
 
-/** Appends records, failing the test when one is refused, and gives the sequences they were kept under. */
+/** Sends the chunks of one message to a room, giving the refusal of the first chunk refused, what a message still waiting for chunks gives, or the sequences the room kept it under once written. */
+async function appendMessage(
+  store: RoomStore,
+  room: Room,
+  records: readonly Uint8Array[],
+): Promise<AppendRefusal | number[] | null> {
+  const staging = store.stage(room);
+  for (const record of records) {
+    const taken = staging.take(record);
+    if (taken === null) {
+      continue;
+    }
+    return typeof taken === 'string' ? taken : ((await taken)?.map((entry) => entry.seq) ?? null);
+  }
+  return null;
+}
+
+/** Appends messages of one record each, failing the test when one is refused, and gives the sequences they were kept under. */
 async function appendAll(store: RoomStore, room: Room, records: readonly Uint8Array[]) {
   const sequences: number[] = [];
   for (const record of records) {
-    const written = store.append(room, record);
-    if (typeof written === 'string') {
-      throw new Error(`The record was refused: ${written}`);
-    }
-    sequences.push((await written)?.seq ?? -1);
+    sequences.push(...(await keptMessage(store, room, [record])));
   }
   return sequences;
+}
+
+/** Appends one message, failing the test when it is refused or not written, and gives the sequences it was kept under. */
+async function keptMessage(store: RoomStore, room: Room, records: readonly Uint8Array[]) {
+  const kept = await appendMessage(store, room, records);
+  if (!Array.isArray(kept)) {
+    throw new Error(`The message was not kept: ${String(kept)}`);
+  }
+  return kept;
 }
 
 /** Gives the sequences a room holds. */
@@ -149,23 +177,45 @@ describe('the rooms of a relay', () => {
     expect(await store.open(OTHER_KEYS.roomId)).toBe(null);
   });
 
-  it('refuses a record not signed with the key of the room, bytes that are not a record, and a chunk already there or telling another story of its message', async () => {
+  it('refuses a record not signed with the key of the room, bytes that are not a record, a message already there, a message that does not start with its first chunk and a chunk of another message in the middle of one', async () => {
     const store = await storeWith();
     const room = await createdRoom(store);
     const [first, second] = sealedRecords('update', 3, 100);
-    if (first === undefined || second === undefined) {
+    const [other] = sealedRecords('update', 6, 100);
+    if (first === undefined || second === undefined || other === undefined) {
       throw new Error('Two records were expected.');
     }
-    await appendAll(store, room, [first]);
+    const kept = await keptMessage(store, room, [sealedRecord('update', 2)]);
+    const interrupted = store.stage(room);
     const refusals = [
-      store.append(room, sealedRecords('update', 4, 4, 0, OTHER_KEYS)[0] ?? new Uint8Array()),
-      store.append(room, Uint8Array.of(1, 2, 3)),
-      store.append(room, first),
-      store.append(room, sealedRecord('update', 3)),
+      store.stage(room).take(sealedRecords('update', 4, 4, 0, OTHER_KEYS)[0] ?? new Uint8Array()),
+      store.stage(room).take(Uint8Array.of(1, 2, 3)),
+      store.stage(room).take(sealedRecord('update', 2)),
+      store.stage(room).take(second),
+      [interrupted.take(first), interrupted.take(other)],
     ];
-    expect([refusals, typeof store.append(room, second)]).toEqual([
-      ['BAD_SIGNATURE', 'MALFORMED', 'MALFORMED', 'MALFORMED'],
-      'object',
+    expect([kept, refusals, await appendMessage(store, room, [first, second])]).toEqual([
+      [1],
+      ['BAD_SIGNATURE', 'MALFORMED', 'MALFORMED', 'MALFORMED', [null, 'MALFORMED']],
+      [2, 3],
+    ]);
+  });
+
+  it('keeps nothing of a message whose last chunks never came, giving back the room it held', async () => {
+    const [first] = sealedRecords('update', 3, 100);
+    const size = ENTRY_HEADER_BYTES + (first?.length ?? 0);
+    const store = await storeWith({ ...ROOMY, maxRoomBytes: ROOM_HEADER_BYTES + 2 * size });
+    const room = await createdRoom(store);
+    const staging = store.stage(room);
+    const waiting = staging.take(first ?? new Uint8Array());
+    const whileWaiting = store.stage(room).take(first ?? new Uint8Array());
+    staging.cancel();
+    const afterwards = await appendMessage(store, room, sealedRecords('update', 3, 100));
+    expect([waiting, whileWaiting, afterwards, sequencesOf(room)]).toEqual([
+      null,
+      'TOO_LARGE',
+      [1, 2],
+      [1, 2],
     ]);
   });
 
@@ -174,22 +224,38 @@ describe('the rooms of a relay', () => {
     const room = await createdRoom(store);
     await appendAll(store, room, [sealedRecord('update', 1)]);
     expect([
-      store.append(room, sealedRecord('snapshot', 2, 4, 2)),
-      typeof store.append(room, sealedRecord('snapshot', 3, 4, 1)),
-    ]).toEqual(['MALFORMED', 'object']);
+      store.stage(room).take(sealedRecord('snapshot', 2, 4, 2)),
+      await appendMessage(store, room, [sealedRecord('snapshot', 3, 4, 1)]),
+    ]).toEqual(['MALFORMED', [2]]);
   });
 
-  it('refuses a change beyond the bytes of a room, while a snapshot may go a whole room beyond to replace what it covers', async () => {
+  it('refuses a record whose author had seen less than what a snapshot freed, as a replay of a record the room dropped', async () => {
+    const store = await storeWith();
+    const room = await createdRoom(store);
+    const old = sealedRecord('update', 1);
+    await appendAll(store, room, [old, sealedRecord('update', 2)]);
+    await keptMessage(store, room, [sealedRecord('snapshot', 3, 4, 2)]);
+    await store.settle();
+    const fresh = sealedRecords('update', 4, 4, 0, ROOM_KEYS, 3);
+    expect([
+      store.stage(room).take(old),
+      await appendMessage(store, room, sealedRecords('update', 5, 4, 0, ROOM_KEYS, 1)),
+      await appendMessage(store, room, fresh),
+    ]).toEqual(['STALE', 'STALE', [4]]);
+  });
+
+  it('refuses a change beyond the bytes of a room, from its first chunk for a message of several, while a snapshot may go a whole room beyond to replace what it covers', async () => {
     const update = sealedRecord('update', 1);
     const size = ENTRY_HEADER_BYTES + update.length;
     const store = await storeWith({ ...ROOMY, maxRoomBytes: ROOM_HEADER_BYTES + size });
     const room = await createdRoom(store);
     await appendAll(store, room, [update]);
-    const refused = store.append(room, sealedRecord('update', 2));
-    const snapshot = sealedRecord('snapshot', 3, 4, 1);
+    const refused = store.stage(room).take(sealedRecord('update', 2));
+    const refusedFirst = store.stage(room).take(sealedRecords('update', 3, 100)[0] ?? update);
+    const snapshot = sealedRecord('snapshot', 4, 4, 1);
     await appendAll(store, room, [snapshot]);
     await store.settle();
-    expect([refused, sequencesOf(room)]).toEqual(['TOO_LARGE', [2]]);
+    expect([refused, refusedFirst, sequencesOf(room)]).toEqual(['TOO_LARGE', 'TOO_LARGE', [2]]);
   });
 
   it('refuses a record beyond the bytes of the whole relay, a snapshot having the same room more', async () => {
@@ -202,41 +268,33 @@ describe('the rooms of a relay', () => {
     });
     const room = await createdRoom(store);
     await appendAll(store, room, [update]);
-    const refused = store.append(room, sealedRecord('update', 2));
+    const refused = store.stage(room).take(sealedRecord('update', 2));
     const kept = await appendAll(store, room, [sealedRecord('snapshot', 3, 4, 1)]);
     expect([refused, kept]).toEqual(['RELAY_FULL', [2]]);
   });
 
-  it('drops, once a whole snapshot is in, every message whose chunks all came at or before what it covers, kept or not, and frees their bytes', async () => {
+  it('drops, once a whole snapshot is in, every message whose chunks all came at or before what it covers, and frees their bytes', async () => {
     const store = await storeWith();
     const room = await createdRoom(store);
-    const [unfinished] = sealedRecords('update', 3, 100);
+    const several = sealedRecords('update', 3, 100);
     const late = sealedRecord('update', 4);
     await appendAll(store, room, [sealedRecord('update', 1), sealedRecord('update', 2)]);
-    await appendAll(store, room, [unfinished ?? new Uint8Array(), late]);
-    const snapshot = sealedRecords('snapshot', 5, 100, 3);
-    await appendAll(store, room, snapshot);
+    await keptMessage(store, room, several);
+    await appendAll(store, room, [late]);
+    const snapshot = sealedRecords('snapshot', 5, 100, 4);
+    await keptMessage(store, room, snapshot);
     await store.release(room);
     const onDisk = await (await storeWith()).open(ROOM_KEYS.roomId);
     const fileBytes = (await stat(path.join(folder, `${room.name}.room`))).size;
     const expectedBytes =
       ROOM_HEADER_BYTES +
       [late, ...snapshot].reduce((total, record) => total + ENTRY_HEADER_BYTES + record.length, 0);
-    expect([sequencesOf(room), sequencesOf(onDisk), fileBytes]).toEqual([
-      [4, 5, 6],
-      [4, 5, 6],
+    expect([several.length, sequencesOf(room), sequencesOf(onDisk), fileBytes]).toEqual([
+      2,
+      [5, 6, 7],
+      [5, 6, 7],
       expectedBytes,
     ]);
-  });
-
-  it('drops nothing until every chunk of the snapshot is in', async () => {
-    const store = await storeWith();
-    const room = await createdRoom(store);
-    await appendAll(store, room, [sealedRecord('update', 1)]);
-    const [firstChunk] = sealedRecords('snapshot', 5, 100, 1);
-    await appendAll(store, room, [firstChunk ?? new Uint8Array()]);
-    await store.release(room);
-    expect(sequencesOf(room)).toEqual([1, 2]);
   });
 
   it('keeps a room in memory while one member still holds it, and lets a new store read what was written', async () => {
@@ -244,12 +302,12 @@ describe('the rooms of a relay', () => {
     const room = await createdRoom(store);
     const again = await store.open(ROOM_KEYS.roomId);
     await store.release(room);
-    const stillOpen = typeof store.append(room, sealedRecord('update', 1));
+    const stillOpen = typeof store.stage(room).take(sealedRecord('update', 1));
     if (again !== null) {
       await store.release(again);
     }
-    const afterwards = store.append(room, sealedRecord('update', 2));
-    expect([again === room, stillOpen, afterwards]).toEqual([true, 'object', 'RELAY_FULL']);
+    const afterwards = store.stage(room).take(sealedRecord('update', 2));
+    expect([again === room, stillOpen, afterwards]).toEqual([true, 'object', 'RELAY_FAILED']);
   });
 
   it('loads a room once however many members open it at the same time', async () => {
@@ -302,15 +360,18 @@ describe('the rooms of a relay', () => {
     expect(await (await storeWith()).expire()).toBe(1);
   });
 
-  it('cuts a record a crash left half written, sets aside a file that is not a room, removes a rewrite left halfway and ignores other files', async () => {
+  it('cuts what a crash left of a message half written after copying the file aside, sets aside a file that is not a room, removes a rewrite left halfway and ignores other files', async () => {
     const store = await storeWith();
     const room = await createdRoom(store);
     await appendAll(store, room, [sealedRecord('update', 1)]);
     await store.release(room);
     const file = path.join(folder, `${room.name}.room`);
     const whole = await readFile(file);
-    const cut = encodeRoomEntry({ seq: 2, record: sealedRecord('update', 2) });
-    await writeFile(file, Buffer.concat([whole, cut.subarray(0, 10)]));
+    const [firstChunk, secondChunk] = sealedRecords('update', 2, 100);
+    const whole2 = encodeRoomEntry({ seq: 2, record: firstChunk ?? new Uint8Array() });
+    const cut = encodeRoomEntry({ seq: 3, record: secondChunk ?? new Uint8Array() });
+    const dropped = whole2.length + 10;
+    await writeFile(file, Buffer.concat([whole, whole2, cut.subarray(0, 10)]));
     const otherName = Buffer.from(OTHER_KEYS.roomId).toString('hex');
     await writeFile(path.join(folder, `${otherName}.room`), 'not a room');
     await writeFile(path.join(folder, `${room.name}.room.tmp`), 'halfway');
@@ -338,9 +399,14 @@ describe('the rooms of a relay', () => {
         `${otherName}.room`,
         `${otherName}.room.damaged-${String(time)}`,
         `${room.name}.room`,
+        `${room.name}.room.damaged-${String(time)}`,
         'notes.txt',
       ],
-      [[`The room ${room.name} ended with a record cut short, which was dropped.`]],
+      [
+        [
+          `The room file ${file} ended with ${String(dropped)} bytes of a message cut short, which were dropped; the whole file was copied to ${file}.damaged-${String(time)}.`,
+        ],
+      ],
       [[`${path.join(folder, otherName)}.room is not the file of a room and was set aside.`]],
     ]);
   });
@@ -348,7 +414,7 @@ describe('the rooms of a relay', () => {
   it('waits for every write in progress when asked to settle', async () => {
     const store = await storeWith();
     const room = await createdRoom(store);
-    const written = store.append(room, sealedRecord('update', 1));
+    const written = store.stage(room).take(sealedRecord('update', 1));
     await store.settle();
     expect([typeof written, sequencesOf(room), failed]).toEqual(['object', [1], []]);
   });

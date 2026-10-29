@@ -1,3 +1,4 @@
+import { testShownLink } from '../../core/testing/secrets';
 import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { describe, expect, it } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
@@ -272,8 +273,8 @@ async function renderRelay(canEdit: boolean) {
   const app = new AppState(fake.context);
   const root = render(App, { app });
   const shown = {
-    edit: canEdit ? 'tasklace://relay.example.org/#e1.Hq7Lm2…' : null,
-    view: 'tasklace://relay.example.org/#v1.P0dX8w…',
+    edit: canEdit ? testShownLink('tasklace://relay.example.org/#e1.Hq7Lm2…') : null,
+    view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…'),
   };
   const offered = openedProjectOf(PLAN, { fileName: '' });
   if (!offered.ok) {

@@ -76,8 +76,7 @@ export function joinThroughRelay(options: RelayTeamOptions): RelayTeamMember {
   });
   connection = startRelaySession({
     address: { host: LOOPBACK, port: options.port, path: '/' },
-    keys,
-    creates,
+    ...(creates && keys.kind === 'edit' ? { creates: true, keys } : { creates: false, keys }),
     keepTrying: false,
     crypto: RELAY_TEST_CRYPTO,
     startTimer: realTimer,
