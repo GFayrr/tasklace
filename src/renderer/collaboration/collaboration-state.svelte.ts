@@ -33,9 +33,12 @@ import type {
   FileFailure,
   GuestEndReason,
   NearbyPlan,
+  OpenedProject,
+  RelayEndReason,
   Sharing,
   TasklaceBridge,
 } from '../../preload/bridge-contract';
+import { isRelayEvent, RelayState, type RelayBridge } from './relay-state.svelte';
 
 export type CollaborationBridge = Pick<
   TasklaceBridge,
@@ -53,7 +56,10 @@ export type CollaborationBridge = Pick<
   | 'keepOwnChanges'
   | 'sendToCollaboration'
   | 'onCollaborationEvent'
+  | RelayBridgeMethod
 >;
+
+type RelayBridgeMethod = keyof RelayBridge;
 
 export interface HostChange {
   readonly left: string | null;
@@ -66,11 +72,17 @@ export interface CollaborationContext {
   readonly now: () => Date;
   readonly session: () => SharedSession | null;
   readonly openShared: (state: Uint8Array) => Promise<boolean>;
+  readonly openJoined: (opened: OpenedProject) => Promise<boolean>;
   readonly repaired: (repairs: readonly SharedRepair[]) => void;
   readonly hostChanged: (change: HostChange) => void;
   readonly ownChangesKept: (kept: Result<KeptOwnChanges, FileFailure>) => void;
   readonly selectedTaskId: () => TaskId | null;
+  readonly relayEnded: (reason: RelayEndReason, relay: string) => void;
+  readonly relayLinkNotKept: () => void;
+  readonly relayChangeRefused: () => void;
+  readonly relayNotReopened: (failure: FileFailure) => void;
   readonly shareLater?: (share: () => void) => void;
+  readonly randomBytes?: (count: number) => Uint8Array;
 }
 
 export type CollaborationMode =
@@ -88,9 +100,22 @@ export type GuestConnection = 'connected' | 'reconnecting' | 'offline' | 'lost';
 
 export type CollaborationFailure = FileFailure | { readonly code: 'NO_NAME' | 'NO_PROJECT' };
 
+export interface PresentPerson {
+  readonly id: string;
+  readonly name: string;
+  readonly color: number;
+}
+
 export const EMPTY_STATE_VECTOR = Uint8Array.of(0);
 
-const NOBODY_PLACED: ReadonlyMap<TaskId, readonly Participant[]> = new Map();
+const NOBODY_PLACED: ReadonlyMap<TaskId, readonly PresentPerson[]> = new Map();
+const MY_RELAY_ID = 'relay-me';
+const MY_RELAY_COLOR = 0;
+
+/** Draws random bytes from the generator of the page. */
+function pageRandomBytes(count: number): Uint8Array {
+  return crypto.getRandomValues(new Uint8Array(count));
+}
 
 /** Shares the list of people a moment later, once for all the presences that arrive meanwhile. */
 function shareAfterAMoment(share: () => void): void {
@@ -156,12 +181,24 @@ export class CollaborationState {
   #settings = $state.raw<CollaborationSettings | null>(null);
   #nearby = $state.raw<readonly NearbyPlan[]>([]);
   #lastEnd = $state.raw<GuestEndReason | null>(null);
-  readonly #presence = $derived.by(() =>
-    this.#phase.kind === 'guest' && this.#phase.connection !== 'connected'
+  readonly #presence = $derived.by(() => {
+    if (this.relay.isActive) {
+      return presenceOf(this.relay.others, null);
+    }
+    return this.#phase.kind === 'guest' && this.#phase.connection !== 'connected'
       ? NOBODY_PLACED
-      : presenceOf(this.#participants, this.me),
+      : presenceOf(this.#participants, this.me);
+  });
+  readonly #shownPeople = $derived.by((): readonly PresentPerson[] =>
+    this.relay.isActive
+      ? [
+          { id: MY_RELAY_ID, name: this.#settings?.name ?? '', color: MY_RELAY_COLOR },
+          ...this.relay.others,
+        ]
+      : this.#participants,
   );
   readonly #context: CollaborationContext;
+  readonly relay: RelayState;
   #starting = false;
   #generation = 0;
   #presenceQueued = false;
@@ -169,6 +206,20 @@ export class CollaborationState {
   /** Starts following the events of the main process about the shared plan. */
   constructor(context: CollaborationContext) {
     this.#context = context;
+    this.relay = new RelayState({
+      bridge: context.bridge,
+      session: context.session,
+      openJoined: context.openJoined,
+      repaired: context.repaired,
+      ownChangesKept: context.ownChangesKept,
+      name: () => this.#settings?.name ?? null,
+      selectedTaskId: context.selectedTaskId,
+      randomBytes: context.randomBytes ?? pageRandomBytes,
+      ended: context.relayEnded,
+      linkNotKept: context.relayLinkNotKept,
+      changeRefused: context.relayChangeRefused,
+      notReopened: context.relayNotReopened,
+    });
     context.bridge.onCollaborationEvent((event) => {
       this.#receive(event);
     });
@@ -218,6 +269,9 @@ export class CollaborationState {
 
   /** Tells whether this page is joining, or connected to, a plan in which it may not edit, so that its changes are refused while it is there, changes made away from the host being kept apart once back. */
   get isReadOnly(): boolean {
+    if (this.relay.isReadOnly) {
+      return true;
+    }
     const connected = this.#phase.kind === 'guest' && this.#phase.connection === 'connected';
     if (!connected && this.#phase.kind !== 'joining') {
       return false;
@@ -225,9 +279,14 @@ export class CollaborationState {
     return !this.canEdit;
   }
 
-  /** Returns the other people in the shared plan by the task each one selected, in the order of the list, or nobody while the connection to the host is lost, since where they are is then unknown. */
-  get presence(): ReadonlyMap<TaskId, readonly Participant[]> {
+  /** Returns the other people in the shared plan by the task each one selected, in the order of the list, or nobody while the connection to the host or the relay is lost, since where they are is then unknown. */
+  get presence(): ReadonlyMap<TaskId, readonly PresentPerson[]> {
     return this.#presence;
+  }
+
+  /** Returns the people shown in the chip and the status bar: everyone in a plan shared on this network, or this person then the others in a plan shared through a relay. */
+  get shownPeople(): readonly PresentPerson[] {
+    return this.#shownPeople;
   }
 
   /** Returns the name of the host of the plan this page joined, or null. */
@@ -267,6 +326,7 @@ export class CollaborationState {
     const saved = await this.saveSettings({ name });
     if (saved.ok) {
       this.#queuePresence();
+      this.relay.selectionChanged();
     }
     return saved;
   }
@@ -380,12 +440,13 @@ export class CollaborationState {
     return joined;
   }
 
-  /** Stops sharing or leaves the plan joined, keeping the open project as it is. */
+  /** Stops sharing or leaves the plan joined, on the network or through a relay, keeping the open project as it is. */
   async stop(): Promise<void> {
-    if (this.#phase.kind === 'idle' && !this.#starting) {
+    if (this.#phase.kind === 'idle' && !this.#starting && !this.relay.isActive) {
       return;
     }
     this.#forget();
+    this.relay.forget();
     const stopped = await this.#context.bridge.stopCollaboration();
     if (!stopped.ok) {
       console.error('The shared plan could not be stopped:', stopped.error);
@@ -423,11 +484,15 @@ export class CollaborationState {
     this.#queuePresence();
   }
 
-  /** Follows a session the page just opened: the plan it joined becomes the shared plan of its guest, any other project ends what the page shared or joined. */
+  /** Follows a session the page just opened: the plan it joined becomes its shared plan, any other project ends what the page shared or joined and comes back to its relay when this computer kept its link. */
   attached(session: SharedSession): void {
+    if (this.relay.isOpening) {
+      this.relay.attached(session);
+      return;
+    }
     const phase = this.#phase;
     if ((phase.kind !== 'joining' && phase.kind !== 'guest') || !phase.flow.isOpening) {
-      void this.stop();
+      void this.#reopen(session);
       return;
     }
     const { flow } = phase;
@@ -448,6 +513,14 @@ export class CollaborationState {
     }
     guest.connected();
     this.#queuePresence();
+  }
+
+  /** Ends what the page shared or joined, then comes back to the relay of the plan just opened when this computer kept its link. */
+  async #reopen(session: SharedSession): Promise<void> {
+    await this.stop();
+    if (this.#context.session() === session) {
+      await this.relay.reopen(session);
+    }
   }
 
   /** Returns what the page hosts, or null when it hosts nothing. */
@@ -484,8 +557,12 @@ export class CollaborationState {
     this.#generation += 1;
   }
 
-  /** Handles an event of the main process about what the page shares or joined. */
+  /** Handles an event of the main process about what the page shares or joined, a plan shared through a relay taking its own events. */
   #receive(event: CollaborationEvent): void {
+    if (this.relay.isActive && isRelayEvent(event)) {
+      this.relay.receive(event);
+      return;
+    }
     switch (event.kind) {
       case 'peerJoined':
         this.#peerJoined(event.peer, event.participantId, event.name, {
@@ -527,6 +604,18 @@ export class CollaborationState {
         return;
       case 'ended':
         this.#ended(event.reason);
+        return;
+      case 'relayConnected':
+      case 'relayState':
+      case 'relayDelivery':
+      case 'relayCaughtUp':
+      case 'relayPresence':
+      case 'relayJoined':
+      case 'relayLeft':
+      case 'relayEnded':
+        console.warn(
+          `An event of a plan shared through a relay came while none is: ${event.kind}.`,
+        );
     }
   }
 
@@ -900,6 +989,7 @@ export class CollaborationState {
       const hosting = this.#hosting();
       hosting?.host.setPresence(name, selected);
       this.#guest()?.setPresence(name, selected);
+      this.relay.selectionChanged();
       if (hosting !== null) {
         this.#participants = hosting.host.roster().participants;
       }
@@ -907,11 +997,11 @@ export class CollaborationState {
   }
 }
 
-/** Groups the people other than this page by the task each one selected, in the order of the list. */
-function presenceOf(
-  participants: readonly Participant[],
-  me: ParticipantId | null,
-): ReadonlyMap<TaskId, readonly Participant[]> {
+/** Groups the people other than this page by the task each one selected, in the order of the list, whether they share on this network or through a relay. */
+function presenceOf<Person extends PresentPerson & { readonly selectedTaskId: TaskId | null }>(
+  participants: readonly Person[],
+  me: string | null,
+): ReadonlyMap<TaskId, readonly Person[]> {
   const placed = participants.flatMap((participant) =>
     participant.id === me || participant.selectedTaskId === null
       ? []

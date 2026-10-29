@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { recentPlaceText } from '../collaboration/collaboration-text';
   import type { AppState } from '../app/app-state.svelte';
 
   let { app }: { app: AppState } = $props();
@@ -52,7 +53,7 @@
         {#each app.recentProjects as recent, index (index)}
           <button type="button" class="recent-project" onclick={() => app.openRecent(index)}>
             <span class="recent-name">{recent.name}</span>
-            <span class="recent-folder">{recent.folder}</span>
+            <span class="recent-folder">{recentPlaceText(app.messages, recent)}</span>
           </button>
         {/each}
       </section>

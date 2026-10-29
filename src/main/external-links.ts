@@ -1,6 +1,9 @@
 import { MAX_EXTERNAL_URL_LENGTH } from '../core/limits';
 
-const ALLOWED_PREFIXES: readonly string[] = ['https://github.com/GFayrr/tasklace'];
+const REPOSITORY_URL = 'https://github.com/GFayrr/tasklace';
+const ALLOWED_PREFIXES: readonly string[] = [REPOSITORY_URL];
+
+export const WORKING_REMOTELY_GUIDE_URL = `${REPOSITORY_URL}/blob/main/docs/working-remotely.md`;
 
 /** Tells whether an untrusted value is an https address the application may open in the browser, from an explicit list of allowed places. */
 export function isAllowedExternalUrl(value: unknown): value is string {

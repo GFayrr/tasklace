@@ -88,3 +88,39 @@ jobs:
       - name: Report the millisecond targets (indicative)
         run: npm run bench -- --silent=false
         continue-on-error: true
+
+  relay-image:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check that no package of the relay has a known flaw
+        working-directory: relay
+        run: npm audit --omit=dev --audit-level=low
+      - name: Build the image of the relay
+        run: docker build --file relay/Dockerfile --tag tasklace-relay:ci .
+      - name: Run the relay with the restrictions of the compose file
+        run: >
+          docker run --detach --name relay --read-only --cap-drop ALL
+          --security-opt no-new-privileges:true --publish 127.0.0.1:8080:8080
+          tasklace-relay:ci
+      - name: Wait until the relay is healthy
+        run: |
+          for attempt in $(seq 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' relay)
+            if [ "$status" = healthy ]; then exit 0; fi
+            sleep 2
+          done
+          docker logs relay
+          exit 1
+      - name: Check that the relay answers 426 to a web page, runs without rights and has no npm
+        run: |
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8080/)" = 426
+          test "$(docker exec relay id -u)" != 0
+          if docker exec relay sh -c 'command -v npm || command -v npx || command -v yarn'; then exit 1; fi
+          test -z "$(docker exec relay find /app -name '*.test.ts')"
+      - name: Check the compose file
+        run: RELAY_DOMAIN=relay.example.org docker compose --file relay/docker-compose.yml config --quiet
+      - name: Show what the relay wrote when a check failed
+        if: failure()
+        run: docker logs relay

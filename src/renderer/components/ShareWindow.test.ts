@@ -1,14 +1,26 @@
+import { testShownLink } from '../../core/testing/secrets';
+import { encodeMessage } from '../../core/collaboration/messages';
 import { requireParticipantId } from '../../core/collaboration/participants';
 import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { project, workTask } from '../../core/testing/project-builder';
 import type { CollaborationSettings } from '../../preload/bridge-contract';
-import { openedAppOf, settle } from '../app/testing/fake-app-context';
+import {
+  openedAppOf,
+  openedProjectOf,
+  relayRequests,
+  settle,
+} from '../app/testing/fake-app-context';
 import english from '../locales/en.json';
 import App from './App.svelte';
 import { button, click, render, single, update } from './testing/render';
 
 const TEXT = english.collaboration;
+const RELAY = english.relay;
+const SHOWN = {
+  edit: testShownLink('tasklace://relay.example.org/#e1.Hq7Lm2…'),
+  view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…'),
+};
 const PLAN = project([workTask('a', { name: 'Survey' })], [], { name: 'Thesis' });
 
 afterEach(() => {
@@ -20,7 +32,7 @@ async function renderApp(settings: Partial<CollaborationSettings> = {}) {
   const opened = await openedAppOf(PLAN);
   opened.control.collaboration.settingsResult = {
     ok: true,
-    value: { name: null, port: 47_313, firewallNoticeSeen: false, ...settings },
+    value: { name: null, port: 47_313, firewallNoticeSeen: false, relayAddress: null, ...settings },
   };
   const root = render(App, { app: opened.app });
   return { ...opened, root };
@@ -62,10 +74,11 @@ function textsOf(root: ParentNode, selector: string): string[] {
   );
 }
 
-/** Renders the application and shares the plan at once, from a computer that gave its name and saw the word about the network. */
+/** Renders the application and shares the plan on this network, from a computer that gave its name and saw the word about the network. */
 async function renderSharing(settings: Partial<CollaborationSettings> = {}) {
   const rendered = await renderApp({ name: 'Camille', firewallNoticeSeen: true, ...settings });
   await clickAndSettle(button(rendered.root, TEXT.share));
+  await clickAndSettle(button(shareWindow(rendered.root), TEXT.startSharing));
   return rendered;
 }
 
@@ -95,8 +108,14 @@ describe('sharing the open plan', () => {
     );
     expect(control.collaboration.requests).toEqual([
       ['settings'],
-      ['saveSettings', { name: 'Camille', port: 47_313, firewallNoticeSeen: false }],
-      ['saveSettings', { name: 'Camille', port: 47_313, firewallNoticeSeen: true }],
+      [
+        'saveSettings',
+        { name: 'Camille', port: 47_313, firewallNoticeSeen: false, relayAddress: null },
+      ],
+      [
+        'saveSettings',
+        { name: 'Camille', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
+      ],
       ['share', 'Thesis', 'Camille'],
     ]);
     expect([textsOf(dialog, '.character').join(''), textsOf(dialog, '.address')]).toEqual([
@@ -105,7 +124,7 @@ describe('sharing the open plan', () => {
     ]);
   });
 
-  it('shares at once once the name is known and the word seen, the host shown as the one who edits', async () => {
+  it('shares on this network without asking again once the name is known and the word seen, the host shown as the one who edits', async () => {
     const { root, app } = await renderSharing();
     const dialog = shareWindow(root);
     expect([app.collaboration.mode.kind, textsOf(dialog, '.person')]).toEqual([
@@ -136,6 +155,7 @@ describe('sharing the open plan', () => {
     const { root, control } = await renderApp({ name: 'Camille', firewallNoticeSeen: true });
     control.collaboration.shareResult = { ok: false, error: { code: 'NO_FREE_PORT' } };
     await clickAndSettle(button(root, TEXT.share));
+    await clickAndSettle(button(shareWindow(root), TEXT.startSharing));
     expect(textsOf(shareWindow(root), '[role="alert"]')).toEqual([english.fileErrors.NO_FREE_PORT]);
   });
 
@@ -161,6 +181,7 @@ describe('sharing the open plan', () => {
       },
     };
     await clickAndSettle(button(root, TEXT.share));
+    await clickAndSettle(button(shareWindow(root), TEXT.startSharing));
     expect(textsOf(shareWindow(root), '.code-part .message, .code-part .hint')).toEqual([
       TEXT.codeHint,
       TEXT.noAddress,
@@ -240,8 +261,11 @@ describe('sharing the open plan', () => {
     await typeIn(dialog, '#share-name', 'Camille M.');
     expect(textsOf(dialog, '.field .message')).toEqual([TEXT.nameNotKept]);
     expect(control.collaboration.requests.filter(([name]) => name === 'saveSettings')).toEqual([
-      ['saveSettings', { name: 'Cam', port: 47_313, firewallNoticeSeen: true }],
-      ['saveSettings', { name: 'Camille M.', port: 47_313, firewallNoticeSeen: true }],
+      ['saveSettings', { name: 'Cam', port: 47_313, firewallNoticeSeen: true, relayAddress: null }],
+      [
+        'saveSettings',
+        { name: 'Camille M.', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
+      ],
     ]);
   });
 
@@ -262,8 +286,14 @@ describe('sharing the open plan', () => {
     await typeIn(dialog, '#share-port', '47401');
     expect(textsOf(dialog, '.network .message')).toEqual([TEXT.portNotKept]);
     expect(control.collaboration.requests.filter(([name]) => name === 'saveSettings')).toEqual([
-      ['saveSettings', { name: 'Camille', port: 47_400, firewallNoticeSeen: false }],
-      ['saveSettings', { name: 'Camille', port: 47_401, firewallNoticeSeen: false }],
+      [
+        'saveSettings',
+        { name: 'Camille', port: 47_400, firewallNoticeSeen: false, relayAddress: null },
+      ],
+      [
+        'saveSettings',
+        { name: 'Camille', port: 47_401, firewallNoticeSeen: false, relayAddress: null },
+      ],
     ]);
   });
 
@@ -298,5 +328,305 @@ describe('sharing the open plan', () => {
         false,
       ]);
     }
+  });
+});
+
+/** Chooses where to share in the share window, as a person clicks one of the two ways. */
+function chooseWay(dialog: ParentNode, title: string): void {
+  const way = [...dialog.querySelectorAll('.choice')].find(
+    (choice) => choice.querySelector('.choice-title')?.textContent.trim() === title,
+  );
+  const input = way?.querySelector('input');
+  if (input === null || input === undefined) {
+    throw new Error(`No way to share named ${title}`);
+  }
+  click(input);
+}
+
+/** Renders the application with a relay kept on this computer and shares the plan through it from the share window. */
+async function renderRelaySharing(kept = true) {
+  const rendered = await renderApp({
+    name: 'Camille',
+    firewallNoticeSeen: true,
+    relayAddress: 'wss://relay.example.org',
+  });
+  rendered.control.collaboration.relay.shareResult = {
+    ok: true,
+    value: { shown: SHOWN, relay: 'relay.example.org', kept },
+  };
+  await clickAndSettle(button(rendered.root, TEXT.share));
+  await clickAndSettle(button(shareWindow(rendered.root), TEXT.startSharing));
+  return rendered;
+}
+
+describe('sharing the open plan through a relay', () => {
+  it('first asks where the others are, on this network when no relay is kept, with the guide for a relay', async () => {
+    const { root, control } = await renderApp({ name: 'Camille', firewallNoticeSeen: true });
+    await clickAndSettle(button(root, TEXT.share));
+    const dialog = shareWindow(root);
+    const onNetwork = [
+      textsOf(dialog, '.choice'),
+      textsOf(dialog, '.choice.chosen .choice-title'),
+      textsOf(dialog, '.intro'),
+      dialog.querySelectorAll('details.network').length,
+    ];
+    chooseWay(dialog, RELAY.throughRelay);
+    const address = single(dialog, '#share-relay-address') as HTMLInputElement;
+    expect([
+      onNetwork,
+      textsOf(dialog, '.choice.chosen .choice-title'),
+      address.value,
+      address.placeholder,
+      textsOf(dialog, '.hint'),
+      dialog.querySelectorAll('details.network').length,
+      control.collaboration.requests,
+    ]).toEqual([
+      [
+        [
+          `${RELAY.onThisNetwork} ${RELAY.onThisNetworkHint}`,
+          `${RELAY.throughRelay} ${RELAY.throughRelayHint}`,
+        ],
+        [RELAY.onThisNetwork],
+        [TEXT.setupIntro],
+        1,
+      ],
+      [RELAY.throughRelay],
+      '',
+      RELAY.addressPlaceholder,
+      [RELAY.noRelay, RELAY.encrypted],
+      0,
+      [['settings']],
+    ]);
+  });
+
+  it('opens on the relay kept on this computer, its address typed already', async () => {
+    const { root } = await renderApp({ name: 'Camille', relayAddress: 'wss://relay.example.org' });
+    await clickAndSettle(button(root, TEXT.share));
+    const dialog = shareWindow(root);
+    expect([
+      textsOf(dialog, '.choice.chosen .choice-title'),
+      (single(dialog, '#share-relay-address') as HTMLInputElement).value,
+      textsOf(dialog, '.hint'),
+    ]).toEqual([[RELAY.throughRelay], 'wss://relay.example.org', [RELAY.encrypted]]);
+  });
+
+  it('opens the guide, telling when the browser could not', async () => {
+    const { root, control } = await renderApp({ name: 'Camille' });
+    await clickAndSettle(button(root, TEXT.share));
+    const dialog = shareWindow(root);
+    chooseWay(dialog, RELAY.throughRelay);
+    await clickAndSettle(button(dialog, RELAY.openGuide));
+    const opened = textsOf(dialog, '.no-relay .message');
+    control.collaboration.relay.guideResult = { ok: false, error: { code: 'TASK_FAILED' } };
+    await clickAndSettle(button(dialog, RELAY.openGuide));
+    expect([opened, textsOf(dialog, '.no-relay .message'), relayRequests(control)]).toEqual([
+      [],
+      [RELAY.guideNotOpened],
+      [['openGuide'], ['openGuide']],
+    ]);
+  });
+
+  it('asks for the address of the relay before sharing, and tells why the relay could not be reached', async () => {
+    const { root, control } = await renderApp({ name: 'Camille' });
+    await clickAndSettle(button(root, TEXT.share));
+    const dialog = shareWindow(root);
+    chooseWay(dialog, RELAY.throughRelay);
+    await clickAndSettle(button(dialog, TEXT.startSharing));
+    const empty = textsOf(dialog, '.field .message');
+    control.collaboration.relay.shareResult = {
+      ok: false,
+      error: { code: 'RELAY_ENDED', reason: 'UNREACHABLE' },
+    };
+    await typeIn(dialog, '#share-relay-address', 'wss://Relay.example.org:8443/');
+    await clickAndSettle(button(dialog, TEXT.startSharing));
+    const unreachable = textsOf(dialog, '[role="alert"]');
+    chooseWay(dialog, RELAY.onThisNetwork);
+    expect([empty, unreachable, textsOf(dialog, '[role="alert"]'), relayRequests(control)]).toEqual(
+      [
+        [RELAY.noAddress],
+        [
+          'The relay relay.example.org:8443 did not answer. Check your connection, or ask who sent you the link.',
+        ],
+        [],
+        [['shareThroughRelay', 'wss://Relay.example.org:8443/']],
+      ],
+    );
+  });
+
+  it('shows both links once shared, copies each through the main process and lists this person as one who edits', async () => {
+    const { root, control } = await renderRelaySharing();
+    const dialog = shareWindow(root);
+    const shown = [
+      textsOf(dialog, '.link-part h3'),
+      textsOf(dialog, '.link'),
+      textsOf(dialog, '.link-part .hint'),
+      textsOf(dialog, '.people .person'),
+      textsOf(dialog, '.people .hint'),
+      textsOf(dialog, '.foot button'),
+    ];
+    await clickAndSettle(button(dialog, RELAY.copyEditLink));
+    const copiedEdit = button(dialog, RELAY.copyEditLink).textContent.trim();
+    control.collaboration.relay.copyLinkResult = { ok: false, error: { code: 'TASK_FAILED' } };
+    await clickAndSettle(button(dialog, RELAY.copyViewLink));
+    expect([shown, copiedEdit, textsOf(dialog, '.links .message'), relayRequests(control)]).toEqual(
+      [
+        [
+          [RELAY.editLink, RELAY.viewLink],
+          [SHOWN.edit, SHOWN.view],
+          [RELAY.editLinkHint, RELAY.viewLinkHint],
+          ['CA Camille · you Can edit'],
+          [RELAY.rightsHint],
+          [TEXT.leave, TEXT.done],
+        ],
+        TEXT.copied,
+        [RELAY.copyFailed],
+        [
+          ['shareThroughRelay', 'wss://relay.example.org'],
+          ['copyRelayLink', 'edit'],
+          ['copyRelayLink', 'view'],
+        ],
+      ],
+    );
+  });
+
+  it('tells when this computer cannot keep the link', async () => {
+    const { root } = await renderRelaySharing(false);
+    expect(textsOf(shareWindow(root), '.links .message.warning')).toEqual([RELAY.linkNotKept]);
+  });
+
+  it('lists the others with what their link lets them do', async () => {
+    const { root, control } = await renderRelaySharing();
+    const listener = control.collaboration.listener;
+    listener?.({ kind: 'relayConnected', member: 1, members: [2] });
+    listener?.({ kind: 'relayCaughtUp' });
+    listener?.({
+      kind: 'relayPresence',
+      member: 2,
+      presence: {
+        bytes: encodeMessage({ kind: 'presence', name: 'Léa', selectedTaskId: null }),
+        canEdit: false,
+      },
+    });
+    await settle();
+    update();
+    expect(textsOf(shareWindow(root), '.people .person')).toEqual([
+      'CA Camille · you Can edit',
+      `LÉ Léa ${TEXT.readOnlyRight}`,
+    ]);
+  });
+
+  it('makes new links once confirmed, telling that they are ready or why they could not be made', async () => {
+    const { root, control } = await renderRelaySharing();
+    const dialog = shareWindow(root);
+    await clickAndSettle(button(dialog, RELAY.makeNewLinks));
+    const asked = textsOf(root, '.confirm h3');
+    await clickAndSettle(
+      button(single(root, '.confirm[aria-labelledby="new-links-title"]'), TEXT.cancel),
+    );
+    const cancelled = relayRequests(control).length;
+    const fresh = {
+      edit: testShownLink('tasklace://relay.example.org/#e1.Zk3Rt9…'),
+      view: SHOWN.view,
+    };
+    control.collaboration.relay.newLinksResult = {
+      ok: true,
+      value: { shown: fresh, relay: 'relay.example.org', kept: true },
+    };
+    await clickAndSettle(button(dialog, RELAY.makeNewLinks));
+    await clickAndSettle(
+      button(single(root, '.confirm[aria-labelledby="new-links-title"]'), RELAY.makeNewLinks),
+    );
+    const made = [textsOf(dialog, '.link'), textsOf(dialog, '[role="status"]')];
+    control.collaboration.relay.newLinksResult = { ok: false, error: { code: 'NOT_CONNECTED' } };
+    await clickAndSettle(button(dialog, RELAY.makeNewLinks));
+    await clickAndSettle(
+      button(single(root, '.confirm[aria-labelledby="new-links-title"]'), RELAY.makeNewLinks),
+    );
+    expect([
+      asked,
+      cancelled,
+      made,
+      textsOf(dialog, '[role="alert"]'),
+      relayRequests(control),
+    ]).toEqual([
+      [RELAY.newLinksTitle],
+      1,
+      [[fresh.edit, fresh.view], [RELAY.newLinksMade]],
+      [english.fileErrors.NOT_CONNECTED],
+      [['shareThroughRelay', 'wss://relay.example.org'], ['makeNewLinks'], ['makeNewLinks']],
+    ]);
+  });
+
+  it('offers to forget a plan the relay no longer finds in place of new links, telling when it could not', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { root, app, control } = await renderRelaySharing();
+    const listener = control.collaboration.listener;
+    listener?.({ kind: 'relayConnected', member: 1, members: [] });
+    listener?.({ kind: 'relayCaughtUp' });
+    listener?.({ kind: 'relayEnded', reason: 'NO_ROOM' });
+    await settle();
+    update();
+    const dialog = shareWindow(root);
+    const shown = [
+      textsOf(dialog, '.gone .hint'),
+      dialog.querySelectorAll('details.new-links').length,
+    ];
+    control.collaboration.relay.forgetResult = { ok: false, error: { code: 'TASK_FAILED' } };
+    await clickAndSettle(button(dialog, RELAY.forgetPlan));
+    const refused = textsOf(dialog, '.gone [role="alert"]');
+    control.collaboration.relay.forgetResult = { ok: true, value: null };
+    await clickAndSettle(button(dialog, RELAY.forgetPlan));
+    expect([
+      shown,
+      refused,
+      app.collaboration.relay.isActive,
+      relayRequests(control).slice(-2),
+      error.mock.calls,
+    ]).toEqual([
+      [[RELAY.notOnRelay], 0],
+      [RELAY.notForgotten],
+      false,
+      [['forgetSharedPlan'], ['forgetSharedPlan']],
+      [['The shared plan could not be forgotten:', { code: 'TASK_FAILED' }]],
+    ]);
+  });
+
+  it('leaves the plan shared through a relay', async () => {
+    const { root, app, control } = await renderRelaySharing();
+    await clickAndSettle(button(shareWindow(root), TEXT.leave));
+    expect([
+      app.collaborationWindow,
+      app.collaboration.relay.isActive,
+      control.collaboration.requests.at(-1),
+    ]).toEqual([null, false, ['stop']]);
+  });
+});
+
+describe('the share window of a plan joined with the link that reads', () => {
+  it('shows only the link that reads, this person in read only and no way to make new links', async () => {
+    const { root, app, control } = await renderApp({ name: 'Léa' });
+    const offered = openedProjectOf(PLAN, { fileName: '' });
+    if (!offered.ok) {
+      throw new Error('The plan could not be offered.');
+    }
+    control.collaboration.relay.joinResult = {
+      ok: true,
+      value: {
+        project: offered.value,
+        shown: { edit: null, view: SHOWN.view },
+        relay: 'relay.example.org',
+        bytesSinceSnapshot: 0,
+        kept: true,
+      },
+    };
+    await app.joinByLink('tasklace://relay.example.org/#v1.key');
+    await settle();
+    await clickAndSettle(button(root, RELAY.readOnly));
+    const dialog = shareWindow(root);
+    expect([
+      textsOf(dialog, '.link-part h3'),
+      textsOf(dialog, '.people .person'),
+      dialog.querySelectorAll('details.new-links').length,
+    ]).toEqual([[RELAY.viewLink], [`LÉ Léa · you ${TEXT.readOnlyRight}`], 0]);
   });
 });

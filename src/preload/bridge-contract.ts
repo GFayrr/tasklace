@@ -1,4 +1,8 @@
 import type { Endpoint, ParticipantId } from '../core/collaboration/participants';
+import type { OpenedPresence } from '../core/collaboration/relay/relay-envelope';
+import type { ShownRelayLink } from '../core/collaboration/relay/relay-link';
+import { RELAY_REFUSALS } from '../core/collaboration/relay/relay-wire';
+import type { RelayDelivery, RelayOutgoing } from '../core/collaboration/relay/relay-member';
 import type { JoinCode } from '../core/collaboration/secure/join-code';
 import type { TokenDigest } from '../core/collaboration/secure/token-digest';
 import type { CsvWarning } from '../core/exchange/csv/csv-rows';
@@ -44,6 +48,14 @@ export const IPC_CHANNELS = {
   findNextHost: 'collaboration:find-next-host',
   collaborationSend: 'collaboration:send',
   collaborationEvent: 'collaboration:event',
+  shareThroughRelay: 'relay:share',
+  joinByLink: 'relay:join',
+  reopenSharedPlan: 'relay:reopen',
+  makeNewLinks: 'relay:new-links',
+  forgetSharedPlan: 'relay:forget',
+  copyRelayLink: 'relay:copy-link',
+  openGuide: 'relay:open-guide',
+  relaySend: 'relay:send',
 } as const;
 
 export type ExchangeKind = 'json' | 'csv';
@@ -67,15 +79,24 @@ export type FileFailureCode =
   | 'LISTEN_FAILED'
   | 'ALREADY_SHARING'
   | 'INVALID_ADDRESS'
+  | 'NOT_SECURE'
+  | 'INVALID_LINK'
+  | 'LINK_UNREADABLE'
+  | 'NOT_CONNECTED'
   | 'TASK_FAILED';
 
 export const ISSUE_FAILURE_CODES = ['INVALID_PROJECT', 'INVALID_IMPORT', 'INVALID_STATE'] as const;
 
 export type IssueFailureCode = (typeof ISSUE_FAILURE_CODES)[number];
 
+export const RELAY_ENDS = [...RELAY_REFUSALS, 'CLOSED', 'UNREACHABLE', 'UNTRUSTED'] as const;
+
+export type RelayEndReason = (typeof RELAY_ENDS)[number];
+
 export type FileFailure =
   | { readonly code: IssueFailureCode; readonly issues: readonly ValidationIssue[] }
-  | { readonly code: Exclude<FileFailureCode, IssueFailureCode> };
+  | { readonly code: Exclude<FileFailureCode, IssueFailureCode> }
+  | { readonly code: 'RELAY_ENDED'; readonly reason: RelayEndReason };
 
 export type BridgeResult<T> = Result<T, FileFailure>;
 
@@ -104,12 +125,14 @@ export type PdfExport =
 export interface RecentProject {
   readonly name: string;
   readonly folder: string;
+  readonly relay: string | null;
 }
 
 export interface CollaborationSettings {
   readonly name: string | null;
   readonly port: number;
   readonly firewallNoticeSeen: boolean;
+  readonly relayAddress: string | null;
 }
 
 export interface Sharing {
@@ -117,6 +140,32 @@ export interface Sharing {
   readonly port: number;
   readonly addresses: readonly string[];
   readonly tokenDigest: TokenDigest;
+}
+
+export interface ShownRelayLinks {
+  readonly edit: ShownRelayLink | null;
+  readonly view: ShownRelayLink;
+}
+
+export type RelayLinkKind = 'edit' | 'view';
+
+export interface RelayLinks {
+  readonly shown: ShownRelayLinks;
+  readonly relay: string;
+  readonly kept: boolean;
+}
+
+export interface RelayJoined {
+  readonly project: OpenedProject;
+  readonly shown: ShownRelayLinks;
+  readonly relay: string;
+  readonly bytesSinceSnapshot: number;
+  readonly kept: boolean;
+}
+
+export interface RelayReopened {
+  readonly shown: ShownRelayLinks;
+  readonly relay: string;
 }
 
 export interface KnownPerson {
@@ -194,7 +243,22 @@ export type CollaborationEvent =
   | { readonly kind: 'becameHost'; readonly sharing: Sharing }
   | { readonly kind: 'yielded' }
   | { readonly kind: 'offline' }
-  | { readonly kind: 'ended'; readonly reason: GuestEndReason };
+  | { readonly kind: 'ended'; readonly reason: GuestEndReason }
+  | {
+      readonly kind: 'relayConnected';
+      readonly member: number;
+      readonly members: readonly number[];
+    }
+  | {
+      readonly kind: 'relayState';
+      readonly state: Uint8Array | null;
+      readonly bytesSinceSnapshot: number;
+    }
+  | { readonly kind: 'relayDelivery'; readonly delivery: RelayDelivery }
+  | { readonly kind: 'relayCaughtUp' }
+  | { readonly kind: 'relayPresence'; readonly member: number; readonly presence: OpenedPresence }
+  | { readonly kind: 'relayJoined' | 'relayLeft'; readonly member: number }
+  | { readonly kind: 'relayEnded'; readonly reason: RelayEndReason };
 
 export type CollaborationTarget = number | readonly number[] | 'host';
 
@@ -252,6 +316,16 @@ export interface TasklaceBridge {
     hostName: string,
     knownPeople: readonly KnownPerson[],
   ) => Promise<BridgeResult<null>>;
+  readonly shareThroughRelay: (address: string) => Promise<BridgeResult<RelayLinks>>;
+  readonly joinByLink: (link: string) => Promise<BridgeResult<RelayJoined>>;
+  readonly reopenSharedPlan: (
+    documentId: DocumentId,
+  ) => Promise<BridgeResult<RelayReopened | null>>;
+  readonly makeNewLinks: () => Promise<BridgeResult<RelayLinks>>;
+  readonly forgetSharedPlan: () => Promise<BridgeResult<null>>;
+  readonly copyRelayLink: (kind: RelayLinkKind) => Promise<BridgeResult<null>>;
+  readonly openGuide: () => Promise<BridgeResult<null>>;
+  readonly sendToRelay: (outgoing: RelayOutgoing) => void;
   readonly sendToCollaboration: (to: CollaborationTarget, message: Uint8Array) => void;
   readonly onCollaborationEvent: (listener: (event: CollaborationEvent) => void) => void;
   readonly onFlushRequested: (flush: () => Promise<boolean>) => void;
@@ -288,6 +362,13 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.forgetGuests]: BridgeResult<null>;
   readonly [IPC_CHANNELS.copyJoinCode]: BridgeResult<null>;
   readonly [IPC_CHANNELS.findNextHost]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.shareThroughRelay]: BridgeResult<RelayLinks>;
+  readonly [IPC_CHANNELS.joinByLink]: BridgeResult<RelayJoined>;
+  readonly [IPC_CHANNELS.reopenSharedPlan]: BridgeResult<RelayReopened | null>;
+  readonly [IPC_CHANNELS.makeNewLinks]: BridgeResult<RelayLinks>;
+  readonly [IPC_CHANNELS.forgetSharedPlan]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.copyRelayLink]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.openGuide]: BridgeResult<null>;
 }
 
 export interface ChannelArguments {
@@ -333,6 +414,13 @@ export interface ChannelArguments {
     hostName: string,
     knownPeople: readonly KnownPerson[],
   ];
+  readonly [IPC_CHANNELS.shareThroughRelay]: readonly [address: string];
+  readonly [IPC_CHANNELS.joinByLink]: readonly [link: string];
+  readonly [IPC_CHANNELS.reopenSharedPlan]: readonly [documentId: DocumentId];
+  readonly [IPC_CHANNELS.makeNewLinks]: readonly [];
+  readonly [IPC_CHANNELS.forgetSharedPlan]: readonly [];
+  readonly [IPC_CHANNELS.copyRelayLink]: readonly [kind: RelayLinkKind];
+  readonly [IPC_CHANNELS.openGuide]: readonly [];
 }
 
 export type InvokeChannel = keyof ChannelAnswers & keyof ChannelArguments;

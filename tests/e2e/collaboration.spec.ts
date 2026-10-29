@@ -6,13 +6,13 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { closeDiscarding, launchApplication } from './application';
+import { picture } from './pictures';
 import { addTask, taskRow } from './table';
 
 const LOOPBACK = '127.0.0.1';
 const REMOVAL_RETRIES = 20;
 const REMOVAL_RETRY_STEP_MS = 100;
 const runFile = promisify(execFile);
-const SCREENSHOT_FOLDER = process.env['TASKLACE_SCREENSHOTS'];
 const CODE_PATTERN = /^[A-HJ-NP-Z2-9]{6}$/;
 const PORT_PATTERN = /port (\d+)/;
 const TOOLBAR_WIDTH = 1_280;
@@ -134,13 +134,6 @@ async function stopProcessTree(pid: number | undefined): Promise<void> {
   process.kill(pid, 'SIGKILL');
 }
 
-/** Saves a picture of a window when a folder for pictures is given, to review the interface by eye. */
-async function picture(page: Page, name: string): Promise<void> {
-  if (SCREENSHOT_FOLDER !== undefined) {
-    await page.screenshot({ path: join(SCREENSHOT_FOLDER, `${name}.png`) });
-  }
-}
-
 /** Joins a plan from an instance the first time, by its address on this computer and its code, under a name. */
 async function joinFrom(
   page: Page,
@@ -150,6 +143,7 @@ async function joinFrom(
   await page.getByRole('button', { name: /^Join…/ }).click();
   const dialog = page.getByRole('dialog', { name: 'Join a shared plan' });
   await dialog.getByLabel('Your name, shown to the others').fill(name);
+  await dialog.getByText('Join someone near you').click();
   await dialog.getByText('Join by address').click();
   await dialog.getByLabel('Address of the host').fill(LOOPBACK);
   await dialog.getByLabel('Port').fill(host.port);
@@ -178,7 +172,7 @@ async function shareNewPlan(page: Page): Promise<{ readonly code: string; readon
   return { code: (await code.textContent()) ?? '', port: PORT_PATTERN.exec(address)?.[1] ?? '' };
 }
 
-test('shares a plan with a code copied for the others, sharing at once the next time', async () => {
+test('shares a plan with a code copied for the others, without the word about the network the next time', async () => {
   const { application, page } = await launch();
   const { code } = await shareNewPlan(page);
   const dialog = page.getByRole('dialog', { name: 'Share “Untitled project”' });
@@ -188,6 +182,7 @@ test('shares a plan with a code copied for the others, sharing at once the next 
   await dialog.getByRole('button', { name: 'Stop sharing' }).click();
   await expect(dialog).toBeHidden();
   await page.getByRole('button', { name: 'Share', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Share the plan' }).click();
   await expect(dialog.locator('.code')).toHaveText(CODE_PATTERN);
   await expect(page.getByRole('dialog', { name: /may ask about the network/ })).toBeHidden();
   await dialog.getByRole('button', { name: 'Done' }).click();
@@ -201,6 +196,7 @@ test('joins a plan shared by another instance with its code, in read only, after
   await guest.page.getByRole('button', { name: /^Join…/ }).click();
   const dialog = guest.page.getByRole('dialog', { name: 'Join a shared plan' });
   await dialog.getByLabel('Your name, shown to the others').fill('Léa');
+  await dialog.getByText('Join someone near you').click();
   await dialog.getByText('Join by address').click();
   await dialog.getByLabel('Address of the host').fill(LOOPBACK);
   await dialog.getByLabel('Port').fill(port);

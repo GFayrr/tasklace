@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as Y from 'yjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { encodeMessage } from '../core/collaboration/messages';
 import { exportProjectCsv } from '../core/exchange/csv/project-csv-export';
 import { exportProjectJson } from '../core/exchange/project-json';
 import { encodeTasklaceFile, encodeTasklaceState } from '../core/file/tasklace-file';
@@ -513,6 +514,26 @@ describe('reading the state of a shared plan', () => {
       state.length,
     );
     expect(isResultOf({ kind: 'readSharedState', state }, read)).toBe(true);
+  });
+
+  it('gives the state of the log of a relay, read as a file, with the name of its plan, and refuses a log that is not one', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID));
+    const task = {
+      kind: 'readRelayLog',
+      messages: [encodeMessage({ kind: 'update', update: state })],
+    } as const;
+    const read = await runFileTask(task);
+    const refused = await runFileTask({ kind: 'readRelayLog', messages: [Uint8Array.of(1)] });
+    expect([read, isResultOf(task, read), refused, warnings.mock.calls]).toEqual([
+      {
+        ok: true,
+        value: { kind: 'relayPlan', state, documentId: TEST_DOCUMENT_ID, name: SAMPLE.name },
+      },
+      true,
+      { ok: false, error: { code: 'INVALID_CONTENT' } },
+      [['The shared plan received could not be opened: INVALID_CONTENT.']],
+    ]);
   });
 
   it('refuses and logs a state that cannot be decoded, keeping the inner error for the log only', async () => {

@@ -1,0 +1,17 @@
+{
+  "name": "tasklace-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Relay that keeps and passes on the encrypted changes of plans shared with Tasklace.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  }
+}

@@ -1,3 +1,4 @@
+import { testShownLink } from '../../core/testing/secrets';
 import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { describe, expect, it } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
@@ -44,9 +45,10 @@ async function renderHosting(guestCount: number) {
   const { collaboration } = opened.control;
   collaboration.settingsResult = {
     ok: true,
-    value: { name: 'Camille', port: 47_313, firewallNoticeSeen: true },
+    value: { name: 'Camille', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
   };
   await opened.app.openShare();
+  await opened.app.startSharing();
   opened.app.closeCollaborationWindow();
   GUESTS.slice(0, guestCount).forEach((name, index) => {
     collaboration.listener?.({
@@ -76,7 +78,7 @@ async function renderJoined(canEdit = false) {
   const { collaboration } = fake.control;
   collaboration.settingsResult = {
     ok: true,
-    value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true },
+    value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
   };
   collaboration.openSharedResult = openedProjectOf(PLAN, { fileName: '' });
   await app.collaboration.loadSettings();
@@ -183,7 +185,7 @@ describe('the chip of the connection', () => {
     const { collaboration } = opened.control;
     collaboration.settingsResult = {
       ok: true,
-      value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true },
+      value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
     };
     collaboration.openSharedResult = openedProjectOf(PLAN, { fileName: '' });
     await opened.app.collaboration.loadSettings();
@@ -228,14 +230,19 @@ describe('the chip of the connection', () => {
     expect([
       textsOf(root, '.status-bar .badge.offline'),
       textsOf(single(root, 'header.toolbar'), '.label'),
-    ]).toEqual([[TEXT.offlineShort], [TEXT.offline]]);
+    ]).toEqual([[TEXT.offlineShort], [TEXT.offlineShort]]);
   });
 
   it('says to a person in read only who is offline that the changes will be kept in their own copy', async () => {
     const { root, control } = await renderJoined();
     control.collaboration.listener?.({ kind: 'offline' });
     update();
-    expect(textsOf(single(root, 'header.toolbar'), '.label')).toEqual([TEXT.offlineKeptApart]);
+    const label = textsOf(single(root, 'header.toolbar'), '.label');
+    click(button(root, TEXT.offlineKeptApart));
+    expect([label, textsOf(root, '[role="menuitem"]')]).toEqual([
+      [TEXT.offlineReadOnlyShort],
+      [`${TEXT.leave} ${TEXT.offlineKeptApart}`],
+    ]);
   });
 
   it('says when and why the connection to the host is lost, the plan staying open', async () => {
@@ -251,6 +258,136 @@ describe('the chip of the connection', () => {
     click(button(root, TEXT.connectionLost));
     expect(textsOf(root, '[role="menuitem"]')).toEqual([
       'Leave the shared plan The connection to Camille broke: what came through it was not what Tasklace expects. The plan stays open on this computer.',
+    ]);
+  });
+});
+
+/** Renders a plan this page shares through a relay with the link that edits, or joined with the link that reads, Léa being on the first task. */
+async function renderRelay(canEdit: boolean) {
+  const fake = fakeAppContext();
+  const { collaboration } = fake.control;
+  collaboration.settingsResult = {
+    ok: true,
+    value: { name: 'Camille', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
+  };
+  const app = new AppState(fake.context);
+  const root = render(App, { app });
+  const shown = {
+    edit: canEdit ? testShownLink('tasklace://relay.example.org/#e1.Hq7Lm2…') : null,
+    view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…'),
+  };
+  const offered = openedProjectOf(PLAN, { fileName: '' });
+  if (!offered.ok) {
+    throw new Error('The plan could not be offered.');
+  }
+  collaboration.relay.joinResult = {
+    ok: true,
+    value: {
+      project: offered.value,
+      shown,
+      relay: 'relay.example.org',
+      bytesSinceSnapshot: 0,
+      kept: true,
+    },
+  };
+  await app.collaboration.loadSettings();
+  await app.joinByLink('tasklace://relay.example.org/#e1.key');
+  await settle();
+  collaboration.listener?.({ kind: 'relayConnected', member: 1, members: [2] });
+  collaboration.listener?.({ kind: 'relayCaughtUp' });
+  collaboration.listener?.({
+    kind: 'relayPresence',
+    member: 2,
+    presence: {
+      bytes: encodeMessage({ kind: 'presence', name: 'Léa', selectedTaskId: testId('a') }),
+      canEdit: true,
+    },
+  });
+  await settle();
+  update();
+  return { app, root, control: fake.control };
+}
+
+describe('a plan shared through a relay', () => {
+  const RELAY = english.relay;
+
+  it('shows the people of the relay in the chip, the status bar and the rows they are on', async () => {
+    const { root } = await renderRelay(true);
+    expect([
+      single(root, 'header.toolbar button.host').getAttribute('aria-label'),
+      single(root, 'header.toolbar button.host').getAttribute('title'),
+      textsOf(single(root, 'header.toolbar'), '.label'),
+      textsOf(single(root, 'header.toolbar'), '.face'),
+      textsOf(root, '.names'),
+      textsOf(root, '.presence'),
+      root.querySelector('.read-only'),
+    ]).toEqual([RELAY.shared, null, [RELAY.shared], ['CA', 'LÉ'], ['Camille, Léa'], ['LÉ'], null]);
+  });
+
+  it('says that it reconnects to the relay, then that it is out of reach, the people hidden', async () => {
+    const { root, control } = await renderRelay(true);
+    control.collaboration.listener?.({ kind: 'reconnecting' });
+    update();
+    /** Gives the chip of the connection to the relay as it is now. */
+    const chip = () => single(root, 'header.toolbar button.host');
+    const reconnecting = [
+      textsOf(single(root, 'header.toolbar'), '.label'),
+      chip().getAttribute('title'),
+      textsOf(root, '.status-bar .badge.reconnecting'),
+      textsOf(root, '.presence'),
+    ];
+    control.collaboration.listener?.({ kind: 'offline' });
+    update();
+    expect([
+      reconnecting,
+      textsOf(single(root, 'header.toolbar'), '.label'),
+      chip().getAttribute('title'),
+      textsOf(root, '.status-bar .badge.offline'),
+      root.querySelector('.people'),
+    ]).toEqual([
+      [[TEXT.reconnectingShort], RELAY.reconnecting, [TEXT.reconnectingShort], []],
+      [TEXT.offlineShort],
+      RELAY.offline,
+      [TEXT.offlineShort],
+      null,
+    ]);
+  });
+
+  it('says to a person with the link that reads that they are in read only, also offline', async () => {
+    const { root, control } = await renderRelay(false);
+    const connected = [
+      textsOf(single(root, 'header.toolbar'), '.label'),
+      single(root, 'header.toolbar button.host').getAttribute('title'),
+      textsOf(root, '.read-only'),
+    ];
+    control.collaboration.listener?.({ kind: 'offline' });
+    update();
+    expect([
+      connected,
+      textsOf(single(root, 'header.toolbar'), '.label'),
+      single(root, 'header.toolbar button.host').getAttribute('title'),
+    ]).toEqual([
+      [[RELAY.readOnly], RELAY.readOnlyHint, [TEXT.readOnlyRight]],
+      [TEXT.offlineReadOnlyShort],
+      RELAY.readOnlyHint,
+    ]);
+  });
+
+  it('tells why the relay ended the plan in a message that stays, and on the chip, the plan staying open', async () => {
+    const { root, app, control } = await renderRelay(true);
+    control.collaboration.listener?.({ kind: 'relayEnded', reason: 'TOO_LARGE' });
+    await settle();
+    update();
+    expect([
+      textsOf(single(root, 'header.toolbar'), '.label'),
+      single(root, 'header.toolbar button.host').getAttribute('title'),
+      app.notices.map((notice) => [notice.text, notice.lasting]),
+      app.project?.name,
+    ]).toEqual([
+      [TEXT.connectionLost],
+      RELAY.ends.TOO_LARGE,
+      [[RELAY.ends.TOO_LARGE, true]],
+      PLAN.name,
     ]);
   });
 });

@@ -383,6 +383,25 @@ describe('createProjectFiles', () => {
     ]);
   });
 
+  it('opens a plan the main process already offered, with the file the main process kept it in, or without one', async () => {
+    const { bridge, events } = fakeBridge(openedOf(TEST_DOCUMENT_ID));
+    const files = createProjectFiles(bridge, QUIET, manualTimer());
+    const offered = openedOf(OTHER_ID);
+    if (!offered.ok) {
+      throw new Error('The plan could not be offered.');
+    }
+    const withFile = await files.openOffered(offered.value);
+    const keptInFile = files.hasFile();
+    const withoutFile = await files.openOffered({ ...offered.value, fileName: '' });
+    expect([
+      withFile.ok && withFile.value.session.documentId,
+      keptInFile,
+      withoutFile.ok && withoutFile.value.session.documentId,
+      files.hasFile(),
+      events,
+    ]).toEqual([OTHER_ID, true, OTHER_ID, false, ['adopt', 'adopt']]);
+  });
+
   it('keeps changes marked unsaved when they come during a save or when the user cancels', async () => {
     const statuses: SaveStatus[] = [];
     let finish: (result: BridgeResult<SavedProject>) => void = () => undefined;

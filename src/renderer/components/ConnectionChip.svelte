@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { AppState } from '../app/app-state.svelte';
   import type { GuestConnection } from '../collaboration/collaboration-state.svelte';
-  import { lostText } from '../collaboration/collaboration-text';
+  import type { RelayConnection } from '../collaboration/relay-state.svelte';
+  import { lostText, relayEndText } from '../collaboration/collaboration-text';
   import { fillMessage } from '../i18n/messages';
   import ConnectionFace from './ConnectionFace.svelte';
   import Icon from './Icon.svelte';
@@ -25,8 +26,38 @@
   const hints: Readonly<Record<GuestConnection, string>> = $derived({
     connected: text.sharedBy,
     reconnecting: text.reconnectingDetail,
-    offline: text.reconnectingDetail,
+    offline: collaboration.canEdit ? text.reconnectingDetail : text.offlineKeptApart,
     lost: lostText(app.messages, collaboration.lastEnd, host),
+  });
+  const relay = $derived(collaboration.relay);
+  const relayText = $derived(app.messages.relay);
+  const RELAY_DOTS: Readonly<Record<RelayConnection, GuestConnection>> = {
+    connecting: 'reconnecting',
+    connected: 'connected',
+    reconnecting: 'reconnecting',
+    offline: 'offline',
+    lost: 'lost',
+  };
+  const relayLabels: Readonly<Record<RelayConnection, string>> = $derived({
+    connecting: relayText.connecting,
+    connected: relay.canEdit ? relayText.shared : relayText.readOnly,
+    reconnecting: text.reconnectingShort,
+    offline: relay.canEdit ? text.offlineShort : text.offlineReadOnlyShort,
+    lost: text.connectionLost,
+  });
+  const relayDetails: Readonly<Record<RelayConnection, string | undefined>> = $derived({
+    connecting: undefined,
+    connected: relay.canEdit ? undefined : relayText.readOnlyHint,
+    reconnecting: relayText.reconnecting,
+    offline: relay.canEdit ? relayText.offline : relayText.readOnlyHint,
+    lost: undefined,
+  });
+  const relayHint = $derived.by(() => {
+    const end = relay.endOfOpenPlan;
+    if (end !== null) {
+      return relayEndText(app.messages, end.reason, end.relay);
+    }
+    return relay.connection === null ? undefined : relayDetails[relay.connection];
   });
   const guestItems: readonly MenuItem[] = $derived([
     {
@@ -42,7 +73,22 @@
   <ConnectionFace {app} {connection} />
 {/snippet}
 
-{#if mode.kind === 'idle'}
+{#if relay.connection !== null}
+  <button
+    type="button"
+    class="host"
+    aria-label={relayLabels[relay.connection]}
+    title={relayHint}
+    onclick={() => app.openShare()}
+  >
+    <ConnectionFace
+      {app}
+      connection={RELAY_DOTS[relay.connection]}
+      label={relayLabels[relay.connection]}
+      people={collaboration.shownPeople}
+    />
+  </button>
+{:else if mode.kind === 'idle'}
   <button type="button" class="share" onclick={() => app.openShare()}>
     <Icon name="share" />
     <span>{text.share}</span>

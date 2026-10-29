@@ -1,3 +1,4 @@
+import { testShownLink } from '../../core/testing/secrets';
 import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { describe, expect, it, vi } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
@@ -27,7 +28,7 @@ async function joinedApp(canEdit = false, fake = fakeAppContext()) {
   const { collaboration } = fake.control;
   collaboration.settingsResult = {
     ok: true,
-    value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true },
+    value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
   };
   collaboration.openSharedResult = openedProjectOf(PLAN, { fileName: '' });
   await app.collaboration.loadSettings();
@@ -106,7 +107,7 @@ describe('a plan joined in read only', () => {
     await app.open();
     fake.control.collaboration.settingsResult = {
       ok: true,
-      value: { name: 'Léa', port: 1, firewallNoticeSeen: true },
+      value: { name: 'Léa', port: 1, firewallNoticeSeen: true, relayAddress: null },
     };
     await app.collaboration.loadSettings();
     await app.join(TARGET);
@@ -134,7 +135,7 @@ describe('joining from the application', () => {
     const { app, control } = await openedAppOf(PLAN);
     control.collaboration.settingsResult = {
       ok: true,
-      value: { name: 'Camille', port: 47_313, firewallNoticeSeen: true },
+      value: { name: 'Camille', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
     };
     await app.collaboration.loadSettings();
     expect((await app.collaboration.share()).ok).toBe(true);
@@ -161,7 +162,7 @@ describe('the windows of a shared plan', () => {
   ): void => {
     fake.control.collaboration.settingsResult = {
       ok: true,
-      value: { name, port: 47_313, firewallNoticeSeen },
+      value: { name, port: 47_313, firewallNoticeSeen, relayAddress: null },
     };
   };
 
@@ -188,31 +189,33 @@ describe('the windows of a shared plan', () => {
     }
   });
 
-  it('shares at once from a computer that already gave a name and saw the word about the network, reading the settings once', async () => {
+  it('opens the share window without sharing yet, since it first asks where the others are, reading the settings once', async () => {
     const opened = await openedAppOf(PLAN);
     withSettings(opened, 'Camille', true);
     await opened.app.openShare();
     expect([opened.app.collaborationWindow, opened.app.collaboration.mode.kind]).toEqual([
       'share',
-      'hosting',
+      'idle',
     ]);
     opened.app.closeCollaborationWindow();
     await opened.app.openShare();
-    expect(opened.control.collaboration.requests).toEqual([
-      ['settings'],
-      ['share', PLAN.name, 'Camille'],
-    ]);
+    expect(opened.control.collaboration.requests).toEqual([['settings']]);
   });
 
-  it('keeps why the plan could not be shared until it is shared', async () => {
+  it('keeps why the plan could not be shared until it is shared or another way is chosen', async () => {
     const opened = await openedAppOf(PLAN);
     withSettings(opened, 'Camille', true);
     opened.control.collaboration.shareResult = { ok: false, error: { code: 'NO_FREE_PORT' } };
     await opened.app.openShare();
+    await opened.app.startSharing();
     expect([opened.app.shareFailure, opened.app.collaboration.mode]).toEqual([
       { code: 'NO_FREE_PORT' },
       { kind: 'idle' },
     ]);
+    opened.app.clearShareFailure();
+    const cleared = opened.app.shareFailure;
+    await opened.app.startSharing();
+    expect([cleared, opened.app.shareFailure]).toEqual([null, { code: 'NO_FREE_PORT' }]);
     opened.control.collaboration.shareResult = {
       ok: true,
       value: {
@@ -412,3 +415,216 @@ describe('changes made in read only away from the host', () => {
     errors.mockRestore();
   });
 });
+
+describe('a plan joined by its link', () => {
+  it('opens in the window as the plan the main process offered, without a file, in read only with the link that reads', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    const offered = openedProjectOf(PLAN, { fileName: '' });
+    if (!offered.ok) {
+      throw new Error('The plan could not be offered.');
+    }
+    fake.control.collaboration.relay.joinResult = {
+      ok: true,
+      value: {
+        project: offered.value,
+        shown: { edit: null, view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…') },
+        relay: 'relay.example.org',
+        bytesSinceSnapshot: 0,
+        kept: true,
+      },
+    };
+    const answer = await app.joinByLink('tasklace://relay.example.org/#v1.key');
+    await settle();
+    expect([
+      answer,
+      app.project?.name,
+      app.collaboration.isReadOnly,
+      fake.control.collaboration.relay.requests,
+    ]).toEqual([
+      { ok: true, value: null },
+      PLAN.name,
+      true,
+      [['joinByLink', 'tasklace://relay.example.org/#v1.key']],
+    ]);
+  });
+
+  it('tells in a message that stays when this computer cannot keep the link of the plan joined', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    const offered = openedProjectOf(PLAN, { fileName: '' });
+    if (!offered.ok) {
+      throw new Error('The plan could not be offered.');
+    }
+    fake.control.collaboration.relay.joinResult = {
+      ok: true,
+      value: {
+        project: offered.value,
+        shown: { edit: null, view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…') },
+        relay: 'relay.example.org',
+        bytesSinceSnapshot: 0,
+        kept: false,
+      },
+    };
+    await app.joinByLink('tasklace://relay.example.org/#v1.key');
+    await settle();
+    expect(app.notices.map((notice) => [notice.kind, notice.text, notice.lasting])).toEqual([
+      ['warning', english.relay.linkNotKept, true],
+    ]);
+  });
+
+  it('asks first about a changed project without file, joining nothing when the user cancels', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    await app.newProject();
+    expect(app.rename('Changed')).toBe(true);
+    await settle();
+    const before = fake.control.collaboration.relay.requests.length;
+    const joining = app.joinByLink('tasklace://relay.example.org/#v1.key');
+    await settle();
+    app.closePrompt?.answer('cancel');
+    expect([await joining, fake.control.collaboration.relay.requests.slice(before)]).toEqual([
+      null,
+      [],
+    ]);
+  });
+
+  it('gives up a join by link still waiting when the join window closes', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    await app.openJoin();
+    const joining = app.collaboration.relay.join('tasklace://relay.example.org/#v1.key');
+    app.closeCollaborationWindow();
+    expect([
+      await joining,
+      app.collaboration.relay.isActive,
+      fake.control.collaboration.requests.at(-1),
+    ]).toEqual([{ ok: false, error: { code: 'CANCELLED' } }, false, ['stop']]);
+  });
+});
+
+describe('a plan shared through a relay', () => {
+  const SHARED = {
+    shown: {
+      edit: testShownLink('tasklace://relay.example.org/#e1.Hq7Lm2…'),
+      view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…'),
+    },
+    relay: 'relay.example.org',
+    kept: true,
+  };
+
+  it('keeps the address of the relay on this computer once the plan is shared through it', async () => {
+    const { app, control } = await openedAppOf(PLAN);
+    withRelaySettings(control);
+    await app.openShare();
+    control.collaboration.relay.shareResult = { ok: true, value: SHARED };
+    await app.shareThroughRelay('  wss://relay.example.org ');
+    expect([
+      app.shareFailure,
+      app.collaboration.relay.links,
+      control.collaboration.requests,
+    ]).toEqual([
+      null,
+      SHARED.shown,
+      [
+        ['settings'],
+        [
+          'saveSettings',
+          {
+            name: 'Camille',
+            port: 47_313,
+            firewallNoticeSeen: true,
+            relayAddress: 'wss://relay.example.org',
+          },
+        ],
+      ],
+    ]);
+  });
+
+  it('keeps why the plan could not be shared through the relay, keeping no address', async () => {
+    const { app, control } = await openedAppOf(PLAN);
+    withRelaySettings(control);
+    await app.openShare();
+    control.collaboration.relay.shareResult = {
+      ok: false,
+      error: { code: 'RELAY_ENDED', reason: 'UNREACHABLE' },
+    };
+    await app.shareThroughRelay('wss://relay.example.org');
+    expect([app.shareFailure, control.collaboration.requests]).toEqual([
+      { code: 'RELAY_ENDED', reason: 'UNREACHABLE' },
+      [['settings']],
+    ]);
+  });
+
+  it('still shares when the address cannot be kept, logging why and telling it', async () => {
+    const { app, control } = await openedAppOf(PLAN);
+    withRelaySettings(control);
+    await app.openShare();
+    control.collaboration.relay.shareResult = { ok: true, value: SHARED };
+    control.collaboration.saveSettingsResult = { ok: false, error: { code: 'WRITE_FAILED' } };
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await app.shareThroughRelay('wss://relay.example.org');
+    expect([
+      app.shareFailure,
+      app.collaboration.relay.links,
+      errors.mock.calls,
+      app.notices.map((notice) => [notice.kind, notice.text]),
+    ]).toEqual([
+      null,
+      SHARED.shown,
+      [['The address of the relay could not be kept on this computer:', { code: 'WRITE_FAILED' }]],
+      [['warning', english.relay.addressNotKept]],
+    ]);
+  });
+
+  it('tells in a message that stays when a change shared through the relay could not be added', async () => {
+    const { app, control } = await openedAppOf(PLAN);
+    withRelaySettings(control);
+    await app.openShare();
+    control.collaboration.relay.shareResult = { ok: true, value: SHARED };
+    await app.shareThroughRelay('wss://relay.example.org');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const listener = control.collaboration.listener;
+    listener?.({ kind: 'relayConnected', member: 1, members: [] });
+    listener?.({ kind: 'relayCaughtUp' });
+    listener?.({
+      kind: 'relayDelivery',
+      delivery: {
+        kind: 'update',
+        messageId: new Uint8Array(16).fill(9),
+        covers: 0,
+        bytes: Uint8Array.of(9),
+        compressedBytes: 1,
+        settled: 1,
+      },
+    });
+    await settle();
+    expect(app.notices.map((notice) => [notice.kind, notice.text, notice.lasting])).toEqual([
+      ['error', english.relay.changeRefused, true],
+    ]);
+  });
+
+  it('tells in a message that stays when this computer can no longer open the link of a shared plan it opens', async () => {
+    const fake = fakeAppContext();
+    fake.control.collaboration.relay.reopenResult = {
+      ok: false,
+      error: { code: 'LINK_UNREADABLE' },
+    };
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const app = new AppState(fake.context);
+    fake.control.openResult = openedProjectOf(PLAN);
+    await app.open();
+    await settle();
+    expect(app.notices.map((notice) => [notice.kind, notice.text, notice.lasting])).toEqual([
+      ['error', english.fileErrors.LINK_UNREADABLE, true],
+    ]);
+  });
+});
+
+/** Gives this computer a name, the word about the network seen and no relay yet. */
+function withRelaySettings(control: ReturnType<typeof fakeAppContext>['control']): void {
+  control.collaboration.settingsResult = {
+    ok: true,
+    value: { name: 'Camille', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
+  };
+}

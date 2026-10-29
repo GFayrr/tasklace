@@ -1,13 +1,8 @@
 import { testPlanKey, testToken } from '../../core/testing/secrets';
-import { connect, createServer, type Server, type Socket } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
 import { createGuest } from '../../core/collaboration/sync';
-import {
-  CHANNEL_CHUNK_BYTES,
-  HEARTBEAT_MILLISECONDS,
-  MAX_TASK_NAME_LENGTH,
-} from '../../core/limits';
+import { CHANNEL_CHUNK_BYTES, HEARTBEAT_MILLISECONDS } from '../../core/limits';
 import { success } from '../../core/result';
 import { createSharedDocument } from '../../core/shared/shared-document';
 import { project, TEST_DOCUMENT_ID, workTask } from '../../core/testing/project-builder';
@@ -29,6 +24,7 @@ import { connectAsGuest } from './guest-client';
 import { startGuestSession } from './guest-session';
 import { startHostServer, type HostServer, type Peer } from './host-server';
 import type { StartTimer } from './secure-connection';
+import { drawnNames, startTcpRelay } from '../testing/tcp-relay';
 
 const PLAN_KEY = testPlanKey(new Uint8Array(32).fill(3));
 const LEA: Introduction = {
@@ -39,91 +35,12 @@ const LEA: Introduction = {
 };
 const servers: HostServer[] = [];
 const LARGE_PLAN_TASKS = 8_000;
-const LARGE_PLAN_SEED = 0x7a5c_1ace;
-const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
-const XORSHIFT_SHIFTS = [13, 17, 5] as const;
 const LARGE_TRANSFER_TIMEOUT_MS = 60_000;
 const NAME_DIGITS = 4;
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
 });
-
-/** Starts a relay between a guest and a host on a port chosen at each connection, which cuts every connection without a word, on demand or after some bytes of the host, and can change the last byte the host sends next. */
-async function relay(target: () => number, cutAfterHostBytes = Number.POSITIVE_INFINITY) {
-  const sockets = new Set<Socket>();
-  let hostBytes = 0;
-  let frozen = false;
-  let tampering = false;
-  /** Destroys every connection passing through the relay. */
-  const cut = (): void => {
-    sockets.forEach((socket) => socket.destroy());
-    sockets.clear();
-  };
-  const server: Server = createServer((guestSide) => {
-    const hostSide = connect(target(), LOOPBACK);
-    sockets.add(guestSide);
-    sockets.add(hostSide);
-    guestSide.on('data', (chunk: Buffer) => {
-      if (!frozen) {
-        hostSide.write(chunk);
-      }
-    });
-    hostSide.on('data', (chunk: Buffer) => {
-      if (tampering && chunk.length > 0) {
-        tampering = false;
-        chunk[chunk.length - 1] = (chunk[chunk.length - 1] ?? 0) ^ 1;
-      }
-      if (!frozen) {
-        guestSide.write(chunk);
-      }
-    });
-    guestSide.on('error', () => undefined);
-    hostSide.on('error', () => undefined);
-    hostSide.on('data', (chunk: Buffer) => {
-      hostBytes += chunk.length;
-      if (hostBytes > cutAfterHostBytes) {
-        cutAfterHostBytes = Number.POSITIVE_INFINITY;
-        cut();
-      }
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, LOOPBACK, resolve));
-  const address = server.address();
-  return {
-    port: typeof address === 'object' && address !== null ? address.port : 0,
-    hostBytes: () => hostBytes,
-    cut,
-    freeze: () => {
-      frozen = true;
-    },
-    tamper: () => {
-      tampering = true;
-    },
-    close: () =>
-      new Promise<void>((resolve) => {
-        server.close(() => {
-          resolve();
-        });
-      }),
-  };
-}
-
-/** Writes names of the longest length from letters drawn with a fixed seed, so that the plan they fill hardly compresses. */
-function drawnNames(count: number): string[] {
-  let state = LARGE_PLAN_SEED;
-  const [left, right, last] = XORSHIFT_SHIFTS;
-  /** Draws the next letter. */
-  const letter = (): string => {
-    state ^= state << left;
-    state ^= state >>> right;
-    state ^= state << last;
-    return LETTERS[(state >>> 0) % LETTERS.length] ?? 'a';
-  };
-  return Array.from({ length: count }, () =>
-    Array.from({ length: MAX_TASK_NAME_LENGTH }, letter).join(''),
-  );
-}
 
 /** Starts a host with the key of the plan on a port, counting who joins. */
 async function host(port: number, startTimer: StartTimer = () => () => undefined) {
@@ -159,7 +76,7 @@ describe('coming back to a host over the network', () => {
   it('joins with the code, then comes back with the key once the network lets it reach the host again', async () => {
     const first = await host(await freePort());
     let target = first.server.port;
-    const network = await relay(() => target);
+    const network = await startTcpRelay(() => target);
     const told: CollaborationEvent['kind'][] = [];
     const retries: (() => void)[] = [];
     let keys = 0;
@@ -208,7 +125,7 @@ describe('coming back to a host over the network', () => {
 
   it('breaks a connection whose bytes were changed on the way, passing nothing on, and comes back with the key, the host closing the broken connection', async () => {
     const shared = await host(await freePort());
-    const network = await relay(() => shared.server.port);
+    const network = await startTcpRelay(() => shared.server.port);
     const told: CollaborationEvent['kind'][] = [];
     const messages: Uint8Array[] = [];
     const retries: (() => void)[] = [];
@@ -316,7 +233,9 @@ describe('coming back to a host over the network', () => {
       ).toBe(true);
       const shared = await startPlanHost(hostSession, { planKey: PLAN_KEY, letEdit: false });
       servers.push(shared.server);
-      const network = await relay(() => shared.server.port, CHANNEL_CHUNK_BYTES);
+      const network = await startTcpRelay(() => shared.server.port, {
+        afterTargetBytes: CHANNEL_CHUNK_BYTES,
+      });
       const guestSession = sessionOn(origin, 2);
       const heard: string[] = [];
       const retries: (() => void)[] = [];
@@ -372,7 +291,10 @@ describe('coming back to a host over the network', () => {
         'update',
         'stateVector',
       ]);
-      expect([network.hostBytes() > 2 * CHANNEL_CHUNK_BYTES, shared.refusals]).toEqual([true, []]);
+      expect([network.targetBytes() > 2 * CHANNEL_CHUNK_BYTES, shared.refusals]).toEqual([
+        true,
+        [],
+      ]);
       session.close();
       network.cut();
       await network.close();
@@ -396,7 +318,7 @@ describe('coming back to a host over the network', () => {
       });
     };
     const shared = await host(await freePort(), startTimer);
-    const network = await relay(() => shared.server.port);
+    const network = await startTcpRelay(() => shared.server.port);
     const told: CollaborationEvent['kind'][] = [];
     let keys = 0;
     const session = startGuestSession({

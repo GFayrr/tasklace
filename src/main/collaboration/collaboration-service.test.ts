@@ -229,9 +229,14 @@ describe('the collaboration service', () => {
   it('reads and keeps the settings, refusing settings of another shape', async () => {
     const page = new FakePage();
     expect(await invoke(page, IPC_CHANNELS.collaborationSettings)).toEqual(
-      success({ name: null, port: 47_313, firewallNoticeSeen: false }),
+      success({ name: null, port: 47_313, firewallNoticeSeen: false, relayAddress: null }),
     );
-    const settings = { name: 'Léa', port: 50_000, firewallNoticeSeen: true };
+    const settings = {
+      name: 'Léa',
+      port: 50_000,
+      firewallNoticeSeen: true,
+      relayAddress: 'wss://tasklace.my-school.example',
+    };
     expect(await invoke(page, IPC_CHANNELS.saveCollaborationSettings, settings)).toEqual(
       success(null),
     );
@@ -708,5 +713,32 @@ describe('the private addresses of this computer', () => {
         none: undefined,
       } as never),
     ).toEqual(['192.168.1.24', 'fe80::1']);
+  });
+});
+
+describe('a plan shared another way', () => {
+  it('is not shared on the network as well, and is left when the page stops sharing', async () => {
+    const elsewhere = new Set<unknown>();
+    const left: unknown[] = [];
+    const registered = registerCollaborationHandlers({
+      assertTrusted: trusted,
+      userDataFolder: folder,
+      runTask: () => Promise.reject(new Error('No task is expected.')),
+      createMdns: () => ({ mdns: mdnsFake.mdns, destroy: () => undefined }),
+      addresses: () => ['192.168.1.24'],
+      copyText: () => Promise.resolve(),
+      sharesElsewhere: (sender) => elsewhere.has(sender),
+      leaveElsewhere: (sender) => {
+        left.push(sender);
+      },
+    });
+    const page = new FakePage();
+    elsewhere.add(page);
+    expect([
+      await invoke(page, IPC_CHANNELS.sharePlan, 'Thesis', 'Camille', 'camille'),
+      await invoke(page, IPC_CHANNELS.stopCollaboration),
+      left,
+      registered.isBusy(page as never),
+    ]).toEqual([failure({ code: 'ALREADY_SHARING' }), success(null), [page], false]);
   });
 });

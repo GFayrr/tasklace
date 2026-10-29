@@ -82,9 +82,10 @@ interface GuestOptions {
   readonly report: (event: SyncEvent) => void;
 }
 
-interface Merger {
+export interface Merger {
   readonly merge: (update: Uint8Array) => Result<null, SyncRefusal | 'incompleteUpdate'>;
   readonly forget: () => void;
+  readonly isWaiting: () => boolean;
 }
 
 /** Runs the host of a shared plan, from a new list or the one taken over from a host that left: it keeps the list of participants, sends each one what it lacks, merges the changes of those who may edit and passes every change to everyone. */
@@ -280,7 +281,7 @@ function encodeMissing(
 }
 
 /** Creates the merger of the updates of one sender, which keeps an update that depends on missing ones with the following, within a size, reporting the repairs a merge needed. */
-function createMerger(session: SharedSession, report: (event: SyncEvent) => void): Merger {
+export function createMerger(session: SharedSession, report: (event: SyncEvent) => void): Merger {
   let pending: Uint8Array | null = null;
   return {
     merge: (update) => {
@@ -311,6 +312,7 @@ function createMerger(session: SharedSession, report: (event: SyncEvent) => void
     forget: () => {
       pending = null;
     },
+    isWaiting: () => pending !== null,
   };
 }
 

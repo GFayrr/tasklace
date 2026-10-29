@@ -7,10 +7,12 @@
     LAST_PORT,
   } from '../../core/collaboration/ports';
   import { MAX_PARTICIPANT_NAME_LENGTH } from '../../core/limits';
+  import { hostLabelOf, readRelayAddress } from '../../core/collaboration/relay/relay-link';
   import { successionQueue } from '../../core/collaboration/succession';
   import type { Project } from '../../core/model/project';
   import type { AppState } from '../app/app-state.svelte';
-  import { collaborationFailureText } from '../collaboration/collaboration-text';
+  import { collaborationFailureText, relayFailureText } from '../collaboration/collaboration-text';
+  import type { RelayLinkKind } from '../../preload/bridge-contract';
   import { fillMessage } from '../i18n/messages';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import Icon from './Icon.svelte';
@@ -25,6 +27,15 @@
   let copied = $state<'copied' | 'failed' | null>(null);
   let askingFirewall = $state(false);
   let starting = $state(false);
+  let where = $state<'network' | 'relay'>('network');
+  let addressDraft = $state('');
+  let addressError = $state<string | null>(null);
+  let guideFailed = $state(false);
+  let linkCopied = $state<RelayLinkKind | 'failed' | null>(null);
+  let askingNewLinks = $state(false);
+  let newLinksMade = $state(false);
+  let newLinksFailure = $state<string | null>(null);
+  let forgetFailed = $state(false);
 
   const text = $derived(app.messages.collaboration);
   const collaboration = $derived(app.collaboration);
@@ -36,8 +47,45 @@
   const timeFormat = $derived(
     new Intl.DateTimeFormat(app.locale, { hour: 'numeric', minute: '2-digit' }),
   );
-  const failure = $derived(
-    app.shareFailure === null ? null : collaborationFailureText(app.messages, app.shareFailure),
+  const relay = $derived(collaboration.relay);
+  const relayText = $derived(app.messages.relay);
+  const links = $derived(relay.links);
+  const typedRelay = $derived.by(() => {
+    const address = readRelayAddress(addressDraft);
+    return address.ok ? hostLabelOf(address.value) : addressDraft.trim();
+  });
+  const failure = $derived.by(() => {
+    const shareFailure = app.shareFailure;
+    if (shareFailure === null) {
+      return null;
+    }
+    return where === 'relay'
+      ? relayFailureText(app.messages, shareFailure, typedRelay)
+      : collaborationFailureText(app.messages, shareFailure);
+  });
+  const linkRows = $derived(
+    links === null
+      ? []
+      : [
+          ...(links.edit === null
+            ? []
+            : [
+                {
+                  kind: 'edit' as const,
+                  label: relayText.editLink,
+                  shown: links.edit,
+                  hint: relayText.editLinkHint,
+                  copyLabel: relayText.copyEditLink,
+                },
+              ]),
+          {
+            kind: 'view' as const,
+            label: relayText.viewLink,
+            shown: links.view,
+            hint: relayText.viewLinkHint,
+            copyLabel: relayText.copyViewLink,
+          },
+        ],
   );
 
   /** Opens the dialog with the name and port of this computer when the share window opens, and closes it when it is closed elsewhere. */
@@ -49,6 +97,14 @@
       nameError = null;
       portError = null;
       copied = null;
+      addressDraft = collaboration.settings?.relayAddress ?? '';
+      where = addressDraft === '' ? 'network' : 'relay';
+      addressError = null;
+      guideFailed = false;
+      linkCopied = null;
+      newLinksMade = false;
+      newLinksFailure = null;
+      forgetFailed = false;
       dialog.showModal();
     } else if (!isOpen && dialog.open) {
       dialog.close();
@@ -85,9 +141,13 @@
     portError = saved.ok ? null : text.portNotKept;
   }
 
-  /** Shares the plan once the name is kept, telling first, a single time, that the computer may ask about the network. */
+  /** Shares the plan once the name is kept, through the relay typed or on this network, telling first, a single time, that the computer may ask about the network. */
   async function start(): Promise<void> {
     if (!(await commitName())) {
+      return;
+    }
+    if (where === 'relay') {
+      await shareThroughRelay();
       return;
     }
     if (settings?.firewallNoticeSeen !== true) {
@@ -114,6 +174,39 @@
     starting = false;
   }
 
+  /** Shares the plan through the relay typed, asking for its address when none is typed. */
+  async function shareThroughRelay(): Promise<void> {
+    if (addressDraft.trim() === '') {
+      addressError = relayText.noAddress;
+      return;
+    }
+    addressError = null;
+    starting = true;
+    await app.shareThroughRelay(addressDraft);
+    starting = false;
+  }
+
+  /** Opens the guide that explains how to set up a relay, saying when the browser could not. */
+  async function openGuide(): Promise<void> {
+    guideFailed = !(await relay.openGuide());
+  }
+
+  /** Copies a link of the plan, saying which one was copied or that it could not be. */
+  async function copyLink(kind: RelayLinkKind): Promise<void> {
+    linkCopied = (await relay.copyLink(kind)) ? kind : 'failed';
+  }
+
+  /** Makes new links once the person confirmed, saying that they are ready or why they could not be made. */
+  async function makeNewLinks(): Promise<void> {
+    askingNewLinks = false;
+    linkCopied = null;
+    const made = await relay.makeNewLinks();
+    newLinksMade = made.ok;
+    newLinksFailure = made.ok
+      ? null
+      : relayFailureText(app.messages, made.error, relay.relay ?? '');
+  }
+
   /** Copies the code, saying whether it could. */
   async function copyCode(): Promise<void> {
     copied = (await collaboration.copyCode()) ? 'copied' : 'failed';
@@ -128,6 +221,11 @@
     if (!collaboration.setRight(participant.id, canEdit)) {
       event.currentTarget.checked = false;
     }
+  }
+
+  /** Forgets the shared plan the relay no longer finds, telling when it could not. */
+  async function forgetPlan(): Promise<void> {
+    forgetFailed = !(await app.forgetSharedPlan());
   }
 
   /** Stops sharing and closes the window. */
@@ -175,8 +273,141 @@
       </button>
     </div>
     <div class="body">
-      {#if sharing === null}
-        <p class="intro">{text.setupIntro}</p>
+      {#if links !== null}
+        <section class="links" aria-label={relayText.throughRelay}>
+          {#each linkRows as row (row.kind)}
+            <div class="link-part">
+              <h3>{row.label}</h3>
+              <div class="link-row">
+                <output class="link">{row.shown}</output>
+                <button
+                  type="button"
+                  class="button"
+                  aria-label={row.copyLabel}
+                  onclick={() => {
+                    void copyLink(row.kind);
+                  }}>{linkCopied === row.kind ? text.copied : text.copy}</button
+                >
+              </div>
+              <p class="hint">{row.hint}</p>
+            </div>
+          {/each}
+          {#if linkCopied === 'failed'}
+            <p class="message error">{relayText.copyFailed}</p>
+          {/if}
+          {#if !relay.isLinkKept}
+            <p class="message warning">{relayText.linkNotKept}</p>
+          {/if}
+        </section>
+        <section class="people" aria-labelledby="share-relay-people-title">
+          <h3 id="share-relay-people-title">{relayText.peopleNow}</h3>
+          <ul>
+            <li class="person">
+              <PersonBadge name={settings?.name ?? ''} color={0} locale={app.locale} />
+              <span class="who">{fillMessage(relayText.you, { name: settings?.name ?? '' })}</span>
+              <span class="right">{relay.canEdit ? text.canEdit : text.readOnlyRight}</span>
+            </li>
+            {#each relay.others as person (person.id)}
+              <li class="person">
+                <PersonBadge name={person.name} color={person.color} locale={app.locale} />
+                <span class="who">{person.name}</span>
+                <span class="right">{person.canEdit ? text.canEdit : text.readOnlyRight}</span>
+              </li>
+            {/each}
+          </ul>
+          <p class="hint">{relayText.rightsHint}</p>
+        </section>
+        {#if relay.endOfOpenPlan?.reason === 'NO_ROOM'}
+          <section class="gone">
+            <p class="hint">{relayText.notOnRelay}</p>
+            <button
+              type="button"
+              class="button"
+              onclick={() => {
+                void forgetPlan();
+              }}>{relayText.forgetPlan}</button
+            >
+            {#if forgetFailed}
+              <p class="message error" role="alert">{relayText.notForgotten}</p>
+            {/if}
+          </section>
+        {:else if relay.canEdit}
+          <details class="new-links">
+            <summary>{relayText.wrongPerson}</summary>
+            <p class="hint">{relayText.newLinksBody}</p>
+            <button
+              type="button"
+              class="button"
+              onclick={() => {
+                askingNewLinks = true;
+              }}>{relayText.makeNewLinks}</button
+            >
+          </details>
+          {#if newLinksMade}
+            <p class="message" role="status">{relayText.newLinksMade}</p>
+          {:else if newLinksFailure !== null}
+            <p class="message error" role="alert">{newLinksFailure}</p>
+          {/if}
+        {/if}
+      {:else if sharing === null}
+        <div class="choices" role="radiogroup" aria-label={relayText.whereLabel}>
+          {#each ['network', 'relay'] as const as way (way)}
+            <label class={['choice', { chosen: where === way }]}>
+              <input
+                type="radio"
+                name="share-where"
+                checked={where === way}
+                onchange={() => {
+                  where = way;
+                  app.clearShareFailure();
+                }}
+              />
+              <span class="choice-title"
+                >{way === 'network' ? relayText.onThisNetwork : relayText.throughRelay}</span
+              >
+              <small
+                >{way === 'network'
+                  ? relayText.onThisNetworkHint
+                  : relayText.throughRelayHint}</small
+              >
+            </label>
+          {/each}
+        </div>
+        {#if where === 'network'}
+          <p class="intro">{text.setupIntro}</p>
+        {:else}
+          <label class="field">
+            <span>{relayText.address}</span>
+            <input
+              id="share-relay-address"
+              bind:value={addressDraft}
+              placeholder={relayText.addressPlaceholder}
+              autocomplete="off"
+              spellcheck="false"
+            />
+            {#if addressError !== null}
+              <span class="message error">{addressError}</span>
+            {:else}
+              <small>{relayText.addressHint}</small>
+            {/if}
+          </label>
+          {#if settings?.relayAddress === null}
+            <div class="no-relay">
+              <p class="hint">{relayText.noRelay}</p>
+              <button
+                type="button"
+                class="button"
+                onclick={() => {
+                  void openGuide();
+                }}>{relayText.openGuide}</button
+              >
+              {#if guideFailed}
+                <p class="message error">{relayText.guideNotOpened}</p>
+              {/if}
+            </div>
+          {/if}
+          <p class="hint">{relayText.encrypted}</p>
+        {/if}
       {:else}
         <section class="code-part" aria-labelledby="share-code-title">
           <h3 id="share-code-title">{text.codeLabel}</h3>
@@ -283,34 +514,37 @@
           <small>{text.nameHint}</small>
         {/if}
       </label>
-      <details class="network">
-        <summary>{text.network}</summary>
-        <label class="field">
-          <span>{text.port}</span>
-          <input
-            id="share-port"
-            type="number"
-            min={FIRST_PORT}
-            max={LAST_PORT}
-            bind:value={portDraft}
-            onchange={() => {
-              void commitPort();
-            }}
-          />
-          {#if portError !== null}
-            <span class="message error">{portError}</span>
-          {:else}
-            <small>{fillMessage(text.portHint, { port: String(DEFAULT_COLLABORATION_PORT) })}</small
-            >
-          {/if}
-        </label>
-      </details>
+      {#if links === null && (where === 'network' || sharing !== null)}
+        <details class="network">
+          <summary>{text.network}</summary>
+          <label class="field">
+            <span>{text.port}</span>
+            <input
+              id="share-port"
+              type="number"
+              min={FIRST_PORT}
+              max={LAST_PORT}
+              bind:value={portDraft}
+              onchange={() => {
+                void commitPort();
+              }}
+            />
+            {#if portError !== null}
+              <span class="message error">{portError}</span>
+            {:else}
+              <small
+                >{fillMessage(text.portHint, { port: String(DEFAULT_COLLABORATION_PORT) })}</small
+              >
+            {/if}
+          </label>
+        </details>
+      {/if}
       {#if failure !== null}
         <p class="message error" role="alert">{failure}</p>
       {/if}
     </div>
     <div class="foot">
-      {#if sharing === null}
+      {#if sharing === null && links === null}
         <button
           type="button"
           class="button"
@@ -332,7 +566,7 @@
           class="button"
           onclick={() => {
             void stopSharing();
-          }}>{text.stopSharing}</button
+          }}>{links === null ? text.stopSharing : text.leave}</button
         >
         <button
           type="button"
@@ -344,6 +578,24 @@
       {/if}
     </div>
   {/if}
+  <ConfirmDialog
+    question={askingNewLinks
+      ? {
+          title: relayText.newLinksTitle,
+          body: relayText.newLinksBody,
+          confirm: relayText.makeNewLinks,
+          danger: true,
+        }
+      : null}
+    titleId="new-links-title"
+    cancel={text.cancel}
+    confirmed={() => {
+      void makeNewLinks();
+    }}
+    dismissed={() => {
+      askingNewLinks = false;
+    }}
+  />
   <ConfirmDialog
     question={askingFirewall
       ? {
@@ -417,6 +669,101 @@
     margin: 0;
     font-size: var(--font-size-small);
     color: var(--color-text-secondary);
+  }
+
+  .choices {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+  }
+
+  .choice {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    cursor: pointer;
+  }
+
+  .choice input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .choice.chosen {
+    border-color: var(--color-action);
+    box-shadow: inset 0 0 0 1px var(--color-action);
+  }
+
+  .choice:has(input:focus-visible) {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  .choice-title {
+    font-weight: 600;
+  }
+
+  .choice small {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+  }
+
+  .no-relay {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+
+  .links {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .link-part {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .link-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .link {
+    flex: 1;
+    min-width: 0;
+    padding: var(--space-2) var(--space-3);
+    overflow: hidden;
+    font-size: var(--font-size-small);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: var(--color-panel);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+  }
+
+  .new-links {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .new-links summary {
+    font-size: var(--font-size-small);
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .new-links .hint {
+    margin: var(--space-2) 0;
   }
 
   .code-part {

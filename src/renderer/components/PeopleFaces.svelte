@@ -1,11 +1,11 @@
 <script lang="ts">
-  import type { Participant } from '../../core/collaboration/participants';
+  import type { PresentPerson } from '../collaboration/collaboration-state.svelte';
   import { initialsOf } from '../collaboration/collaboration-text';
   import { fillMessage } from '../i18n/messages';
   import { personColorOf } from '../theme/person-colors';
 
   interface Props {
-    readonly people: readonly Participant[];
+    readonly people: readonly PresentPerson[];
     readonly locale: string;
     readonly limit: number;
     readonly more: string;

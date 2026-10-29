@@ -1,3 +1,4 @@
+import { testShownLink } from '../../core/testing/secrets';
 import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encodeMessage, readMessage } from '../../core/collaboration/messages';
@@ -39,6 +40,7 @@ function side(session: SharedSession | null, ids: readonly string[]) {
   const opened: Uint8Array[] = [];
   const repairs: unknown[] = [];
   const hostChanges: [string | null, string | null][] = [];
+  const relayTold: unknown[][] = [];
   const kept: unknown[] = [];
   let openSucceeds = true;
   let openingError: Error | null = null;
@@ -68,10 +70,24 @@ function side(session: SharedSession | null, ids: readonly string[]) {
       state.attached(read.value);
       return Promise.resolve(true);
     },
+    openJoined: (project) => {
+      opened.push(project.state);
+      const read = openSharedSessionFromState(project.state);
+      if (!openSucceeds || !read.ok) {
+        return Promise.resolve(false);
+      }
+      current = read.value;
+      state.attached(read.value);
+      return Promise.resolve(true);
+    },
     repaired: (found) => repairs.push(...found),
     hostChanged: ({ left, next }) => hostChanges.push([left, next]),
     ownChangesKept: (result) => kept.push(result),
     selectedTaskId: () => (selected === null ? null : testId(selected)),
+    relayEnded: (reason, relay) => relayTold.push(['ended', reason, relay]),
+    relayLinkNotKept: () => relayTold.push(['linkNotKept']),
+    relayChangeRefused: () => relayTold.push(['changeRefused']),
+    relayNotReopened: () => relayTold.push(['notReopened']),
     shareLater: (share) => {
       laterShares.push(share);
       if (sharesAtOnce) {
@@ -89,6 +105,7 @@ function side(session: SharedSession | null, ids: readonly string[]) {
     repairs,
     hostChanges,
     kept,
+    relayTold,
     session: () => current,
     select: (id: string | null) => {
       selected = id;
@@ -937,14 +954,19 @@ describe('the settings and the plans nearby', () => {
     expect(page.state.settings).toBeNull();
     page.collaboration.settingsResult = {
       ok: true,
-      value: { name: null, port: 47_313, firewallNoticeSeen: false },
+      value: { name: null, port: 47_313, firewallNoticeSeen: false, relayAddress: null },
     };
     page.collaboration.saveSettingsResult = { ok: false, error: { code: 'WRITE_FAILED' } };
     expect(await page.state.saveSettings({ name: 'Léa' })).toEqual({
       ok: false,
       error: { code: 'WRITE_FAILED' },
     });
-    expect(page.state.settings).toEqual({ name: null, port: 47_313, firewallNoticeSeen: false });
+    expect(page.state.settings).toEqual({
+      name: null,
+      port: 47_313,
+      firewallNoticeSeen: false,
+      relayAddress: null,
+    });
   });
 
   it('lists the plans nearby while searching, and forgets them once it stops', async () => {
@@ -1110,5 +1132,87 @@ describe('joining and editing together', () => {
     host.select('a');
     await settle();
     expect(host.collaboration.sent).toEqual([]);
+  });
+});
+
+describe('a plan shared through a relay, seen from the page', () => {
+  const origin = createSharedDocument(project([workTask('a'), workTask('b')]), TEST_DOCUMENT_ID);
+
+  it('comes back to the relay of a plan opened with a kept link, following its events, in read only with the link that reads, and leaves it once stopped', async () => {
+    const session = sessionOn(origin, 1);
+    const reader = side(session, []);
+    reader.collaboration.relay.reopenResult = {
+      ok: true,
+      value: {
+        shown: { edit: null, view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…') },
+        relay: 'relay.example.org',
+      },
+    };
+    reader.state.attached(session);
+    await settle();
+    emit(reader.collaboration, { kind: 'relayConnected', member: 2, members: [] });
+    const connected = reader.state.relay.connection;
+    emit(reader.collaboration, { kind: 'offline' });
+    const offline = reader.state.relay.connection;
+    const readOnly = reader.state.isReadOnly;
+    await reader.state.stop();
+    expect([
+      reader.collaboration.relay.requests,
+      connected,
+      offline,
+      readOnly,
+      reader.state.relay.isActive,
+      reader.collaboration.requests.at(-1),
+    ]).toEqual([
+      [['reopenSharedPlan', TEST_DOCUMENT_ID]],
+      'connected',
+      'offline',
+      true,
+      false,
+      ['stop'],
+    ]);
+  });
+
+  it('joins a plan by its link, opening the plan the main process offered and sending its own changes', async () => {
+    const joiner = side(null, []);
+    await named(joiner.state, 'Léa');
+    joiner.collaboration.relay.joinResult = {
+      ok: true,
+      value: {
+        project: {
+          state: sessionOn(origin, 2).encodeState(),
+          documentId: TEST_DOCUMENT_ID,
+          fileName: '',
+          warnings: [],
+          localChanges: null,
+        },
+        shown: {
+          edit: testShownLink('tasklace://relay.example.org/#e1.Hq7Lm2…'),
+          view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…'),
+        },
+        relay: 'relay.example.org',
+        bytesSinceSnapshot: 0,
+        kept: true,
+      },
+    };
+    const answer = await joiner.state.relay.join('tasklace://relay.example.org/#e1.key');
+    rename(joiner.session(), 'a', 'Mine');
+    await settle();
+    expect([
+      answer,
+      joiner.opened.length,
+      joiner.collaboration.relay.sent.map((outgoing) =>
+        outgoing.kind === 'message' ? outgoing.message.kind : outgoing.kind,
+      ),
+    ]).toEqual([{ ok: true, value: null }, 1, ['presence', 'update']]);
+  });
+
+  it('warns about an event of a relay when the page shares nothing through one', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const idle = side(sessionOn(origin, 1), []);
+    emit(idle.collaboration, { kind: 'relayCaughtUp' });
+    expect(warn.mock.calls).toEqual([
+      ['An event of a plan shared through a relay came while none is: relayCaughtUp.'],
+    ]);
   });
 });

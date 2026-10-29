@@ -26,7 +26,7 @@ import {
   type ResultChannel,
   type SavedProject,
 } from '../preload/bridge-contract';
-import type { FileTask, ResultOfTask, LoadedProject } from './file-tasks';
+import type { FileTask, ResultOfTask, LoadedProject, RelayPlan } from './file-tasks';
 import {
   readExchangeKind,
   readExportText,
@@ -43,8 +43,13 @@ import {
   projectNameFromPath,
   withExtension,
 } from './project-names';
-import { setLocalCopyAside } from './local-copies';
-import { readRecentProjects, recordRecentProject } from './recent-projects';
+import { lastSavedPath, setLocalCopyAside } from './local-copies';
+import {
+  noteRecentRelay,
+  readRecentProjects,
+  recordRecentProject,
+  type RecentEntry,
+} from './recent-projects';
 import { writeFileSafely } from './safe-write';
 import { createSerialQueue } from './serial-queue';
 import { isMissingFile, isSystemError } from './stored-files';
@@ -58,10 +63,20 @@ export interface ProjectFileServices {
 
 export type WindowProjectKind = 'none' | 'withFile' | 'withoutFile' | 'joinedPlan';
 
+export interface ProjectFileHandlers {
+  readonly offerRelayPlan: (
+    sender: WebContents,
+    plan: RelayPlan,
+    relay: string,
+  ) => Promise<OpenedProject>;
+  readonly noteRelay: (sender: WebContents, relay: string | null) => Promise<void>;
+}
+
 interface WindowProject {
   readonly path: string | null;
   readonly documentId: DocumentId;
   readonly joined: boolean;
+  readonly relay?: string | null;
 }
 
 type ReadKind = 'tasklace' | ExchangeKind;
@@ -88,6 +103,7 @@ const CANCEL_BUTTON = 1;
 const FILE_PLACEHOLDER = '{file}';
 const LOCAL_COPY_FOLDER = 'local-copies';
 const KEPT_FOLDER = 'kept-plans';
+const SHARED_FOLDER = 'shared-plans';
 const KEPT_NAME_ATTEMPTS = 64;
 const projects = new WeakMap<WebContents, WindowProject>();
 const saveInOrder = createSerialQueue();
@@ -98,6 +114,11 @@ const keptChanges = new WeakMap<WebContents, string>();
 export function forgetWindowProject(sender: WebContents): void {
   projects.delete(sender);
   offered.delete(sender);
+}
+
+/** Gives the identifier of the plan the window of a page holds, or null when it holds none. */
+export function windowDocumentOf(sender: WebContents): DocumentId | null {
+  return projects.get(sender)?.documentId ?? null;
 }
 
 /** Tells what the window of a page holds: no project, a project saved to a file, a shared plan it joined, or a project kept only on this computer. */
@@ -112,8 +133,8 @@ export function windowProjectKind(sender: WebContents): WindowProjectKind {
   return project.joined ? 'joinedPlan' : 'withoutFile';
 }
 
-/** Answers the project file requests of the bridge (new, open, recent, import, adopt, save, save as, export, changes kept apart), the main process alone choosing paths and knowing the project of each window, which changes only once its page adopts it. */
-export function registerProjectFileHandlers(services: ProjectFileServices): void {
+/** Answers the project file requests of the bridge, the main process alone choosing paths and knowing the project of each window, which changes only once its page adopts it, and returns how to offer and note plans shared through a relay. */
+export function registerProjectFileHandlers(services: ProjectFileServices): ProjectFileHandlers {
   /** Registers the answer of a channel, which checks first that the page asking is trusted. */
   const handle = <C extends InvokeChannel>(channel: C, answer: ChannelHandler<C>): void => {
     handleChannel(services.assertTrusted, channel, answer);
@@ -163,6 +184,10 @@ export function registerProjectFileHandlers(services: ProjectFileServices): void
   handleFileAction(IPC_CHANNELS.setLocalCopyAside, (event, documentId) =>
     setCopyAside(services, event.sender, documentId),
   );
+  return {
+    offerRelayPlan: (sender, plan, relay) => offerRelayPlan(services, sender, plan, relay),
+    noteRelay: (sender, relay) => noteRelay(services, sender, relay),
+  };
 }
 
 /** Answers a file request of the bridge, turning an Error other than a refusal into a logged task failure the page can report, and throwing again a value that is not an Error. */
@@ -207,7 +232,7 @@ async function adoptProject(
   offered.delete(sender);
   projects.set(sender, project);
   if (project.path !== null) {
-    await rememberRecentProject(services, project.path);
+    await rememberRecentProject(services, project.path, project.relay);
   }
   return success(null);
 }
@@ -258,6 +283,94 @@ export function offerSharedProject(sender: WebContents, loaded: LoadedProject): 
   };
 }
 
+/** Offers a window the plan it joined through a relay as a file of its own on this computer, so that it reopens from the recent projects with its relay, or as a project without file when that file cannot be written, which is logged. */
+async function offerRelayPlan(
+  services: ProjectFileServices,
+  sender: WebContents,
+  plan: RelayPlan,
+  relay: string,
+): Promise<OpenedProject> {
+  const { state, documentId } = plan;
+  const path = await saveInOrder(() => keepRelayPlan(services, plan));
+  offered.set(sender, { path, documentId, joined: path === null, relay });
+  return {
+    state,
+    documentId,
+    fileName: path === null ? '' : basename(path),
+    warnings: [],
+    localChanges: null,
+  };
+}
+
+/** Writes a plan joined through a relay to a file of its own in the folder of shared plans, the file this computer already keeps for the same plan or a new one under the name of its plan, giving its path or null when it could not be written. */
+async function keepRelayPlan(
+  services: ProjectFileServices,
+  plan: RelayPlan,
+): Promise<string | null> {
+  const folder = join(services.userDataFolder, SHARED_FOLDER);
+  if (!(await createdFolder(folder, 'shared plans'))) {
+    return null;
+  }
+  const localCopyFolder = join(services.userDataFolder, LOCAL_COPY_FOLDER);
+  const path =
+    (await keptSharedPlan(localCopyFolder, folder, plan.documentId)) ??
+    (await freePathIn(
+      folder,
+      fileNameForProject(plan.name, 'tasklace', MESSAGES.projects.untitled),
+    ));
+  const written = await services.runTask({
+    kind: 'saveProject',
+    path,
+    state: plan.state,
+    documentId: plan.documentId,
+    localCopyFolder,
+    savedAt: new Date(),
+  });
+  if (!written.ok) {
+    console.error(
+      `The plan joined through a relay could not be kept as ${path}: ${written.error.code}.`,
+    );
+    return null;
+  }
+  return path;
+}
+
+/** Gives the file in the folder of shared plans where a plan joined before was last saved, or null when it has none there, an index that cannot be read being only logged. */
+async function keptSharedPlan(
+  localCopyFolder: string,
+  folder: string,
+  documentId: DocumentId,
+): Promise<string | null> {
+  try {
+    const path = await lastSavedPath(localCopyFolder, documentId);
+    return path !== null && dirname(path) === folder ? path : null;
+  } catch (error) {
+    console.error('The file of a plan joined before could not be looked for:', error);
+    return null;
+  }
+}
+
+/** Notes the relay the plan of a window is shared through, or that it is shared through none, in the recent projects when the plan has a file, a list that cannot be written being only logged. */
+async function noteRelay(
+  services: ProjectFileServices,
+  sender: WebContents,
+  relay: string | null,
+): Promise<void> {
+  const project = projects.get(sender);
+  if (project === undefined) {
+    return;
+  }
+  projects.set(sender, { ...project, relay });
+  if (project.path === null) {
+    return;
+  }
+  try {
+    await noteRecentRelay(recentStore(services), project.path, relay);
+  } catch (error) {
+    console.error('The relay of a recent project could not be noted:', error);
+  }
+}
+
 /** Lets the user choose a project file, then opens it. */
 async function chooseAndOpen(
   services: ProjectFileServices,
@@ -274,43 +387,50 @@ async function openRecent(
   value: unknown,
 ): Promise<BridgeResult<OpenedProject>> {
   const index = readRecentIndex(value) ?? refuseMessage();
-  const read = await readRecentPaths(services);
+  const read = await readRecentEntries(services);
   if (!read.ok) {
     return read;
   }
-  const paths = read.value;
-  const path = paths[index];
+  const entries = read.value;
+  const path = entries[index]?.path;
   if (path === undefined) {
     console.error(
-      `The page asked for recent project ${String(index)}, but only ${String(paths.length)} are known.`,
+      `The page asked for recent project ${String(index)}, but only ${String(entries.length)} are known.`,
     );
     return failure({ code: 'READ_FAILED' });
   }
   return openPath(services, sender, path);
 }
 
-/** Lists the recent projects by name and folder, a list that cannot be read being logged and reported, so that the page keeps the list it shows and tells the user. */
+/** Lists the recent projects by name, folder and the relay their plan is shared through, a list that cannot be read being logged and reported, so that the page keeps the list it shows and tells the user. */
 async function listRecent(
   services: ProjectFileServices,
 ): Promise<BridgeResult<readonly RecentProject[]>> {
-  const read = await readRecentPaths(services);
+  const read = await readRecentEntries(services);
   return read.ok
     ? success(
-        read.value.map((path) => ({
+        read.value.map(({ path, relay }) => ({
           name: projectNameFromPath(path, MESSAGES.projects.untitled),
-          folder:
-            dirname(path) === join(services.userDataFolder, KEPT_FOLDER)
-              ? MESSAGES.projects.keptOnThisComputer
-              : dirname(path),
+          folder: isOnThisComputer(services, path)
+            ? MESSAGES.projects.keptOnThisComputer
+            : dirname(path),
+          relay,
         })),
       )
     : read;
 }
 
-/** Reads the paths of the recent projects, a failure of the system being logged and reported as a failed read. */
-async function readRecentPaths(
+/** Tells whether a project file lives in a folder Tasklace keeps on this computer, for changes kept apart or plans joined through a relay. */
+function isOnThisComputer(services: ProjectFileServices, path: string): boolean {
+  return [KEPT_FOLDER, SHARED_FOLDER].some(
+    (folder) => dirname(path) === join(services.userDataFolder, folder),
+  );
+}
+
+/** Reads the recent projects, a failure of the system being logged and reported as a failed read. */
+async function readRecentEntries(
   services: ProjectFileServices,
-): Promise<BridgeResult<readonly string[]>> {
+): Promise<BridgeResult<readonly RecentEntry[]>> {
   try {
     return success(await readRecentProjects(recentStore(services)));
   } catch (error) {
@@ -433,7 +553,7 @@ async function keepOwnChanges(
     return failure({ code: 'NO_PROJECT' });
   }
   const folder = join(services.userDataFolder, KEPT_FOLDER);
-  if (!(await createdFolder(folder))) {
+  if (!(await createdFolder(folder, 'kept changes'))) {
     return failure({ code: 'WRITE_FAILED' });
   }
   const fileName = fileNameForProject(
@@ -475,8 +595,8 @@ async function openKeptChanges(
   return openPath(services, sender, path);
 }
 
-/** Creates a folder when it is missing, telling whether it now exists, an error of the system being logged. */
-async function createdFolder(folder: string): Promise<boolean> {
+/** Creates a folder when it is missing, telling whether it now exists, an error of the system being logged with what the folder holds. */
+async function createdFolder(folder: string, holding: string): Promise<boolean> {
   try {
     await mkdir(folder, { recursive: true });
     return true;
@@ -484,7 +604,7 @@ async function createdFolder(folder: string): Promise<boolean> {
     if (!isSystemError(error)) {
       throw error;
     }
-    console.error('The folder of the kept changes could not be created:', error);
+    console.error(`The folder of the ${holding} could not be created:`, error);
     return false;
   }
 }
@@ -502,10 +622,14 @@ async function freePathIn(folder: string, fileName: string): Promise<string> {
   return join(folder, `${randomUUID()}${extension}`);
 }
 
-/** Adds a project to the recent list, a list that cannot be read or written being only logged since the project itself is fine. */
-async function rememberRecentProject(services: ProjectFileServices, path: string): Promise<void> {
+/** Adds a project to the recent list, with the relay its plan is shared through when it is known, a list that cannot be read or written being only logged since the project itself is fine. */
+async function rememberRecentProject(
+  services: ProjectFileServices,
+  path: string,
+  relay?: string | null,
+): Promise<void> {
   try {
-    await recordRecentProject(recentStore(services), path);
+    await recordRecentProject(recentStore(services), path, relay);
   } catch (error) {
     console.error('The recent projects could not be recorded:', error);
   }

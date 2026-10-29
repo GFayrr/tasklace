@@ -79,6 +79,16 @@ const bridge: TasklaceBridge = {
   copyJoinCode: () => request(IPC_CHANNELS.copyJoinCode),
   findNextHost: (queue, planName, hostName, knownPeople) =>
     request(IPC_CHANNELS.findNextHost, queue, planName, hostName, knownPeople),
+  shareThroughRelay: (address) => request(IPC_CHANNELS.shareThroughRelay, address),
+  joinByLink: (link) => request(IPC_CHANNELS.joinByLink, link),
+  reopenSharedPlan: (documentId) => request(IPC_CHANNELS.reopenSharedPlan, documentId),
+  makeNewLinks: () => request(IPC_CHANNELS.makeNewLinks),
+  forgetSharedPlan: () => request(IPC_CHANNELS.forgetSharedPlan),
+  copyRelayLink: (kind) => request(IPC_CHANNELS.copyRelayLink, kind),
+  openGuide: () => request(IPC_CHANNELS.openGuide),
+  sendToRelay: (outgoing) => {
+    ipcRenderer.send(IPC_CHANNELS.relaySend, outgoing);
+  },
   sendToCollaboration: (to, message) => {
     ipcRenderer.send(IPC_CHANNELS.collaborationSend, to, message);
   },
@@ -163,8 +173,10 @@ function isRegionalFormat(value: unknown): value is RegionalFormat {
 
 /** Tells whether an answer has the shape of a recent project. */
 function isRecentProject(value: unknown): value is RecentProject {
+  const relay: unknown = Reflect.get(Object(value), 'relay');
   return (
     typeof Reflect.get(Object(value), 'name') === 'string' &&
-    typeof Reflect.get(Object(value), 'folder') === 'string'
+    typeof Reflect.get(Object(value), 'folder') === 'string' &&
+    (relay === null || typeof relay === 'string')
   );
 }

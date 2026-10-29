@@ -21,19 +21,42 @@ afterEach(async () => {
 });
 
 describe('the collaboration settings of this computer', () => {
-  it('starts with no name, port 47313 and the note about the firewall not seen', async () => {
+  it('starts with no name, port 47313, the note about the firewall not seen and no relay', async () => {
     expect(await loadCollaborationSettings(join(folder, 'settings.json'))).toEqual({
       name: null,
       port: 47_313,
       firewallNoticeSeen: false,
+      relayAddress: null,
     });
   });
 
   it('keeps what was stored', async () => {
     const path = join(folder, 'settings.json');
-    const settings = { name: 'Camille', port: 50_000, firewallNoticeSeen: true };
+    const settings = {
+      name: 'Camille',
+      port: 50_000,
+      firewallNoticeSeen: true,
+      relayAddress: 'wss://tasklace.my-school.example',
+    };
     await storeCollaborationSettings(path, settings);
     expect(await loadCollaborationSettings(path)).toEqual(settings);
+  });
+
+  it('reads settings stored before the address of a relay as having none, keeping the name', async () => {
+    const path = join(folder, 'settings.json');
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        settings: { name: 'Camille', port: 50_000, firewallNoticeSeen: true },
+      }),
+    );
+    expect(await loadCollaborationSettings(path)).toEqual({
+      name: 'Camille',
+      port: 50_000,
+      firewallNoticeSeen: true,
+      relayAddress: null,
+    });
   });
 
   it.each([
@@ -56,11 +79,15 @@ describe('the collaboration settings of this computer', () => {
   });
 
   it('reads settings from an untrusted value, refusing every other shape', () => {
-    expect(readCollaborationSettings({ name: 'Léa', port: 1, firewallNoticeSeen: false })).toEqual({
-      name: 'Léa',
-      port: 1,
-      firewallNoticeSeen: false,
-    });
+    expect(
+      [
+        { name: 'Léa', port: 1, firewallNoticeSeen: false, relayAddress: null },
+        { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 'wss://localhost:8080' },
+      ].map(readCollaborationSettings),
+    ).toEqual([
+      { name: 'Léa', port: 1, firewallNoticeSeen: false, relayAddress: null },
+      { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 'wss://localhost:8080' },
+    ]);
     expect(
       [
         null,
@@ -71,7 +98,12 @@ describe('the collaboration settings of this computer', () => {
         { name: null, port: 0, firewallNoticeSeen: false },
         { name: null, port: '1', firewallNoticeSeen: false },
         { name: null, port: 1, firewallNoticeSeen: 'no' },
+        { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 'ws://relay.example' },
+        { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 'ws://localhost:8080' },
+        { name: null, port: 1, firewallNoticeSeen: false, relayAddress: ' wss://relay.example' },
+        { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 'relay.example' },
+        { name: null, port: 1, firewallNoticeSeen: false, relayAddress: 3 },
       ].map(readCollaborationSettings),
-    ).toEqual([null, null, null, null, null, null, null, null]);
+    ).toEqual(Array.from({ length: 13 }, () => null));
   });
 });

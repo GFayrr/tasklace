@@ -37,6 +37,14 @@ vi.mock('electron', () => ({
 }));
 
 const ENDPOINT = { addresses: ['192.168.1.24'], port: 47_313 };
+const DELIVERY = {
+  kind: 'snapshot',
+  messageId: new Uint8Array(16),
+  covers: 3,
+  bytes: Uint8Array.of(1),
+  compressedBytes: 20,
+  settled: 4,
+};
 
 const FORMAT = {
   listSeparator: ';',
@@ -123,25 +131,36 @@ describe('the bridge exposed to the page', () => {
     const bridge = await loadBridge();
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      const entries = [
-        { name: 'Plan', folder: '/projects' },
-        { name: 3, folder: '/projects' },
-        { name: 'Other' },
+      const single = { name: 'Plan', folder: '/projects', relay: null };
+      const malformed = [
+        { name: 3, folder: '/projects', relay: null },
+        { name: 'Other', relay: null },
+        { name: 'Shared', folder: '/projects', relay: 7 },
+        { name: 'Shared', folder: '/projects' },
         null,
       ];
-      electron.invoke.mockResolvedValueOnce({ ok: true, value: entries });
-      expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
-      const single = { name: 'Plan', folder: '/projects' };
+      const refusals = [];
+      for (const entry of malformed) {
+        electron.invoke.mockResolvedValueOnce({ ok: true, value: [single, entry] });
+        refusals.push(await bridge.recentProjects());
+      }
+      expect(refusals).toEqual(
+        malformed.map(() => ({ ok: false, error: { code: 'TASK_FAILED' } })),
+      );
       electron.invoke.mockResolvedValueOnce({ ok: true, value: single });
       expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
-      electron.invoke.mockResolvedValueOnce({ ok: true, value: [single] });
-      expect(await bridge.recentProjects()).toEqual({ ok: true, value: [single] });
+      const both = [single, { name: 'Thesis', folder: '/projects', relay: 'relay.example' }];
+      electron.invoke.mockResolvedValueOnce({ ok: true, value: both });
+      expect(await bridge.recentProjects()).toEqual({ ok: true, value: both });
       electron.invoke.mockResolvedValueOnce({ ok: false, error: { code: 'READ_FAILED' } });
       expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'READ_FAILED' } });
       electron.invoke.mockResolvedValueOnce([single]);
       expect(await bridge.recentProjects()).toEqual({ ok: false, error: { code: 'TASK_FAILED' } });
       expect(logged.mock.calls).toEqual([
-        ['The main process sent recent projects of an unexpected shape:', entries],
+        ...malformed.map((entry) => [
+          'The main process sent recent projects of an unexpected shape:',
+          [single, entry],
+        ]),
         ['The main process sent recent projects that are not a list:', single],
         [
           `The main process answered ${IPC_CHANNELS.recentProjects} with an unexpected shape:`,
@@ -213,7 +232,7 @@ describe('the shared plan through the bridge', () => {
   it('sends each collaboration request on its own channel with its values', async () => {
     const bridge = await loadBridge();
     electron.invoke.mockResolvedValue({ ok: true, value: null });
-    const settings = { name: 'Léa', port: 47_313, firewallNoticeSeen: true };
+    const settings = { name: 'Léa', port: 47_313, firewallNoticeSeen: true, relayAddress: null };
     const joining = {
       address: '192.168.1.24',
       port: 47_313,
@@ -253,6 +272,31 @@ describe('the shared plan through the bridge', () => {
         'Léa',
         [],
       ],
+    ]);
+  });
+
+  it('sends each request about a relay on its own channel with its values', async () => {
+    const bridge = await loadBridge();
+    electron.invoke.mockResolvedValue({ ok: true, value: null });
+    const documentId = requireDocumentId('8a1d2f3c-4b5e-4f60-8a7b-9c0d1e2f3a4b');
+    await bridge.shareThroughRelay('wss://relay.example.org');
+    await bridge.joinByLink('tasklace://relay.example.org/#v1.key');
+    await bridge.reopenSharedPlan(documentId);
+    await bridge.makeNewLinks();
+    await bridge.copyRelayLink('view');
+    await bridge.openGuide();
+    const outgoing = { kind: 'presence', bytes: Uint8Array.of(1) } as const;
+    bridge.sendToRelay(outgoing);
+    expect([electron.invoke.mock.calls, electron.sent]).toEqual([
+      [
+        [IPC_CHANNELS.shareThroughRelay, 'wss://relay.example.org'],
+        [IPC_CHANNELS.joinByLink, 'tasklace://relay.example.org/#v1.key'],
+        [IPC_CHANNELS.reopenSharedPlan, documentId],
+        [IPC_CHANNELS.makeNewLinks],
+        [IPC_CHANNELS.copyRelayLink, 'view'],
+        [IPC_CHANNELS.openGuide],
+      ],
+      [[IPC_CHANNELS.relaySend, outgoing]],
     ]);
   });
 
@@ -313,6 +357,15 @@ describe('the shared plan through the bridge', () => {
       { kind: 'hostMessage', message: Uint8Array.of(2) },
       { kind: 'ended', reason: 'WRONG_CODE' },
       { kind: 'ended', reason: 'TURNED_AWAY' },
+      { kind: 'relayConnected', member: 2, members: [1, 3] },
+      { kind: 'relayState', state: Uint8Array.of(1), bytesSinceSnapshot: 0 },
+      { kind: 'relayState', state: null, bytesSinceSnapshot: 12 },
+      { kind: 'relayDelivery', delivery: DELIVERY },
+      { kind: 'relayCaughtUp' },
+      { kind: 'relayPresence', member: 1, presence: { bytes: Uint8Array.of(1), canEdit: true } },
+      { kind: 'relayJoined', member: 4 },
+      { kind: 'relayLeft', member: 4 },
+      { kind: 'relayEnded', reason: 'UNTRUSTED' },
     ];
     const invalid = [
       null,
@@ -358,6 +411,24 @@ describe('the shared plan through the bridge', () => {
         },
       },
       { kind: 'becameHost', sharing: null },
+      { kind: 'relayConnected', member: -1, members: [] },
+      { kind: 'relayConnected', member: 1, members: [1.5] },
+      { kind: 'relayConnected', member: 1, members: 'all' },
+      { kind: 'relayState', state: [1], bytesSinceSnapshot: 0 },
+      { kind: 'relayState', state: null, bytesSinceSnapshot: -1 },
+      { kind: 'relayDelivery', delivery: { ...DELIVERY, kind: 'other' } },
+      { kind: 'relayDelivery', delivery: { ...DELIVERY, messageId: new Uint8Array(8) } },
+      { kind: 'relayDelivery', delivery: { ...DELIVERY, messageId: [1] } },
+      { kind: 'relayDelivery', delivery: { ...DELIVERY, covers: 0.5 } },
+      { kind: 'relayDelivery', delivery: { ...DELIVERY, kind: 'update', covers: 2 } },
+      { kind: 'relayDelivery', delivery: { ...DELIVERY, bytes: 'text' } },
+      { kind: 'relayDelivery', delivery: { ...DELIVERY, compressedBytes: -2 } },
+      { kind: 'relayDelivery', delivery: { ...DELIVERY, settled: null } },
+      { kind: 'relayPresence', member: 1, presence: { bytes: 'text', canEdit: true } },
+      { kind: 'relayPresence', member: 1, presence: { bytes: Uint8Array.of(1), canEdit: 'yes' } },
+      { kind: 'relayJoined', member: 'one' },
+      { kind: 'relayLeft', member: null },
+      { kind: 'relayEnded', reason: 'WRONG_CODE' },
     ];
     [...valid, ...invalid].forEach(emit);
     expect(received).toEqual(valid);

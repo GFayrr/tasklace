@@ -6,6 +6,8 @@ import {
   type RejoinToken,
 } from '../collaboration/secure/link';
 import { requireTokenDigest, type TokenDigest } from '../collaboration/secure/token-digest';
+import type { RelayVerifyKey } from '../collaboration/relay/relay-keys';
+import { isShownRelayLink, type ShownRelayLink } from '../collaboration/relay/relay-link';
 
 /** Gives bytes a test uses as the key of a plan, failing the test when they do not have its length. */
 export function testPlanKey(bytes: Uint8Array): PlanKey {
@@ -32,4 +34,17 @@ export function testToken(text: string): RejoinToken {
 /** Gives a text a test uses as the digest of a token, failing the test when it is not one. */
 export function testDigest(text: string): TokenDigest {
   return requireTokenDigest(text);
+}
+
+/** Gives any bytes as the key that checks signatures, unchecked, for tests that show what a forged key would do. */
+export function forgedVerifyKey(bytes: Uint8Array): RelayVerifyKey {
+  return bytes as RelayVerifyKey;
+}
+
+/** Gives a text a test uses as a link shown on screen, failing the test when it is not cut as one. */
+export function testShownLink(text: string): ShownRelayLink {
+  if (!isShownRelayLink(text)) {
+    throw new RangeError(`Not a link shown on screen: ${text}`);
+  }
+  return text;
 }

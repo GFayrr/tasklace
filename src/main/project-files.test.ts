@@ -53,6 +53,10 @@ vi.mock('./recent-projects', async (importOriginal) => {
       recording.failure === null
         ? original.recordRecentProject(...values)
         : Promise.reject(recording.failure),
+    noteRecentRelay: (...values: Parameters<typeof original.noteRecentRelay>) =>
+      recording.failure === null
+        ? original.noteRecentRelay(...values)
+        : Promise.reject(recording.failure),
   };
 });
 
@@ -89,7 +93,7 @@ const trusted = vi.fn();
 let folder: string;
 let userData: string;
 
-registerProjectFileHandlers({
+const files = registerProjectFileHandlers({
   assertTrusted: trusted,
   runTask: async (task) => {
     tasks.push(task);
@@ -203,7 +207,7 @@ describe('opening projects', () => {
     expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(success([]));
     expect(await request(IPC_CHANNELS.adoptProject, sender, DOCUMENT_ID)).toEqual(success(null));
     expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(
-      success([{ name: 'Thesis', folder }]),
+      success([{ name: 'Thesis', folder, relay: null }]),
     );
     expect(trusted).toHaveBeenCalledTimes(4);
   });
@@ -553,8 +557,8 @@ describe('saving projects', () => {
     expect(tasks.at(-1)).toMatchObject({ path: join(folder, 'New.tasklace') });
     expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(
       success([
-        { name: 'New', folder },
-        { name: 'Old', folder },
+        { name: 'New', folder, relay: null },
+        { name: 'Old', folder, relay: null },
       ]),
     );
   });
@@ -804,8 +808,8 @@ describe('keeping the changes a person could not share', () => {
     ]).toEqual([STATE, true, '{plan} (my changes)', path, join(userData, 'local-copies'), keptAt]);
     expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(
       success([
-        { name: 'Thesis (my changes)', folder: 'Kept on this computer' },
-        { name: 'Thesis', folder },
+        { name: 'Thesis (my changes)', folder: 'Kept on this computer', relay: null },
+        { name: 'Thesis', folder, relay: null },
       ]),
     );
     await writeFile(path, 'project');
@@ -876,7 +880,7 @@ describe('keeping the changes a person could not share', () => {
       logged: [['A page asked to open the changes it kept, but its window kept none.']],
     });
     expect(await request(IPC_CHANNELS.recentProjects, {})).toEqual(
-      success([{ name: 'Thesis', folder }]),
+      success([{ name: 'Thesis', folder, relay: null }]),
     );
   });
 
@@ -988,6 +992,164 @@ describe('setting aside the local copy of an opened file', () => {
       failure({ code: 'WRITE_FAILED' }),
       [[`The local copy of ${path} could not be set aside:`, denied]],
       [`${DOCUMENT_ID}.tasklace`],
+    ]);
+  });
+});
+
+describe('plans shared through a relay', () => {
+  const SHARED = 'shared-plans';
+  const RELAY = 'relay.example';
+  const PLAN = {
+    kind: 'relayPlan',
+    state: STATE,
+    documentId: DOCUMENT_ID,
+    name: 'Thesis',
+  } as const;
+
+  it('offers a joined plan as a file of its own named after the plan, listed first with its relay once adopted', async () => {
+    const sender = {};
+    const opened = await files.offerRelayPlan(sender as WebContents, PLAN, RELAY);
+    const path = join(userData, SHARED, 'Thesis.tasklace');
+    const task = tasks.at(-1);
+    expect([
+      opened,
+      task?.kind === 'saveProject' && [
+        task.path,
+        task.state,
+        task.documentId,
+        task.localCopyFolder,
+        task.savedAt instanceof Date,
+      ],
+    ]).toEqual([
+      {
+        state: STATE,
+        documentId: DOCUMENT_ID,
+        fileName: 'Thesis.tasklace',
+        warnings: [],
+        localChanges: null,
+      },
+      [path, STATE, DOCUMENT_ID, copiesIn(userData), true],
+    ]);
+    expect(await request(IPC_CHANNELS.adoptProject, sender, DOCUMENT_ID)).toEqual(success(null));
+    expect([
+      windowProjectKind(sender as WebContents),
+      await request(IPC_CHANNELS.recentProjects, {}),
+    ]).toEqual([
+      'withFile',
+      success([{ name: 'Thesis', folder: 'Kept on this computer', relay: RELAY }]),
+    ]);
+  });
+
+  it('names a second joined plan of the same name apart from the first', async () => {
+    await mkdir(join(userData, SHARED));
+    await writeFile(join(userData, SHARED, 'Thesis.tasklace'), 'project');
+    const opened = await files.offerRelayPlan({} as WebContents, PLAN, RELAY);
+    expect([opened.fileName, tasks.at(-1)]).toMatchObject([
+      'Thesis 2.tasklace',
+      { kind: 'saveProject', path: join(userData, SHARED, 'Thesis 2.tasklace') },
+    ]);
+  });
+
+  it('writes a plan joined again into the file this computer keeps for it, and a plan last saved elsewhere into a file of its own', async () => {
+    const kept = join(userData, SHARED, 'Old name.tasklace');
+    /** Notes where the plan was last saved, as the local copy index does. */
+    const lastSavedIn = async (path: string): Promise<void> => {
+      await mkdir(copiesIn(userData), { recursive: true });
+      await writeFile(
+        join(copiesIn(userData), 'index.json'),
+        JSON.stringify({
+          version: 1,
+          copies: { [DOCUMENT_ID]: { path, savedAt: '2026-10-29T10:00:00.000Z' } },
+        }),
+      );
+    };
+    await lastSavedIn(kept);
+    const again = await files.offerRelayPlan({} as WebContents, PLAN, RELAY);
+    const intoKept = tasks.at(-1);
+    await lastSavedIn(join(folder, 'Thesis.tasklace'));
+    const elsewhere = await files.offerRelayPlan({} as WebContents, PLAN, RELAY);
+    expect([again.fileName, intoKept, elsewhere.fileName, tasks.at(-1)]).toMatchObject([
+      'Old name.tasklace',
+      { kind: 'saveProject', path: kept },
+      'Thesis.tasklace',
+      { kind: 'saveProject', path: join(userData, SHARED, 'Thesis.tasklace') },
+    ]);
+  });
+
+  it('offers a joined plan without a file when its file cannot be written, logging why', async () => {
+    const sender = {};
+    runTask.mockResolvedValueOnce(failure({ code: 'WRITE_FAILED' }));
+    const { answer, logged } = await quietly(() =>
+      files.offerRelayPlan(sender as WebContents, PLAN, RELAY),
+    );
+    expect(await request(IPC_CHANNELS.adoptProject, sender, DOCUMENT_ID)).toEqual(success(null));
+    expect([
+      answer,
+      logged,
+      windowProjectKind(sender as WebContents),
+      await request(IPC_CHANNELS.recentProjects, {}),
+    ]).toEqual([
+      { state: STATE, documentId: DOCUMENT_ID, fileName: '', warnings: [], localChanges: null },
+      [
+        [
+          `The plan joined through a relay could not be kept as ${join(userData, SHARED, 'Thesis.tasklace')}: WRITE_FAILED.`,
+        ],
+      ],
+      'joinedPlan',
+      success([]),
+    ]);
+  });
+
+  it('offers a joined plan without a file when the folder of shared plans cannot be created, logging why', async () => {
+    await writeFile(join(userData, SHARED), 'a file where the folder should be');
+    const { answer, logged } = await quietly(() =>
+      files.offerRelayPlan({} as WebContents, PLAN, RELAY),
+    );
+    expect([answer, logged.map((call): unknown => call[0]), tasks]).toEqual([
+      { state: STATE, documentId: DOCUMENT_ID, fileName: '', warnings: [], localChanges: null },
+      ['The folder of the shared plans could not be created:'],
+      [],
+    ]);
+  });
+
+  it('notes the relay of the plan of a window among the recent projects, keeps it when the file comes first again, and clears it', async () => {
+    const path = join(folder, 'Thesis.tasklace');
+    const sender = await openedIn(path);
+    await files.noteRelay(sender as WebContents, RELAY);
+    const noted = await request(IPC_CHANNELS.recentProjects, {});
+    const again = await openedIn(path);
+    const reopened = await request(IPC_CHANNELS.recentProjects, {});
+    await files.noteRelay(again as WebContents, null);
+    expect([noted, reopened, await request(IPC_CHANNELS.recentProjects, {})]).toEqual([
+      success([{ name: 'Thesis', folder, relay: RELAY }]),
+      success([{ name: 'Thesis', folder, relay: RELAY }]),
+      success([{ name: 'Thesis', folder, relay: null }]),
+    ]);
+  });
+
+  it('notes nothing for a window without a project or without a file, and logs a list that cannot be written', async () => {
+    const sender = await openedIn(join(folder, 'Thesis.tasklace'));
+    await files.noteRelay({} as WebContents, RELAY);
+    const unsaved = {};
+    const created = await request(IPC_CHANNELS.newProject, unsaved);
+    await request(IPC_CHANNELS.adoptProject, unsaved, created);
+    const taskCount = tasks.length;
+    const refusal = new Error('disk full');
+    recording.failure = refusal;
+    const { logged } = await quietly(async () => {
+      await files.noteRelay(unsaved as WebContents, RELAY);
+      await files.noteRelay(sender as WebContents, RELAY);
+    }).finally(() => {
+      recording.failure = null;
+    });
+    expect([
+      logged,
+      tasks.length - taskCount,
+      await request(IPC_CHANNELS.recentProjects, {}),
+    ]).toEqual([
+      [['The relay of a recent project could not be noted:', refusal]],
+      0,
+      success([{ name: 'Thesis', folder, relay: null }]),
     ]);
   });
 });

@@ -18,10 +18,12 @@ import {
   readSharedState,
   readTasklaceDocument,
   type FileError,
+  type SharedStateReading,
 } from '../core/file/tasklace-file';
 import type { Project } from '../core/model/project';
 import type { CheckedPrintDocument } from '../core/print/read-print-document';
 import { failure, success, type Result } from '../core/result';
+import { readRelayLog } from '../core/collaboration/relay/relay-log';
 import { createSharedDocument, type DocumentId } from '../core/shared/shared-document';
 import type { FileFailure } from '../preload/bridge-contract';
 import { localCopyPath, saveLocalCopy } from './local-copies';
@@ -33,6 +35,7 @@ import { zlibCompressor } from './zlib-compressor';
 export type FileTask =
   | { readonly kind: 'openProject'; readonly path: string; readonly localCopyFolder: string }
   | { readonly kind: 'readSharedState'; readonly state: Uint8Array }
+  | { readonly kind: 'readRelayLog'; readonly messages: readonly Uint8Array[] }
   | {
       readonly kind: 'importJson';
       readonly path: string;
@@ -81,6 +84,13 @@ export interface LoadedProject {
   readonly localChanges: Uint8Array | null;
 }
 
+export interface RelayPlan {
+  readonly kind: 'relayPlan';
+  readonly state: Uint8Array;
+  readonly documentId: DocumentId;
+  readonly name: string;
+}
+
 export interface SavedFiles {
   readonly kind: 'saved';
   readonly localCopySaved: boolean;
@@ -91,10 +101,14 @@ export interface DirectPdf {
   readonly pdf: Uint8Array;
 }
 
-export type FileTaskResult = Result<LoadedProject | SavedFiles | DirectPdf, FileFailure>;
+export type FileTaskResult = Result<
+  LoadedProject | RelayPlan | SavedFiles | DirectPdf,
+  FileFailure
+>;
 interface TaskOutcomes {
   readonly openProject: LoadedProject;
   readonly readSharedState: LoadedProject;
+  readonly readRelayLog: RelayPlan;
   readonly importJson: LoadedProject;
   readonly importCsv: LoadedProject;
   readonly saveProject: SavedFiles;
@@ -107,6 +121,7 @@ export type ResultOfTask<T extends FileTask> = Result<TaskOutcomes[T['kind']], F
 const OUTCOME_KINDS = {
   openProject: 'loaded',
   readSharedState: 'loaded',
+  readRelayLog: 'relayPlan',
   importJson: 'loaded',
   importCsv: 'loaded',
   saveProject: 'saved',
@@ -133,7 +148,9 @@ export async function runFileTask(task: FileTask): Promise<FileTaskResult> {
     case 'openProject':
       return openProject(task.path, task.localCopyFolder);
     case 'readSharedState':
-      return sharedState(task.state);
+      return sharedState(readSharedState(task.state));
+    case 'readRelayLog':
+      return relayPlan(readRelayLog(task.messages));
     case 'importJson':
       return importText(task.path, MAX_JSON_FILE_BYTES, (text) =>
         importJsonText(text, task.documentId, task.naming),
@@ -176,12 +193,10 @@ function lighterPdfRefusal(error: unknown): 'TOO_LARGE' | 'MISSING_CHARACTERS' |
   return error instanceof MissingCharacter ? 'MISSING_CHARACTERS' : null;
 }
 
-/** Checks completely the state of a shared plan received on joining it, as the content of a file, a state refused being logged with its code. */
-function sharedState(state: Uint8Array): FileTaskResult {
-  const read = readSharedState(state);
+/** Gives the state of a shared plan received on joining it from its host, once checked completely as the content of a file, a state refused being logged with its code. */
+function sharedState(read: Result<SharedStateReading, FileError>): FileTaskResult {
   if (!read.ok) {
-    console.warn(`The shared plan received could not be opened: ${read.error.code}.`);
-    return failure(withoutReason(read.error));
+    return refusedSharedState(read.error);
   }
   return success({
     kind: 'loaded',
@@ -190,6 +205,25 @@ function sharedState(state: Uint8Array): FileTaskResult {
     warnings: [],
     localChanges: null,
   });
+}
+
+/** Gives the plan the log of a relay holds, its state checked completely as the content of a file, with the name of the plan for its own file, a log refused being logged with its code. */
+function relayPlan(read: Result<SharedStateReading, FileError>): FileTaskResult {
+  if (!read.ok) {
+    return refusedSharedState(read.error);
+  }
+  return success({
+    kind: 'relayPlan',
+    state: ownBytes(read.value.state),
+    documentId: read.value.documentId,
+    name: read.value.name,
+  });
+}
+
+/** Logs a shared plan received that could not be opened, giving the failure the page reads. */
+function refusedSharedState(error: FileError): FileTaskResult {
+  console.warn(`The shared plan received could not be opened: ${error.code}.`);
+  return failure(withoutReason(error));
 }
 
 /** Reads a .tasklace file and checks it completely, giving back its Yjs state and document identifier with the changes its local copy holds that it lacks, a file refused being logged with its code. */
