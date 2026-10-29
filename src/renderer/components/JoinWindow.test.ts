@@ -1,3 +1,4 @@
+import { fillMessage } from '../i18n/messages';
 import { describe, expect, it } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
 import { project, workTask } from '../../core/testing/project-builder';
@@ -382,7 +383,7 @@ describe('joining a plan by its link', () => {
       relayRequests(control),
     ]).toEqual([
       'The relay relay.example.org:8443 did not answer. Check your connection, or ask who sent you the link.',
-      RELAY.ends.NO_ROOM,
+      fillMessage(RELAY.ends.NO_ROOM, { relay: 'relay.example.org:8443' }),
       TEXT.nameNotKept,
       2,
       [

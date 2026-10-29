@@ -77,6 +77,8 @@ async function join(keys: RelayKeys, clientId: number, creates: boolean): Promis
     randomBytes: seededRandom(clientId),
   };
   const assembler = createRelayAssembler(keys, crypto);
+  let number = 0;
+  let since = 0;
   const socket = new WebSocket(`ws://127.0.0.1:${String(relay.port)}/`);
   await new Promise((resolve) => socket.once('open', resolve));
   /** Sends a frame to the relay. */
@@ -91,13 +93,13 @@ async function join(keys: RelayKeys, clientId: number, creates: boolean): Promis
     randomBytes: seededRandom(clientId + 100),
     send: (outgoing) => {
       if (outgoing.kind === 'presence') {
-        const sealed = sealRelayPresence(keys, outgoing.bytes, crypto);
+        const sealed = sealRelayPresence(keys, number, outgoing.bytes, crypto);
         if (sealed.ok) {
           send({ type: 'presence', bytes: sealed.value });
         }
         return;
       }
-      const sealed = sealRelayMessage(keys, outgoing.message, crypto);
+      const sealed = sealRelayMessage(keys, { ...outgoing.message, seen: since }, crypto);
       if (sealed.ok) {
         sealed.value.forEach((record) => {
           send({ type: 'append', record });
@@ -111,17 +113,21 @@ async function join(keys: RelayKeys, clientId: number, creates: boolean): Promis
     if (frame === null || frame === 'UNSUPPORTED_VERSION') {
       throw new Error('The relay sent what is not a frame.');
     }
+    if (frame.type === 'welcome') {
+      number = frame.member;
+    }
     if (frame.type === 'caughtUp') {
       member.caughtUp();
     }
     if (frame.type === 'presence') {
-      const opened = openRelayPresence(keys, frame.bytes, crypto);
+      const opened = openRelayPresence(keys, frame.member, frame.bytes, crypto);
       if (opened !== null) {
         member.presence(frame.member, opened);
       }
     }
     if (frame.type === 'record') {
       const taken = assembler.take(frame.seq, frame.record);
+      since = taken.ok ? frame.seq : since;
       if (taken.ok && taken.value !== null) {
         member.receive({ ...taken.value, settled: assembler.settled() });
       }

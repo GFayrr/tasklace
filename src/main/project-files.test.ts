@@ -1050,6 +1050,32 @@ describe('plans shared through a relay', () => {
     ]);
   });
 
+  it('writes a plan joined again into the file this computer keeps for it, and a plan last saved elsewhere into a file of its own', async () => {
+    const kept = join(userData, SHARED, 'Old name.tasklace');
+    /** Notes where the plan was last saved, as the local copy index does. */
+    const lastSavedIn = async (path: string): Promise<void> => {
+      await mkdir(copiesIn(userData), { recursive: true });
+      await writeFile(
+        join(copiesIn(userData), 'index.json'),
+        JSON.stringify({
+          version: 1,
+          copies: { [DOCUMENT_ID]: { path, savedAt: '2026-10-29T10:00:00.000Z' } },
+        }),
+      );
+    };
+    await lastSavedIn(kept);
+    const again = await files.offerRelayPlan({} as WebContents, PLAN, RELAY);
+    const intoKept = tasks.at(-1);
+    await lastSavedIn(join(folder, 'Thesis.tasklace'));
+    const elsewhere = await files.offerRelayPlan({} as WebContents, PLAN, RELAY);
+    expect([again.fileName, intoKept, elsewhere.fileName, tasks.at(-1)]).toMatchObject([
+      'Old name.tasklace',
+      { kind: 'saveProject', path: kept },
+      'Thesis.tasklace',
+      { kind: 'saveProject', path: join(userData, SHARED, 'Thesis.tasklace') },
+    ]);
+  });
+
   it('offers a joined plan without a file when its file cannot be written, logging why', async () => {
     const sender = {};
     runTask.mockResolvedValueOnce(failure({ code: 'WRITE_FAILED' }));

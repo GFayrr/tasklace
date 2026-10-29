@@ -26,7 +26,7 @@ export interface RelayLinkStore {
     documentId: DocumentId,
     link: RelayLink,
   ) => Promise<Result<void, 'NO_SAFE_STORAGE'>>;
-  readonly find: (documentId: DocumentId) => Promise<RelayLink | null>;
+  readonly find: (documentId: DocumentId) => Promise<Result<RelayLink | null, 'LINK_UNREADABLE'>>;
   readonly forget: (documentId: DocumentId) => Promise<void>;
 }
 
@@ -128,9 +128,19 @@ export function createRelayLinkStore(storePath: string, vault: Vault): RelayLink
         return success(undefined);
       }),
     find: (documentId) =>
-      inOrder(async () => {
+      inOrder(async (): Promise<Result<RelayLink | null, 'LINK_UNREADABLE'>> => {
         const kept = (await read()).find((link) => link.documentId === documentId);
-        return kept === undefined || !vault.isAvailable() ? null : opened(vault, kept);
+        if (kept === undefined) {
+          return success(null);
+        }
+        if (!vault.isAvailable()) {
+          console.warn(
+            'The link of a shared plan is kept, but the vault of the system cannot open it now.',
+          );
+          return failure('LINK_UNREADABLE');
+        }
+        const link = opened(vault, kept);
+        return link === null ? failure('LINK_UNREADABLE') : success(link);
       }),
     forget: (documentId) =>
       inOrder(async () => {

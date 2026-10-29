@@ -85,6 +85,8 @@ function side(session: SharedSession | null, ids: readonly string[]) {
     selectedTaskId: () => (selected === null ? null : testId(selected)),
     relayEnded: (reason, relay) => relayTold.push(['ended', reason, relay]),
     relayLinkNotKept: () => relayTold.push(['linkNotKept']),
+    relayChangeRefused: () => relayTold.push(['changeRefused']),
+    relayNotReopened: () => relayTold.push(['notReopened']),
     shareLater: (share) => {
       laterShares.push(share);
       if (sharesAtOnce) {

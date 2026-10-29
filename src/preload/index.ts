@@ -83,6 +83,7 @@ const bridge: TasklaceBridge = {
   joinByLink: (link) => request(IPC_CHANNELS.joinByLink, link),
   reopenSharedPlan: (documentId) => request(IPC_CHANNELS.reopenSharedPlan, documentId),
   makeNewLinks: () => request(IPC_CHANNELS.makeNewLinks),
+  forgetSharedPlan: () => request(IPC_CHANNELS.forgetSharedPlan),
   copyRelayLink: (kind) => request(IPC_CHANNELS.copyRelayLink, kind),
   openGuide: () => request(IPC_CHANNELS.openGuide),
   sendToRelay: (outgoing) => {

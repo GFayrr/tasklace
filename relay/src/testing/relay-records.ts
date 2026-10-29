@@ -20,6 +20,7 @@ export function sealedRecords(
   length: number,
   covers = 0,
   keys: RelayKeys = ROOM_KEYS,
+  seen = covers,
 ): readonly Uint8Array[] {
   const sealed = sealRelayMessage(
     keys,
@@ -27,6 +28,7 @@ export function sealedRecords(
       kind,
       messageId: new Uint8Array(16).fill(byte),
       covers,
+      seen,
       bytes: new Uint8Array(length).fill(byte),
     },
     { aead: testAead, compression: plainCompression, randomBytes: seededRandom(byte) },

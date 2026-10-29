@@ -16,7 +16,9 @@ import {
 import type { RelayConfig } from './config.ts';
 import { entriesAfter } from './room-file.ts';
 import { createAddressBuckets, createBucket, type Bucket, type Rate } from './rate.ts';
-import { openRoomStore, type Room, type RoomStore } from './rooms.ts';
+import { openRoomStore, type Room, type RoomStore, type Staging } from './rooms.ts';
+import type { StoredRecord } from './room-file.ts';
+import { createSendQueue, type SendQueue } from './send-queue.ts';
 import { verifierOf } from './signature.ts';
 
 export interface RelayTimings {
@@ -47,11 +49,11 @@ interface Member {
   readonly socket: WebSocket;
   readonly address: string;
   readonly frames: Bucket;
-  readonly queue: RelayFrame[];
+  readonly queue: SendQueue;
+  staging: Staging | null;
   phase: 'waiting' | 'joining' | 'in' | 'gone';
   place: Place | null;
   number: number;
-  queuedBytes: number;
   alive: boolean;
   helloTimer: NodeJS.Timeout | undefined;
 }
@@ -110,7 +112,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
     now,
     roomFailed: (room) => {
       places.get(room.name)?.members.forEach((member) => {
-        refuse(member, 'RELAY_FULL');
+        refuse(member, 'RELAY_FAILED');
       });
     },
   });
@@ -125,13 +127,12 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
   /** Sends what waits for a member as fast as its connection takes it, so that a member catching up on a large room never holds it all in memory twice. */
   const pump = (member: Member): void => {
     while (
-      member.queue.length > 0 &&
+      !member.queue.isEmpty() &&
       member.socket.readyState === member.socket.OPEN &&
       member.socket.bufferedAmount < sending.highWaterBytes
     ) {
-      const frame = member.queue.shift();
+      const frame = member.queue.next();
       if (frame !== undefined) {
-        member.queuedBytes -= sizeOf(frame);
         member.socket.send(encodeRelayFrame(frame), (error) => {
           afterSend(member, error);
         });
@@ -147,11 +148,17 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
     console.warn('A frame could not be sent to a member of a room:', error.message);
     member.socket.terminate();
   };
-  /** Adds a frame to what waits for a member, cutting a member so slow that more than a whole room waits for it, as it will catch up once back. */
+  /** Adds a frame to what waits for a member, cutting a member so slow that more than two whole rooms wait for it, as it will catch up once back. */
   const enqueue = (member: Member, frame: RelayFrame): void => {
-    member.queue.push(frame);
-    member.queuedBytes += sizeOf(frame);
-    if (member.queuedBytes > sending.maxQueuedBytes) {
+    keepUp(member, member.queue.push(frame));
+  };
+  /** Adds the presence of another member to what waits for a member, a presence still waiting being replaced by the newer one so that a flood of presences never piles up. */
+  const enqueuePresence = (member: Member, from: number, bytes: Uint8Array): void => {
+    keepUp(member, member.queue.pushPresence(from, bytes));
+  };
+  /** Sends what waits for a member, or cuts it when more waits than the relay keeps for one member. */
+  const keepUp = (member: Member, fits: boolean): void => {
+    if (!fits) {
       console.warn('A member of a room fell too far behind and was cut.');
       member.socket.terminate();
       return;
@@ -164,8 +171,9 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
       return;
     }
     member.phase = 'gone';
-    member.queue.length = 0;
-    member.queuedBytes = 0;
+    member.staging?.cancel();
+    member.staging = null;
+    member.queue.clear();
     sendNow(member.socket, { type: 'refused', reason });
     member.socket.close(CLOSE_REFUSED);
   };
@@ -234,7 +242,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
       enter(member, room, frame.type === 'hello' ? frame.since : 0);
     } catch (error) {
       console.error('A room could not be opened:', error);
-      refuse(member, 'RELAY_FULL');
+      refuse(member, 'RELAY_FAILED');
     }
   };
   /** Gives the room a frame opens or creates, or why it cannot. */
@@ -251,19 +259,30 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
       ? store.create(frame.roomId, frame.verifyKey)
       : 'BAD_SIGNATURE';
   };
-  /** Keeps a record a member sent and passes it to every member once written, its author included so that it knows the record is kept. */
+  /** Takes a chunk a member sent into the message it is sending, and once the message is whole and written, passes its records to every member then in the room, its author included so that it knows the message is kept. */
   const append = (member: Member, place: Place, record: Uint8Array): void => {
-    const written = store.append(place.room, record);
-    if (typeof written === 'string') {
-      refuse(member, written);
+    const staging = member.staging ?? store.stage(place.room);
+    const taken = staging.take(record);
+    member.staging = taken === null ? staging : null;
+    if (taken === null) {
       return;
     }
-    void written.then((stored) => {
+    if (typeof taken === 'string') {
+      refuse(member, taken);
+      return;
+    }
+    void taken.then((stored) => {
       if (stored !== null) {
-        place.members.forEach((other) => {
-          enqueue(other, { type: 'record', seq: stored.seq, record: stored.record });
-        });
+        passOn(place.room.name, stored);
       }
+    });
+  };
+  /** Passes records just written to the members in their room now, who may have come in while they were written. */
+  const passOn = (name: string, stored: readonly StoredRecord[]): void => {
+    places.get(name)?.members.forEach((other) => {
+      stored.forEach((entry) => {
+        enqueue(other, { type: 'record', seq: entry.seq, record: entry.record });
+      });
     });
   };
   /** Closes a room for good when its key signed it, telling every member. */
@@ -272,12 +291,16 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
       refuse(member, 'BAD_SIGNATURE');
       return;
     }
-    places.delete(place.room.name);
     try {
       await store.remove(place.room);
     } catch (error) {
       console.error(`The room ${place.room.name} could not be removed:`, error);
+      place.members.forEach((other) => {
+        refuse(other, 'RELAY_FAILED');
+      });
+      return;
     }
+    places.delete(place.room.name);
     place.members.forEach((other) => {
       other.phase = 'gone';
       sendNow(other.socket, { type: 'closed' });
@@ -302,7 +325,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
       case 'presence':
         place.members.forEach((other) => {
           if (other !== member) {
-            enqueue(other, { type: 'presence', member: member.number, bytes: frame.bytes });
+            enqueuePresence(other, member.number, frame.bytes);
           }
         });
         return;
@@ -338,6 +361,8 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
   const forget = (member: Member): void => {
     clearTimeout(member.helloTimer);
     member.phase = 'gone';
+    member.staging?.cancel();
+    member.staging = null;
     members.delete(member);
     const count = (perAddress.get(member.address) ?? 1) - 1;
     if (count === 0) {
@@ -356,11 +381,11 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Run
       socket,
       address,
       frames: createBucket(FRAME_RATE, now),
-      queue: [],
+      queue: createSendQueue(sending.maxQueuedBytes),
+      staging: null,
       phase: 'waiting',
       place: null,
       number: 0,
-      queuedBytes: 0,
       alive: true,
       helloTimer: undefined,
     };
@@ -505,11 +530,6 @@ function bytesOf(data: RawData): Uint8Array {
     return new Uint8Array(Buffer.concat(data));
   }
   return new Uint8Array(data);
-}
-
-/** Gives the bytes a frame waiting for a member holds, its record when it has one. */
-function sizeOf(frame: RelayFrame): number {
-  return frame.type === 'record' ? frame.record.length : 0;
 }
 
 /** Sends a frame at once to a connection still open, ahead of what waits. */

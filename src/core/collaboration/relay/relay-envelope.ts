@@ -36,6 +36,10 @@ export interface RelayMessage {
   readonly bytes: Uint8Array;
 }
 
+export interface MessageToSeal extends RelayMessage {
+  readonly seen: number;
+}
+
 export interface OpenedRelayMessage extends RelayMessage {
   readonly compressedBytes: number;
 }
@@ -65,17 +69,18 @@ interface Assembly {
 }
 
 const ZERO_NONCE = new Uint8Array(NONCE_BYTES);
-const PRESENCE_DOMAIN = new TextEncoder().encode('Tasklace relay presence v1');
+const PRESENCE_DOMAIN = new TextEncoder().encode('Tasklace relay presence v2');
+const MEMBER_BYTES = 4;
 const SIGNED_PRESENCE = 1;
 const UNSIGNED_PRESENCE = 0;
 const PRESENCE_FLAG_BYTES = 1;
 const PRESENCE_OVERHEAD = SALT_BYTES + PRESENCE_FLAG_BYTES + SIGNATURE_BYTES + AEAD_TAG_BYTES;
 export const MAX_PRESENCE_MESSAGE_BYTES = MAX_RELAY_PRESENCE_BYTES - PRESENCE_OVERHEAD;
 
-/** Seals a message of the plan for the relay: compressed, encrypted under a key of its own drawn from a random salt, cut into chunks of one mebibyte and each chunk signed, refusing a member who may not edit and a message too large. */
+/** Seals a message of the plan for the relay: compressed, encrypted under a key drawn from a random salt, cut into chunks each signed with the last sequence its author had seen, refusing a member who may not edit and a message too large. */
 export function sealRelayMessage(
   keys: RelayKeys,
-  message: RelayMessage,
+  message: MessageToSeal,
   crypto: RelayCrypto,
 ): Result<readonly Uint8Array[], SealRefusal> {
   const { sign } = keys;
@@ -104,6 +109,7 @@ export function sealRelayMessage(
         index,
         count,
         covers: message.covers,
+        seen: message.seen,
         signature: new Uint8Array(SIGNATURE_BYTES),
         chunk: sealed.subarray(index * RELAY_CHUNK_BYTES, (index + 1) * RELAY_CHUNK_BYTES),
       });
@@ -113,7 +119,7 @@ export function sealRelayMessage(
   );
 }
 
-/** Rebuilds messages from the records the relay passes on, in any order and from several authors, refusing a record not signed for this room, waiting within bounds and giving up a message whose chunks stop coming. */
+/** Rebuilds messages from the records the relay passes on, in any order and from several authors, refusing a record not signed for this room, waiting within bounds and giving up a message whose chunks stop coming or that a snapshot already holds. */
 export function createRelayAssembler(
   keys: RelayKeys,
   crypto: RelayCrypto,
@@ -127,10 +133,13 @@ export function createRelayAssembler(
     open.delete(key);
     buffered -= assembly.bytes;
   };
-  /** Gives up the messages that waited too long for their next chunk. */
-  const abandonStale = (): void => {
+  /** Gives up the messages that waited too long for their next chunk, and those a snapshot covers, whose author had them whole since a snapshot covers only what its author settled. */
+  const abandonStale = (covered: number): void => {
     for (const [key, assembly] of open) {
-      if (lastSeq - assembly.firstSeq > RELAY_ABANDON_AFTER_RECORDS) {
+      if (
+        lastSeq - assembly.firstSeq > RELAY_ABANDON_AFTER_RECORDS ||
+        assembly.firstSeq <= covered
+      ) {
         drop(key, assembly);
       }
     }
@@ -180,8 +189,6 @@ export function createRelayAssembler(
   };
   return {
     take: (seq, bytes) => {
-      lastSeq = Math.max(lastSeq, seq);
-      abandonStale();
       const record = readRelayRecord(bytes);
       if (record === null) {
         return failure('MALFORMED');
@@ -189,6 +196,8 @@ export function createRelayAssembler(
       if (!isSignedBy(keys.verifyKey, signedRecordBytes(keys.roomId, bytes), record.signature)) {
         return failure('BAD_SIGNATURE');
       }
+      lastSeq = Math.max(lastSeq, seq);
+      abandonStale(0);
       const key = `${bytesToHex(record.messageId)}.${bytesToHex(record.salt)}`;
       const known = open.get(key);
       const assembly = known === undefined ? start(key, seq, record) : success(known);
@@ -214,7 +223,11 @@ export function createRelayAssembler(
         return success(null);
       }
       drop(key, value);
-      return finish(value);
+      const finished = finish(value);
+      if (finished.ok && finished.value.kind === 'snapshot') {
+        abandonStale(finished.value.covers);
+      }
+      return finished;
     },
     settled: () =>
       [...open.values()].reduce(
@@ -224,9 +237,10 @@ export function createRelayAssembler(
   };
 }
 
-/** Seals the presence of a member: encrypted under a key of its own and, for a member who may edit, signed, so that a member in read only cannot pass for one who edits. */
+/** Seals the presence of a member under the number the relay gave it: encrypted under a key of its own and, for a member who may edit, signed, so that a member in read only cannot pass for one who edits. */
 export function sealRelayPresence(
   keys: RelayKeys,
+  member: number,
   bytes: Uint8Array,
   crypto: RelayCrypto,
 ): Result<Uint8Array, 'TOO_LARGE'> {
@@ -234,9 +248,7 @@ export function sealRelayPresence(
     return failure('TOO_LARGE');
   }
   const signature =
-    keys.sign === null
-      ? new Uint8Array()
-      : keys.sign(joined([PRESENCE_DOMAIN, keys.roomId, bytes]));
+    keys.sign === null ? new Uint8Array() : keys.sign(signedPresenceBytes(keys, member, bytes));
   const inner = joined([
     Uint8Array.of(keys.sign === null ? UNSIGNED_PRESENCE : SIGNED_PRESENCE),
     signature,
@@ -248,9 +260,10 @@ export function sealRelayPresence(
   );
 }
 
-/** Opens the presence of another member, telling whether it may edit from its signature, or returns null for bytes that do not decrypt or are not a presence. */
+/** Opens the presence the relay passed on under the number of a member, telling whether it may edit from its signature, or returns null for bytes that do not decrypt, are not a presence or carry a signature that does not hold for that member. */
 export function openRelayPresence(
   keys: RelayKeys,
+  member: number,
   sealed: Uint8Array,
   crypto: RelayCrypto,
 ): OpenedPresence | null {
@@ -273,11 +286,18 @@ export function openRelayPresence(
   const bytes = inner.slice(PRESENCE_FLAG_BYTES + SIGNATURE_BYTES);
   if (
     inner[0] !== SIGNED_PRESENCE ||
-    !isSignedBy(keys.verifyKey, joined([PRESENCE_DOMAIN, keys.roomId, bytes]), signature)
+    !isSignedBy(keys.verifyKey, signedPresenceBytes(keys, member, bytes), signature)
   ) {
     return null;
   }
   return { bytes, canEdit: true };
+}
+
+/** Gives the bytes the signature of a presence covers: a domain, the room, the number the relay gave its member and the presence, so that a member who replays the presence of another under its own number does not pass for one who edits. */
+function signedPresenceBytes(keys: RelayKeys, member: number, bytes: Uint8Array): Uint8Array {
+  const number = new Uint8Array(MEMBER_BYTES);
+  new DataView(number.buffer).setUint32(0, member);
+  return joined([PRESENCE_DOMAIN, keys.roomId, number, bytes]);
 }
 
 /** Tells whether a chunk belongs to the same message as the first one received, its kind, count and covered sequence matching. */

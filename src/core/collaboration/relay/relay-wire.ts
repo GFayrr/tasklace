@@ -1,4 +1,4 @@
-export const RELAY_WIRE_VERSION = 1;
+export const RELAY_WIRE_VERSION = 2;
 export const ROOM_ID_BYTES = 32;
 export const VERIFY_KEY_BYTES = 32;
 export const SIGNATURE_BYTES = 64;
@@ -19,6 +19,7 @@ export interface RelayRecord {
   readonly index: number;
   readonly count: number;
   readonly covers: number;
+  readonly seen: number;
   readonly signature: Uint8Array;
   readonly chunk: Uint8Array;
 }
@@ -33,7 +34,9 @@ export type RelayRefusal =
   | 'ROOM_FULL'
   | 'RELAY_FULL'
   | 'TOO_MANY'
-  | 'TOO_FAST';
+  | 'TOO_FAST'
+  | 'STALE'
+  | 'RELAY_FAILED';
 
 export type ClientFrame =
   | {
@@ -98,6 +101,8 @@ const REFUSALS: readonly RelayRefusal[] = [
   'RELAY_FULL',
   'TOO_MANY',
   'TOO_FAST',
+  'STALE',
+  'RELAY_FAILED',
 ];
 const KIND_OFFSET = 0;
 const MESSAGE_ID_OFFSET = 1;
@@ -105,14 +110,15 @@ const SALT_OFFSET = MESSAGE_ID_OFFSET + MESSAGE_ID_BYTES;
 const INDEX_OFFSET = SALT_OFFSET + SALT_BYTES;
 const COUNT_OFFSET = INDEX_OFFSET + COUNT_BYTES;
 const COVERS_OFFSET = COUNT_OFFSET + COUNT_BYTES;
-export const RECORD_SIGNATURE_OFFSET = COVERS_OFFSET + SEQUENCE_BYTES;
+const SEEN_OFFSET = COVERS_OFFSET + SEQUENCE_BYTES;
+export const RECORD_SIGNATURE_OFFSET = SEEN_OFFSET + SEQUENCE_BYTES;
 const SIGNATURE_OFFSET = RECORD_SIGNATURE_OFFSET;
 const CHUNK_OFFSET = SIGNATURE_OFFSET + SIGNATURE_BYTES;
 
 export const MAX_RELAY_RECORD_BYTES = CHUNK_OFFSET + RELAY_CHUNK_BYTES;
 export const MAX_RELAY_FRAME_BYTES = FRAME_HEADER_BYTES + SEQUENCE_BYTES + MAX_RELAY_RECORD_BYTES;
 
-/** Writes one chunk of a message as the record the relay keeps and passes on: its kind, the message it belongs to, the salt of its key, its place among the chunks, the sequence a snapshot covers, the signature and the chunk. */
+/** Writes one chunk of a message as the record the relay keeps and passes on: its kind, its message, the salt of its key, its place, the sequence a snapshot covers, the last sequence its author had seen, the signature and the chunk. */
 export function encodeRelayRecord(record: RelayRecord): Uint8Array {
   const bytes = new Uint8Array(CHUNK_OFFSET + record.chunk.length);
   const view = new DataView(bytes.buffer);
@@ -122,12 +128,13 @@ export function encodeRelayRecord(record: RelayRecord): Uint8Array {
   view.setUint16(INDEX_OFFSET, record.index);
   view.setUint16(COUNT_OFFSET, record.count);
   view.setBigUint64(COVERS_OFFSET, BigInt(record.covers));
+  view.setBigUint64(SEEN_OFFSET, BigInt(record.seen));
   bytes.set(record.signature, SIGNATURE_OFFSET);
   bytes.set(record.chunk, CHUNK_OFFSET);
   return bytes;
 }
 
-/** Reads a record from untrusted bytes, returning null for an unknown kind, a chunk out of place, too many chunks, a sequence beyond the safe integers or a chunk too large, without ever throwing. */
+/** Reads a record from untrusted bytes, returning null for an unknown kind, a chunk out of place, too many chunks, a sequence beyond the safe integers, a snapshot covering more than its author had seen or a chunk too large, without ever throwing. */
 export function readRelayRecord(bytes: Uint8Array): RelayRecord | null {
   if (bytes.length < CHUNK_OFFSET || bytes.length > MAX_RELAY_RECORD_BYTES) {
     return null;
@@ -137,10 +144,11 @@ export function readRelayRecord(bytes: Uint8Array): RelayRecord | null {
   const index = view.getUint16(INDEX_OFFSET);
   const count = view.getUint16(COUNT_OFFSET);
   const covers = safeInteger(view.getBigUint64(COVERS_OFFSET));
+  const seen = safeInteger(view.getBigUint64(SEEN_OFFSET));
   if (kind === undefined || count === 0 || count > MAX_RELAY_CHUNKS || index >= count) {
     return null;
   }
-  if (covers === null || (kind === 'update' && covers !== 0)) {
+  if (covers === null || seen === null || covers > seen || (kind === 'update' && covers !== 0)) {
     return null;
   }
   return {
@@ -150,6 +158,7 @@ export function readRelayRecord(bytes: Uint8Array): RelayRecord | null {
     index,
     count,
     covers,
+    seen,
     signature: bytes.slice(SIGNATURE_OFFSET, CHUNK_OFFSET),
     chunk: bytes.subarray(CHUNK_OFFSET),
   };

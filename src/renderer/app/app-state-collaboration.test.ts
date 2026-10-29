@@ -555,7 +555,7 @@ describe('a plan shared through a relay', () => {
     ]);
   });
 
-  it('still shares when the address cannot be kept, logging why', async () => {
+  it('still shares when the address cannot be kept, logging why and telling it', async () => {
     const { app, control } = await openedAppOf(PLAN);
     withRelaySettings(control);
     await app.openShare();
@@ -563,10 +563,59 @@ describe('a plan shared through a relay', () => {
     control.collaboration.saveSettingsResult = { ok: false, error: { code: 'WRITE_FAILED' } };
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     await app.shareThroughRelay('wss://relay.example.org');
-    expect([app.shareFailure, app.collaboration.relay.links, errors.mock.calls]).toEqual([
+    expect([
+      app.shareFailure,
+      app.collaboration.relay.links,
+      errors.mock.calls,
+      app.notices.map((notice) => [notice.kind, notice.text]),
+    ]).toEqual([
       null,
       SHARED.shown,
       [['The address of the relay could not be kept on this computer:', { code: 'WRITE_FAILED' }]],
+      [['warning', english.relay.addressNotKept]],
+    ]);
+  });
+
+  it('tells in a message that stays when a change shared through the relay could not be added', async () => {
+    const { app, control } = await openedAppOf(PLAN);
+    withRelaySettings(control);
+    await app.openShare();
+    control.collaboration.relay.shareResult = { ok: true, value: SHARED };
+    await app.shareThroughRelay('wss://relay.example.org');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const listener = control.collaboration.listener;
+    listener?.({ kind: 'relayConnected', member: 1, members: [] });
+    listener?.({ kind: 'relayCaughtUp' });
+    listener?.({
+      kind: 'relayDelivery',
+      delivery: {
+        kind: 'update',
+        messageId: new Uint8Array(16).fill(9),
+        covers: 0,
+        bytes: Uint8Array.of(9),
+        compressedBytes: 1,
+        settled: 1,
+      },
+    });
+    await settle();
+    expect(app.notices.map((notice) => [notice.kind, notice.text, notice.lasting])).toEqual([
+      ['error', english.relay.changeRefused, true],
+    ]);
+  });
+
+  it('tells in a message that stays when this computer can no longer open the link of a shared plan it opens', async () => {
+    const fake = fakeAppContext();
+    fake.control.collaboration.relay.reopenResult = {
+      ok: false,
+      error: { code: 'LINK_UNREADABLE' },
+    };
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const app = new AppState(fake.context);
+    fake.control.openResult = openedProjectOf(PLAN);
+    await app.open();
+    await settle();
+    expect(app.notices.map((notice) => [notice.kind, notice.text, notice.lasting])).toEqual([
+      ['error', english.fileErrors.LINK_UNREADABLE, true],
     ]);
   });
 });

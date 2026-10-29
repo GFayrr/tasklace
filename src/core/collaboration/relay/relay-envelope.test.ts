@@ -9,8 +9,8 @@ import {
   openRelayPresence,
   sealRelayMessage,
   sealRelayPresence,
+  type MessageToSeal,
   type RelayCrypto,
-  type RelayMessage,
 } from './relay-envelope';
 import {
   drawRelayAccess,
@@ -34,25 +34,26 @@ const EDIT = relayKeysOf(ACCESS);
 const VIEW = relayKeysOf(viewAccessOf(ACCESS));
 const OTHER = relayKeysOf(drawRelayAccess(seededRandom(12)));
 const ZERO_NONCE = new Uint8Array(NONCE_BYTES);
+const MEMBER = 3;
 
 /** Gives the test cipher and compression with a random source of a seed. */
 function cryptoOf(seed = 1): RelayCrypto {
   return { aead: testAead, compression: plainCompression, randomBytes: seededRandom(seed) };
 }
 
-/** Builds a message of a kind with an identifier made of one byte. */
+/** Builds a message of a kind with an identifier made of one byte, its author having seen what it covers. */
 function message(
   bytes: Uint8Array,
   id = 1,
-  kind: RelayMessage['kind'] = 'update',
+  kind: MessageToSeal['kind'] = 'update',
   covers = 0,
-): RelayMessage {
-  return { kind, messageId: new Uint8Array(16).fill(id), covers, bytes };
+): MessageToSeal {
+  return { kind, messageId: new Uint8Array(16).fill(id), covers, seen: covers, bytes };
 }
 
 /** Seals a message with the keys to edit, failing the test when it is refused. */
 function sealed(
-  content: RelayMessage,
+  content: MessageToSeal,
   keys: RelayKeys = EDIT,
   crypto = cryptoOf(),
 ): readonly Uint8Array[] {
@@ -166,6 +167,7 @@ describe('rebuilding messages from what the relay passes on', () => {
       index: 0,
       count: 2,
       covers: 0,
+      seen: 2,
       signature: new Uint8Array(64),
       chunk: Uint8Array.of(1),
     };
@@ -196,25 +198,65 @@ describe('rebuilding messages from what the relay passes on', () => {
   it('tells no sequence as settled before any record', () => {
     expect(createRelayAssembler(VIEW, cryptoOf()).settled()).toBe(0);
   });
+
+  it('never counts the sequence of a record that is not signed for the room as settled', () => {
+    const assembler = createRelayAssembler(VIEW, cryptoOf());
+    const taken = assembler.take(2, first(sealed(message(Uint8Array.of(1)))));
+    const forged = assembler.take(1_000, first(sealed(message(Uint8Array.of(2), 2), OTHER)));
+    expect([taken.ok, forged, assembler.settled()]).toEqual([true, failure('BAD_SIGNATURE'), 2]);
+  });
+
+  it('gives up a message still waiting for its chunks once a snapshot covers its first one, its author having had it whole', () => {
+    const base: RelayRecord = {
+      kind: 'update',
+      messageId: new Uint8Array(16).fill(5),
+      salt: new Uint8Array(16).fill(5),
+      index: 0,
+      count: 2,
+      covers: 0,
+      seen: 0,
+      signature: new Uint8Array(64),
+      chunk: Uint8Array.of(1),
+    };
+    const assembler = createRelayAssembler(VIEW, cryptoOf());
+    const started = assembler.take(1, signedRecord(base));
+    const before = assembler.settled();
+    const snapshot = assembler.take(2, first(sealed(message(Uint8Array.of(9), 6, 'snapshot', 1))));
+    expect([started, before, snapshot.ok, assembler.settled()]).toEqual([
+      success(null),
+      0,
+      true,
+      2,
+    ]);
+  });
 });
 
 describe('the presence of a member on the relay', () => {
   it('tells a member who may edit from its signature, and one who may only view without it', () => {
     const bytes = Uint8Array.of(4, 5);
-    const fromEditor = sealRelayPresence(EDIT, bytes, cryptoOf());
-    const fromViewer = sealRelayPresence(VIEW, bytes, cryptoOf());
+    const fromEditor = sealRelayPresence(EDIT, MEMBER, bytes, cryptoOf());
+    const fromViewer = sealRelayPresence(VIEW, MEMBER, bytes, cryptoOf());
     expect([
-      fromEditor.ok ? openRelayPresence(VIEW, fromEditor.value, cryptoOf()) : fromEditor,
-      fromViewer.ok ? openRelayPresence(EDIT, fromViewer.value, cryptoOf()) : fromViewer,
+      fromEditor.ok ? openRelayPresence(VIEW, MEMBER, fromEditor.value, cryptoOf()) : fromEditor,
+      fromViewer.ok ? openRelayPresence(EDIT, MEMBER, fromViewer.value, cryptoOf()) : fromViewer,
     ]).toEqual([
       { bytes, canEdit: true },
       { bytes, canEdit: false },
     ]);
   });
 
+  it('refuses the signed presence of a member passed on under the number of another, as a member in read only who replays it', () => {
+    const fromEditor = sealRelayPresence(EDIT, MEMBER, Uint8Array.of(4), cryptoOf());
+    expect(
+      fromEditor.ok
+        ? openRelayPresence(VIEW, MEMBER + 1, fromEditor.value, cryptoOf())
+        : fromEditor,
+    ).toBeNull();
+  });
+
   it('refuses a presence that claims a signature it does not have, an unknown mark, bytes that do not decrypt and sizes out of bounds', () => {
     const bytes = Uint8Array.of(4);
-    const forged = sealRelayPresence({ ...EDIT, sign: OTHER.sign }, bytes, cryptoOf());
+    const forged = sealRelayPresence({ ...EDIT, sign: OTHER.sign }, MEMBER, bytes, cryptoOf());
     const salt = new Uint8Array(SALT_BYTES).fill(2);
     const unknownMark = Uint8Array.from([
       ...salt,
@@ -224,22 +266,27 @@ describe('the presence of a member on the relay', () => {
       ...salt,
       ...testAead.seal(messageKeyOf(EDIT.encryptionKey, salt), ZERO_NONCE, new Uint8Array()),
     ]);
-    const sealedOk = sealRelayPresence(EDIT, bytes, cryptoOf());
+    const sealedOk = sealRelayPresence(EDIT, MEMBER, bytes, cryptoOf());
     expect([
-      forged.ok ? openRelayPresence(VIEW, forged.value, cryptoOf()) : forged,
-      openRelayPresence(VIEW, unknownMark, cryptoOf()),
-      openRelayPresence(VIEW, empty, cryptoOf()),
-      sealedOk.ok ? openRelayPresence(OTHER, sealedOk.value, cryptoOf()) : sealedOk,
-      openRelayPresence(VIEW, new Uint8Array(SALT_BYTES - 1), cryptoOf()),
-      openRelayPresence(VIEW, new Uint8Array(MAX_RELAY_PRESENCE_BYTES + 1), cryptoOf()),
+      forged.ok ? openRelayPresence(VIEW, MEMBER, forged.value, cryptoOf()) : forged,
+      openRelayPresence(VIEW, MEMBER, unknownMark, cryptoOf()),
+      openRelayPresence(VIEW, MEMBER, empty, cryptoOf()),
+      sealedOk.ok ? openRelayPresence(OTHER, MEMBER, sealedOk.value, cryptoOf()) : sealedOk,
+      openRelayPresence(VIEW, MEMBER, new Uint8Array(SALT_BYTES - 1), cryptoOf()),
+      openRelayPresence(VIEW, MEMBER, new Uint8Array(MAX_RELAY_PRESENCE_BYTES + 1), cryptoOf()),
     ]).toEqual([null, null, null, null, null, null]);
   });
 
   it('seals a presence up to the size the relay passes on, and refuses a larger one', () => {
-    const largest = sealRelayPresence(EDIT, new Uint8Array(MAX_PRESENCE_MESSAGE_BYTES), cryptoOf());
+    const largest = sealRelayPresence(
+      EDIT,
+      MEMBER,
+      new Uint8Array(MAX_PRESENCE_MESSAGE_BYTES),
+      cryptoOf(),
+    );
     expect([
       largest.ok ? largest.value.length : largest,
-      sealRelayPresence(EDIT, new Uint8Array(MAX_PRESENCE_MESSAGE_BYTES + 1), cryptoOf()),
+      sealRelayPresence(EDIT, MEMBER, new Uint8Array(MAX_PRESENCE_MESSAGE_BYTES + 1), cryptoOf()),
     ]).toEqual([MAX_RELAY_PRESENCE_BYTES, failure('TOO_LARGE')]);
   });
 });

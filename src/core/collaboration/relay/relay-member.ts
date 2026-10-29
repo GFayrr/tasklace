@@ -57,7 +57,7 @@ interface Unconfirmed {
   readonly update: Uint8Array;
 }
 
-/** Runs a member of a plan shared through a relay, with no host: sends its changes while it may edit until passed back, merges the others', follows who is in, snapshots once enough changed and, on reopening, shares what only this computer holds. */
+/** Runs a member of a plan shared through a relay, with no host: sends its changes until passed back, merges the others', follows who is in, snapshots once enough changed and, on reopening, shares or keeps apart what only this computer holds. */
 export function createRelayMember(options: RelayMemberOptions): RelayMember {
   const { session, canEdit, send, report } = options;
   const merger = createMerger(session, (event) => {
@@ -71,6 +71,7 @@ export function createRelayMember(options: RelayMemberOptions): RelayMember {
   let bytesSinceSnapshot = options.bytesSinceSnapshot;
   let live = false;
   let unshared = false;
+  let snapshotting = false;
   /** Sends a change of the plan to the relay. */
   const sendUpdate = ({ messageId, update }: Unconfirmed): void => {
     send({
@@ -125,12 +126,12 @@ export function createRelayMember(options: RelayMemberOptions): RelayMember {
   const tellPeople = (): void => {
     report({ kind: 'people', people: new Map(people) });
   };
-  /** Puts the whole plan on the relay as a snapshot covering what came before it, once this member's own change made the changes since the last snapshot large enough, and while no change waits for another. */
+  /** Puts the whole plan on the relay as a snapshot covering what came before it, once this member's own change made the changes since the last snapshot large enough, while no change waits for another and no snapshot of its own is on its way. */
   const snapshotIfDue = (settled: number): void => {
-    if (bytesSinceSnapshot < SNAPSHOT_AFTER_BYTES || merger.isWaiting()) {
+    if (bytesSinceSnapshot < SNAPSHOT_AFTER_BYTES || merger.isWaiting() || snapshotting) {
       return;
     }
-    bytesSinceSnapshot = 0;
+    snapshotting = true;
     send({
       kind: 'message',
       message: {
@@ -164,12 +165,14 @@ export function createRelayMember(options: RelayMemberOptions): RelayMember {
     },
     disconnected: () => {
       live = false;
+      snapshotting = false;
       people.clear();
       tellPeople();
     },
     receive: (delivery) => {
       bytesSinceSnapshot =
         delivery.kind === 'snapshot' ? 0 : bytesSinceSnapshot + delivery.compressedBytes;
+      snapshotting &&= delivery.kind !== 'snapshot';
       const read = readMessage(delivery.bytes);
       if (!read.ok) {
         report({ kind: 'refused', reason: read.error });
@@ -224,8 +227,11 @@ export function createRelayMember(options: RelayMemberOptions): RelayMember {
     catchUpWith: (state, bytes) => {
       bytesSinceSnapshot = bytes;
       const merged = state === null ? null : merger.merge(state);
-      if (merged?.ok === false && merged.error !== 'incompleteUpdate') {
-        report({ kind: 'refused', reason: merged.error });
+      const refusal =
+        merged === null || merged.ok || merged.error === 'incompleteUpdate' ? null : merged.error;
+      if (refusal !== null) {
+        report({ kind: 'refused', reason: refusal });
+        unshared = true;
         return;
       }
       if (!holdsChangesMissingFrom(session.encodeState(), state ?? EMPTY_UPDATE)) {

@@ -96,6 +96,7 @@ function recordOf(
     index: 0,
     count: 1,
     covers: options.covers ?? 0,
+    seen: options.covers ?? 0,
     signature: new Uint8Array(SIGNATURE_BYTES),
     chunk: Uint8Array.of(number % 256),
   };
@@ -155,11 +156,11 @@ async function opened(roomId: Uint8Array): Promise<Room> {
   return room;
 }
 
-/** Keeps a record in a room and waits until it is written, failing the test when it is refused. */
+/** Keeps a message of one record in a room and waits until it is written, failing the test when it is refused. */
 async function append(room: Room, record: Uint8Array): Promise<void> {
-  const appended = store.append(room, record);
-  if (typeof appended === 'string') {
-    throw new Error(`A record of the test was refused: ${appended}`);
+  const appended = store.stage(room).take(record);
+  if (appended === null || typeof appended === 'string') {
+    throw new Error(`A record of the test was refused: ${String(appended)}`);
   }
   if ((await appended) === null) {
     throw new Error('A record of the test was not written.');
@@ -262,6 +263,7 @@ describe('the relay', () => {
           kind: 'update',
           messageId: new Uint8Array(MESSAGE_ID_BYTES),
           covers: 0,
+          seen: 0,
           bytes: systemRandomBytes(size),
         },
         CRYPTO,

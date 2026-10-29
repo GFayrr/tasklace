@@ -94,7 +94,7 @@ import type { ZoomLevel } from '../plan/time-scale';
 import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
 import type { Theme } from '../theme/theme';
 import { SettingsPanel } from './settings-panel.svelte';
-import { relayEndText } from '../collaboration/collaboration-text';
+import { relayEndText, relayFailureText } from '../collaboration/collaboration-text';
 import {
   CollaborationState,
   type CollaborationFailure,
@@ -304,6 +304,15 @@ export class AppState {
       },
       relayLinkNotKept: () => {
         this.#notify('warning', this.messages.relay.linkNotKept, null, true);
+      },
+      relayChangeRefused: () => {
+        this.#notify('error', this.messages.relay.changeRefused, null, true);
+      },
+      relayNotReopened: (failure) => {
+        const text = relayFailureText(this.messages, failure, '');
+        if (text !== null) {
+          this.#notify('error', text, null, true);
+        }
       },
       ownChangesKept: (kept) => {
         this.#ownChangesKept(kept);
@@ -874,7 +883,7 @@ export class AppState {
     this.#shareFailure = shared.ok ? null : shared.error;
   }
 
-  /** Shares the open project through a relay, keeping its address on this computer once shared, a failure to keep it being only logged, and why it could not be shared for the window. */
+  /** Shares the open project through a relay, keeping its address on this computer once shared and telling when it could not be kept, and why it could not be shared for the window. */
   async shareThroughRelay(address: string): Promise<void> {
     this.#shareFailure = null;
     const shared = await this.collaboration.relay.share(address);
@@ -885,7 +894,13 @@ export class AppState {
     const kept = await this.collaboration.saveSettings({ relayAddress: address.trim() });
     if (!kept.ok) {
       console.error('The address of the relay could not be kept on this computer:', kept.error);
+      this.#notify('warning', this.messages.relay.addressNotKept);
     }
+  }
+
+  /** Forgets for good the plan of the open project shared through a relay whose room the relay no longer finds, giving whether it was forgotten. */
+  forgetSharedPlan(): Promise<boolean> {
+    return this.collaboration.relay.forgetPlan();
   }
 
   /** Opens the window that joins a shared plan and starts looking for the plans shared nearby. */

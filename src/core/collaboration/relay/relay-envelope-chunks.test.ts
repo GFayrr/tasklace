@@ -6,7 +6,7 @@ import {
   createRelayAssembler,
   sealRelayMessage,
   type RelayCrypto,
-  type RelayMessage,
+  type MessageToSeal,
 } from './relay-envelope';
 import { drawRelayAccess, relayKeysOf, viewAccessOf } from './relay-keys';
 import { readRelayRecord } from './relay-wire';
@@ -29,17 +29,18 @@ function cryptoOf(seed = 1): RelayCrypto {
 }
 
 /** Builds a change of the plan of some length with an identifier made of one byte. */
-function message(length: number, id: number): RelayMessage {
+function message(length: number, id: number): MessageToSeal {
   return {
     kind: 'update',
     messageId: new Uint8Array(16).fill(id),
     covers: 0,
+    seen: 0,
     bytes: Uint8Array.from({ length }, (_unused, index) => index % 251),
   };
 }
 
 /** Seals a message with the keys to edit, failing the test when it is refused. */
-function sealed(content: RelayMessage, seed = 1): readonly Uint8Array[] {
+function sealed(content: MessageToSeal, seed = 1): readonly Uint8Array[] {
   const records = sealRelayMessage(EDIT, content, cryptoOf(seed));
   if (!records.ok) {
     throw new Error(`Refused: ${records.error}`);

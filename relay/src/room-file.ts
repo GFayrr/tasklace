@@ -16,7 +16,7 @@ export interface RoomFile {
 }
 
 const MAGIC = new TextEncoder().encode('TLRY');
-const FILE_VERSION = 1;
+const FILE_VERSION = 2;
 const VERSION_OFFSET = MAGIC.length;
 const KEY_OFFSET = VERSION_OFFSET + 1;
 export const ROOM_HEADER_BYTES = KEY_OFFSET + VERIFY_KEY_BYTES;

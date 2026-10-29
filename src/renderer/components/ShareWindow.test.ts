@@ -553,6 +553,40 @@ describe('sharing the open plan through a relay', () => {
     ]);
   });
 
+  it('offers to forget a plan the relay no longer finds in place of new links, telling when it could not', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { root, app, control } = await renderRelaySharing();
+    const listener = control.collaboration.listener;
+    listener?.({ kind: 'relayConnected', member: 1, members: [] });
+    listener?.({ kind: 'relayCaughtUp' });
+    listener?.({ kind: 'relayEnded', reason: 'NO_ROOM' });
+    await settle();
+    update();
+    const dialog = shareWindow(root);
+    const shown = [
+      textsOf(dialog, '.gone .hint'),
+      dialog.querySelectorAll('details.new-links').length,
+    ];
+    control.collaboration.relay.forgetResult = { ok: false, error: { code: 'TASK_FAILED' } };
+    await clickAndSettle(button(dialog, RELAY.forgetPlan));
+    const refused = textsOf(dialog, '.gone [role="alert"]');
+    control.collaboration.relay.forgetResult = { ok: true, value: null };
+    await clickAndSettle(button(dialog, RELAY.forgetPlan));
+    expect([
+      shown,
+      refused,
+      app.collaboration.relay.isActive,
+      relayRequests(control).slice(-2),
+      error.mock.calls,
+    ]).toEqual([
+      [[RELAY.notOnRelay], 0],
+      [RELAY.notForgotten],
+      false,
+      [['forgetSharedPlan'], ['forgetSharedPlan']],
+      [['The shared plan could not be forgotten:', { code: 'TASK_FAILED' }]],
+    ]);
+  });
+
   it('leaves the plan shared through a relay', async () => {
     const { root, app, control } = await renderRelaySharing();
     await clickAndSettle(button(shareWindow(root), TEXT.leave));

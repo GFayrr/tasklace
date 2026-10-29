@@ -56,7 +56,7 @@ describe('the links of shared plans when the disk fails', () => {
     const found = await store.find(PLAN);
     expect([
       refused instanceof Error ? refused.message : refused,
-      found === null ? null : encodeRelayLink(found),
+      found.ok && found.value !== null ? encodeRelayLink(found.value) : found,
     ]).toEqual(['No space left on device', encodeRelayLink(LINK)]);
   });
 
@@ -70,7 +70,7 @@ describe('the links of shared plans when the disk fails', () => {
     failing.write = true;
     const found = await createRelayLinkStore(storePath, PLAIN_VAULT).find(PLAN);
     expect([
-      found === null ? null : encodeRelayLink(found),
+      found.ok && found.value !== null ? encodeRelayLink(found.value) : found,
       error.mock.calls.map(([message]: unknown[]) => message).at(-1),
     ]).toEqual([encodeRelayLink(LINK), 'The repaired links of shared plans could not be written:']);
   });

@@ -21,6 +21,7 @@ import { OTHER_KEYS, ROOM_KEYS, sealedRecord, temporaryFolder } from './testing/
 const CLOSE_REFUSED = 1008;
 const CLOSE_NORMAL = 1000;
 const CLOSE_ABNORMAL = 1006;
+const TWO_BARE_FRAMES = 128;
 const FAST: RelayTimings = {
   helloMilliseconds: 8_192,
   heartbeatMilliseconds: 16_384,
@@ -216,9 +217,9 @@ describe('a relay', () => {
     const text = await connectTo(relay.port);
     text.socket.send('hello');
     const version = await connectTo(relay.port);
-    version.socket.send(Uint8Array.of(2, 1));
+    version.socket.send(Uint8Array.of(3, 1));
     const garbage = await connectTo(relay.port);
-    garbage.socket.send(Uint8Array.of(1, 99));
+    garbage.socket.send(Uint8Array.of(2, 99));
     const early = await connectTo(relay.port);
     early.send({ type: 'append', record: sealedRecord('update', 1) });
     const again = await creator(relay);
@@ -325,7 +326,7 @@ describe('a relay', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const relay = await relayWith(
       {},
-      { sending: { highWaterBytes: 8_388_608, maxQueuedBytes: 0 } },
+      { sending: { highWaterBytes: 8_388_608, maxQueuedBytes: TWO_BARE_FRAMES } },
     );
     const stuck = await creator(relay);
     stuck.send({ type: 'append', record: sealedRecord('update', 1) });

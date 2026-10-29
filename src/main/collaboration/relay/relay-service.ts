@@ -1,5 +1,5 @@
 import { ipcMain, type IpcMainEvent, type WebContents } from 'electron';
-import type { RelayOutgoing } from '../../../core/collaboration/relay/relay-member';
+import type { RelayDelivery, RelayOutgoing } from '../../../core/collaboration/relay/relay-member';
 import {
   drawRelayAccess,
   relayKeysOf,
@@ -15,7 +15,7 @@ import {
   type RelayLink,
 } from '../../../core/collaboration/relay/relay-link';
 import { MESSAGE_ID_BYTES } from '../../../core/collaboration/relay/relay-wire';
-import { MAX_COLLABORATION_MESSAGE_BYTES } from '../../../core/limits';
+import { MAX_COLLABORATION_MESSAGE_BYTES, MAX_UNCOMPRESSED_BYTES } from '../../../core/limits';
 import { failure, success } from '../../../core/result';
 import { isDocumentId, type DocumentId } from '../../../core/shared/shared-document';
 import {
@@ -77,6 +77,7 @@ type Outcome =
 
 interface Gathered {
   readonly messages: Uint8Array[];
+  bytes: number;
   bytesSinceSnapshot: number;
 }
 
@@ -90,7 +91,7 @@ interface WindowRelay {
 
 const MESSAGE_KINDS: readonly unknown[] = ['update', 'snapshot'];
 const LINK_KINDS: readonly unknown[] = ['edit', 'view'];
-const ROOM_GONE: readonly RelayEnd[] = ['CLOSED', 'NO_ROOM'];
+const ROOM_CLOSED: RelayEnd = 'CLOSED';
 
 /** Answers the requests of the bridge about plans shared through a relay, one relay session per window, the main process alone holding the links and keys, and returns how to know or leave what a window shares, its link staying kept. */
 export function registerRelayHandlers(services: RelayServices): RelayHandlers {
@@ -133,7 +134,7 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
   /** Starts the relay session of a window, gathering what the relay passes on until it caught up when the window joins or reopens a plan, so that the page receives the plan in one checked state before anything after it. */
   const start = (sender: WebContents, link: RelayLink, mode: Mode): WindowRelay => {
     let gathered: Gathered | null =
-      mode === 'create' ? null : { messages: [], bytesSinceSnapshot: 0 };
+      mode === 'create' ? null : { messages: [], bytes: 0, bytesSinceSnapshot: 0 };
     let held: CollaborationEvent[] | null = null;
     const { promise: outcome, resolve: settle } = Promise.withResolvers<Outcome>();
     /** Hands the page an event, or holds it while the state a reopened plan caught up to is being checked. */
@@ -167,26 +168,50 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
       tell(sender, { kind: 'relayCaughtUp' });
       release();
     };
-    /** Checks the log a reopened plan caught up to as the state of its plan, giving null for an empty log and undefined for a log that is not the log of this plan. */
+    /** Checks the log a reopened plan caught up to as the state of its plan, giving null for an empty log and undefined for a log that cannot be read or is not the log of this plan. */
     const stateOf = async (caughtUp: Gathered): Promise<Uint8Array | null | undefined> => {
       if (caughtUp.messages.length === 0) {
         return null;
       }
       const loaded = await services.runTask({ kind: 'readRelayLog', messages: caughtUp.messages });
-      if (!loaded.ok || loaded.value.documentId !== relay.documentId) {
+      if (!loaded.ok) {
+        console.error(
+          `The log the relay gave for the reopened plan could not be read: ${loaded.error.code}.`,
+        );
+        return undefined;
+      }
+      if (loaded.value.documentId !== relay.documentId) {
         console.error('The relay gave a log that is not the log of the reopened plan.');
         return undefined;
       }
       return loaded.value.state;
     };
+    /** Hands the page the state a reopened plan caught up to, ending the session when that fails unexpectedly so that nothing stays held. */
+    const handOverOrEnd = (caughtUp: Gathered): void => {
+      handOver(caughtUp).catch((error: unknown) => {
+        console.error('The plan could not come back to its relay:', error);
+        stop(sender);
+        release();
+        tell(sender, { kind: 'relayEnded', reason: 'MALFORMED' });
+      });
+    };
+    /** Adds a message to the log gathered until the relay caught up, ending the session once the log grows beyond what a plan can hold, as only a relay that lies sends that much. */
+    const gather = (into: Gathered, delivery: RelayDelivery): void => {
+      into.bytes += delivery.bytes.length;
+      if (into.bytes > MAX_UNCOMPRESSED_BYTES) {
+        console.error('The relay gave a log larger than any plan.');
+        settle({ kind: 'ended', reason: 'TOO_LARGE' });
+        stop(sender);
+        return;
+      }
+      into.messages.push(delivery.bytes);
+      into.bytesSinceSnapshot =
+        delivery.kind === 'snapshot' ? 0 : into.bytesSinceSnapshot + delivery.compressedBytes;
+    };
     /** Follows what the relay session tells, gathering the log until it caught up and forwarding the rest to the page. */
     const follow = (event: RelaySessionEvent): void => {
       if (gathered !== null && event.kind === 'delivery') {
-        gathered.messages.push(event.delivery.bytes);
-        gathered.bytesSinceSnapshot =
-          event.delivery.kind === 'snapshot'
-            ? 0
-            : gathered.bytesSinceSnapshot + event.delivery.compressedBytes;
+        gather(gathered, event.delivery);
         return;
       }
       if (gathered !== null && event.kind === 'caughtUp') {
@@ -195,7 +220,7 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
         settle({ kind: 'caughtUp', gathered: caughtUp });
         if (mode === 'reopen') {
           held = [];
-          void handOver(caughtUp);
+          handOverOrEnd(caughtUp);
         }
         return;
       }
@@ -209,10 +234,10 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
       }
       forward(eventForPage(event));
     };
-    /** Forgets a window whose session ended for good, and the link of its plan and its relay among the recent projects when its room is gone. */
+    /** Forgets a window whose session ended for good, and the link of its plan and its relay among the recent projects once its owner closed its room, a room the relay no longer finds keeping its link since the relay may only have lost it for a while. */
     const ended = (reason: RelayEnd): void => {
       relays.delete(sender);
-      if (ROOM_GONE.includes(reason) && relay.documentId !== null) {
+      if (reason === ROOM_CLOSED && relay.documentId !== null) {
         void forgetLink(relay.documentId);
         void services.noteRelay(sender, null);
       }
@@ -266,6 +291,7 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
       return failure({ code: 'CANCELLED' });
     }
     if (!loaded.ok) {
+      console.error(`The log of the plan a link joined could not be read: ${loaded.error.code}.`);
       stop(sender);
       return loaded;
     }
@@ -317,6 +343,7 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
     }
     const link = await foundLink(services.links, documentId);
     if (!link.ok) {
+      console.error(`The plan could not come back to its relay: ${link.error.code}.`);
       return link;
     }
     if (link.value === null) {
@@ -339,11 +366,23 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
       );
       return failure({ code: 'TASK_FAILED' });
     }
-    if (!relay.session.closeRoom().ok) {
+    const closed = await relay.session.closeRoom();
+    if (!closed.ok) {
+      console.error(`The room of a plan could not be closed for new links: ${closed.error}.`);
       return failure({ code: 'NOT_CONNECTED' });
     }
     stop(event.sender);
     return shareInNewRoom(event.sender, relay.link.address, relay.documentId);
+  });
+  handle(IPC_CHANNELS.forgetSharedPlan, async (event) => {
+    const documentId = services.documentOf(event.sender);
+    if (documentId === null || relays.has(event.sender)) {
+      console.error('A page asked to forget a shared plan it does not hold or still follows.');
+      return failure({ code: 'TASK_FAILED' });
+    }
+    await forgetLink(documentId);
+    await services.noteRelay(event.sender, null);
+    return success(null);
   });
   handle(IPC_CHANNELS.copyRelayLink, async (event, value) => {
     const kind = LINK_KINDS.includes(value) ? value : refuseMessage();
@@ -387,13 +426,14 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
   };
 }
 
-/** Finds the link kept for a plan, a store the system cannot read being logged and reported. */
+/** Finds the link kept for a plan, a link this computer can no longer open and a store the system cannot read being reported. */
 async function foundLink(
   links: RelayLinkStore,
   documentId: DocumentId,
 ): Promise<BridgeResult<RelayLink | null>> {
   try {
-    return success(await links.find(documentId));
+    const found = await links.find(documentId);
+    return found.ok ? found : failure({ code: found.error });
   } catch (error) {
     if (!isSystemError(error)) {
       throw error;
@@ -460,6 +500,7 @@ export function readRelayOutgoing(value: unknown): RelayOutgoing | null {
     messageId.length === MESSAGE_ID_BYTES &&
     Number.isSafeInteger(covers) &&
     Number(covers) >= 0 &&
+    (messageKind === 'snapshot' || covers === 0) &&
     isMessageBytes(bytes);
   return valid
     ? {

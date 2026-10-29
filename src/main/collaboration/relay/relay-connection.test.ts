@@ -3,8 +3,16 @@ import { createServer as createHttpsServer, type Server } from 'node:https';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { startRelayServer, type RunningRelay } from '../../../../relay/src/server.ts';
 import { testConfig } from '../../../../relay/src/testing/relay-client.ts';
-import { sealedRecord, temporaryFolder } from '../../../../relay/src/testing/relay-records.ts';
-import type { RelayCrypto, RelayMessage } from '../../../core/collaboration/relay/relay-envelope';
+import {
+  ROOM_KEYS,
+  sealedRecord,
+  temporaryFolder,
+} from '../../../../relay/src/testing/relay-records.ts';
+import {
+  sealRelayMessage,
+  type RelayCrypto,
+  type RelayMessage,
+} from '../../../core/collaboration/relay/relay-envelope';
 import {
   drawRelayAccess,
   relayKeysOf,
@@ -14,9 +22,15 @@ import {
 import type { RelayAddress } from '../../../core/collaboration/relay/relay-link';
 import {
   encodeRelayFrame,
+  encodeRelayRecord,
+  readClientFrame,
+  RECORD_SIGNATURE_OFFSET,
   RELAY_WIRE_VERSION,
+  signedRecordBytes,
+  type ClientFrame,
   type RelayFrame,
 } from '../../../core/collaboration/relay/relay-wire';
+import { MAX_OPEN_RELAY_MESSAGES } from '../../../core/limits';
 import { seededRandom } from '../../../core/testing/test-crypto';
 import { aesGcm, systemRandomBytes } from '../aes-gcm';
 import { zlibCompressor } from '../../zlib-compressor';
@@ -136,6 +150,36 @@ function update(byte: number, length = 8): RelayMessage {
   };
 }
 
+/** Seals a change of one byte with some keys as a member of this computer would, giving its one record. */
+function sealedUpdate(keys: RelayKeys, byte: number): Uint8Array {
+  const sealed = sealRelayMessage(keys, { ...update(byte), seen: 0 }, CRYPTO);
+  const [record] = sealed.ok ? sealed.value : [];
+  if (record === undefined) {
+    throw new Error('The change could not be sealed.');
+  }
+  return record;
+}
+
+/** Writes the first of two chunks of a message signed with the keys to edit, whose second never comes. */
+function firstOfTwoChunks(id: number): Uint8Array {
+  const record = encodeRelayRecord({
+    kind: 'update',
+    messageId: new Uint8Array(16).fill(id),
+    salt: new Uint8Array(16).fill(id),
+    index: 0,
+    count: 2,
+    covers: 0,
+    seen: 0,
+    signature: new Uint8Array(64),
+    chunk: Uint8Array.of(id),
+  });
+  record.set(
+    EDIT_KEYS.sign?.(signedRecordBytes(EDIT_KEYS.roomId, record)) ?? [],
+    RECORD_SIGNATURE_OFFSET,
+  );
+  return record;
+}
+
 /** Gives what the page sees of the messages a session handed it: their kind, first byte, length and the sequence settled. */
 function deliveriesOf(events: readonly RelaySessionEvent[]) {
   return events.flatMap((event) =>
@@ -163,13 +207,18 @@ function plainPresence(event: RelaySessionEvent) {
 async function lyingRelay(
   frames: readonly (Uint8Array | string)[],
   certificate = TEST_CERTIFICATE,
+  heard: ClientFrame[] = [],
 ): Promise<number> {
   const port = await freePort();
   const server = createHttpsServer({ cert: certificate.certificate, key: certificate.key });
   const fake = new WebSocketServer({ server });
   fakes.push(server);
   fake.on('connection', (socket: WebSocket) => {
-    socket.once('message', () => {
+    socket.once('message', (data: Buffer) => {
+      const frame = readClientFrame(new Uint8Array(data));
+      if (frame !== null && frame !== 'UNSUPPORTED_VERSION') {
+        heard.push(frame);
+      }
       frames.forEach((frame) => {
         socket.send(frame);
       });
@@ -258,7 +307,7 @@ describe('a session in a room of a relay', () => {
     const relay = await startedRelay();
     const editor = joinRelay(relay.port, EDIT_KEYS, { creates: true });
     const early = editor.session.send({ kind: 'message', message: update(1) });
-    const earlyClose = editor.session.closeRoom();
+    const earlyClose = await editor.session.closeRoom();
     await until(() => editor.kinds().includes('connected'));
     const viewer = joinRelay(relay.port, VIEW_KEYS);
     await until(() => viewer.kinds().includes('caughtUp'));
@@ -266,7 +315,7 @@ describe('a session in a room of a relay', () => {
       early,
       earlyClose,
       viewer.session.send({ kind: 'message', message: update(2) }),
-      viewer.session.closeRoom(),
+      await viewer.session.closeRoom(),
       viewer.session.send({ kind: 'presence', bytes: new Uint8Array(8_192) }),
     ]).toEqual([
       { ok: false, error: 'NOT_OPEN' },
@@ -277,21 +326,37 @@ describe('a session in a room of a relay', () => {
     ]);
   });
 
-  it('closes the room for good with the link that edits, telling every member', async () => {
+  it('closes the room for good with the link that edits once the relay says so, stopping quietly while every other member is told', async () => {
     const relay = await startedRelay();
     const editor = joinRelay(relay.port, EDIT_KEYS, { creates: true });
     await until(() => editor.kinds().includes('connected'));
     const viewer = joinRelay(relay.port, VIEW_KEYS);
     await until(() => viewer.kinds().includes('caughtUp'));
-    expect(editor.session.closeRoom()).toEqual({ ok: true, value: undefined });
-    await until(() => editor.kinds().includes('ended') && viewer.kinds().includes('ended'));
+    const closed = await editor.session.closeRoom();
+    await until(() => viewer.kinds().includes('ended'));
     const comingBack = joinRelay(relay.port, VIEW_KEYS);
     await until(() => comingBack.kinds().includes('ended'));
-    expect([editor.events.at(-1), viewer.events.at(-1), comingBack.events]).toEqual([
-      { kind: 'ended', reason: 'CLOSED' },
+    expect([
+      closed,
+      editor.kinds().includes('ended'),
+      viewer.events.at(-1),
+      comingBack.events,
+    ]).toEqual([
+      { ok: true, value: undefined },
+      false,
       { kind: 'ended', reason: 'CLOSED' },
       [{ kind: 'ended', reason: 'NO_ROOM' }],
     ]);
+  });
+
+  it('tells the room could not be closed when the relay never answers', async () => {
+    const silent = await lyingRelay([
+      encodeRelayFrame(WELCOME),
+      encodeRelayFrame({ type: 'caughtUp' }),
+    ]);
+    const editor = joinRelay(silent, ROOM_KEYS);
+    await until(() => editor.kinds().includes('caughtUp'));
+    expect(await editor.session.closeRoom()).toEqual({ ok: false, error: 'UNREACHABLE' });
   });
 
   it('ends at once on a relay of this computer whose certificate it does not trust', async () => {
@@ -375,7 +440,7 @@ describe('a session in a room of a relay', () => {
 });
 
 describe('a session with a relay that lies', () => {
-  it('sets aside a record or a presence that does not open, and a record it already has', async () => {
+  it('sets aside a record or a presence that does not open, never counting a record not signed for the room as had', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const port = await lyingRelay([
       encodeRelayFrame(WELCOME),
@@ -390,9 +455,53 @@ describe('a session with a relay that lies', () => {
       ['connected', 'caughtUp'],
       [
         ['A record of the shared plan was set aside: BAD_SIGNATURE.'],
+        ['A record of the shared plan was set aside: BAD_SIGNATURE.'],
         ['A presence in the shared plan did not open and was set aside.'],
       ],
     ]);
+  });
+
+  it('comes back from the first record once it had to drop a record for want of room, so that no change is lost for good', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const heard: ClientFrame[] = [];
+    const starts = Array.from({ length: MAX_OPEN_RELAY_MESSAGES + 1 }, (_unused, index) =>
+      encodeRelayFrame({ type: 'record', seq: index + 2, record: firstOfTwoChunks(index + 1) }),
+    );
+    const port = await lyingRelay(
+      [
+        encodeRelayFrame(WELCOME),
+        encodeRelayFrame({ type: 'record', seq: 1, record: sealedUpdate(EDIT_KEYS, 1) }),
+        ...starts,
+      ],
+      TEST_CERTIFICATE,
+      heard,
+    );
+    const member = joinRelay(port, VIEW_KEYS);
+    await until(() => heard.length >= 2);
+    expect([
+      heard.slice(0, 2).map((frame) => (frame.type === 'hello' ? frame.since : null)),
+      member.kinds().includes('reconnecting'),
+      warn.mock.calls.find(([message]) => String(message).includes('set aside')),
+    ]).toEqual([[0, 0], true, ['A record of the shared plan was set aside: TOO_MANY.']]);
+  });
+
+  it('skips a record of a sequence it already has, and still takes the next one after a forged record of a far sequence', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const port = await lyingRelay([
+      encodeRelayFrame(WELCOME),
+      encodeRelayFrame({ type: 'record', seq: 3, record: sealedUpdate(EDIT_KEYS, 1) }),
+      encodeRelayFrame({ type: 'record', seq: 2, record: sealedUpdate(EDIT_KEYS, 2) }),
+      encodeRelayFrame({ type: 'record', seq: 1_000, record: sealedUpdate(OTHER_KEYS, 3) }),
+      encodeRelayFrame({ type: 'record', seq: 4, record: sealedUpdate(EDIT_KEYS, 4) }),
+      encodeRelayFrame({ type: 'caughtUp' }),
+    ]);
+    const member = joinRelay(port, VIEW_KEYS);
+    await until(() => member.kinds().includes('caughtUp'));
+    expect(
+      member.events.flatMap((event) =>
+        event.kind === 'delivery' ? [event.delivery.messageId[0]] : [],
+      ),
+    ).toEqual([1, 4]);
   });
 
   it.each([

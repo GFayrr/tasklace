@@ -27,6 +27,7 @@ export type RelayBridge = Pick<
   | 'joinByLink'
   | 'reopenSharedPlan'
   | 'makeNewLinks'
+  | 'forgetSharedPlan'
   | 'copyRelayLink'
   | 'openGuide'
   | 'stopCollaboration'
@@ -45,6 +46,8 @@ export interface RelayContext {
   readonly randomBytes: (count: number) => Uint8Array;
   readonly ended: (reason: RelayEndReason, relay: string) => void;
   readonly linkNotKept: () => void;
+  readonly changeRefused: () => void;
+  readonly notReopened: (failure: FileFailure) => void;
 }
 
 export interface ShownRelayPerson {
@@ -269,6 +272,7 @@ export class RelayState {
     if (!reopened.ok || reopened.value === null) {
       if (!reopened.ok) {
         console.error('The plan could not come back to its relay:', reopened.error);
+        this.#context.notReopened(reopened.error);
       }
       this.#forget();
       return false;
@@ -327,6 +331,20 @@ export class RelayState {
     if (!stopped.ok) {
       console.error('The plan shared through a relay could not be left:', stopped.error);
     }
+  }
+
+  /** Forgets for good a plan whose room the relay no longer finds, with the link this computer kept for it, giving whether it was forgotten. */
+  async forgetPlan(): Promise<boolean> {
+    if (this.#phase.kind !== 'in' || this.#phase.end !== 'NO_ROOM') {
+      return false;
+    }
+    const forgotten = await this.#context.bridge.forgetSharedPlan();
+    if (!forgotten.ok) {
+      console.error('The shared plan could not be forgotten:', forgotten.error);
+      return false;
+    }
+    this.#forget();
+    return true;
   }
 
   /** Forgets the plan shared through a relay without telling the main process, which already stopped it. */
@@ -465,6 +483,7 @@ export class RelayState {
         return;
       case 'refused':
         console.warn(`The plan shared through a relay refused a message: ${event.reason}.`);
+        this.#context.changeRefused();
         return;
       case 'people':
         this.#people = event.people;

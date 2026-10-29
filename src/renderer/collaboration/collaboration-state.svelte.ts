@@ -79,6 +79,8 @@ export interface CollaborationContext {
   readonly selectedTaskId: () => TaskId | null;
   readonly relayEnded: (reason: RelayEndReason, relay: string) => void;
   readonly relayLinkNotKept: () => void;
+  readonly relayChangeRefused: () => void;
+  readonly relayNotReopened: (failure: FileFailure) => void;
   readonly shareLater?: (share: () => void) => void;
   readonly randomBytes?: (count: number) => Uint8Array;
 }
@@ -215,6 +217,8 @@ export class CollaborationState {
       randomBytes: context.randomBytes ?? pageRandomBytes,
       ended: context.relayEnded,
       linkNotKept: context.relayLinkNotKept,
+      changeRefused: context.relayChangeRefused,
+      notReopened: context.relayNotReopened,
     });
     context.bridge.onCollaborationEvent((event) => {
       this.#receive(event);

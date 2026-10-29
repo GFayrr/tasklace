@@ -93,6 +93,7 @@ function page(session: SharedSession | null = sessionOn(ORIGIN, 1)) {
     stop: DONE,
     copy: DONE,
     guide: DONE,
+    forget: DONE,
     keep: success({ localCopySaved: true }) as BridgeResult<{ readonly localCopySaved: boolean }>,
     opens: true,
     meanwhile: (): void => undefined,
@@ -129,6 +130,10 @@ function page(session: SharedSession | null = sessionOn(ORIGIN, 1)) {
       requests.push(['openGuide']);
       return Promise.resolve(answers.guide);
     },
+    forgetSharedPlan: () => {
+      requests.push(['forgetSharedPlan']);
+      return Promise.resolve(answers.forget);
+    },
     sendToRelay: (outgoing) => {
       sent.push(outgoing);
     },
@@ -157,6 +162,8 @@ function page(session: SharedSession | null = sessionOn(ORIGIN, 1)) {
     randomBytes: seededRandom(3),
     ended: (reason, relay) => told.push(['ended', reason, relay]),
     linkNotKept: () => told.push(['linkNotKept']),
+    changeRefused: () => told.push(['changeRefused']),
+    notReopened: (failure) => told.push(['notReopened', failure.code]),
   });
   return {
     relay,
@@ -331,24 +338,28 @@ describe('joining a plan by its link from the page', () => {
 });
 
 describe('reopening a plan shared through a relay from the page', () => {
-  it('does nothing for a plan without a kept link, and logs one that cannot come back', async () => {
+  it('does nothing for a plan without a kept link, and logs and tells a plan that cannot come back', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const none = page();
     const failed = page();
-    failed.answers.reopen = failure({ code: 'READ_FAILED' });
+    failed.answers.reopen = failure({ code: 'LINK_UNREADABLE' });
     const session = sessionOn(ORIGIN, 1);
     expect([
       await none.relay.reopen(session),
       none.relay.isActive,
+      none.told,
       await failed.relay.reopen(session),
       failed.relay.isActive,
+      failed.told,
       error.mock.calls,
     ]).toEqual([
       false,
       false,
+      [],
       false,
       false,
-      [['The plan could not come back to its relay:', { code: 'READ_FAILED' }]],
+      [['notReopened', 'LINK_UNREADABLE']],
+      [['The plan could not come back to its relay:', { code: 'LINK_UNREADABLE' }]],
     ]);
   });
 
@@ -499,9 +510,10 @@ describe('a plan shared through a relay while it lives', () => {
         bytes: Uint8Array.of(9),
       },
     });
-    expect([nameOf(shared.session(), 'a'), warn.mock.calls]).toEqual([
+    expect([nameOf(shared.session(), 'a'), warn.mock.calls, shared.told]).toEqual([
       'Theirs',
       [['The plan shared through a relay refused a message: UNSUPPORTED_VERSION.']],
+      [['changeRefused']],
     ]);
   });
 
@@ -526,6 +538,34 @@ describe('a plan shared through a relay while it lives', () => {
     expect([shared.repairs.length > 0, shared.session()?.project().dependencies.length]).toEqual([
       true,
       1,
+    ]);
+  });
+
+  it('forgets for good only a plan whose room the relay no longer finds, once the main process forgot its link', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const closed = await sharedPage();
+    closed.relay.receive({ kind: 'relayEnded', reason: 'CLOSED' });
+    const refused = await sharedPage();
+    refused.relay.receive({ kind: 'relayEnded', reason: 'NO_ROOM' });
+    refused.answers.forget = failure({ code: 'TASK_FAILED' });
+    const gone = await sharedPage();
+    gone.relay.receive({ kind: 'relayEnded', reason: 'NO_ROOM' });
+    expect([
+      await closed.relay.forgetPlan(),
+      await refused.relay.forgetPlan(),
+      refused.relay.isActive,
+      await gone.relay.forgetPlan(),
+      gone.relay.isActive,
+      gone.requests.at(-1),
+      error.mock.calls,
+    ]).toEqual([
+      false,
+      false,
+      true,
+      true,
+      false,
+      ['forgetSharedPlan'],
+      [['The shared plan could not be forgotten:', { code: 'TASK_FAILED' }]],
     ]);
   });
 
