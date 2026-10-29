@@ -1,3 +1,4 @@
+import { testShownLink } from '../../core/testing/secrets';
 import { encodeMessage } from '../../core/collaboration/messages';
 import { requireParticipantId } from '../../core/collaboration/participants';
 import { testDigest, testJoinCode } from '../../core/testing/secrets';
@@ -17,8 +18,8 @@ import { button, click, render, single, update } from './testing/render';
 const TEXT = english.collaboration;
 const RELAY = english.relay;
 const SHOWN = {
-  edit: 'tasklace://relay.example.org/#e1.Hq7Lm2…',
-  view: 'tasklace://relay.example.org/#v1.P0dX8w…',
+  edit: testShownLink('tasklace://relay.example.org/#e1.Hq7Lm2…'),
+  view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…'),
 };
 const PLAN = project([workTask('a', { name: 'Survey' })], [], { name: 'Thesis' });
 
@@ -523,7 +524,10 @@ describe('sharing the open plan through a relay', () => {
       button(single(root, '.confirm[aria-labelledby="new-links-title"]'), TEXT.cancel),
     );
     const cancelled = relayRequests(control).length;
-    const fresh = { edit: 'tasklace://relay.example.org/#e1.Zk3Rt9…', view: SHOWN.view };
+    const fresh = {
+      edit: testShownLink('tasklace://relay.example.org/#e1.Zk3Rt9…'),
+      view: SHOWN.view,
+    };
     control.collaboration.relay.newLinksResult = {
       ok: true,
       value: { shown: fresh, relay: 'relay.example.org', kept: true },

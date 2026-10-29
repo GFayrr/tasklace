@@ -19,8 +19,9 @@ import {
   encodeRelayRecord,
   readRelayRecord,
   signedRecordBytes,
+  coveredSequence,
+  type CoveredSequence,
   type RelayRecord,
-  type RelayRecordKind,
 } from './relay-wire';
 
 export interface RelayCrypto {
@@ -29,20 +30,18 @@ export interface RelayCrypto {
   readonly randomBytes: (count: number) => Uint8Array;
 }
 
-export interface RelayMessage {
-  readonly kind: RelayRecordKind;
+export type RelayMessage = CoveredSequence & {
   readonly messageId: Uint8Array;
-  readonly covers: number;
   readonly bytes: Uint8Array;
-}
+};
 
-export interface MessageToSeal extends RelayMessage {
+export type MessageToSeal = RelayMessage & {
   readonly seen: number;
-}
+};
 
-export interface OpenedRelayMessage extends RelayMessage {
+export type OpenedRelayMessage = RelayMessage & {
   readonly compressedBytes: number;
-}
+};
 
 export interface OpenedPresence {
   readonly bytes: Uint8Array;
@@ -83,10 +82,10 @@ export function sealRelayMessage(
   message: MessageToSeal,
   crypto: RelayCrypto,
 ): Result<readonly Uint8Array[], SealRefusal> {
-  const { sign } = keys;
-  if (sign === null) {
+  if (keys.kind === 'view') {
     return failure('READ_ONLY');
   }
+  const { sign } = keys;
   if (message.bytes.length > MAX_COLLABORATION_MESSAGE_BYTES) {
     return failure('TOO_LARGE');
   }
@@ -103,12 +102,11 @@ export function sealRelayMessage(
   return success(
     Array.from({ length: count }, (_unused, index) => {
       const record = encodeRelayRecord({
-        kind: message.kind,
+        ...coveredSequence(message.kind, message.covers),
         messageId: message.messageId,
         salt,
         index,
         count,
-        covers: message.covers,
         seen: message.seen,
         signature: new Uint8Array(SIGNATURE_BYTES),
         chunk: sealed.subarray(index * RELAY_CHUNK_BYTES, (index + 1) * RELAY_CHUNK_BYTES),
@@ -161,9 +159,8 @@ export function createRelayAssembler(
       return failure(bytes.error === 'OUTPUT_TOO_LARGE' ? 'TOO_LARGE' : 'UNREADABLE');
     }
     return success({
-      kind: first.kind,
+      ...coveredSequence(first.kind, first.covers),
       messageId: first.messageId,
-      covers: first.covers,
       bytes: bytes.value,
       compressedBytes: sealed.length,
     });

@@ -6,6 +6,7 @@ import {
   drawRelayAccess,
   relayKeysOf,
   viewAccessOf,
+  type RelayKeys,
 } from '../../../core/collaboration/relay/relay-keys';
 import type { TaskId } from '../../../core/model/project';
 import { createSharedDocument } from '../../../core/shared/shared-document';
@@ -67,7 +68,11 @@ function rename(session: SharedSession, id: string, name: string): void {
 }
 
 /** Follows a session through the relay of the test, leaving it after the test. */
-function join(session: SharedSession, keys = EDIT_KEYS, creates = false): RelayTeamMember {
+function join(
+  session: SharedSession,
+  keys: RelayKeys = EDIT_KEYS,
+  creates = false,
+): RelayTeamMember {
   const member = joinThroughRelay({ port: relay.port, session, keys, creates });
   members.push(member);
   return member;

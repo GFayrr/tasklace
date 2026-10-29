@@ -4,7 +4,7 @@ import {
   type CollaborationEvent,
   type NearbyPlan,
 } from './bridge-contract';
-import { MESSAGE_ID_BYTES } from '../core/collaboration/relay/relay-wire';
+import { MESSAGE_ID_BYTES, RELAY_RECORD_KINDS } from '../core/collaboration/relay/relay-wire';
 import { readEndpoint } from '../core/collaboration/endpoint';
 import { isParticipantId } from '../core/collaboration/participants';
 import { isJoinCode } from '../core/collaboration/secure/join-code';
@@ -13,7 +13,7 @@ import { createIssueList } from '../core/validation/validation-issues';
 
 const GUEST_END_VALUES: readonly unknown[] = GUEST_ENDS;
 const RELAY_END_VALUES: readonly unknown[] = RELAY_ENDS;
-const RELAY_MESSAGE_KINDS: readonly unknown[] = ['update', 'snapshot'];
+const RELAY_MESSAGE_KINDS: readonly unknown[] = RELAY_RECORD_KINDS;
 
 /** Reads a field of a value of any shape. */
 function field(value: unknown, name: string): unknown {
@@ -30,14 +30,16 @@ function isCount(value: unknown): value is number {
   return isWhole(value) && value >= 0;
 }
 
-/** Tells whether a value is a message of the plan a relay passed on, opened by the main process, with the sequence settled. */
+/** Tells whether a value is a message of the plan a relay passed on, opened by the main process, with the sequence settled, only a snapshot covering one. */
 function isRelayDelivery(value: unknown): boolean {
   const messageId = field(value, 'messageId');
+  const covers = field(value, 'covers');
   return (
     RELAY_MESSAGE_KINDS.includes(field(value, 'kind')) &&
     messageId instanceof Uint8Array &&
     messageId.length === MESSAGE_ID_BYTES &&
-    isCount(field(value, 'covers')) &&
+    isCount(covers) &&
+    (field(value, 'kind') === 'snapshot' || covers === 0) &&
     field(value, 'bytes') instanceof Uint8Array &&
     isCount(field(value, 'compressedBytes')) &&
     isCount(field(value, 'settled'))

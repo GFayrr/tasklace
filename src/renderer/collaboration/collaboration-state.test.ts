@@ -1,3 +1,4 @@
+import { testShownLink } from '../../core/testing/secrets';
 import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encodeMessage, readMessage } from '../../core/collaboration/messages';
@@ -1143,7 +1144,7 @@ describe('a plan shared through a relay, seen from the page', () => {
     reader.collaboration.relay.reopenResult = {
       ok: true,
       value: {
-        shown: { edit: null, view: 'tasklace://relay.example.org/#v1.P0dX8w…' },
+        shown: { edit: null, view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…') },
         relay: 'relay.example.org',
       },
     };
@@ -1186,8 +1187,8 @@ describe('a plan shared through a relay, seen from the page', () => {
           localChanges: null,
         },
         shown: {
-          edit: 'tasklace://relay.example.org/#e1.Hq7Lm2…',
-          view: 'tasklace://relay.example.org/#v1.P0dX8w…',
+          edit: testShownLink('tasklace://relay.example.org/#e1.Hq7Lm2…'),
+          view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…'),
         },
         relay: 'relay.example.org',
         bytesSinceSnapshot: 0,

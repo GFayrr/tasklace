@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { createServer as createHttpsServer, type Server } from 'node:https';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { startRelayServer, type RunningRelay } from '../../../../relay/src/server.ts';
@@ -47,6 +47,7 @@ import {
   startRelaySession,
   type RelaySession,
   type RelaySessionEvent,
+  type RelaySessionOptions,
 } from './relay-connection';
 
 vi.mock('node:tls', async (importOriginal) => {
@@ -128,10 +129,13 @@ function joinRelay(
   options: { readonly creates?: boolean; readonly keepTrying?: boolean } = {},
 ) {
   const events: RelaySessionEvent[] = [];
+  const opening =
+    options.creates === true && keys.kind === 'edit'
+      ? { creates: true as const, keys }
+      : { creates: false as const, keys };
   const session = startRelaySession({
     address: addressOf(port),
-    keys,
-    creates: options.creates ?? false,
+    ...opening,
     keepTrying: options.keepTrying ?? false,
     crypto: CRYPTO,
     startTimer: fastTimer,
@@ -174,10 +178,7 @@ function firstOfTwoChunks(id: number): Uint8Array {
     signature: new Uint8Array(64),
     chunk: Uint8Array.of(id),
   });
-  record.set(
-    EDIT_KEYS.sign?.(signedRecordBytes(EDIT_KEYS.roomId, record)) ?? [],
-    RECORD_SIGNATURE_OFFSET,
-  );
+  record.set(EDIT_KEYS.sign(signedRecordBytes(EDIT_KEYS.roomId, record)), RECORD_SIGNATURE_OFFSET);
   return record;
 }
 
@@ -598,17 +599,16 @@ describe('a session with a relay that lies', () => {
 
 describe('a session that creates a room', () => {
   it('needs the link that edits, which alone can sign the creation', () => {
-    expect(() =>
-      startRelaySession({
-        address: addressOf(1),
-        keys: VIEW_KEYS,
-        creates: true,
-        keepTrying: false,
-        crypto: CRYPTO,
-        startTimer: fastTimer,
-        tell: () => undefined,
-      }),
-    ).toThrow('Only the link that edits a plan can create its room.');
+    const options = {
+      address: addressOf(1),
+      keys: VIEW_KEYS,
+      creates: true,
+      keepTrying: false,
+      crypto: CRYPTO,
+      startTimer: fastTimer,
+      tell: () => undefined,
+    } as const;
+    expectTypeOf(options).not.toExtend<RelaySessionOptions>();
   });
 });
 

@@ -10,33 +10,40 @@ export const MAX_RELAY_PRESENCE_BYTES = 4_096;
 export const MAX_RELAY_MEMBERS = 64;
 export const MAX_RELAY_SEQUENCE = Number.MAX_SAFE_INTEGER;
 
-export type RelayRecordKind = 'update' | 'snapshot';
+export const RELAY_RECORD_KINDS = ['update', 'snapshot'] as const;
 
-export interface RelayRecord {
-  readonly kind: RelayRecordKind;
+export type RelayRecordKind = (typeof RELAY_RECORD_KINDS)[number];
+
+export const RELAY_REFUSALS = [
+  'UNSUPPORTED_VERSION',
+  'MALFORMED',
+  'NO_ROOM',
+  'ROOM_EXISTS',
+  'BAD_SIGNATURE',
+  'TOO_LARGE',
+  'ROOM_FULL',
+  'RELAY_FULL',
+  'TOO_MANY',
+  'TOO_FAST',
+  'STALE',
+  'RELAY_FAILED',
+] as const;
+
+export type RelayRefusal = (typeof RELAY_REFUSALS)[number];
+
+export type CoveredSequence =
+  | { readonly kind: 'update'; readonly covers: 0 }
+  | { readonly kind: 'snapshot'; readonly covers: number };
+
+export type RelayRecord = CoveredSequence & {
   readonly messageId: Uint8Array;
   readonly salt: Uint8Array;
   readonly index: number;
   readonly count: number;
-  readonly covers: number;
   readonly seen: number;
   readonly signature: Uint8Array;
   readonly chunk: Uint8Array;
-}
-
-export type RelayRefusal =
-  | 'UNSUPPORTED_VERSION'
-  | 'MALFORMED'
-  | 'NO_ROOM'
-  | 'ROOM_EXISTS'
-  | 'BAD_SIGNATURE'
-  | 'TOO_LARGE'
-  | 'ROOM_FULL'
-  | 'RELAY_FULL'
-  | 'TOO_MANY'
-  | 'TOO_FAST'
-  | 'STALE'
-  | 'RELAY_FAILED';
+};
 
 export type ClientFrame =
   | {
@@ -71,7 +78,6 @@ const COUNT_BYTES = 2;
 const RECORD_DOMAIN = new TextEncoder().encode('Tasklace relay record v1');
 const CREATE_DOMAIN = new TextEncoder().encode('Tasklace relay create v1');
 const CLOSE_DOMAIN = new TextEncoder().encode('Tasklace relay close v1');
-const RECORD_KINDS: readonly RelayRecordKind[] = ['update', 'snapshot'];
 const FIRST_CODE = 1;
 const CLIENT_CODES: Readonly<Record<ClientFrame['type'], number>> = {
   create: 1,
@@ -90,20 +96,6 @@ const RELAY_CODES: Readonly<Record<RelayFrame['type'], number>> = {
   refused: 7,
   closed: 8,
 };
-const REFUSALS: readonly RelayRefusal[] = [
-  'UNSUPPORTED_VERSION',
-  'MALFORMED',
-  'NO_ROOM',
-  'ROOM_EXISTS',
-  'BAD_SIGNATURE',
-  'TOO_LARGE',
-  'ROOM_FULL',
-  'RELAY_FULL',
-  'TOO_MANY',
-  'TOO_FAST',
-  'STALE',
-  'RELAY_FAILED',
-];
 const KIND_OFFSET = 0;
 const MESSAGE_ID_OFFSET = 1;
 const SALT_OFFSET = MESSAGE_ID_OFFSET + MESSAGE_ID_BYTES;
@@ -120,9 +112,12 @@ export const MAX_RELAY_FRAME_BYTES = FRAME_HEADER_BYTES + SEQUENCE_BYTES + MAX_R
 
 /** Writes one chunk of a message as the record the relay keeps and passes on: its kind, its message, the salt of its key, its place, the sequence a snapshot covers, the last sequence its author had seen, the signature and the chunk. */
 export function encodeRelayRecord(record: RelayRecord): Uint8Array {
+  if (!hasRecordShape(record)) {
+    throw new RangeError('A record has a field of the wrong length or a chunk out of place.');
+  }
   const bytes = new Uint8Array(CHUNK_OFFSET + record.chunk.length);
   const view = new DataView(bytes.buffer);
-  bytes[KIND_OFFSET] = RECORD_KINDS.indexOf(record.kind) + FIRST_CODE;
+  bytes[KIND_OFFSET] = RELAY_RECORD_KINDS.indexOf(record.kind) + FIRST_CODE;
   bytes.set(record.messageId, MESSAGE_ID_OFFSET);
   bytes.set(record.salt, SALT_OFFSET);
   view.setUint16(INDEX_OFFSET, record.index);
@@ -134,13 +129,26 @@ export function encodeRelayRecord(record: RelayRecord): Uint8Array {
   return bytes;
 }
 
+/** Tells whether the fields of a record have the lengths the format writes and its chunk a place among its chunks, so that no field ever runs over the next. */
+function hasRecordShape(record: RelayRecord): boolean {
+  return (
+    record.messageId.length === MESSAGE_ID_BYTES &&
+    record.salt.length === SALT_BYTES &&
+    record.signature.length === SIGNATURE_BYTES &&
+    record.chunk.length <= RELAY_CHUNK_BYTES &&
+    record.count >= 1 &&
+    record.count <= MAX_RELAY_CHUNKS &&
+    record.index < record.count
+  );
+}
+
 /** Reads a record from untrusted bytes, returning null for an unknown kind, a chunk out of place, too many chunks, a sequence beyond the safe integers, a snapshot covering more than its author had seen or a chunk too large, without ever throwing. */
 export function readRelayRecord(bytes: Uint8Array): RelayRecord | null {
   if (bytes.length < CHUNK_OFFSET || bytes.length > MAX_RELAY_RECORD_BYTES) {
     return null;
   }
   const view = viewOf(bytes);
-  const kind = RECORD_KINDS[(bytes[KIND_OFFSET] ?? 0) - FIRST_CODE];
+  const kind = RELAY_RECORD_KINDS[(bytes[KIND_OFFSET] ?? 0) - FIRST_CODE];
   const index = view.getUint16(INDEX_OFFSET);
   const count = view.getUint16(COUNT_OFFSET);
   const covers = safeInteger(view.getBigUint64(COVERS_OFFSET));
@@ -152,16 +160,20 @@ export function readRelayRecord(bytes: Uint8Array): RelayRecord | null {
     return null;
   }
   return {
-    kind,
+    ...coveredSequence(kind, covers),
     messageId: bytes.slice(MESSAGE_ID_OFFSET, SALT_OFFSET),
     salt: bytes.slice(SALT_OFFSET, INDEX_OFFSET),
     index,
     count,
-    covers,
     seen,
     signature: bytes.slice(SIGNATURE_OFFSET, CHUNK_OFFSET),
     chunk: bytes.subarray(CHUNK_OFFSET),
   };
+}
+
+/** Gives what a message of a kind covers, nothing for a change and a sequence for a snapshot, so that the type of a record says only a snapshot covers one. */
+export function coveredSequence(kind: RelayRecordKind, covers: number): CoveredSequence {
+  return kind === 'update' ? { kind, covers: 0 } : { kind, covers };
 }
 
 /** Gives the bytes the signature of a record covers: a domain, the room, and every byte of the record but the signature, so that a record signed for one room or one place never passes for another. */
@@ -261,7 +273,7 @@ export function encodeRelayFrame(frame: RelayFrame): Uint8Array {
     case 'left':
       return framed(RELAY_CODES[frame.type], [memberBytes(frame.member)]);
     case 'refused':
-      return framed(RELAY_CODES.refused, [Uint8Array.of(REFUSALS.indexOf(frame.reason))]);
+      return framed(RELAY_CODES.refused, [Uint8Array.of(RELAY_REFUSALS.indexOf(frame.reason))]);
   }
 }
 
@@ -344,7 +356,8 @@ function readRecordFrame(content: Uint8Array): RelayFrame | null {
 
 /** Reads why the relay refused, from its code. */
 function readRefused(content: Uint8Array): RelayFrame | null {
-  const reason = content.length === 1 ? REFUSALS[content[0] ?? REFUSALS.length] : undefined;
+  const reason =
+    content.length === 1 ? RELAY_REFUSALS[content[0] ?? RELAY_REFUSALS.length] : undefined;
   return reason === undefined ? null : { type: 'refused', reason };
 }
 

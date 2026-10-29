@@ -17,6 +17,7 @@ import {
 } from '../../src/core/collaboration/relay/relay-envelope';
 import { drawRelayAccess, relayKeysOf } from '../../src/core/collaboration/relay/relay-keys';
 import {
+  coveredSequence,
   encodeRelayRecord,
   signedRecordBytes,
   type RelayRecordKind,
@@ -90,12 +91,11 @@ function recordOf(
   options: { readonly kind?: RelayRecordKind; readonly covers?: number; readonly signed?: boolean },
 ): Uint8Array {
   const unsigned = {
-    kind: options.kind ?? 'update',
+    ...coveredSequence(options.kind ?? 'update', options.covers ?? 0),
     messageId: numberedBytes(MESSAGE_ID_BYTES, number),
     salt: new Uint8Array(SALT_BYTES),
     index: 0,
     count: 1,
-    covers: options.covers ?? 0,
     seen: options.covers ?? 0,
     signature: new Uint8Array(SIGNATURE_BYTES),
     chunk: Uint8Array.of(number % 256),

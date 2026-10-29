@@ -1,3 +1,4 @@
+import { testShownLink } from '../../core/testing/secrets';
 import { fillMessage } from '../i18n/messages';
 import { describe, expect, it } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
@@ -324,7 +325,7 @@ describe('joining a plan by its link', () => {
       ok: true,
       value: {
         project: offered.value,
-        shown: { edit: null, view: 'tasklace://relay.example.org:8443/#v1.BBBBBB…' },
+        shown: { edit: null, view: testShownLink('tasklace://relay.example.org:8443/#v1.BBBBBB…') },
         relay: 'relay.example.org:8443',
         bytesSinceSnapshot: 0,
         kept: true,

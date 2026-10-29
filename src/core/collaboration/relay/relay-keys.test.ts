@@ -59,6 +59,7 @@ describe('the keys of a plan shared through a relay', () => {
     const view = relayKeysOf(viewAccessOf(editAccess()));
     expect([view, viewAccessOf(viewAccessOf(editAccess()))]).toEqual([
       {
+        kind: 'view',
         roomId: edit.roomId,
         encryptionKey: edit.encryptionKey,
         verifyKey: edit.verifyKey,

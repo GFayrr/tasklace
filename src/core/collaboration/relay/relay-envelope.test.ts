@@ -23,6 +23,7 @@ import {
   MAX_RELAY_PRESENCE_BYTES,
   RECORD_SIGNATURE_OFFSET,
   SALT_BYTES,
+  coveredSequence,
   encodeRelayRecord,
   readRelayRecord,
   signedRecordBytes,
@@ -48,7 +49,12 @@ function message(
   kind: MessageToSeal['kind'] = 'update',
   covers = 0,
 ): MessageToSeal {
-  return { kind, messageId: new Uint8Array(16).fill(id), covers, seen: covers, bytes };
+  return {
+    ...coveredSequence(kind, covers),
+    messageId: new Uint8Array(16).fill(id),
+    seen: covers,
+    bytes,
+  };
 }
 
 /** Seals a message with the keys to edit, failing the test when it is refused. */

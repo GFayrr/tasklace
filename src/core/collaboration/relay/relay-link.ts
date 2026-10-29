@@ -28,6 +28,10 @@ export interface RelayLinkPreview {
 
 export type AddressRefusal = 'INVALID_ADDRESS' | 'NOT_SECURE';
 
+declare const SHOWN: unique symbol;
+
+export type ShownRelayLink = string & { readonly [SHOWN]: true };
+
 const MAX_HOST_LENGTH = 253;
 const MAX_PATH_LENGTH = 256;
 const SECURE_SCHEME = 'wss';
@@ -41,6 +45,7 @@ const LEFT_OUT = '…';
 const ADDRESS_PATTERN = /^([a-z]+):\/\/([^/:[\]]+|\[[^\]]*\])(?::(\d{1,5}))?(\/[^#?]*)?$/i;
 const LINK_PATTERN =
   /^tasklace:\/\/([^/:[\]]+|\[[^\]]*\])(?::(\d{1,5}))?(\/[^#?]*)?#([ev]1)\.([A-Za-z0-9_-]+)$/;
+const SHOWN_LINK_PATTERN = /^tasklace:\/\/[^#]+#[ev]1\.[A-Za-z0-9_-]{6}…$/;
 const NAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
 const IPV6_PATTERN = /^\[[0-9a-f:.]{2,45}\]$/;
 const PATH_PATTERN = /^(\/[A-Za-z0-9._~-]*)+$/;
@@ -111,10 +116,19 @@ export function previewRelayLink(text: string): RelayLinkPreview | null {
 }
 
 /** Writes a link as a person may see it on screen, its keys cut after their first characters so that the page never holds them. */
-export function shownRelayLink(link: RelayLink): string {
+export function shownRelayLink(link: RelayLink): ShownRelayLink {
   const written = encodeRelayLink(link);
   const keysStart = written.indexOf('#') + `#${EDIT_MARK}.`.length;
-  return `${written.slice(0, keysStart + SHOWN_KEY_CHARACTERS)}${LEFT_OUT}`;
+  const shown = `${written.slice(0, keysStart + SHOWN_KEY_CHARACTERS)}${LEFT_OUT}`;
+  if (!isShownRelayLink(shown)) {
+    throw new Error('A link was not cut as one shown on screen.');
+  }
+  return shown;
+}
+
+/** Tells whether a text is a link cut as it is shown on screen, never one holding its keys whole. */
+export function isShownRelayLink(text: string): text is ShownRelayLink {
+  return SHOWN_LINK_PATTERN.test(text);
 }
 
 /** Checks the host, port and path of an address, the host in lower case and the path / when none is given, or returns null for any part that is not one. */

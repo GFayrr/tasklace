@@ -1,3 +1,4 @@
+import { testShownLink } from '../../core/testing/secrets';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encodeMessage, readMessage } from '../../core/collaboration/messages';
 import type { RelayDelivery, RelayOutgoing } from '../../core/collaboration/relay/relay-member';
@@ -25,14 +26,14 @@ import { isRelayEvent, RelayState, type RelayBridge } from './relay-state.svelte
 
 const ORIGIN = createSharedDocument(project([workTask('a'), workTask('b')]), TEST_DOCUMENT_ID);
 const BOTH_LINKS: ShownRelayLinks = {
-  edit: 'tasklace://relay.example.org/#e1.Hq7Lm2…',
-  view: 'tasklace://relay.example.org/#v1.P0dX8w…',
+  edit: testShownLink('tasklace://relay.example.org/#e1.Hq7Lm2…'),
+  view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…'),
 };
 const VIEW_LINK: ShownRelayLinks = { edit: null, view: BOTH_LINKS.view };
 const LINKS: RelayLinks = { shown: BOTH_LINKS, relay: 'relay.example.org', kept: true };
 const NEW_LINKS: RelayLinks = {
   ...LINKS,
-  shown: { edit: 'tasklace://relay.example.org/#e1.Zk3Rt9…', view: BOTH_LINKS.view },
+  shown: { edit: testShownLink('tasklace://relay.example.org/#e1.Zk3Rt9…'), view: BOTH_LINKS.view },
 };
 const DONE: BridgeResult<null> = { ok: true, value: null };
 

@@ -420,6 +420,7 @@ describe('the shared plan through the bridge', () => {
       { kind: 'relayDelivery', delivery: { ...DELIVERY, messageId: new Uint8Array(8) } },
       { kind: 'relayDelivery', delivery: { ...DELIVERY, messageId: [1] } },
       { kind: 'relayDelivery', delivery: { ...DELIVERY, covers: 0.5 } },
+      { kind: 'relayDelivery', delivery: { ...DELIVERY, kind: 'update', covers: 2 } },
       { kind: 'relayDelivery', delivery: { ...DELIVERY, bytes: 'text' } },
       { kind: 'relayDelivery', delivery: { ...DELIVERY, compressedBytes: -2 } },
       { kind: 'relayDelivery', delivery: { ...DELIVERY, settled: null } },

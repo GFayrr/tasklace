@@ -1,5 +1,7 @@
 import type { Endpoint, ParticipantId } from '../core/collaboration/participants';
 import type { OpenedPresence } from '../core/collaboration/relay/relay-envelope';
+import type { ShownRelayLink } from '../core/collaboration/relay/relay-link';
+import { RELAY_REFUSALS } from '../core/collaboration/relay/relay-wire';
 import type { RelayDelivery, RelayOutgoing } from '../core/collaboration/relay/relay-member';
 import type { JoinCode } from '../core/collaboration/secure/join-code';
 import type { TokenDigest } from '../core/collaboration/secure/token-digest';
@@ -87,23 +89,7 @@ export const ISSUE_FAILURE_CODES = ['INVALID_PROJECT', 'INVALID_IMPORT', 'INVALI
 
 export type IssueFailureCode = (typeof ISSUE_FAILURE_CODES)[number];
 
-export const RELAY_ENDS = [
-  'UNSUPPORTED_VERSION',
-  'MALFORMED',
-  'NO_ROOM',
-  'ROOM_EXISTS',
-  'BAD_SIGNATURE',
-  'TOO_LARGE',
-  'ROOM_FULL',
-  'RELAY_FULL',
-  'TOO_MANY',
-  'TOO_FAST',
-  'STALE',
-  'RELAY_FAILED',
-  'CLOSED',
-  'UNREACHABLE',
-  'UNTRUSTED',
-] as const;
+export const RELAY_ENDS = [...RELAY_REFUSALS, 'CLOSED', 'UNREACHABLE', 'UNTRUSTED'] as const;
 
 export type RelayEndReason = (typeof RELAY_ENDS)[number];
 
@@ -157,8 +143,8 @@ export interface Sharing {
 }
 
 export interface ShownRelayLinks {
-  readonly edit: string | null;
-  readonly view: string;
+  readonly edit: ShownRelayLink | null;
+  readonly view: ShownRelayLink;
 }
 
 export type RelayLinkKind = 'edit' | 'view';

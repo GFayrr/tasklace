@@ -1,3 +1,4 @@
+import { testShownLink } from '../../core/testing/secrets';
 import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { describe, expect, it, vi } from 'vitest';
 import { encodeMessage } from '../../core/collaboration/messages';
@@ -427,7 +428,7 @@ describe('a plan joined by its link', () => {
       ok: true,
       value: {
         project: offered.value,
-        shown: { edit: null, view: 'tasklace://relay.example.org/#v1.P0dX8w…' },
+        shown: { edit: null, view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…') },
         relay: 'relay.example.org',
         bytesSinceSnapshot: 0,
         kept: true,
@@ -459,7 +460,7 @@ describe('a plan joined by its link', () => {
       ok: true,
       value: {
         project: offered.value,
-        shown: { edit: null, view: 'tasklace://relay.example.org/#v1.P0dX8w…' },
+        shown: { edit: null, view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…') },
         relay: 'relay.example.org',
         bytesSinceSnapshot: 0,
         kept: false,
@@ -505,8 +506,8 @@ describe('a plan joined by its link', () => {
 describe('a plan shared through a relay', () => {
   const SHARED = {
     shown: {
-      edit: 'tasklace://relay.example.org/#e1.Hq7Lm2…',
-      view: 'tasklace://relay.example.org/#v1.P0dX8w…',
+      edit: testShownLink('tasklace://relay.example.org/#e1.Hq7Lm2…'),
+      view: testShownLink('tasklace://relay.example.org/#v1.P0dX8w…'),
     },
     relay: 'relay.example.org',
     kept: true,

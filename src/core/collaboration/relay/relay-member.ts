@@ -9,9 +9,9 @@ import { createMerger, type SyncRefusal } from '../sync';
 import type { OpenedPresence, OpenedRelayMessage, RelayMessage } from './relay-envelope';
 import { MESSAGE_ID_BYTES } from './relay-wire';
 
-export interface RelayDelivery extends OpenedRelayMessage {
+export type RelayDelivery = OpenedRelayMessage & {
   readonly settled: number;
-}
+};
 
 export interface RelayPerson {
   readonly name: string;

@@ -14,7 +14,7 @@ import {
   type RelayCrypto,
   type SealRefusal,
 } from '../../../core/collaboration/relay/relay-envelope';
-import type { RelayKeys } from '../../../core/collaboration/relay/relay-keys';
+import type { EditRelayKeys, RelayKeys } from '../../../core/collaboration/relay/relay-keys';
 import {
   hostLabelOf,
   relayUrlOf,
@@ -50,15 +50,19 @@ export type RelaySessionEvent =
   | { readonly kind: 'offline' }
   | { readonly kind: 'ended'; readonly reason: RelayEnd };
 
-export interface RelaySessionOptions {
+interface RelaySessionBasics {
   readonly address: RelayAddress;
-  readonly keys: RelayKeys;
-  readonly creates: boolean;
   readonly keepTrying: boolean;
   readonly crypto: RelayCrypto;
   readonly startTimer: StartTimer;
   readonly tell: (event: RelaySessionEvent) => void;
 }
+
+export type RelaySessionOptions = RelaySessionBasics &
+  (
+    | { readonly creates: true; readonly keys: EditRelayKeys }
+    | { readonly creates: false; readonly keys: RelayKeys }
+  );
 
 export interface RelaySession {
   readonly send: (outgoing: RelayOutgoing) => Result<void, SealRefusal | 'NOT_OPEN'>;
@@ -125,7 +129,7 @@ export function endOfError(error: Error): RelayEnd {
 export function startRelaySession(options: RelaySessionOptions): RelaySession {
   const { keys, crypto, startTimer, tell } = options;
   const relay = hostLabelOf(options.address);
-  const creation = options.creates ? creationOf(keys) : null;
+  const creation = options.creates ? creationOf(options.keys) : null;
   let assembler = createRelayAssembler(keys, crypto);
   let socket: WebSocket | null = null;
   let isIn = false;
@@ -343,18 +347,15 @@ export function startRelaySession(options: RelaySessionOptions): RelaySession {
       return success(undefined);
     },
     closeRoom: () =>
-      keys.sign === null
+      keys.kind === 'view'
         ? Promise.resolve(failure('READ_ONLY'))
         : closeRoom(keys.sign(signedCloseBytes(keys.roomId))),
     close: stop,
   };
 }
 
-/** Gives the signed frame that creates the room of some keys, throwing for keys that cannot sign since only the link that edits a plan creates its room. */
-function creationOf(keys: RelayKeys): ClientFrame {
-  if (keys.sign === null) {
-    throw new Error('Only the link that edits a plan can create its room.');
-  }
+/** Gives the signed frame that creates the room of some keys, which only the link that edits a plan has. */
+function creationOf(keys: EditRelayKeys): ClientFrame {
   return {
     type: 'create',
     roomId: keys.roomId,

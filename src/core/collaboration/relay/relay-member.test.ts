@@ -270,7 +270,7 @@ describe('a member of a plan shared through a relay', () => {
     const base = {
       kind: 'update' as const,
       messageId: new Uint8Array(16),
-      covers: 0,
+      covers: 0 as const,
       compressedBytes: 1,
       settled: 1,
     };

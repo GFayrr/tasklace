@@ -4,6 +4,8 @@ import {
   drawRelayAccess,
   relayKeysOf,
   viewAccessOf,
+  type EditRelayKeys,
+  type RelayKeys,
 } from '../../../core/collaboration/relay/relay-keys';
 import {
   encodeRelayLink,
@@ -14,7 +16,11 @@ import {
   type RelayAddress,
   type RelayLink,
 } from '../../../core/collaboration/relay/relay-link';
-import { MESSAGE_ID_BYTES } from '../../../core/collaboration/relay/relay-wire';
+import {
+  coveredSequence,
+  MESSAGE_ID_BYTES,
+  RELAY_RECORD_KINDS,
+} from '../../../core/collaboration/relay/relay-wire';
 import { MAX_COLLABORATION_MESSAGE_BYTES, MAX_UNCOMPRESSED_BYTES } from '../../../core/limits';
 import { failure, success } from '../../../core/result';
 import { isDocumentId, type DocumentId } from '../../../core/shared/shared-document';
@@ -67,7 +73,9 @@ export interface RelayHandlers {
   readonly leave: (sender: WebContents) => void;
 }
 
-type Mode = 'create' | 'join' | 'reopen';
+type Opening =
+  | { readonly mode: 'create'; readonly keys: EditRelayKeys }
+  | { readonly mode: 'join' | 'reopen'; readonly keys: RelayKeys };
 
 type Outcome =
   | { readonly kind: 'in' }
@@ -89,7 +97,7 @@ interface WindowRelay {
   documentId: DocumentId | null;
 }
 
-const MESSAGE_KINDS: readonly unknown[] = ['update', 'snapshot'];
+const MESSAGE_KINDS: readonly unknown[] = RELAY_RECORD_KINDS;
 const LINK_KINDS: readonly unknown[] = ['edit', 'view'];
 const ROOM_CLOSED: RelayEnd = 'CLOSED';
 
@@ -132,7 +140,8 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
       console.error('The link of a shared plan could not be forgotten:', error);
     });
   /** Starts the relay session of a window, gathering what the relay passes on until it caught up when the window joins or reopens a plan, so that the page receives the plan in one checked state before anything after it. */
-  const start = (sender: WebContents, link: RelayLink, mode: Mode): WindowRelay => {
+  const start = (sender: WebContents, link: RelayLink, opening: Opening): WindowRelay => {
+    const { mode } = opening;
     let gathered: Gathered | null =
       mode === 'create' ? null : { messages: [], bytes: 0, bytesSinceSnapshot: 0 };
     let held: CollaborationEvent[] | null = null;
@@ -244,8 +253,9 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
     };
     const session = startRelaySession({
       address: link.address,
-      keys: relayKeysOf(link.access),
-      creates: mode === 'create',
+      ...(opening.mode === 'create'
+        ? { creates: true, keys: opening.keys }
+        : { creates: false, keys: opening.keys }),
       keepTrying: mode === 'reopen',
       crypto,
       startTimer: services.startTimer,
@@ -269,8 +279,9 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
     address: RelayAddress,
     documentId: DocumentId,
   ): Promise<BridgeResult<RelayLinks>> => {
-    const link: RelayLink = { address, access: drawRelayAccess(randomBytes) };
-    const relay = start(sender, link, 'create');
+    const access = drawRelayAccess(randomBytes);
+    const link: RelayLink = { address, access };
+    const relay = start(sender, link, { mode: 'create', keys: relayKeysOf(access) });
     relay.documentId = documentId;
     const outcome = await relay.outcome;
     if (outcome.kind !== 'in') {
@@ -329,7 +340,10 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
     if (isBusy(event.sender)) {
       return failure({ code: 'ALREADY_SHARING' });
     }
-    const relay = start(event.sender, link.value, 'join');
+    const relay = start(event.sender, link.value, {
+      mode: 'join',
+      keys: relayKeysOf(link.value.access),
+    });
     const outcome = await relay.outcome;
     return outcome.kind === 'caughtUp'
       ? openJoined(event.sender, relay, outcome.gathered)
@@ -353,7 +367,10 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
     if (isBusy(event.sender)) {
       return failure({ code: 'ALREADY_SHARING' });
     }
-    start(event.sender, link.value, 'reopen').documentId = documentId;
+    start(event.sender, link.value, {
+      mode: 'reopen',
+      keys: relayKeysOf(link.value.access),
+    }).documentId = documentId;
     const label = hostLabelOf(link.value.address);
     await services.noteRelay(event.sender, label);
     return success<RelayReopened>({ shown: shownLinksOf(link.value), relay: label });
@@ -506,9 +523,8 @@ export function readRelayOutgoing(value: unknown): RelayOutgoing | null {
     ? {
         kind,
         message: {
-          kind: messageKind === 'snapshot' ? 'snapshot' : 'update',
+          ...coveredSequence(messageKind === 'snapshot' ? 'snapshot' : 'update', Number(covers)),
           messageId,
-          covers: Number(covers),
           bytes,
         },
       }
