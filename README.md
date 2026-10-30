@@ -7,13 +7,13 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/GFayrr/tasklace/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/GFayrr/tasklace/actions/workflows/ci.yml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-1E3A5F?style=flat-square)](LICENSE)
-[![Status: early development](https://img.shields.io/badge/status-early%20development-1E3A5F?style=flat-square)](#roadmap)
+[![Status: pre-release](https://img.shields.io/badge/status-pre--release-1E3A5F?style=flat-square)](#roadmap)
 [![Node.js 24](https://img.shields.io/badge/node-%E2%89%A5%2024-1E3A5F?style=flat-square)](https://nodejs.org/)
 
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace is in early development. The scheduling core, project validation, the `.tasklace` file format and JSON and CSV exchange are built and tested. The desktop application opens, saves, imports and exports projects, plans tasks in a table and on a timeline, and has its project settings: name and start, working calendar, tags, and the critical path, date constraints and baseline among the advanced options. It exports plans to PDF, and several people can edit the same plan at the same time on a local network or from anywhere through an end-to-end encrypted relay that a school or a company hosts. There is no downloadable release yet.
+> Tasklace is not released yet. The application is complete for its first version: planning, project settings, PDF export, and real-time collaboration on a local network or through an end-to-end encrypted relay. What remains is distribution, a signed Windows executable that runs with a double-click. Until then, Tasklace can only be run from the source code.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -21,11 +21,13 @@ Tasklace is designed for students and professionals who want clear project plans
 
 - [Background](#background)
 - [Features](#features)
-- [Roadmap](#roadmap)
 - [Install](#install)
 - [Usage](#usage)
-- [Project structure](#project-structure)
+- [Roadmap](#roadmap)
+- [Security](#security)
+- [Development](#development)
 - [Maintainers](#maintainers)
+- [Acknowledgements](#acknowledgements)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -34,44 +36,83 @@ Tasklace is designed for students and professionals who want clear project plans
 Most Gantt tools are either heavyweight project-management suites or online services that keep your data on their servers. Tasklace aims for the middle ground:
 
 - **Strict Gantt rules**: tasks, milestones, summary tasks, the four dependency types, working calendars, progress and critical path.
-- **Quarter-hour precision**: durations are expressed in hours and minutes, by quarter hours, and spread over working days, with optional hours per day.
-- **Collaboration without an account**: people join a plan with a code on the local network, or with a link through an optional end-to-end encrypted relay that any school or company can host ([Working remotely: setting up a relay](docs/working-remotely.md)).
-- **Offline first**: every member keeps a local copy and changes are merged when they reconnect.
+- **Quarter-hour precision**: durations in hours and minutes, by quarter hours, spread over working days.
+- **Collaboration without an account**: people join a plan with a code on the local network, or with a link through an end-to-end encrypted relay that any school or company can host.
+- **Offline first**: every member keeps a copy of the plan on their computer, and changes are merged when they reconnect.
 - **Lightweight exports**: vector PDF files with selectable text.
 
 ## Features
 
-What Tasklace already supports:
+### Planning
 
-- Automatic scheduling from the project start date, task start dates, durations and dependencies.
-- Finish-to-start, start-to-start, finish-to-finish and start-to-finish dependencies, with lags and leads in working hours; dependency cycles are rejected.
-- Working calendars: working weekdays, one or more daily time ranges and non-working periods; no public holiday is assumed.
-- Durations in hours, with hours per day and an optional daily start hour per task.
-- Split tasks: one task made of several blocks separated by interruptions.
+- Dates worked out from the project start, task start dates, durations and dependencies.
+- Finish-to-start, start-to-start, finish-to-finish and start-to-finish dependencies, with lags and leads in working hours; dependency cycles are refused.
 - Milestones, nested summary tasks with duration-weighted progress, and WBS numbering (1, 1.1, 1.2…).
-- Optional advanced features, disabled by default: critical path with total and free float, "must finish on" dates and deadlines, with conflicts reported rather than enforced.
-- Optional tags that color the blocks: a 12-color default palette, any custom color, and automatic patterns when two colors could be confused, including for color-blind readers and grayscale prints.
-- Tags representing a person or a team: overlapping work is detected to the quarter hour and reported as grouped conflict periods, without moving anything.
-- Results that never depend on the order of the data, a prerequisite for real-time collaboration.
-- Complete validation of untrusted project data before anything is loaded, with each problem reported at its exact location.
+- Split tasks: one task made of several blocks separated by interruptions, each block able to wait for another task or block.
+- Working calendars: working weekdays, one or more daily time ranges and days off; no public holiday is assumed.
+- Hours per day and an optional daily start time for each task.
+
+### Working with the plan
+
+- A task table and a timeline side by side: edit names, durations, dates, progress, predecessors and tags in the table; drag and stretch bars, and link tasks or blocks by dragging on the timeline.
+- Zoom by hour, day, week or month, with non-working time shaded and a line for today.
+- Undo and redo that never touch the changes of others, and keyboard shortcuts for every common action.
+- Project settings in one window: name and start, working days, working hours to the quarter hour and days off, each change applied at once and undone with Ctrl+Z.
+
+### Tags and conflicts
+
+- Optional tags that color the bars: a 12-color palette, any custom color, and automatic patterns when two colors could be confused, including for color-blind readers and grayscale prints.
+- Tags that represent a person or a team: overlapping work is detected to the quarter hour and listed as grouped conflict periods, without moving anything.
+
+### Advanced options
+
+Off by default, each one turned on per project:
+
+- **Critical path**: total and free floats in the table, critical tasks underlined on the timeline, and how far the others can slip.
+- **Date constraints**: a date a task must finish on and a deadline, each missed date marked and listed with the conflicts.
+- **Baseline**: freeze the plan, then see where each task was planned and how many working days later or earlier it now ends.
+
+### Files and exports
+
 - `.tasklace` project files: compressed, checksummed and fully checked before opening, so that a damaged or forged file is refused without ever being loaded.
-- JSON import and export: compact, versioned documents with dates in clear text.
-- CSV import and export of the task table for Excel or LibreOffice, with regional dates and separators, errors reported by row and, when a single cell is at fault, by column, and protection against formula injection.
-- A shared project model where concurrent edits always merge into the same valid project for everyone, and a frozen baseline plan.
-- A secure desktop shell: projects decoded in an isolated worker with capped memory, automatic saving to a temporary file then renamed, and a local copy of every project for offline work.
-- A sober, readable interface: light theme with WCAG AA contrasts checked by a test, undo and redo that never touch the changes of others, and scheduling in a background worker.
-- A task table and a timeline side by side: edit names, durations, dates, progress, predecessors and tags in the table, drag and stretch bars, link tasks or single blocks by dragging, and open the details of a task to edit its blocks and daily hours.
-- Safe file handling: one file action at a time with the window waiting meanwhile, automatic saving with a local copy, the last three projects at hand, clear messages for every failure and a log file for diagnosis.
-- Project settings in a dialog with tabs: project name and start, working days, working hours to the quarter hour and days off, each change applied at once and undone with Ctrl+Z.
-- Tag management: rename, choose one of twelve tested colors or a custom one, mark a person or a team, add and delete (with a question when tasks use the tag); the legend shows the patterns of close colors.
-- A list of the conflicts of people and teams next to the legend: a line selects the first task concerned and scrolls the table and the timeline to it.
-- PDF export: A4, A3 or US Letter, the whole project or chosen days, an automatic or chosen zoom and optional columns, with a live preview of the first page. Text is never smaller than 10 points: a plan fits on one page when it can, otherwise it is printed on a grid of pages repeating the names and the time scale. The title, the export date, the legend of the tags and the page numbers are on every page; a PDF heavier than expected can be written again without the browser, lighter.
-- Real-time collaboration on the local network, without an account: share a plan and give the people near you its six-character code; they find it nearby or type the address of the host. Everything sent is encrypted, after a key exchange based on the code (CPace), and only computers on a private network are accepted.
-- People in a shared plan see who is there and which task each one has selected; newcomers are in read only until the host lets them edit.
-- A shared plan keeps going on its own: a lost connection comes back without any action, the person connected the longest takes over when the host leaves or their computer is switched off, and changes made offline are shared on return, or kept in a copy of your own when you were in read only.
-- Collaboration from anywhere through a relay, without an account: share a plan through the relay of your school or company and send one of its two links, to edit or to view. The relay only stores and passes on encrypted, signed messages: it never sees the plan, the names or who is looking at what. A plan joined this way is kept on your computer and its link in the system vault, so it reopens from the recent projects, and changes made offline are shared once the relay answers. If a link went to the wrong person, new links replace both.
-- A relay that any school or company can host: a small Node.js server, delivered as a hardened Docker image with Caddy for HTTPS, or to run behind Apache or nginx, or on its own with systemd, with quotas set by environment variables and a [step-by-step guide](docs/working-remotely.md).
-- Advanced options, off by default, turned on in the project settings: with the critical path on, the table shows total and free floats, the timeline underlines critical tasks and draws how far the others can slip; with date constraints on, a task can have a date it must finish on and a deadline, each date missed is listed with the conflicts, marked in the table and on the timeline, and each deadline is drawn on its row; with the baseline on, the plan can be frozen, each task then shows where it was planned and how many working days later or earlier it now ends.
+- Automatic saving, a local copy of every project, and the last three projects at hand.
+- CSV import and export for Excel or LibreOffice, with regional dates and separators, errors reported by row and column, and protection against formula injection.
+- JSON import and export: compact documents with dates in clear text.
+- PDF export: A4, A3 or US Letter, the whole project or chosen days, an automatic or chosen zoom, optional columns and a live preview. Text is never smaller than 10 points; a large plan is printed on a grid of pages that repeat the names and the time scale.
+
+### Collaboration
+
+- **On the local network**: share a plan and give the people near you its six-character code; they find it nearby or type the address of the host. Newcomers join in read only until the host lets them edit.
+- **From anywhere, through a relay**: share a plan through the relay of your school or company and send one of its two links, to edit or to view. A plan joined this way stays on your computer and reopens from the recent projects.
+- People in a shared plan see who is there and which task each one has selected.
+- A shared plan keeps going on its own: a lost connection comes back without any action, on the local network someone else takes over when the host leaves, and changes made offline are shared on return, or kept in a copy of your own when you were in read only.
+
+## Install
+
+There is no release yet. Tasklace will ship as a portable Windows executable: download it and double-click to run, with nothing else to install. An installer will also be offered.
+
+Until then, Tasklace can be run from the source code, which needs [Node.js](https://nodejs.org/) 24 LTS and npm:
+
+```sh
+git clone https://github.com/GFayrr/tasklace.git
+cd tasklace
+npm install
+npm run dev
+```
+
+### Hosting a relay
+
+A relay lets people share plans from anywhere. It is a small Node.js server that a school or a company runs on its own machine, with Docker and Caddy, behind Apache or nginx, or on its own with systemd. The guide [Working remotely: setting up a relay](docs/working-remotely.md) walks an IT department through every step.
+
+## Usage
+
+1. On the welcome screen, choose **New project**, **Open…** a Tasklace project, **Import…** a CSV or JSON file, or **Join…** a plan shared with you.
+2. Add tasks in the table, then set their durations and predecessors; the dates are worked out at once and drawn on the timeline.
+3. Open **Project settings** (the gear next to the project name, or Ctrl+,) to set the start, the working calendar, the tags and the advanced options.
+4. Use **Export** for a CSV table, a JSON file or a PDF.
+5. Use **Share** to work with others, on this network with a code, or through a relay with a link.
+
+Projects are saved automatically.
 
 ## Roadmap
 
@@ -85,31 +126,28 @@ What Tasklace already supports:
 - [x] End-to-end encrypted relay and deployment guide
 - [ ] Portable Windows executable
 
-Windows comes first; the code stays cross-platform so that macOS and Linux versions can follow. The [roadmap](docs/roadmap.md) gives the status of each step.
+Windows comes first; the code stays cross-platform so that macOS and Linux versions can follow. The [roadmap](docs/roadmap.md) tells what comes next, what may come later and what is not planned.
 
-## Install
+## Security
 
-There is no release yet. When it is available, Tasklace will ship as a portable Windows executable: download it and double-click to run, with nothing else to install.
+Tasklace treats every file it opens and every message it receives as untrusted:
 
-To work on the source code, you need [Node.js](https://nodejs.org/) 24 LTS and npm.
+- Project files and network messages are size-limited and fully validated before use; files are decoded in an isolated worker with capped memory.
+- The desktop shell runs with context isolation, a sandbox and a strict content security policy, and loads no remote content.
+- On the local network, everything is encrypted after a key exchange based on the join code (CPace), and only computers on a private network are accepted.
+- Through a relay, plans and presence are encrypted end to end (AES-256-GCM) and every change is signed (Ed25519); the relay stores and passes on messages it cannot read. Links are kept in the vault of the system.
 
-```sh
-git clone https://github.com/GFayrr/tasklace.git
-cd tasklace
-npm install
-```
+## Development
 
-## Usage
-
-The following commands are for development only.
+### Commands
 
 | Command                | Purpose                                                         |
 | ---------------------- | --------------------------------------------------------------- |
 | `npm run dev`          | Start the desktop application in development mode               |
 | `npm run build`        | Build the main process, the preload bridge and the page         |
-| `npm run test:e2e`     | Build, then test the running application end to end             |
 | `npm test`             | Run unit and property-based tests with coverage                 |
 | `npm run test:watch`   | Run tests in watch mode                                         |
+| `npm run test:e2e`     | Build, then test the running application end to end             |
 | `npm run bench`        | Check performance on 10,000 tasks and 20,000 links              |
 | `npm run bench:growth` | Check that key operations grow as their complexity says         |
 | `npm run pdf:compare`  | Print three sample plans with both PDF engines and compare them |
@@ -117,9 +155,11 @@ The following commands are for development only.
 | `npm run format`       | Format the code with Prettier                                   |
 | `npm run format:check` | Check formatting without changing files                         |
 
-The test suite covers edge cases extensively and uses property-based testing to check scheduling invariants and data exchange on thousands of random projects, and to make sure that no malformed input is ever accepted. Continuous integration runs formatting, linting, unit tests and end-to-end tests on Windows and Linux, the unit tests again in two time zones far from UTC, and the growth checks of key operations, for every push and pull request.
+### Tests
 
-## Project structure
+The test suite covers edge cases extensively and uses property-based testing to check scheduling invariants, merges and data exchange on thousands of random projects, and to make sure that no malformed input is ever accepted. Every file keeps at least 90% coverage. Continuous integration runs formatting, linting, unit tests and end-to-end tests on Windows and Linux, the unit tests again in two time zones far from UTC, the growth checks of key operations, and builds and checks the relay image, for every push and pull request.
+
+### Project structure
 
 ```
 src/core/            pure logic, independent of any user interface
@@ -154,6 +194,10 @@ tests/repository/    repository checks: small text fixtures, no text written in 
 ## Maintainers
 
 [@GFayrr](https://github.com/GFayrr)
+
+## Acknowledgements
+
+Tasklace is built on [Electron](https://www.electronjs.org/), [Svelte](https://svelte.dev/) and [Yjs](https://yjs.dev/), with cryptography from [noble](https://paulmillr.com/noble/), WebSockets from [ws](https://github.com/websockets/ws), PDF writing from [PDFKit](https://pdfkit.org/) and the [Jost](https://github.com/indestructible-type/Jost) typeface.
 
 ## Contributing
 
