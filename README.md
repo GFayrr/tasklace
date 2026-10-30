@@ -203,7 +203,7 @@ Tasklace is built on [Electron](https://www.electronjs.org/), [Svelte](https://s
 
 ## Contributing
 
-The project is at an early stage and is not accepting pull requests yet. Bug reports and suggestions are welcome in the [issue tracker](https://github.com/GFayrr/tasklace/issues).
+The project is at an early stage and is not accepting pull requests yet. Bug reports and suggestions are welcome in the [issue tracker](https://github.com/GFayrr/tasklace/issues); the [contributing notes](CONTRIBUTING.md) tell how to make them most useful.
 
 ## License
 
