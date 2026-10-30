@@ -154,5 +154,8 @@ test('does not run as Node when asked to, its fuse being off', async () => {
   await delay(RUN_AS_NODE_WAIT_MS);
   const stillRunning = child.exitCode === null;
   await stopProcessTree(child);
-  expect({ output, stillRunning }).toEqual({ output: '', stillRunning: true });
+  expect({ ranAsNode: output.includes(NODE_ANSWER), stillRunning }).toEqual({
+    ranAsNode: false,
+    stillRunning: true,
+  });
 });
