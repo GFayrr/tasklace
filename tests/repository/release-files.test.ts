@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { pngSize, readIco } from '../../scripts/ico-file.ts';
+import { APPLICATION_USER_MODEL_ID } from '../../src/main/platform/application-identity';
 
 const ICON_SIZES = [16, 20, 24, 32, 40, 48, 64, 256];
 const WINDOW_ICON_SIZE = 256;
@@ -37,6 +38,12 @@ describe('release files', () => {
     const { productName, version } = packageFile();
     expect(productName).toBe('Tasklace');
     expect(typeof version === 'string' && SEMANTIC_VERSION.test(version)).toBe(true);
+  });
+
+  it('packs the application under the same name and identifier as it runs with', () => {
+    const builder = readFileSync('electron-builder.yml', 'utf8');
+    expect(/^appId: (.+)$/m.exec(builder)?.[1]).toBe(APPLICATION_USER_MODEL_ID);
+    expect(/^productName: (.+)$/m.exec(builder)?.[1]).toBe(packageFile().productName);
   });
 
   it('keeps a changelog with a part for the changes to come or for the current version', () => {

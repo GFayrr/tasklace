@@ -43,6 +43,7 @@ export default defineConfig({
         'relay/src/main.ts',
         'scripts/**/*.test.ts',
         'scripts/make-icons.ts',
+        'scripts/write-third-party-notices.ts',
         'relay/src/testing/**',
         'src/core/testing/**',
         'src/main/testing/**',
