@@ -18,3 +18,4 @@ The first public version, 0.1.0, is being prepared. It will bring:
 - PDF export with a live preview, on one page or a grid of pages.
 - Real-time collaboration on a local network with a short code, or from anywhere through an end-to-end encrypted relay that a school or a company hosts, with a guide to set it up.
 - A portable Windows executable and an installer.
+- Tasklace settings for this computer, with the version in use and a check for new versions once a day that can be turned off; Tasklace never updates itself.

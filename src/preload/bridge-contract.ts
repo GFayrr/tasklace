@@ -55,10 +55,32 @@ export const IPC_CHANNELS = {
   forgetSharedPlan: 'relay:forget',
   copyRelayLink: 'relay:copy-link',
   openGuide: 'relay:open-guide',
+  appVersion: 'app:version',
+  openPrivacyPolicy: 'app:open-privacy-policy',
+  updateSettings: 'updates:settings',
+  setCheckForNewVersions: 'updates:set-check',
+  checkAtLaunch: 'updates:check-at-launch',
+  checkNow: 'updates:check-now',
+  openReleasePage: 'updates:open-release-page',
   relaySend: 'relay:send',
 } as const;
 
 export type ExchangeKind = 'json' | 'csv';
+
+export const RELEASE_CHECK_FAILURES = ['unreachable', 'refused', 'malformed'] as const;
+
+export type ReleaseCheckFailure = (typeof RELEASE_CHECK_FAILURES)[number];
+
+export type ReleaseCheck =
+  | { readonly kind: 'latest' }
+  | { readonly kind: 'newer'; readonly version: string }
+  | { readonly kind: 'failed'; readonly reason: ReleaseCheckFailure };
+
+export type LaunchCheck = ReleaseCheck | { readonly kind: 'skipped' };
+
+export interface UpdateSettings {
+  readonly checkForNewVersions: boolean;
+}
 
 export type FileFailureCode =
   | FileError['code']
@@ -325,6 +347,13 @@ export interface TasklaceBridge {
   readonly forgetSharedPlan: () => Promise<BridgeResult<null>>;
   readonly copyRelayLink: (kind: RelayLinkKind) => Promise<BridgeResult<null>>;
   readonly openGuide: () => Promise<BridgeResult<null>>;
+  readonly appVersion: () => Promise<BridgeResult<string>>;
+  readonly openPrivacyPolicy: () => Promise<BridgeResult<null>>;
+  readonly updateSettings: () => Promise<BridgeResult<UpdateSettings>>;
+  readonly setCheckForNewVersions: (check: boolean) => Promise<BridgeResult<null>>;
+  readonly checkAtLaunch: () => Promise<BridgeResult<LaunchCheck>>;
+  readonly checkNow: () => Promise<BridgeResult<ReleaseCheck>>;
+  readonly openReleasePage: (version: string) => Promise<BridgeResult<null>>;
   readonly sendToRelay: (outgoing: RelayOutgoing) => void;
   readonly sendToCollaboration: (to: CollaborationTarget, message: Uint8Array) => void;
   readonly onCollaborationEvent: (listener: (event: CollaborationEvent) => void) => void;
@@ -369,6 +398,13 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.forgetSharedPlan]: BridgeResult<null>;
   readonly [IPC_CHANNELS.copyRelayLink]: BridgeResult<null>;
   readonly [IPC_CHANNELS.openGuide]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.appVersion]: BridgeResult<string>;
+  readonly [IPC_CHANNELS.openPrivacyPolicy]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.updateSettings]: BridgeResult<UpdateSettings>;
+  readonly [IPC_CHANNELS.setCheckForNewVersions]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.checkAtLaunch]: BridgeResult<LaunchCheck>;
+  readonly [IPC_CHANNELS.checkNow]: BridgeResult<ReleaseCheck>;
+  readonly [IPC_CHANNELS.openReleasePage]: BridgeResult<null>;
 }
 
 export interface ChannelArguments {
@@ -421,6 +457,13 @@ export interface ChannelArguments {
   readonly [IPC_CHANNELS.forgetSharedPlan]: readonly [];
   readonly [IPC_CHANNELS.copyRelayLink]: readonly [kind: RelayLinkKind];
   readonly [IPC_CHANNELS.openGuide]: readonly [];
+  readonly [IPC_CHANNELS.appVersion]: readonly [];
+  readonly [IPC_CHANNELS.openPrivacyPolicy]: readonly [];
+  readonly [IPC_CHANNELS.updateSettings]: readonly [];
+  readonly [IPC_CHANNELS.setCheckForNewVersions]: readonly [check: boolean];
+  readonly [IPC_CHANNELS.checkAtLaunch]: readonly [];
+  readonly [IPC_CHANNELS.checkNow]: readonly [];
+  readonly [IPC_CHANNELS.openReleasePage]: readonly [version: string];
 }
 
 export type InvokeChannel = keyof ChannelAnswers & keyof ChannelArguments;

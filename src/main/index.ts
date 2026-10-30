@@ -1,7 +1,16 @@
 import { join } from 'node:path';
 import type { Worker } from 'node:worker_threads';
 import { Bonjour } from 'bonjour-service';
-import { app, BrowserWindow, clipboard, dialog, protocol, safeStorage, session } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  net,
+  protocol,
+  safeStorage,
+  session,
+} from 'electron';
 import {
   APP_ENTRY_URL,
   APP_SCHEME,
@@ -45,6 +54,7 @@ import {
   writeLogBeforeQuitting,
 } from './log-file';
 import { createMainWindow, createPrintWindow } from './window';
+import { registerUpdateHandlers } from './updates/update-service';
 import iconPath from '../../resources/icon.png?asset';
 import { printFontsIn, registerPdfHandlers } from './pdf-export';
 
@@ -57,6 +67,7 @@ const fileWorkerPath = join(import.meta.dirname, 'file-worker.js');
 const EXIT_AFTER_FAILURE = 1;
 const LOG_FOLDER = 'logs';
 const RELAY_LINK_STORE = 'relay-links.json';
+const UPDATE_SETTINGS_STORE = 'update-check.json';
 const log = createLogFile(
   join(app.getPath('userData'), LOG_FOLDER),
   () => new Date(),
@@ -135,6 +146,15 @@ function start(): void {
     noteRelay: files.noteRelay,
     copyText: (text) => clipboard.writeText(text),
     openGuide: () => openInBrowser(WORKING_REMOTELY_GUIDE_URL),
+  });
+  registerUpdateHandlers({
+    assertTrusted,
+    storePath: join(app.getPath('userData'), UPDATE_SETTINGS_STORE),
+    version: app.getVersion(),
+    isPackaged: app.isPackaged,
+    now: () => new Date(),
+    fetchReleases: (url, init) => net.fetch(url, init),
+    openInBrowser,
   });
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath, iconPath);

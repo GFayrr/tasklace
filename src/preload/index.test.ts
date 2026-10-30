@@ -300,6 +300,82 @@ describe('the shared plan through the bridge', () => {
     ]);
   });
 
+  it('sends each request about versions on its own channel with its values', async () => {
+    const bridge = await loadBridge();
+    electron.invoke.mockResolvedValue({ ok: true, value: null });
+    await bridge.setCheckForNewVersions(false);
+    await bridge.openReleasePage('0.2.0');
+    await bridge.openPrivacyPolicy();
+    expect(electron.invoke.mock.calls).toEqual([
+      [IPC_CHANNELS.setCheckForNewVersions, false],
+      [IPC_CHANNELS.openReleasePage, '0.2.0'],
+      [IPC_CHANNELS.openPrivacyPolicy],
+    ]);
+  });
+
+  it('passes on a version, its settings and the results of checks of the expected shape', async () => {
+    const bridge = await loadBridge();
+    const answers = new Map<string, unknown>([
+      [IPC_CHANNELS.appVersion, { ok: true, value: '0.1.0' }],
+      [IPC_CHANNELS.updateSettings, { ok: true, value: { checkForNewVersions: false } }],
+      [IPC_CHANNELS.checkAtLaunch, { ok: true, value: { kind: 'skipped' } }],
+      [IPC_CHANNELS.checkNow, { ok: true, value: { kind: 'newer', version: '0.2.0' } }],
+    ]);
+    electron.invoke.mockImplementation((channel) => Promise.resolve(answers.get(channel)));
+    expect([
+      await bridge.appVersion(),
+      await bridge.updateSettings(),
+      await bridge.checkAtLaunch(),
+      await bridge.checkNow(),
+    ]).toEqual([...answers.values()]);
+    for (const value of [{ kind: 'latest' }, { kind: 'failed', reason: 'refused' }]) {
+      answers.set(IPC_CHANNELS.checkNow, { ok: true, value });
+      expect(await bridge.checkNow()).toEqual({ ok: true, value });
+    }
+  });
+
+  it('refuses a version, settings or results of another shape, logging them, and passes a failure through', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const bridge = await loadBridge();
+    const failed = { ok: false, error: { code: 'TASK_FAILED' } };
+    const answers = new Map<string, unknown>([
+      [IPC_CHANNELS.appVersion, { ok: true, value: 'latest' }],
+      [IPC_CHANNELS.updateSettings, { ok: true, value: { checkForNewVersions: 'yes' } }],
+      [IPC_CHANNELS.checkAtLaunch, { ok: true, value: { kind: 'later' } }],
+      [IPC_CHANNELS.checkNow, { ok: true, value: { kind: 'newer', version: 'https://x' } }],
+    ]);
+    electron.invoke.mockImplementation((channel) => Promise.resolve(answers.get(channel)));
+    expect([
+      await bridge.appVersion(),
+      await bridge.updateSettings(),
+      await bridge.checkAtLaunch(),
+      await bridge.checkNow(),
+    ]).toEqual([failed, failed, failed, failed]);
+    answers.set(IPC_CHANNELS.checkNow, { ok: true, value: { kind: 'failed', reason: 'tired' } });
+    expect(await bridge.checkNow()).toEqual(failed);
+    answers.set(IPC_CHANNELS.appVersion, { ok: false, error: { code: 'READ_FAILED' } });
+    expect(await bridge.appVersion()).toEqual({ ok: false, error: { code: 'READ_FAILED' } });
+    expect(error.mock.calls).toEqual([
+      [`The main process answered ${IPC_CHANNELS.appVersion} with an unexpected value:`, 'latest'],
+      [
+        `The main process answered ${IPC_CHANNELS.updateSettings} with an unexpected value:`,
+        { checkForNewVersions: 'yes' },
+      ],
+      [
+        `The main process answered ${IPC_CHANNELS.checkAtLaunch} with an unexpected value:`,
+        { kind: 'later' },
+      ],
+      [
+        `The main process answered ${IPC_CHANNELS.checkNow} with an unexpected value:`,
+        { kind: 'newer', version: 'https://x' },
+      ],
+      [
+        `The main process answered ${IPC_CHANNELS.checkNow} with an unexpected value:`,
+        { kind: 'failed', reason: 'tired' },
+      ],
+    ]);
+  });
+
   it('sends the messages of the plan without waiting for an answer', async () => {
     const bridge = await loadBridge();
     bridge.sendToCollaboration('host', Uint8Array.of(1));

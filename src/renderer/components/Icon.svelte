@@ -17,7 +17,8 @@
     | 'sliders'
     | 'gear'
     | 'share'
-    | 'eye';
+    | 'eye'
+    | 'menu';
 
   let { name }: { name: IconName } = $props();
 </script>
@@ -74,6 +75,8 @@
     <path
       d="M2.25 12s3.6-6.75 9.75-6.75S21.75 12 21.75 12 18.15 18.75 12 18.75 2.25 12 2.25 12Z"
     /><circle cx="12" cy="12" r="2.7" />
+  {:else if name === 'menu'}
+    <path d="M4 7h16M4 12h16M4 17h16" />
   {:else if name === 'close'}
     <path d="M18 6 6 18M6 6l12 12" />
   {:else}

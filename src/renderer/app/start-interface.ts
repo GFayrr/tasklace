@@ -18,7 +18,7 @@ export function listenForUnexpectedErrors(
   });
 }
 
-/** Builds the state of the interface, shows it in its root and answers the requests to close the window, telling the caller once it runs, before the recent projects are loaded, so that their errors reach the user. */
+/** Builds the state of the interface, shows it in its root and answers the requests to close the window, telling the caller once it runs, before the recent projects are loaded and the check for new versions runs, so that their errors reach the user. */
 export async function startInterface(
   page: Document,
   context: AppContext,
@@ -40,4 +40,5 @@ export async function startInterface(
   started(app);
   target.dataset['started'] = 'true';
   await app.loadRecentProjects();
+  await app.startUpdates();
 }
