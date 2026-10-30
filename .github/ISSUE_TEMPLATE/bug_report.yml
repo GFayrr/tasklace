@@ -62,5 +62,5 @@ body:
     id: log
     attributes:
       label: Lines from the log
-      description: Tasklace writes its errors to `logs/tasklace.log` in its folder of user data. Paste the lines from around the problem, after reading them, as they may name your files or plans.
+      description: Tasklace writes its errors to `%APPDATA%\Tasklace\logs\tasklace.log` on Windows. Paste the lines from around the problem, after reading them, as they may name your files or plans.
       render: text
