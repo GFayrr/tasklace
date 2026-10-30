@@ -1,11 +1,15 @@
 # Dependabot proposes a pull request when a newer version of what the relay runs on is out:
 # the Node and Caddy images, pinned by version and digest, and the packages of its lock file.
+# A new major version of Node is left out: the whole project moves to it at once, by decision.
 version: 2
 updates:
   - package-ecosystem: docker
     directory: /relay
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: node
+        update-types: [version-update:semver-major]
     commit-message:
       prefix: build(relay)
   - package-ecosystem: docker-compose
