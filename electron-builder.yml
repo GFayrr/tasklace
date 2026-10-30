@@ -1,0 +1,53 @@
+# How electron-builder packs Tasklace for Windows: a portable executable and an installer for the current user.
+# The Windows executables are built by continuous integration only; nothing is signed yet.
+appId: io.github.gfayrr.tasklace
+productName: Tasklace
+copyright: © Fayr
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - resources/**
+  - package.json
+asar: true
+electronLanguages:
+  - en-US
+extraFiles:
+  - from: LICENSE
+    to: LICENSE.txt
+  - from: src/renderer/public/fonts/OFL.txt
+    to: licenses/Jost-OFL.txt
+  - from: out/licenses/THIRD-PARTY-NOTICES.txt
+    to: licenses/THIRD-PARTY-NOTICES.txt
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  loadBrowserProcessSpecificV8Snapshot: false
+  grantFileProtocolExtraPrivileges: false
+win:
+  icon: build/icons/tasklace.ico
+  target:
+    - portable
+    - nsis
+portable:
+  artifactName: Tasklace-${version}-portable.${ext}
+nsis:
+  artifactName: Tasklace-${version}-setup.${ext}
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  createStartMenuShortcut: true
+  createDesktopShortcut: false
+  deleteAppDataOnUninstall: false
+  installerIcon: build/icons/tasklace.ico
+  uninstallerIcon: build/icons/tasklace.ico
+linux:
+  target:
+    - dir
+publish: null

@@ -26,6 +26,7 @@ export default defineConfig(
             'electron.vite.config.ts',
             'playwright.config.ts',
             'playwright.pdf-compare.config.ts',
+            'playwright.packaged.config.ts',
             'svelte.config.js',
           ],
         },

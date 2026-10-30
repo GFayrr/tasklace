@@ -34,6 +34,7 @@ import {
 import { MESSAGES } from './messages';
 import { setApplicationIdentity } from './platform/application-identity';
 import { installApplicationMenu } from './platform/application-menu';
+import { keepSpellCheckingLocal } from './platform/spell-checking';
 import {
   captureConsole,
   createLogFile,
@@ -88,6 +89,7 @@ if (app.requestSingleInstanceLock()) {
 /** Protects the session, serves the interface and the pages printed to PDF, answers the bridge and opens the window, which saves its project before closing. */
 function start(): void {
   hardenSession(session.defaultSession, policy);
+  keepSpellCheckingLocal(process.platform, session.defaultSession);
   const printPages = createPrintPageStore();
   protocol.handle(
     APP_SCHEME,

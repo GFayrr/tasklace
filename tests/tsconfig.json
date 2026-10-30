@@ -9,7 +9,8 @@
     "../electron.vite.config.ts",
     "../playwright.config.ts",
     "../playwright.pdf-compare.config.ts",
+    "../playwright.packaged.config.ts",
     "../src/main/pdf/pdfkit-dash.d.ts"
   ],
-  "exclude": ["e2e", "pdf-compare"]
+  "exclude": ["e2e", "pdf-compare", "packaged"]
 }
