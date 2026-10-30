@@ -29,6 +29,12 @@
           }}>{text.notices.details}</button
         >
       {/if}
+      {#if notice.action !== null}
+        {@const action = notice.action}
+        <button type="button" class="details" onclick={() => void app.runNoticeAction(action)}
+          >{text.notices.openReleasePage}</button
+        >
+      {/if}
       <button
         type="button"
         class="dismiss"

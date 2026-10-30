@@ -168,7 +168,9 @@
       "other": "The float of {count} tasks cannot be worked out: to finish on time, they would have to start before {firstYear}, the first year Tasklace handles. Give the calendar more working hours, or turn off “Date constraints” in the “Advanced options” tab."
     },
     "projectStartMoved": "The project now starts on {date}, so that this task can start earlier.",
-    "details": "Details"
+    "details": "Details",
+    "newVersion": "Tasklace {version} is available.",
+    "openReleasePage": "Open the release page"
   },
   "scheduleFailures": {
     "calendar": "The dates could not be worked out because the working calendar of the project is not valid.",
@@ -780,5 +782,28 @@
       "UNREACHABLE": "The relay {relay} did not answer. Check your connection, or ask who sent you the link.",
       "UNTRUSTED": "The relay {relay} could not prove who it is, so Tasklace does not use it. Ask its owner to check its certificate."
     }
+  },
+  "tasklace": {
+    "menu": "Tasklace",
+    "settingsItem": "Tasklace settings…",
+    "guideItem": "Guide to setting up a relay",
+    "version": "Tasklace {version}",
+    "title": "Tasklace settings",
+    "keptHere": "Kept on this computer",
+    "close": "Close the Tasklace settings",
+    "versionHeading": "Version",
+    "checkNow": "Check now",
+    "checking": "Checking…",
+    "latest": "This is the latest version. Checked at {time}.",
+    "newer": "Tasklace {version} is available.",
+    "failed": "Tasklace could not find out which version is the latest. Try again later.",
+    "checkOff": "Tasklace does not check for new versions. You can still use “Check now”.",
+    "checkSwitch": "Check for new versions",
+    "checkHint": "Once a day, Tasklace asks GitHub which version is the latest. GitHub sees the address of your connection and the version you use; nothing else is sent.",
+    "privacyPolicy": "Privacy policy",
+    "notKept": "This setting could not be kept on this computer.",
+    "notOpened": "The browser could not open this page.",
+    "done": "Done",
+    "footerLink": "Tasklace settings"
   }
 }

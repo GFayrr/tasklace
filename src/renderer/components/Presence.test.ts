@@ -193,7 +193,9 @@ describe('the chip of the connection', () => {
     await opened.app.join({ address: '192.168.1.24', port: 47_313, code: testJoinCode('K7Q4MZ') });
     update();
     expect(
-      single(root, 'header.toolbar').querySelector('.share, [aria-haspopup="menu"].trigger'),
+      single(root, 'header.toolbar').querySelector(
+        '.share, [aria-haspopup="menu"].trigger:not([aria-label="Tasklace"])',
+      ),
     ).toBeNull();
     collaboration.listener?.({ kind: 'connected' });
     collaboration.listener?.({

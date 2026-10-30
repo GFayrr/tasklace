@@ -11,6 +11,7 @@
   }
   import ConnectionChip from './ConnectionChip.svelte';
   import MenuButton, { type MenuItem } from './MenuButton.svelte';
+  import TasklaceMenu from './TasklaceMenu.svelte';
 
   let { app }: { app: AppState } = $props();
   const text = $derived(app.messages);
@@ -210,6 +211,7 @@
     {text.toolbar.save}
   </button>
   <ConnectionChip {app} />
+  <TasklaceMenu {app} />
 </header>
 
 <style>
@@ -219,7 +221,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-2);
     background: var(--color-surface);
     border-bottom: 1px solid var(--color-border);
   }

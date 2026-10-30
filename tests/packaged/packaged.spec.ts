@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,6 +34,10 @@ test.beforeAll(() => {
 
 test.beforeEach(async () => {
   userData = await mkdtemp(join(tmpdir(), 'tasklace-packaged-'));
+  await writeFile(
+    join(userData, 'update-check.json'),
+    JSON.stringify({ version: 1, settings: { checkForNewVersions: false, lastCheckedOn: null } }),
+  );
 });
 
 test.afterEach(async () => {
@@ -157,5 +161,21 @@ test('does not run as Node when asked to, its fuse being off', async () => {
   expect({ ranAsNode: output.includes(NODE_ANSWER), stillRunning }).toEqual({
     ranAsNode: false,
     stillRunning: true,
+  });
+});
+
+test('shows its version in its settings, with the check for new versions turned off before launch, so that no test asks GitHub', async () => {
+  const { page } = await start();
+  const { version } = JSON.parse(await readFile('package.json', 'utf8')) as { version: string };
+  await page.getByRole('button', { name: 'Tasklace settings' }).click();
+  const settings = page.getByRole('dialog', { name: 'Tasklace settings' });
+  await expect(settings.locator('.part .row span').first()).toHaveText(`Tasklace ${version}`);
+  await expect(settings.getByRole('switch', { name: 'Check for new versions' })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  );
+  expect(JSON.parse(await readFile(join(userData, 'update-check.json'), 'utf8'))).toEqual({
+    version: 1,
+    settings: { checkForNewVersions: false, lastCheckedOn: null },
   });
 });

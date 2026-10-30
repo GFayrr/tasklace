@@ -1,6 +1,7 @@
 <script lang="ts">
   import { recentPlaceText } from '../collaboration/collaboration-text';
   import type { AppState } from '../app/app-state.svelte';
+  import { fillMessage } from '../i18n/messages';
 
   let { app }: { app: AppState } = $props();
   const text = $derived(app.messages);
@@ -58,10 +59,47 @@
         {/each}
       </section>
     {/if}
+    <footer class="footer">
+      <span
+        >{app.updates.version === null
+          ? ''
+          : fillMessage(text.tasklace.version, { version: app.updates.version })}</span
+      >
+      <button
+        type="button"
+        class="footer-link"
+        onclick={() => {
+          app.openTasklaceSettings();
+        }}>{text.tasklace.footerLink}</button
+      >
+    </footer>
   </div>
 </div>
 
 <style>
+  .footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    padding-top: var(--space-3);
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    border-top: 1px solid var(--color-border);
+  }
+
+  .footer-link {
+    padding: 0;
+    font: inherit;
+    color: var(--color-focus);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    background: none;
+    border: 0;
+    cursor: pointer;
+  }
+
   .welcome {
     height: 100%;
     display: flex;

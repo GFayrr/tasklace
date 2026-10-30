@@ -13,10 +13,15 @@ import {
   type ChannelAnswers,
   type ChannelArguments,
   type ResultChannel,
+  type LaunchCheck,
   type RecentProject,
+  type ReleaseCheck,
+  RELEASE_CHECK_FAILURES,
+  type UpdateSettings,
   type TasklaceBridge,
 } from './bridge-contract';
 import { isCollaborationEvent } from './collaboration-events';
+import { readVersion } from '../core/version';
 
 const LIST_SEPARATORS: readonly unknown[] = CSV_SEPARATORS;
 const DATE_ORDER_VALUES: readonly unknown[] = DATE_ORDERS;
@@ -86,6 +91,16 @@ const bridge: TasklaceBridge = {
   forgetSharedPlan: () => request(IPC_CHANNELS.forgetSharedPlan),
   copyRelayLink: (kind) => request(IPC_CHANNELS.copyRelayLink, kind),
   openGuide: () => request(IPC_CHANNELS.openGuide),
+  appVersion: () =>
+    checked(IPC_CHANNELS.appVersion, request(IPC_CHANNELS.appVersion), isVersionText),
+  openPrivacyPolicy: () => request(IPC_CHANNELS.openPrivacyPolicy),
+  updateSettings: () =>
+    checked(IPC_CHANNELS.updateSettings, request(IPC_CHANNELS.updateSettings), isUpdateSettings),
+  setCheckForNewVersions: (check) => request(IPC_CHANNELS.setCheckForNewVersions, check),
+  checkAtLaunch: () =>
+    checked(IPC_CHANNELS.checkAtLaunch, request(IPC_CHANNELS.checkAtLaunch), isLaunchCheck),
+  checkNow: () => checked(IPC_CHANNELS.checkNow, request(IPC_CHANNELS.checkNow), isReleaseCheck),
+  openReleasePage: (version) => request(IPC_CHANNELS.openReleasePage, version),
   sendToRelay: (outgoing) => {
     ipcRenderer.send(IPC_CHANNELS.relaySend, outgoing);
   },
@@ -149,6 +164,49 @@ async function request<C extends ResultChannel>(
   }
   console.error(`The main process answered ${channel} with an unexpected shape:`, result);
   return UNEXPECTED_ANSWER;
+}
+
+/** Checks the value of an answer the page relies on, besides its outcome, an answer of any other shape being logged and counting as a failed task. */
+async function checked<T>(
+  channel: ResultChannel,
+  request: Promise<BridgeResult<unknown>>,
+  isValue: (value: unknown) => value is T,
+): Promise<BridgeResult<T>> {
+  const answer = await request;
+  if (!answer.ok) {
+    return answer;
+  }
+  if (isValue(answer.value)) {
+    return { ok: true, value: answer.value };
+  }
+  console.error(`The main process answered ${channel} with an unexpected value:`, answer.value);
+  return UNEXPECTED_ANSWER;
+}
+
+/** Tells whether an answer is the text of a version. */
+function isVersionText(value: unknown): value is string {
+  return readVersion(value) !== null;
+}
+
+/** Tells whether an answer has the shape of the settings of new versions. */
+function isUpdateSettings(value: unknown): value is UpdateSettings {
+  return typeof Reflect.get(Object(value), 'checkForNewVersions') === 'boolean';
+}
+
+/** Tells whether an answer is the result of a check for new versions. */
+function isReleaseCheck(value: unknown): value is ReleaseCheck {
+  const kind: unknown = Reflect.get(Object(value), 'kind');
+  const failures: readonly unknown[] = RELEASE_CHECK_FAILURES;
+  return (
+    kind === 'latest' ||
+    (kind === 'newer' && isVersionText(Reflect.get(Object(value), 'version'))) ||
+    (kind === 'failed' && failures.includes(Reflect.get(Object(value), 'reason')))
+  );
+}
+
+/** Tells whether an answer is the result of the check at launch, which may also have been skipped. */
+function isLaunchCheck(value: unknown): value is LaunchCheck {
+  return Reflect.get(Object(value), 'kind') === 'skipped' || isReleaseCheck(value);
 }
 
 /** Tells whether an answer to a file request has the shape of a bridge result, checking only its outcome, the rest being trusted since the main process types what each channel answers. */

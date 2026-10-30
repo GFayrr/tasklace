@@ -302,6 +302,7 @@ describe('opening and importing', () => {
           entries: [`Task 1, name: ${english.issues.EMPTY_TEXT}`],
         },
         lasting: true,
+        action: null,
       },
     ]);
   });

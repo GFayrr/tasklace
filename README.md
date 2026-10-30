@@ -137,6 +137,8 @@ Tasklace treats every file it opens and every message it receives as untrusted:
 - On the local network, everything is encrypted after a key exchange based on the join code (CPace), and only computers on a private network are accepted.
 - Through a relay, plans and presence are encrypted end to end (AES-256-GCM) and every change is signed (Ed25519); the relay stores and passes on messages it cannot read. Links are kept in the vault of the system.
 
+What leaves your computer, when and to whom, is described in the [privacy policy](PRIVACY.md).
+
 To report a vulnerability, do not open a public issue: follow the [security policy](SECURITY.md).
 
 ## Development

@@ -101,6 +101,7 @@ import {
   type KeptOwnChanges,
 } from '../collaboration/collaboration-state.svelte';
 import type { Command } from './shortcuts';
+import { UpdateState } from './update-state.svelte';
 import type { NewIdentifier } from '../../core/identifiers';
 
 export type NoticeKind = 'error' | 'warning' | 'info';
@@ -174,12 +175,18 @@ export interface Report {
   readonly entries: readonly string[];
 }
 
+export interface NoticeAction {
+  readonly kind: 'openReleasePage';
+  readonly version: string;
+}
+
 export interface Notice {
   readonly id: number;
   readonly kind: NoticeKind;
   readonly text: string;
   readonly report: Report | null;
   readonly lasting: boolean;
+  readonly action: NoticeAction | null;
 }
 
 export interface HeavyPdf {
@@ -227,6 +234,8 @@ export class AppState {
     this.#startMove = null;
   });
   readonly collaboration: CollaborationState;
+  readonly updates: UpdateState;
+  #tasklaceSettingsOpen = $state(false);
   #closePrompt = $state.raw<ClosePrompt | null>(null);
   #pdfExport = $state.raw<PdfExportOpening | null>(null);
   #collaborationWindow = $state<CollaborationWindow | null>(null);
@@ -286,6 +295,7 @@ export class AppState {
       chooseLocalChanges: async (fileName) =>
         LOCAL_CHANGES_CHOICES[await this.#ask({ reason: 'localChanges', fileName })],
     });
+    this.updates = new UpdateState(context.bridge, context.now);
     this.collaboration = new CollaborationState({
       bridge: context.bridge,
       createId: context.createId,
@@ -492,6 +502,40 @@ export class AppState {
   /** Returns the detailed list behind a message shown to the user, or null. */
   get report(): Report | null {
     return this.#report;
+  }
+
+  /** Tells whether the window of the settings of this computer is open. */
+  get isTasklaceSettingsOpen(): boolean {
+    return this.#tasklaceSettingsOpen;
+  }
+
+  /** Opens the window of the settings of this computer, with the version and the check for new versions. */
+  openTasklaceSettings(): void {
+    this.#tasklaceSettingsOpen = true;
+  }
+
+  /** Closes the window of the settings of this computer. */
+  closeTasklaceSettings(): void {
+    this.#tasklaceSettingsOpen = false;
+  }
+
+  /** Learns the version in use and runs the check for new versions of a new launch, telling with a lasting message when a newer version is out. */
+  async startUpdates(): Promise<void> {
+    await this.updates.load();
+    const version = await this.updates.checkAtLaunch();
+    if (version !== null) {
+      this.#notify('info', fillMessage(this.messages.notices.newVersion, { version }), null, true, {
+        kind: 'openReleasePage',
+        version,
+      });
+    }
+  }
+
+  /** Runs the action a message offers, such as opening the page of a new release, telling the user when the browser could not open it. */
+  async runNoticeAction(action: NoticeAction): Promise<void> {
+    if (!(await this.updates.openReleasePage(action.version))) {
+      this.#notify('error', this.messages.tasklace.notOpened);
+    }
   }
 
   /** Loads the list of recent projects, a list that cannot be loaded leaving the previous one and a warning, so that the action that asked for it still succeeds. */
@@ -1687,10 +1731,11 @@ export class AppState {
     text: string,
     report: Report | null = null,
     lasting = report !== null,
+    action: NoticeAction | null = null,
   ): number {
     this.#nextNoticeId += 1;
     const others = this.notices.filter((notice) => notice.text !== text);
-    this.#notices = [...others, { id: this.#nextNoticeId, kind, text, report, lasting }];
+    this.#notices = [...others, { id: this.#nextNoticeId, kind, text, report, lasting, action }];
     return this.#nextNoticeId;
   }
 }
