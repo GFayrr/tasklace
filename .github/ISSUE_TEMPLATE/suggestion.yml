@@ -1,0 +1,25 @@
+name: Suggestion
+description: An idea that would make Tasklace more useful.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Some features are left out on purpose; the [roadmap](https://github.com/GFayrr/tasklace/blob/main/docs/roadmap.md#not-planned) lists them.
+  - type: textarea
+    id: need
+    attributes:
+      label: What are you trying to do?
+      description: 'The need comes first: what you want to achieve, and why it is hard today.'
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: How you picture it in Tasklace, if you have an idea.
+  - type: textarea
+    id: today
+    attributes:
+      label: How do you manage today?
+      description: Another tool, a workaround, or nothing at all.

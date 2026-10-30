@@ -1,0 +1,66 @@
+name: Bug report
+description: Something in Tasklace or its relay does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a problem. For a security problem, do not use this form: follow the [security policy](https://github.com/GFayrr/tasklace/security/policy) instead.
+
+        Never paste a relay link here: the part after `#` holds the keys of a plan.
+  - type: dropdown
+    id: part
+    attributes:
+      label: Where did it happen?
+      options:
+        - Desktop application
+        - Sharing on the local network
+        - Sharing through a relay
+        - Relay server or its guide
+        - PDF, CSV or JSON export or import
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What did you do?
+      description: The steps that lead to the problem, one per line.
+      placeholder: |
+        1. Open a new project
+        2. Add a task with a duration of 2d
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead?
+      description: The message shown, if any, word for word. A screenshot helps.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: such as 0.1.0, or the first characters of a commit
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Operating system
+      placeholder: such as Windows 11 24H2
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Lines from the log
+      description: Tasklace writes its errors to `logs/tasklace.log` in its folder of user data. Paste the lines from around the problem, after reading them, as they may name your files or plans.
+      render: text
