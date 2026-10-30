@@ -25,13 +25,14 @@ vi.mock('electron', async () => {
 });
 
 describe('createMainWindow', () => {
-  it('creates a hidden window with every page protection, shown once its content is ready', () => {
-    const window = createMainWindow('/app/preload.cjs') as unknown as EventEmitter;
+  it('creates a hidden window with its icon and every page protection, shown once its content is ready', () => {
+    const window = createMainWindow('/app/preload.cjs', '/app/icon.png') as unknown as EventEmitter;
     const [record] = created;
     expect(record?.options).toEqual({
       show: false,
       width: 1280,
       height: 800,
+      icon: '/app/icon.png',
       webPreferences: {
         preload: '/app/preload.cjs',
         contextIsolation: true,

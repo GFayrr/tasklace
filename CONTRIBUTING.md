@@ -6,7 +6,7 @@ Thank you for your interest in Tasklace. The project is at an early stage and is
 
 Open a [bug report](https://github.com/GFayrr/tasklace/issues/new/choose) and fill in the form. The most useful reports say what you did, what you expected and what happened instead, with the commit or version and the operating system.
 
-Tasklace writes its errors to a log file, `logs/tasklace.log`, in its folder of user data. Adding the lines from around the problem helps a lot. Read them first: they may name your files or plans.
+Tasklace writes its errors to a log file: on Windows, `%APPDATA%\Tasklace\logs\tasklace.log`. Adding the lines from around the problem helps a lot. Read them first: they may name your files or plans.
 
 Never paste a relay link: the part after `#` holds the keys of a plan.
 

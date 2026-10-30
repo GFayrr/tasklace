@@ -32,6 +32,7 @@ import {
   openInBrowser,
 } from './security';
 import { MESSAGES } from './messages';
+import { setApplicationIdentity } from './platform/application-identity';
 import { installApplicationMenu } from './platform/application-menu';
 import {
   captureConsole,
@@ -43,6 +44,7 @@ import {
   writeLogBeforeQuitting,
 } from './log-file';
 import { createMainWindow, createPrintWindow } from './window';
+import iconPath from '../../resources/icon.png?asset';
 import { printFontsIn, registerPdfHandlers } from './pdf-export';
 
 const developmentUrl = app.isPackaged ? null : (process.env['ELECTRON_RENDERER_URL'] ?? null);
@@ -68,6 +70,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 app.enableSandbox();
+setApplicationIdentity(process.platform, app);
 
 if (app.requestSingleInstanceLock()) {
   app.on('second-instance', focusFirstWindow);
@@ -132,7 +135,7 @@ function start(): void {
     openGuide: () => openInBrowser(WORKING_REMOTELY_GUIDE_URL),
   });
   installApplicationMenu(process.platform);
-  const window = createMainWindow(preloadPath);
+  const window = createMainWindow(preloadPath, iconPath);
   logPageMessages(window.webContents, log);
   flushBeforeClosing(
     window,

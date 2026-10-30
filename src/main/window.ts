@@ -3,12 +3,13 @@ import { BrowserWindow } from 'electron';
 const INITIAL_WIDTH = 1280;
 const INITIAL_HEIGHT = 800;
 
-/** Creates the application window with every page protection enabled, showing it once its content is ready. */
-export function createMainWindow(preloadPath: string): BrowserWindow {
+/** Creates the application window with its icon and every page protection enabled, showing it once its content is ready. */
+export function createMainWindow(preloadPath: string, iconPath: string): BrowserWindow {
   const window = new BrowserWindow({
     show: false,
     width: INITIAL_WIDTH,
     height: INITIAL_HEIGHT,
+    icon: iconPath,
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
