@@ -1,10 +1,10 @@
-import { isWindowsExecutablePath } from '../platform/this-copy';
+import { isWindowsExecutablePath, type WindowsExecutablePath } from '../platform/this-copy';
 import { writeFileSafely } from '../safe-write';
 import { parseStoredJson, readStoredText, setDamagedFileAside } from '../stored-files';
 
 export interface SetupSettings {
   readonly welcomed: boolean;
-  readonly registeredExecutable: string | null;
+  readonly registeredExecutable: WindowsExecutablePath | null;
 }
 
 export const DEFAULT_SETUP_SETTINGS: SetupSettings = {
@@ -28,7 +28,8 @@ export function readSetupSettings(value: unknown): SetupSettings | null {
   const registeredExecutable: unknown = Reflect.get(value, 'registeredExecutable');
   if (
     typeof welcomed !== 'boolean' ||
-    !(registeredExecutable === null || isWindowsExecutablePath(registeredExecutable))
+    !(registeredExecutable === null || isWindowsExecutablePath(registeredExecutable)) ||
+    (!welcomed && registeredExecutable !== null)
   ) {
     return null;
   }

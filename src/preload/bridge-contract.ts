@@ -73,14 +73,10 @@ export const IPC_CHANNELS = {
 
 export type ExchangeKind = 'json' | 'csv';
 
-export const RELEASE_CHECK_FAILURES = ['unreachable', 'refused', 'malformed'] as const;
-
-export type ReleaseCheckFailure = (typeof RELEASE_CHECK_FAILURES)[number];
-
 export type ReleaseCheck =
   | { readonly kind: 'latest' }
   | { readonly kind: 'newer'; readonly version: string }
-  | { readonly kind: 'failed'; readonly reason: ReleaseCheckFailure };
+  | { readonly kind: 'failed' };
 
 export type LaunchCheck = ReleaseCheck | { readonly kind: 'skipped' };
 
@@ -89,13 +85,17 @@ export interface UpdateSettings {
 }
 
 export type OutsideRequest =
-  { readonly kind: 'file' } | { readonly kind: 'link'; readonly link: string };
+  | { readonly kind: 'file'; readonly id: number }
+  | { readonly kind: 'link'; readonly link: string }
+  | { readonly kind: 'unreadable'; readonly what: 'file' | 'link' };
 
 export type FileAssociation =
   | { readonly kind: 'unavailable' }
+  | { readonly kind: 'unknown' }
   | { readonly kind: 'none' }
   | { readonly kind: 'thisCopy' }
-  | { readonly kind: 'otherCopy'; readonly path: string };
+  | { readonly kind: 'otherCopy'; readonly path: string }
+  | { readonly kind: 'otherProgram' };
 
 export interface SetupState {
   readonly welcome: boolean;
@@ -380,7 +380,7 @@ export interface TasklaceBridge {
   readonly checkNow: () => Promise<BridgeResult<ReleaseCheck>>;
   readonly openReleasePage: (version: string) => Promise<BridgeResult<null>>;
   readonly takeOutsideRequest: () => Promise<BridgeResult<OutsideRequest | null>>;
-  readonly openOutsideFile: () => Promise<BridgeResult<OpenedProject>>;
+  readonly openOutsideFile: (id: number) => Promise<BridgeResult<OpenedProject>>;
   readonly setupState: () => Promise<BridgeResult<SetupState>>;
   readonly finishWelcome: (choices: WelcomeChoices) => Promise<BridgeResult<FileAssociation>>;
   readonly setFileAssociation: (on: boolean) => Promise<BridgeResult<FileAssociation>>;
@@ -501,7 +501,7 @@ export interface ChannelArguments {
   readonly [IPC_CHANNELS.checkNow]: readonly [];
   readonly [IPC_CHANNELS.openReleasePage]: readonly [version: string];
   readonly [IPC_CHANNELS.takeOutsideRequest]: readonly [];
-  readonly [IPC_CHANNELS.openOutsideFile]: readonly [];
+  readonly [IPC_CHANNELS.openOutsideFile]: readonly [id: number];
   readonly [IPC_CHANNELS.setupState]: readonly [];
   readonly [IPC_CHANNELS.finishWelcome]: readonly [choices: WelcomeChoices];
   readonly [IPC_CHANNELS.setFileAssociation]: readonly [on: boolean];

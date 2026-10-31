@@ -1,4 +1,9 @@
-const VERSION_TAG = /^v(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?$/;
+const NUMBER = String.raw`0|[1-9]\d{0,8}`;
+const IDENTIFIER = String.raw`(?:${NUMBER}|\d*[A-Za-z-][0-9A-Za-z-]*)`;
+const VERSION_TAG = new RegExp(
+  String.raw`^v(${NUMBER})\.(${NUMBER})\.(${NUMBER})(-${IDENTIFIER}(?:\.${IDENTIFIER})*)?$`,
+);
+const MAX_TAG_LENGTH = 65;
 const SECTION_START = /^## \[(.+?)\]/;
 const SIGNATURE_NOTE = [
   '### Files',
@@ -20,9 +25,9 @@ export interface FileFingerprint {
   readonly sha256: string;
 }
 
-/** Reads the version a release tag names, a pre-release being any version before 1.0.0 or with a pre-release part, or returns null for a tag that is not a version. */
+/** Reads the version a release tag names exactly as Tasklace reads the versions of its releases, a pre-release being any version before 1.0.0 or with a pre-release part, or returns null for a tag that is not a version. */
 export function releaseVersionOf(tag: string): ReleaseVersion | null {
-  const match = VERSION_TAG.exec(tag);
+  const match = tag.length > MAX_TAG_LENGTH ? null : VERSION_TAG.exec(tag);
   if (match === null) {
     return null;
   }
@@ -52,4 +57,40 @@ export function checksumsText(fingerprints: readonly FileFingerprint[]): string 
     .sort((first, second) => first.name.localeCompare(second.name, 'en'))
     .map(({ name, sha256 }) => `${sha256}  ${name}\n`)
     .join('');
+}
+
+export interface ReleaseFiles {
+  readonly version: string;
+  readonly preRelease: boolean;
+  readonly notes: string;
+  readonly files: readonly string[];
+}
+
+/** Checks what a release needs before it is prepared: a tag naming the version of the application, its part of the changelog, and exactly its portable executable and installer among the built files, the only files it publishes with their fingerprints. */
+export function checkRelease(
+  tag: string,
+  packageVersion: unknown,
+  changelog: string,
+  builtFiles: readonly string[],
+): ReleaseFiles {
+  const release = releaseVersionOf(tag);
+  if (release === null) {
+    throw new Error(`The tag ${tag} does not name a version such as v1.2.3.`);
+  }
+  const { version, preRelease } = release;
+  if (packageVersion !== version) {
+    throw new Error(
+      `The tag ${tag} does not match the version ${String(packageVersion)} of package.json.`,
+    );
+  }
+  const section = changelogSection(changelog, version);
+  if (section === null || section === '') {
+    throw new Error(`CHANGELOG.md has no part for the version ${version}.`);
+  }
+  const files = [`Tasklace-${version}-portable.exe`, `Tasklace-${version}-setup.exe`];
+  const missing = files.filter((file) => !builtFiles.includes(file));
+  if (missing.length > 0) {
+    throw new Error(`The release needs ${missing.join(' and ')}, which the build did not make.`);
+  }
+  return { version, preRelease, notes: releaseNotes(section, version), files };
 }

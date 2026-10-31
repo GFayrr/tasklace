@@ -31,38 +31,37 @@ describe('copyPlaceOf', () => {
     });
   });
 
-  it('refuses and logs a portable executable named by a path it cannot use in a command', () => {
+  it('refuses and logs a portable or installed executable named by a path it cannot use in a command or a registry file', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const paths = [
-      'Tasklace.exe',
-      'C:\\Users\\Lea\\"Tasklace".exe',
-      `C:\\${'a'.repeat(MAX_FILE_PATH_LENGTH)}.exe`,
-    ];
+    const paths = ['Tasklace.exe', 'C:\\Users\\"Lea"\\Tasklace.exe', 'C:\\Lea\r\n[HKEY]\\T.exe'];
     for (const path of paths) {
       expect(copyPlaceOf('win32', true, UNPACKED, { PORTABLE_EXECUTABLE_FILE: path })).toBeNull();
     }
-    expect(error.mock.calls).toEqual(
-      paths.map((path) => [
-        'The portable executable names itself with a path Tasklace cannot use:',
-        path,
-      ]),
-    );
+    expect(copyPlaceOf('win32', true, 'C:\\Lea\n\\T.exe', {})).toBeNull();
+    expect(error.mock.calls).toEqual([
+      ...paths.map((path) => ['The portable executable has a path Tasklace cannot use:', path]),
+      ['The installed executable has a path Tasklace cannot use:', 'C:\\Lea\n\\T.exe'],
+    ]);
   });
 });
 
 describe('isWindowsExecutablePath', () => {
-  it('accepts a full path from a drive or a network share, and nothing a command could not quote', () => {
+  it('accepts a full path from a drive or a network share, and nothing a command or a registry file could not hold', () => {
     expect(
       [
         PORTABLE,
         'd:\\Tasklace.exe',
         '\\\\school\\apps\\Tasklace.exe',
+        `C:\\${'a'.repeat(MAX_FILE_PATH_LENGTH - 3)}`,
+        `C:\\${'a'.repeat(MAX_FILE_PATH_LENGTH - 2)}`,
         '\\Tasklace.exe',
         '/opt/Tasklace/tasklace',
         'C:Tasklace.exe',
         'C:\\Lea\0.exe',
+        'C:\\Lea\t.exe',
+        'C:\\Lea\u007f.exe',
         7,
       ].map(isWindowsExecutablePath),
-    ).toEqual([true, true, true, false, false, false, false, false]);
+    ).toEqual([true, true, true, true, false, false, false, false, false, false, false, false]);
   });
 });

@@ -28,14 +28,14 @@ export interface UpdateServices {
   readonly now: () => Date;
   readonly fetchReleases: FetchReleases;
   readonly openInBrowser: (url: string) => Promise<boolean>;
-  readonly welcomePending: () => boolean;
+  readonly mayCheckAtLaunch: () => Promise<boolean>;
 }
 
 export interface UpdateHandlers {
   readonly setCheck: (check: boolean) => Promise<BridgeResult<null>>;
 }
 
-/** Answers the channels of the version and of the check for new versions, which runs at launch at most once a day, only built and once the welcome window got its answer, one check at a time, and returns how to turn the check on or off. */
+/** Answers the channels of the version and of the check for new versions, which runs at launch at most once a day, only built and once the choice about it is known and applied, one check at a time, and returns how to turn the check on or off. */
 export function registerUpdateHandlers(services: UpdateServices): UpdateHandlers {
   const current = readVersion(services.version);
   if (current === null) {
@@ -62,7 +62,7 @@ export function registerUpdateHandlers(services: UpdateServices): UpdateHandlers
     setCheck(services.storePath, value),
   );
   handle(IPC_CHANNELS.checkAtLaunch, async () => {
-    if (!services.isPackaged || services.welcomePending()) {
+    if (!services.isPackaged || !(await services.mayCheckAtLaunch())) {
       return success({ kind: 'skipped' });
     }
     const settings = await readSettings(services.storePath);

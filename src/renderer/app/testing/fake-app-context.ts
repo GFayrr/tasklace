@@ -361,7 +361,7 @@ export function fakeBridge(): {
       askedUpdates(['openReleasePage', version], updates.releasePageResult),
     takeOutsideRequest: () =>
       askedSetup(['takeOutsideRequest'], setup.outsideResults.shift() ?? { ok: true, value: null }),
-    openOutsideFile: () => askedSetup(['openOutsideFile'], setup.outsideFileResult),
+    openOutsideFile: (id) => askedSetup(['openOutsideFile', id], setup.outsideFileResult),
     setupState: () => askedSetup(['setupState'], setup.stateResult),
     finishWelcome: (choices) => askedSetup(['finishWelcome', choices], setup.finishResult),
     setFileAssociation: (on) => askedSetup(['setFileAssociation', on], setup.associationResult),

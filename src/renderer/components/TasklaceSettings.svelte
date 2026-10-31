@@ -12,14 +12,14 @@
   let notChanged = $state(false);
   let changing = $state(false);
 
-  /** Opens the window as a modal dialog while the settings are open, and closes it otherwise. */
+  /** Opens the window as a modal dialog while the settings are open, clearing earlier problems and asking again which copy opens project files, and closes it otherwise. */
   function followOpening(dialog: HTMLDialogElement): void {
     $effect(() => {
       if (app.isTasklaceSettingsOpen && !dialog.open) {
         notKept = false;
         notOpened = false;
         notChanged = false;
-        void app.setup.load();
+        void reloadSetup();
         dialog.showModal();
       }
       if (!app.isTasklaceSettingsOpen && dialog.open) {
@@ -33,11 +33,21 @@
     notKept = !(await updates.setCheck(updates.checkForNewVersions !== true));
   }
 
-  /** Makes this copy open project files and links or stops it, telling when it could not be changed. */
+  /** Asks again which copy opens project files, telling when the main process could not answer. */
+  async function reloadSetup(): Promise<void> {
+    notChanged = !(await app.setup.load());
+  }
+
+  /** Makes this copy open project files and links or stops it, telling when it could not be changed and reporting an unexpected error, the switch being given back whatever happens. */
   async function toggleAssociation(on: boolean): Promise<void> {
     changing = true;
-    notChanged = !(await app.setFileAssociation(on));
-    changing = false;
+    try {
+      notChanged = !(await app.setFileAssociation(on));
+    } catch (error) {
+      app.reportUnexpectedError(error);
+    } finally {
+      changing = false;
+    }
   }
 
   /** Opens a page in the browser, telling when it could not open. */
@@ -147,6 +157,10 @@
       {:else if association.kind === 'otherCopy'}
         <p class="hint">{setupText.otherCopy}</p>
         <p class="path">{association.path}</p>
+      {:else if association.kind === 'otherProgram'}
+        <p class="hint">{setupText.otherProgram}</p>
+      {:else if association.kind === 'unknown'}
+        <p class="hint">{setupText.unknownCopy}</p>
       {:else}
         <p class="hint">{setupText.noCopy}</p>
       {/if}

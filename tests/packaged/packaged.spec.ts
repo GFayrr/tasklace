@@ -50,6 +50,10 @@ test.beforeEach(async () => {
     join(userData, 'update-check.json'),
     JSON.stringify({ version: 1, settings: { checkForNewVersions: false, lastCheckedOn: null } }),
   );
+  await writeFile(
+    join(userData, 'setup.json'),
+    JSON.stringify({ version: 1, settings: { welcomed: true, registeredExecutable: null } }),
+  );
 });
 
 test.afterEach(async () => {

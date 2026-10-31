@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrintDocument } from '../core/print/print-document';
 import { BRIDGE_NAME, IPC_CHANNELS, type TasklaceBridge } from './bridge-contract';
 import { requireDocumentId } from '../core/shared/shared-document';
+import { MAX_FILE_PATH_LENGTH, MAX_RELAY_LINK_LENGTH } from '../core/limits';
 
 const PRINTED: PrintDocument = {
   paper: 'a4',
@@ -328,7 +329,7 @@ describe('the shared plan through the bridge', () => {
       await bridge.checkAtLaunch(),
       await bridge.checkNow(),
     ]).toEqual([...answers.values()]);
-    for (const value of [{ kind: 'latest' }, { kind: 'failed', reason: 'refused' }]) {
+    for (const value of [{ kind: 'latest' }, { kind: 'failed' }]) {
       answers.set(IPC_CHANNELS.checkNow, { ok: true, value });
       expect(await bridge.checkNow()).toEqual({ ok: true, value });
     }
@@ -351,7 +352,7 @@ describe('the shared plan through the bridge', () => {
       await bridge.checkAtLaunch(),
       await bridge.checkNow(),
     ]).toEqual([failed, failed, failed, failed]);
-    answers.set(IPC_CHANNELS.checkNow, { ok: true, value: { kind: 'failed', reason: 'tired' } });
+    answers.set(IPC_CHANNELS.checkNow, { ok: true, value: { kind: 'tired' } });
     expect(await bridge.checkNow()).toEqual(failed);
     answers.set(IPC_CHANNELS.appVersion, { ok: false, error: { code: 'READ_FAILED' } });
     expect(await bridge.appVersion()).toEqual({ ok: false, error: { code: 'READ_FAILED' } });
@@ -371,7 +372,7 @@ describe('the shared plan through the bridge', () => {
       ],
       [
         `The main process answered ${IPC_CHANNELS.checkNow} with an unexpected value:`,
-        { kind: 'failed', reason: 'tired' },
+        { kind: 'tired' },
       ],
     ]);
   });
@@ -379,43 +380,58 @@ describe('the shared plan through the bridge', () => {
   it('sends the requests of the setup and of what came from outside on their own channels', async () => {
     const bridge = await loadBridge();
     electron.invoke.mockResolvedValue({ ok: true, value: { kind: 'none' } });
-    await bridge.openOutsideFile();
+    await bridge.openOutsideFile(3);
     await bridge.finishWelcome({ associate: true, checkForNewVersions: false });
     await bridge.setFileAssociation(false);
     expect(electron.invoke.mock.calls).toEqual([
-      [IPC_CHANNELS.openOutsideFile],
+      [IPC_CHANNELS.openOutsideFile, 3],
       [IPC_CHANNELS.finishWelcome, { associate: true, checkForNewVersions: false }],
       [IPC_CHANNELS.setFileAssociation, false],
     ]);
   });
 
-  it('passes on the setup and what came from outside of the expected shape, and refuses any other', async () => {
+  it('passes on the setup and what came from outside of the expected shape, and refuses any other, never logging a link', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const bridge = await loadBridge();
     const failed = { ok: false, error: { code: 'TASK_FAILED' } };
     const link = 'tasklace://relay.example.org/#e1.key';
+    const longest = `tasklace://${'a'.repeat(MAX_RELAY_LINK_LENGTH - 11)}`;
     /** Answers every request with one value. */
     const answering = (value: unknown): void => {
       electron.invoke.mockResolvedValue({ ok: true, value });
     };
-    for (const value of [null, { kind: 'file' }, { kind: 'link', link }]) {
+    for (const value of [
+      null,
+      { kind: 'file', id: 4 },
+      { kind: 'link', link },
+      { kind: 'link', link: longest },
+      { kind: 'unreadable', what: 'link' },
+      { kind: 'unreadable', what: 'file' },
+    ]) {
       answering(value);
       expect(await bridge.takeOutsideRequest()).toEqual({ ok: true, value });
     }
-    for (const value of [
-      { kind: 'link', link: 'https://example.org' },
-      { kind: 'link', link: `${link}${'a'.repeat(1_024)}` },
+    const refusedRequests = [
+      { kind: 'link', link: 'https://example.org/#e1.key' },
+      { kind: 'link', link: `${longest}a` },
       { kind: 'link' },
+      { kind: 'file' },
+      { kind: 'file', id: 1.5 },
+      { kind: 'unreadable', what: 'folder' },
       { kind: 'folder' },
-    ]) {
+    ];
+    for (const value of refusedRequests) {
       answering(value);
       expect(await bridge.takeOutsideRequest()).toEqual(failed);
     }
     const associations = [
       { kind: 'unavailable' },
+      { kind: 'unknown' },
       { kind: 'none' },
       { kind: 'thisCopy' },
+      { kind: 'otherProgram' },
       { kind: 'otherCopy', path: 'D:\\Tasklace.exe' },
+      { kind: 'otherCopy', path: 'x'.repeat(MAX_FILE_PATH_LENGTH) },
     ];
     for (const association of associations) {
       answering(association);
@@ -430,11 +446,12 @@ describe('the shared plan through the bridge', () => {
         value: { welcome: true, association },
       });
     }
-    for (const association of [
+    const refusedAssociations = [
       { kind: 'otherCopy' },
-      { kind: 'otherCopy', path: 'x'.repeat(40_000) },
+      { kind: 'otherCopy', path: 'x'.repeat(MAX_FILE_PATH_LENGTH + 1) },
       null,
-    ]) {
+    ];
+    for (const association of refusedAssociations) {
       answering(association);
       expect(await bridge.setFileAssociation(true)).toEqual(failed);
       answering({ welcome: false, association });
@@ -442,7 +459,21 @@ describe('the shared plan through the bridge', () => {
     }
     answering({ welcome: 'no', association: { kind: 'none' } });
     expect(await bridge.setupState()).toEqual(failed);
-    expect(error).toHaveBeenCalledTimes(11);
+    /** Writes the line the bridge logs for an answer of another shape. */
+    const logged = (channel: string, value: unknown): unknown[] => [
+      `The main process answered ${channel} with an unexpected value:`,
+      value,
+    ];
+    expect(error.mock.calls).toEqual([
+      ...refusedRequests.map((value) =>
+        logged(IPC_CHANNELS.takeOutsideRequest, { kind: value.kind }),
+      ),
+      ...refusedAssociations.flatMap((association) => [
+        logged(IPC_CHANNELS.setFileAssociation, association),
+        logged(IPC_CHANNELS.setupState, { welcome: false, association }),
+      ]),
+      logged(IPC_CHANNELS.setupState, { welcome: 'no', association: { kind: 'none' } }),
+    ]);
   });
 
   it('tells the page each time something arrives from outside, once it listens', async () => {

@@ -86,12 +86,23 @@ describe('UpdateState', () => {
     control.updates.checkNowResult = { ok: true, value: { kind: 'newer', version: '0.2.0' } };
     await updates.checkNow();
     expect(updates.status).toEqual({ kind: 'newer', version: '0.2.0' });
-    control.updates.checkNowResult = { ok: true, value: { kind: 'failed', reason: 'unreachable' } };
+    control.updates.checkNowResult = { ok: true, value: { kind: 'failed' } };
     await updates.checkNow();
     expect(updates.status).toEqual({ kind: 'failed' });
     control.updates.checkNowResult = { ok: false, error: { code: 'TASK_FAILED' } };
     await updates.checkNow();
     expect(updates.status).toEqual({ kind: 'failed' });
+  });
+
+  it('shows a failed check when the bridge itself fails, and throws its error again', async () => {
+    const fault = new Error('bridge gone');
+    const { context } = updatesOf();
+    const failing = new UpdateState(
+      { ...context.bridge, checkNow: () => Promise.reject(fault) },
+      () => FIXED_NOW,
+    );
+    await expect(failing.checkNow()).rejects.toBe(fault);
+    expect(failing.status).toEqual({ kind: 'failed' });
   });
 
   it('opens the release page and the privacy policy, telling whether they opened', async () => {

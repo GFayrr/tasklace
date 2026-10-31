@@ -3,8 +3,12 @@ import { join, win32 } from 'node:path';
 import type { FileAssociation } from '../../preload/bridge-contract';
 import { writeFileSafely } from '../safe-write';
 import { readRegistryString, registryFileText, registryString, type Registry } from './registry';
+import { isWindowsExecutablePath, type WindowsExecutablePath } from './this-copy';
 
-export type AssociationOwner = Exclude<FileAssociation, { readonly kind: 'unavailable' }>;
+export type AssociationOwner = Exclude<
+  FileAssociation,
+  { readonly kind: 'unavailable' } | { readonly kind: 'unknown' }
+>;
 
 export interface FileAssociations {
   readonly owner: () => Promise<AssociationOwner>;
@@ -14,7 +18,7 @@ export interface FileAssociations {
 
 export interface AssociationServices {
   readonly registry: Registry;
-  readonly executable: string;
+  readonly executable: WindowsExecutablePath;
   readonly fileIcon: string;
   readonly userDataFolder: string;
 }
@@ -32,12 +36,12 @@ const COPIED_ICON = 'tasklace-file.ico';
 const COMMAND_PATTERN = /^"([^"]+)" -- "%1"$/;
 
 /** Writes the command Windows runs to open a project file or a link, the separator before the file or link keeping Tasklace and Chromium from ever reading it as an option. */
-export function openCommandOf(executable: string): string {
+export function openCommandOf(executable: WindowsExecutablePath): string {
   return `"${executable}" -- "%1"`;
 }
 
 /** Writes the registry file that makes an executable open project files and Tasklace links for the current user, the earlier keys of Tasklace being removed first so that none of their values stays behind. */
-export function associationRegistry(executable: string, fileIcon: string): string {
+export function associationRegistry(executable: WindowsExecutablePath, fileIcon: string): string {
   const command = registryString(openCommandOf(executable));
   return registryFileText([
     `[-${PROJECT_TYPE_KEY}]`,
@@ -70,12 +74,18 @@ export function removalRegistry(): string {
   ]);
 }
 
-/** Tells which copy of Tasklace opens project files from the command registered for them: this one, another one named by its path, or none. */
-export function ownerOfCommand(command: string | null, executable: string): AssociationOwner {
+/** Tells which copy of Tasklace opens project files from the command registered for them: this one, another one named by its path, another program whose command is not that of a copy of Tasklace, or none. */
+export function ownerOfCommand(
+  command: string | null,
+  executable: WindowsExecutablePath,
+): AssociationOwner {
   if (command === null) {
     return { kind: 'none' };
   }
-  const registered = COMMAND_PATTERN.exec(command)?.[1] ?? command;
+  const registered = COMMAND_PATTERN.exec(command)?.[1];
+  if (!isWindowsExecutablePath(registered)) {
+    return { kind: 'otherProgram' };
+  }
   return sameWindowsPath(registered, executable)
     ? { kind: 'thisCopy' }
     : { kind: 'otherCopy', path: registered };
@@ -91,9 +101,10 @@ export function createFileAssociations(services: AssociationServices): FileAssoc
   const { registry, executable } = services;
   return {
     owner: async () => {
-      const exported = await registry.exportKey(`${PROJECT_TYPE_KEY}${OPEN_COMMAND}`);
+      const key = `${PROJECT_TYPE_KEY}${OPEN_COMMAND}`;
+      const exported = await registry.exportKey(key);
       return ownerOfCommand(
-        exported === null ? null : readRegistryString(exported, null),
+        exported === null ? null : readRegistryString(exported, key, null),
         executable,
       );
     },

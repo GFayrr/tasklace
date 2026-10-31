@@ -179,6 +179,48 @@ describe('the files and links part of the Tasklace settings', () => {
     expect(control.setup.requests.at(-1)).toEqual(['setFileAssociation', true]);
   });
 
+  it('tells when another program opens them, or when Tasklace cannot find out which one does', async () => {
+    const other = await settingsWith({ kind: 'otherProgram' });
+    expect(single(other.dialog, '#tasklace-files-title ~ .hint').textContent).toBe(
+      'They open with another program.',
+    );
+    const unknown = await settingsWith({ kind: 'unknown' });
+    expect(single(unknown.dialog, '#tasklace-files-title ~ .hint').textContent).toBe(
+      'Tasklace could not find out which program opens them.',
+    );
+    expect(switchOf(unknown.dialog, 'tasklace-associate-title').getAttribute('aria-checked')).toBe(
+      'false',
+    );
+  });
+
+  it('tells when it could not ask which copy opens them as the window opens', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const fake = fakeAppContext();
+    fake.control.setup.stateResult = {
+      ok: true,
+      value: { welcome: false, association: { kind: 'thisCopy' } },
+    };
+    const app = new AppState(fake.context);
+    const root = render(App, { app });
+    await app.startSetup();
+    fake.control.setup.stateResult = { ok: false, error: { code: 'READ_FAILED' } };
+    app.openTasklaceSettings();
+    await settle();
+    update();
+    const dialog = dialogOf(root, 'dialog.tasklace-settings');
+    expect(single(dialog, '[role="alert"]').textContent).toBe(TEXT.notChanged);
+  });
+
+  it('reports an unexpected failure of the switch and gives the switch back', async () => {
+    const { app, dialog } = await settingsWith({ kind: 'none' });
+    const fault = new Error('bridge gone');
+    vi.spyOn(app, 'setFileAssociation').mockRejectedValueOnce(fault);
+    const reported = vi.spyOn(app, 'reportUnexpectedError').mockImplementation(() => undefined);
+    await clickAndSettle(switchOf(dialog, 'tasklace-associate-title'));
+    expect(reported.mock.calls).toEqual([[fault]]);
+    expect(switchOf(dialog, 'tasklace-associate-title').hasAttribute('disabled')).toBe(false);
+  });
+
   it('tells when this copy could not be changed', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { dialog, control } = await settingsWith({ kind: 'none' });
@@ -192,6 +234,7 @@ describe('a link opened from outside', () => {
   it('fills the join window and warns where it came from, joining nothing until “Join”', async () => {
     const { app, control } = await openedAppOf(PLAN);
     render(App, { app });
+    await app.setup.load();
     control.setup.outsideResults = [{ ok: true, value: { kind: 'link', link: LINK } }];
     await app.takeOutsideRequest();
     update();
@@ -209,6 +252,7 @@ describe('a link opened from outside', () => {
     const fake = fakeAppContext();
     const app = new AppState(fake.context);
     const root = render(App, { app });
+    await app.setup.load();
     await app.openJoin();
     update();
     const dialog = dialogOf(root, 'dialog.join');

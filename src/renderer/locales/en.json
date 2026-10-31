@@ -819,6 +819,10 @@
     "otherCopy": "They open with another copy:",
     "noCopy": "Double-clicking a .tasklace file or clicking a Tasklace link does not open Tasklace.",
     "notChanged": "Tasklace could not change which copy opens its files and links.",
-    "outsideLink": "You opened a link from outside Tasklace. Join only if you expected it."
+    "outsideLink": "You opened a link from outside Tasklace. Join only if you expected it.",
+    "linkUnreadable": "The link you opened is not the link of a shared plan, or it was cut. Ask the person who sent it for the whole link.",
+    "fileUnreadable": "Tasklace could not open this file from where it was opened. Open it with “Open…” instead.",
+    "otherProgram": "They open with another program.",
+    "unknownCopy": "Tasklace could not find out which program opens them."
   }
 }

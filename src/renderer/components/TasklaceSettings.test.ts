@@ -104,7 +104,7 @@ describe('the settings of this computer', () => {
     );
     await clickAndSettle(button(dialog, english.notices.openReleasePage));
     expect(control.updates.requests.at(-1)).toEqual(['openReleasePage', '0.2.0']);
-    control.updates.checkNowResult = { ok: true, value: { kind: 'failed', reason: 'malformed' } };
+    control.updates.checkNowResult = { ok: true, value: { kind: 'failed' } };
     await clickAndSettle(button(dialog, TEXT.checkNow));
     expect(single(dialog, '.status').textContent.trim()).toBe(TEXT.failed);
   });
