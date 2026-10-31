@@ -146,3 +146,12 @@ describe('newestRelease', () => {
     expect(newestRelease(releases, version('1.0.0-rc.1'))).toEqual(version('1.3.0-beta.1'));
   });
 });
+
+describe('a version', () => {
+  it('comes only from reading one, never from parts written by hand', () => {
+    const parts = { major: 0, minor: 1, patch: 0, preRelease: [] };
+    // @ts-expect-error parts written by hand are not a version read by readVersion
+    const handWritten: Version = parts;
+    expect(readVersion('0.1.0')).toEqual(handWritten);
+  });
+});
