@@ -4,7 +4,7 @@ Tasklace encrypts shared plans, opens files that may come from anyone and ships 
 
 ## Supported versions
 
-Tasklace has not been released yet. Until the first release, only the latest commit of the `main` branch is supported. Once releases exist, security fixes will go into the latest release.
+Only the latest release is supported: security fixes go into a new release, never into older ones. The relay is supported at the same version as the application, as the [relay guide](docs/working-remotely.md#look-after-the-relay) explains.
 
 ## Reporting a vulnerability
 

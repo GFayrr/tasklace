@@ -44,6 +44,7 @@ export default defineConfig({
         'scripts/**/*.test.ts',
         'scripts/make-icons.ts',
         'scripts/write-third-party-notices.ts',
+        'scripts/write-release-files.ts',
         'relay/src/testing/**',
         'src/core/testing/**',
         'src/main/testing/**',
