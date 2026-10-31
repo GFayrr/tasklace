@@ -283,6 +283,34 @@ Without Docker, add each setting to an `Environment=` line of the service, for e
 
 - **Stopping the relay** keeps its plans: `docker compose down`, or `sudo systemctl stop tasklace-relay` without Docker. To remove the plans as well: `docker compose down --volumes`, or remove `/var/lib/private/tasklace-relay`.
 
+## Remove the relay
+
+Removing the relay removes the encrypted plans it keeps. Nobody loses a plan: every person in it keeps a full copy on their own computer, and Tasklace tells them that the relay no longer answers. To go on working together, the owner of a plan shares it again through another relay and sends the new links.
+
+**With Docker**, from the folder `tasklace/relay`, stop both containers and remove their volumes, which hold the plans and the certificate of Caddy, then the images they used and the files of Tasklace:
+
+```sh
+docker compose down --volumes --rmi all
+cd ../..
+rm -rf tasklace
+```
+
+**Without Docker**, stop the relay and remove its service, its plans and its files:
+
+```sh
+sudo systemctl disable --now tasklace-relay
+sudo rm /etc/systemd/system/tasklace-relay.service
+sudo systemctl daemon-reload
+sudo rm -rf /var/lib/private/tasklace-relay /opt/tasklace
+```
+
+Then remove what passed the connections on to it:
+
+- Behind Apache: `sudo a2dissite tasklace-relay`, `sudo rm /etc/apache2/sites-available/tasklace-relay.conf` and `sudo systemctl reload apache2`.
+- Behind nginx: `sudo rm /etc/nginx/sites-enabled/tasklace-relay /etc/nginx/sites-available/tasklace-relay` and `sudo systemctl reload nginx`.
+
+Finally, remove the hook that reloads the certificate, `sudo rm /etc/letsencrypt/renewal-hooks/deploy/tasklace-relay`, then the certificate when nothing else uses it, `sudo certbot delete --cert-name tasklace.my-school.example`. Close the ports 80 and 443 if nothing else needs them, and remove the domain name, or point it elsewhere.
+
 ## Try it on a single computer
 
 To see the relay work before setting up a server, run it with Docker on your own computer, under the name `localhost`. Caddy then makes its own certificate, which you tell only one start of Tasklace to trust:
