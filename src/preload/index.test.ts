@@ -376,6 +376,91 @@ describe('the shared plan through the bridge', () => {
     ]);
   });
 
+  it('sends the requests of the setup and of what came from outside on their own channels', async () => {
+    const bridge = await loadBridge();
+    electron.invoke.mockResolvedValue({ ok: true, value: { kind: 'none' } });
+    await bridge.openOutsideFile();
+    await bridge.finishWelcome({ associate: true, checkForNewVersions: false });
+    await bridge.setFileAssociation(false);
+    expect(electron.invoke.mock.calls).toEqual([
+      [IPC_CHANNELS.openOutsideFile],
+      [IPC_CHANNELS.finishWelcome, { associate: true, checkForNewVersions: false }],
+      [IPC_CHANNELS.setFileAssociation, false],
+    ]);
+  });
+
+  it('passes on the setup and what came from outside of the expected shape, and refuses any other', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const bridge = await loadBridge();
+    const failed = { ok: false, error: { code: 'TASK_FAILED' } };
+    const link = 'tasklace://relay.example.org/#e1.key';
+    /** Answers every request with one value. */
+    const answering = (value: unknown): void => {
+      electron.invoke.mockResolvedValue({ ok: true, value });
+    };
+    for (const value of [null, { kind: 'file' }, { kind: 'link', link }]) {
+      answering(value);
+      expect(await bridge.takeOutsideRequest()).toEqual({ ok: true, value });
+    }
+    for (const value of [
+      { kind: 'link', link: 'https://example.org' },
+      { kind: 'link', link: `${link}${'a'.repeat(1_024)}` },
+      { kind: 'link' },
+      { kind: 'folder' },
+    ]) {
+      answering(value);
+      expect(await bridge.takeOutsideRequest()).toEqual(failed);
+    }
+    const associations = [
+      { kind: 'unavailable' },
+      { kind: 'none' },
+      { kind: 'thisCopy' },
+      { kind: 'otherCopy', path: 'D:\\Tasklace.exe' },
+    ];
+    for (const association of associations) {
+      answering(association);
+      expect(await bridge.finishWelcome({ associate: true, checkForNewVersions: true })).toEqual({
+        ok: true,
+        value: association,
+      });
+      expect(await bridge.setFileAssociation(true)).toEqual({ ok: true, value: association });
+      answering({ welcome: true, association });
+      expect(await bridge.setupState()).toEqual({
+        ok: true,
+        value: { welcome: true, association },
+      });
+    }
+    for (const association of [
+      { kind: 'otherCopy' },
+      { kind: 'otherCopy', path: 'x'.repeat(40_000) },
+      null,
+    ]) {
+      answering(association);
+      expect(await bridge.setFileAssociation(true)).toEqual(failed);
+      answering({ welcome: false, association });
+      expect(await bridge.setupState()).toEqual(failed);
+    }
+    answering({ welcome: 'no', association: { kind: 'none' } });
+    expect(await bridge.setupState()).toEqual(failed);
+    expect(error).toHaveBeenCalledTimes(11);
+  });
+
+  it('tells the page each time something arrives from outside, once it listens', async () => {
+    const bridge = await loadBridge();
+    /** Tells the page that something arrived from outside, as the main process does. */
+    const arrive = (): void => {
+      electron.listeners.get(IPC_CHANNELS.outsideRequestReceived)?.();
+    };
+    arrive();
+    let told = 0;
+    bridge.onOutsideRequest(() => {
+      told += 1;
+    });
+    arrive();
+    arrive();
+    expect(told).toBe(2);
+  });
+
   it('sends the messages of the plan without waiting for an answer', async () => {
     const bridge = await loadBridge();
     bridge.sendToCollaboration('host', Uint8Array.of(1));

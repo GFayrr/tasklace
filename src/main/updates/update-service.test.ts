@@ -56,6 +56,7 @@ function register(overrides: Partial<UpdateServices> = {}): void {
       opened.push(url);
       return Promise.resolve(true);
     },
+    welcomePending: () => false,
     ...overrides,
   });
 }
@@ -171,6 +172,35 @@ describe('registerUpdateHandlers', () => {
     register();
     expect(await ask(IPC_CHANNELS.checkAtLaunch)).toEqual({ ok: true, value: { kind: 'skipped' } });
     expect(fetched).toBe(0);
+  });
+
+  it('skips the check at launch while the welcome window has not got its answer, and turns the check on or off for it', async () => {
+    let pending = true;
+    ipcMain.handlers.clear();
+    const handlers = registerUpdateHandlers({
+      assertTrusted: () => undefined,
+      storePath,
+      version: '0.1.0',
+      isPackaged: true,
+      now: () => TODAY,
+      fetchReleases: releasesAnswering(NEWER),
+      openInBrowser: () => Promise.resolve(true),
+      welcomePending: () => pending,
+    });
+    expect(await ask(IPC_CHANNELS.checkAtLaunch)).toEqual({ ok: true, value: { kind: 'skipped' } });
+    expect(fetched).toBe(0);
+    expect(await handlers.setCheck(false)).toEqual({ ok: true, value: null });
+    expect(await stored()).toEqual({
+      version: 1,
+      settings: { checkForNewVersions: false, lastCheckedOn: null },
+    });
+    expect(await handlers.setCheck(true)).toEqual({ ok: true, value: null });
+    pending = false;
+    expect(await ask(IPC_CHANNELS.checkAtLaunch)).toEqual({
+      ok: true,
+      value: { kind: 'newer', version: '0.2.0' },
+    });
+    expect(fetched).toBe(1);
   });
 
   it('checks now whatever the setting and the day, sharing a check that already runs', async () => {

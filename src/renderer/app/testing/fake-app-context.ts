@@ -28,6 +28,9 @@ import type {
   LaunchCheck,
   ReleaseCheck,
   UpdateSettings,
+  FileAssociation,
+  OutsideRequest,
+  SetupState,
 } from '../../../preload/bridge-contract';
 import type { RelayOutgoing } from '../../../core/collaboration/relay/relay-member';
 import english from '../../locales/en.json';
@@ -69,6 +72,17 @@ export interface FakeBridgeControl {
   readonly setAside: DocumentId[];
   readonly collaboration: FakeCollaboration;
   readonly updates: FakeUpdates;
+  readonly setup: FakeSetup;
+}
+
+export interface FakeSetup {
+  stateResult: BridgeResult<SetupState>;
+  finishResult: BridgeResult<FileAssociation>;
+  associationResult: BridgeResult<FileAssociation>;
+  outsideResults: BridgeResult<OutsideRequest | null>[];
+  outsideFileResult: BridgeResult<OpenedProject>;
+  listener: (() => void) | null;
+  readonly requests: (readonly [string, ...unknown[]])[];
 }
 
 export interface FakeUpdates {
@@ -216,8 +230,22 @@ export function fakeBridge(): {
       privacyResult: { ok: true, value: null },
       requests: [],
     },
+    setup: {
+      stateResult: { ok: true, value: { welcome: false, association: { kind: 'unavailable' } } },
+      finishResult: { ok: true, value: { kind: 'thisCopy' } },
+      associationResult: { ok: true, value: { kind: 'thisCopy' } },
+      outsideResults: [],
+      outsideFileResult: NOT_ANSWERED,
+      listener: null,
+      requests: [],
+    },
   };
-  const { collaboration, updates } = control;
+  const { collaboration, updates, setup } = control;
+  /** Records a request about the setup of this copy and answers it with a value. */
+  const askedSetup = <T>(request: readonly [string, ...unknown[]], value: T): Promise<T> => {
+    setup.requests.push(request);
+    return Promise.resolve(value);
+  };
   /** Records a request about versions and answers it with a value. */
   const askedUpdates = <T>(request: readonly [string, ...unknown[]], value: T): Promise<T> => {
     updates.requests.push(request);
@@ -331,6 +359,15 @@ export function fakeBridge(): {
     checkNow: () => askedUpdates(['checkNow'], updates.checkNowResult),
     openReleasePage: (version) =>
       askedUpdates(['openReleasePage', version], updates.releasePageResult),
+    takeOutsideRequest: () =>
+      askedSetup(['takeOutsideRequest'], setup.outsideResults.shift() ?? { ok: true, value: null }),
+    openOutsideFile: () => askedSetup(['openOutsideFile'], setup.outsideFileResult),
+    setupState: () => askedSetup(['setupState'], setup.stateResult),
+    finishWelcome: (choices) => askedSetup(['finishWelcome', choices], setup.finishResult),
+    setFileAssociation: (on) => askedSetup(['setFileAssociation', on], setup.associationResult),
+    onOutsideRequest: (listener) => {
+      setup.listener = listener;
+    },
     sendToRelay: (outgoing) => {
       relay.sent.push(outgoing);
     },

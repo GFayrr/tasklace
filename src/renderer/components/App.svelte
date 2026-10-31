@@ -7,6 +7,7 @@
   import ConflictList from './ConflictList.svelte';
   import ReportDialog from './ReportDialog.svelte';
   import TasklaceSettings from './TasklaceSettings.svelte';
+  import WelcomeWindow from './WelcomeWindow.svelte';
   import Notices from './Notices.svelte';
   import StatusBar from './StatusBar.svelte';
   import PdfExport from './PdfExport.svelte';
@@ -40,6 +41,7 @@
       app.collaborationWindow !== null ||
       app.keptChanges !== null ||
       app.isTasklaceSettingsOpen ||
+      app.setup.welcome ||
       (app.settings.isOpen && !SETTINGS_COMMANDS.includes(command))
     ) {
       return;
@@ -95,6 +97,7 @@
 <ClosePrompt {app} />
 <ReportDialog {app} />
 <TasklaceSettings {app} />
+<WelcomeWindow {app} />
 
 <style>
   .shell {

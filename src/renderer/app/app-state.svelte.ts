@@ -41,6 +41,7 @@ import type {
   FileFailure,
   RecentProject,
   TasklaceBridge,
+  WelcomeChoices,
 } from '../../preload/bridge-contract';
 import { ownCopyName } from '../../core/collaboration/own-copy';
 import { createDayFormatter } from '../i18n/format';
@@ -102,6 +103,7 @@ import {
 } from '../collaboration/collaboration-state.svelte';
 import type { Command } from './shortcuts';
 import { UpdateState } from './update-state.svelte';
+import { SetupState } from './setup-state.svelte';
 import type { NewIdentifier } from '../../core/identifiers';
 
 export type NoticeKind = 'error' | 'warning' | 'info';
@@ -235,7 +237,9 @@ export class AppState {
   });
   readonly collaboration: CollaborationState;
   readonly updates: UpdateState;
+  readonly setup: SetupState;
   #tasklaceSettingsOpen = $state(false);
+  #outsideLink = $state<string | null>(null);
   #closePrompt = $state.raw<ClosePrompt | null>(null);
   #pdfExport = $state.raw<PdfExportOpening | null>(null);
   #collaborationWindow = $state<CollaborationWindow | null>(null);
@@ -296,6 +300,7 @@ export class AppState {
         LOCAL_CHANGES_CHOICES[await this.#ask({ reason: 'localChanges', fileName })],
     });
     this.updates = new UpdateState(context.bridge, context.now);
+    this.setup = new SetupState(context.bridge);
     this.collaboration = new CollaborationState({
       bridge: context.bridge,
       createId: context.createId,
@@ -517,6 +522,61 @@ export class AppState {
   /** Closes the window of the settings of this computer. */
   closeTasklaceSettings(): void {
     this.#tasklaceSettingsOpen = false;
+  }
+
+  /** Learns the setup of this copy and, unless its welcome window must first ask its choices, opens what Tasklace was started with from outside and runs the check for new versions of a new launch. */
+  async startSetup(): Promise<void> {
+    await this.setup.load();
+    if (!this.setup.welcome) {
+      await this.#afterWelcome();
+    }
+  }
+
+  /** Applies the choices of the welcome window, telling the user when they could not be kept, then opens what Tasklace was started with from outside and runs the check for new versions. */
+  async finishWelcome(choices: WelcomeChoices): Promise<void> {
+    if (!(await this.setup.finishWelcome(choices))) {
+      this.#notify('error', this.messages.setup.notApplied);
+    }
+    await this.#afterWelcome();
+  }
+
+  /** Makes this copy open project files and links or stops it, telling whether it now does what was asked. */
+  setFileAssociation(on: boolean): Promise<boolean> {
+    return this.setup.setAssociation(on);
+  }
+
+  /** Returns the link of a shared plan opened from outside Tasklace, which the join window fills in and warns about, or null. */
+  get outsideLink(): string | null {
+    return this.#outsideLink;
+  }
+
+  /** Takes what Tasklace was started with from outside once the welcome got its answer, a project file opening like a file chosen to open and a link filling the join window, nothing being joined before the person asks. */
+  async takeOutsideRequest(): Promise<void> {
+    if (this.setup.welcome) {
+      return;
+    }
+    const taken = await this.#context.bridge.takeOutsideRequest();
+    if (!taken.ok) {
+      console.error('What Tasklace was started with could not be taken:', taken.error.code);
+      return;
+    }
+    const request = taken.value;
+    if (request?.kind === 'file') {
+      if (await this.#readyToReplace()) {
+        await this.#load(this.#files.openOutside());
+      }
+      return;
+    }
+    if (request !== null) {
+      this.#outsideLink = request.link;
+      await this.openJoin();
+    }
+  }
+
+  /** Opens what Tasklace was started with from outside, then runs the check for new versions of a new launch. */
+  async #afterWelcome(): Promise<void> {
+    await this.takeOutsideRequest();
+    await this.startUpdates();
   }
 
   /** Learns the version in use and runs the check for new versions of a new launch, telling with a lasting message when a newer version is out. */
@@ -960,6 +1020,7 @@ export class AppState {
   closeCollaborationWindow(): void {
     const closed = this.#collaborationWindow;
     this.#collaborationWindow = null;
+    this.#outsideLink = null;
     if (closed !== 'join') {
       return;
     }

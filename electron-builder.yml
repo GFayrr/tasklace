@@ -20,6 +20,9 @@ extraFiles:
     to: licenses/Jost-OFL.txt
   - from: out/licenses/THIRD-PARTY-NOTICES.txt
     to: licenses/THIRD-PARTY-NOTICES.txt
+extraResources:
+  - from: build/icons/tasklace-file.ico
+    to: tasklace-file.ico
 electronFuses:
   runAsNode: false
   enableCookieEncryption: true

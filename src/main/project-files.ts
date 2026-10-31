@@ -59,6 +59,7 @@ export interface ProjectFileServices {
   readonly assertTrusted: TrustCheck;
   readonly runTask: <T extends FileTask>(task: T) => Promise<ResultOfTask<T>>;
   readonly userDataFolder: string;
+  readonly takeOutsideFile: () => string | null;
 }
 
 export type WindowProjectKind = 'none' | 'withFile' | 'withoutFile' | 'joinedPlan';
@@ -158,6 +159,9 @@ export function registerProjectFileHandlers(services: ProjectFileServices): Proj
   handleFileAction(IPC_CHANNELS.openProject, (event) => chooseAndOpen(services, event.sender));
   handleFileAction(IPC_CHANNELS.openRecentProject, (event, index) =>
     openRecent(services, event.sender, index),
+  );
+  handleFileAction(IPC_CHANNELS.openOutsideFile, (event) =>
+    openOutsideFile(services, event.sender),
   );
   handle(IPC_CHANNELS.recentProjects, () => listRecent(services));
   handleFileAction(IPC_CHANNELS.importProject, (event, kind) =>
@@ -398,6 +402,19 @@ async function openRecent(
       `The page asked for recent project ${String(index)}, but only ${String(entries.length)} are known.`,
     );
     return failure({ code: 'READ_FAILED' });
+  }
+  return openPath(services, sender, path);
+}
+
+/** Opens the project file Tasklace was started with from outside, once the page took the request, a request to open it again being logged and refused. */
+async function openOutsideFile(
+  services: ProjectFileServices,
+  sender: WebContents,
+): Promise<BridgeResult<OpenedProject>> {
+  const path = services.takeOutsideFile();
+  if (path === null) {
+    console.error('The page asked to open a file from outside, but none is waiting.');
+    return failure({ code: 'TASK_FAILED' });
   }
   return openPath(services, sender, path);
 }

@@ -92,6 +92,7 @@ const runTask = vi.fn<(task: FileTask) => Promise<FileTaskResult>>();
 const trusted = vi.fn();
 let folder: string;
 let userData: string;
+let outsideFile: string | null = null;
 
 const files = registerProjectFileHandlers({
   assertTrusted: trusted,
@@ -105,6 +106,11 @@ const files = registerProjectFileHandlers({
   },
   get userDataFolder() {
     return userData;
+  },
+  takeOutsideFile: () => {
+    const taken = outsideFile;
+    outsideFile = null;
+    return taken;
   },
 });
 
@@ -261,6 +267,20 @@ describe('opening projects', () => {
     );
   });
 
+  it('opens the project file Tasklace was started with from outside once, like a file chosen to open', async () => {
+    const path = join(folder, 'Outside.tasklace');
+    await writeFile(path, 'project');
+    outsideFile = path;
+    runTask.mockResolvedValueOnce(success(LOADED));
+    expect(await request(IPC_CHANNELS.openOutsideFile, {})).toMatchObject({ ok: true });
+    expect(tasks).toEqual([{ kind: 'openProject', path, localCopyFolder: copiesIn(userData) }]);
+    expect(await quietly(() => request(IPC_CHANNELS.openOutsideFile, {}))).toEqual({
+      answer: failure({ code: 'TASK_FAILED' }),
+      logged: [['The page asked to open a file from outside, but none is waiting.']],
+    });
+    expect(tasks).toHaveLength(1);
+  });
+
   it('reports a project whose size cannot be read as a failed read, logging why, without decoding it', async () => {
     const path = join(folder, 'Locked.tasklace');
     await writeFile(path, 'project');
@@ -380,6 +400,7 @@ describe('opening projects', () => {
       [IPC_CHANNELS.adoptProject, DOCUMENT_ID],
       [IPC_CHANNELS.openProject],
       [IPC_CHANNELS.openRecentProject, 0],
+      [IPC_CHANNELS.openOutsideFile],
       [IPC_CHANNELS.recentProjects],
       [IPC_CHANNELS.importProject, 'json'],
       [IPC_CHANNELS.saveProject, STATE],
