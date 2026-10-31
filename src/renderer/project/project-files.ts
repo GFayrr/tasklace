@@ -29,6 +29,7 @@ export type ProjectBridge = Pick<
   | 'newProject'
   | 'openProject'
   | 'openRecentProject'
+  | 'openOutsideFile'
   | 'importProject'
   | 'adoptProject'
   | 'saveProject'
@@ -94,6 +95,7 @@ export interface ProjectFiles {
   readonly create: (project: Project) => Promise<ActionResult<SharedSession>>;
   readonly open: () => Promise<ActionResult<OpenedSession>>;
   readonly openRecent: (index: number) => Promise<ActionResult<OpenedSession>>;
+  readonly openOutside: () => Promise<ActionResult<OpenedSession>>;
   readonly importFile: (kind: ExchangeKind) => Promise<ActionResult<OpenedSession>>;
   readonly openShared: (state: Uint8Array) => Promise<ActionResult<OpenedSession>>;
   readonly openOffered: (opened: OpenedProject) => Promise<ActionResult<OpenedSession>>;
@@ -323,6 +325,7 @@ export function createProjectFiles(
     create: (project) => exclusive(() => create(project)),
     open: () => exclusive(() => load(bridge.openProject, true)),
     openRecent: (index) => exclusive(() => load(() => bridge.openRecentProject(index), true)),
+    openOutside: () => exclusive(() => load(bridge.openOutsideFile, true)),
     importFile: (kind) => exclusive(() => load(() => bridge.importProject(kind), false)),
     openShared: (state) => onceFree(() => load(() => bridge.openSharedPlan(state), false)),
     openOffered: (opened) =>

@@ -41,6 +41,7 @@ import {
   openInBrowser,
 } from './security';
 import { MESSAGES } from './messages';
+import { IPC_CHANNELS } from '../preload/bridge-contract';
 import { setApplicationIdentity } from './platform/application-identity';
 import { installApplicationMenu } from './platform/application-menu';
 import { keepSpellCheckingLocal } from './platform/spell-checking';
@@ -55,6 +56,11 @@ import {
 } from './log-file';
 import { createMainWindow, createPrintWindow } from './window';
 import { registerUpdateHandlers } from './updates/update-service';
+import { registerOutsideRequests, type OutsideRequests } from './outside-request';
+import { createFileAssociations } from './platform/file-associations';
+import { createRegistry, runRegistryTool } from './platform/registry';
+import { copyPlaceOf } from './platform/this-copy';
+import { registerSetupHandlers, type Setup } from './setup/setup-service';
 import iconPath from '../../resources/icon.png?asset';
 import { printFontsIn, registerPdfHandlers } from './pdf-export';
 
@@ -68,6 +74,8 @@ const EXIT_AFTER_FAILURE = 1;
 const LOG_FOLDER = 'logs';
 const RELAY_LINK_STORE = 'relay-links.json';
 const UPDATE_SETTINGS_STORE = 'update-check.json';
+const SETUP_STORE = 'setup.json';
+const FILE_ICON = 'tasklace-file.ico';
 const log = createLogFile(
   join(app.getPath('userData'), LOG_FOLDER),
   () => new Date(),
@@ -84,8 +92,18 @@ protocol.registerSchemesAsPrivileged([
 app.enableSandbox();
 setApplicationIdentity(process.platform, app);
 
+let outside: OutsideRequests | null = null;
+let startArguments: readonly string[] = process.argv;
+
 if (app.requestSingleInstanceLock()) {
-  app.on('second-instance', focusFirstWindow);
+  app.on('second-instance', (_event, argv) => {
+    focusFirstWindow();
+    if (outside === null) {
+      startArguments = argv;
+    } else {
+      outside.receive(argv);
+    }
+  });
   app.on('web-contents-created', (_event, contents) => {
     hardenContents(contents);
   });
@@ -108,10 +126,14 @@ function start(): void {
   );
   const assertTrusted = createTrustCheck((address) => isAppAddress(address, developmentOrigin));
   registerFlushHandler(assertTrusted);
+  const requests = registerOutsideRequests({ assertTrusted, notify: tellOutsideRequest });
+  outside = requests;
+  requests.receive(startArguments);
   const files = registerProjectFileHandlers({
     assertTrusted,
     runTask: (task) => runInFileWorker(createFileWorker, task),
     userDataFolder: app.getPath('userData'),
+    takeOutsideFile: requests.takeFile,
   });
   const pdf = registerPdfHandlers({
     assertTrusted,
@@ -147,7 +169,8 @@ function start(): void {
     copyText: (text) => clipboard.writeText(text),
     openGuide: () => openInBrowser(WORKING_REMOTELY_GUIDE_URL),
   });
-  registerUpdateHandlers({
+  let setup: Setup | null = null;
+  const updates = registerUpdateHandlers({
     assertTrusted,
     storePath: join(app.getPath('userData'), UPDATE_SETTINGS_STORE),
     version: app.getVersion(),
@@ -155,6 +178,13 @@ function start(): void {
     now: () => new Date(),
     fetchReleases: (url, init) => net.fetch(url, init),
     openInBrowser,
+    welcomePending: () => setup?.welcomePending() ?? true,
+  });
+  setup = registerSetupHandlers({
+    assertTrusted,
+    storePath: join(app.getPath('userData'), SETUP_STORE),
+    copy: thisCopy(),
+    setCheck: updates.setCheck,
   });
   installApplicationMenu(process.platform);
   const window = createMainWindow(preloadPath, iconPath);
@@ -211,6 +241,30 @@ function createMdns(): ReturnType<
       bonjour.destroy();
     },
   };
+}
+
+/** Describes the built copy of Tasklace for Windows that runs, with the registry of the current user and the files and links it may open, or returns null for any other copy. */
+function thisCopy(): Parameters<typeof registerSetupHandlers>[0]['copy'] {
+  const place = copyPlaceOf(process.platform, app.isPackaged, process.execPath, process.env);
+  if (place === null) {
+    return null;
+  }
+  const userDataFolder = app.getPath('userData');
+  const registry = createRegistry(runRegistryTool(process.env['SystemRoot']), userDataFolder);
+  const associations = createFileAssociations({
+    registry,
+    executable: place.executable,
+    fileIcon: join(process.resourcesPath, FILE_ICON),
+    userDataFolder,
+  });
+  return { ...place, registry, associations };
+}
+
+/** Tells the page of the window that a file or a link arrived from outside, for it to take once it runs. */
+function tellOutsideRequest(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(IPC_CHANNELS.outsideRequestReceived);
+  }
 }
 
 /** Brings the first window forward when the application is launched a second time. */

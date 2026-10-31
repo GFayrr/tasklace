@@ -75,6 +75,10 @@ function fakeBridge(
       return opening ?? Promise.resolve(openResult);
     },
     openRecentProject: () => Promise.resolve(openResult),
+    openOutsideFile: () => {
+      events.push('openOutside');
+      return Promise.resolve(openResult);
+    },
     importProject: () => Promise.resolve(openResult),
     openSharedPlan: () => Promise.resolve(openResult),
     openKeptChanges: () => {
@@ -232,6 +236,7 @@ describe('createProjectFiles', () => {
     expect(await files.saveAs()).toEqual(busy);
     expect(await files.open()).toEqual(busy);
     expect(await files.openRecent(0)).toEqual(busy);
+    expect(await files.openOutside()).toEqual(busy);
     expect(await files.importFile('csv')).toEqual(busy);
     expect(await files.create(SAMPLE)).toEqual(busy);
     expect(await files.exportFile('csv', 'a', 'Plan')).toEqual(busy);
@@ -370,6 +375,17 @@ describe('createProjectFiles', () => {
     expect(files.hasFile()).toBe(true);
     expect(await files.saveAs()).toEqual(SAVED);
     expect(saves).toEqual([{ as: true, documentId: OTHER_ID }]);
+  });
+
+  it('opens the project file Tasklace was started with from outside as a project with its file', async () => {
+    const { bridge, events } = fakeBridge(openedOf(OTHER_ID));
+    const files = createProjectFiles(bridge, QUIET, manualTimer());
+    const opened = await files.openOutside();
+    expect([opened.ok && opened.value.session.documentId, files.hasFile(), events]).toEqual([
+      OTHER_ID,
+      true,
+      ['openOutside', 'adopt'],
+    ]);
   });
 
   it('opens the changes kept apart as a project with its file', async () => {

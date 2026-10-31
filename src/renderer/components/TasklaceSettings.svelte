@@ -5,8 +5,12 @@
   let { app }: { app: AppState } = $props();
   const text = $derived(app.messages.tasklace);
   const updates = $derived(app.updates);
+  const setupText = $derived(app.messages.setup);
+  const association = $derived(app.setup.association);
   let notKept = $state(false);
   let notOpened = $state(false);
+  let notChanged = $state(false);
+  let changing = $state(false);
 
   /** Opens the window as a modal dialog while the settings are open, and closes it otherwise. */
   function followOpening(dialog: HTMLDialogElement): void {
@@ -14,6 +18,8 @@
       if (app.isTasklaceSettingsOpen && !dialog.open) {
         notKept = false;
         notOpened = false;
+        notChanged = false;
+        void app.setup.load();
         dialog.showModal();
       }
       if (!app.isTasklaceSettingsOpen && dialog.open) {
@@ -25,6 +31,13 @@
   /** Turns the check for new versions on or off, telling when this computer could not keep the choice. */
   async function toggleCheck(): Promise<void> {
     notKept = !(await updates.setCheck(updates.checkForNewVersions !== true));
+  }
+
+  /** Makes this copy open project files and links or stops it, telling when it could not be changed. */
+  async function toggleAssociation(on: boolean): Promise<void> {
+    changing = true;
+    notChanged = !(await app.setFileAssociation(on));
+    changing = false;
   }
 
   /** Opens a page in the browser, telling when it could not open. */
@@ -114,6 +127,34 @@
       <p class="problem" role="alert">{text.notKept}</p>
     {/if}
   </section>
+  {#if association !== null && association.kind !== 'unavailable'}
+    <section class="part" aria-labelledby="tasklace-files-title">
+      <h3 id="tasklace-files-title">{setupText.filesHeading}</h3>
+      <div class="row">
+        <span id="tasklace-associate-title">{setupText.associateSwitch}</span>
+        <button
+          type="button"
+          class="switch"
+          role="switch"
+          aria-checked={association.kind === 'thisCopy'}
+          aria-labelledby="tasklace-associate-title"
+          disabled={changing}
+          onclick={() => void toggleAssociation(association.kind !== 'thisCopy')}
+        ></button>
+      </div>
+      {#if association.kind === 'thisCopy'}
+        <p class="hint">{setupText.thisCopy}</p>
+      {:else if association.kind === 'otherCopy'}
+        <p class="hint">{setupText.otherCopy}</p>
+        <p class="path">{association.path}</p>
+      {:else}
+        <p class="hint">{setupText.noCopy}</p>
+      {/if}
+      {#if notChanged}
+        <p class="problem" role="alert">{setupText.notChanged}</p>
+      {/if}
+    </section>
+  {/if}
   {#if notOpened}
     <p class="problem" role="alert">{text.notOpened}</p>
   {/if}
@@ -183,6 +224,16 @@
     margin: 0;
     font-size: 13px;
     color: var(--color-text-secondary);
+  }
+
+  .path {
+    margin: 0;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+
+  .row > span {
+    font-size: 14px;
   }
 
   .problem {

@@ -18,7 +18,7 @@ export function listenForUnexpectedErrors(
   });
 }
 
-/** Builds the state of the interface, shows it in its root and answers the requests to close the window, telling the caller once it runs, before the recent projects are loaded and the check for new versions runs, so that their errors reach the user. */
+/** Builds the state of the interface, shows it, answers the requests to close and what arrives from outside, and tells the caller once it runs, before the recent projects and the setup load, so that their errors reach the user. */
 export async function startInterface(
   page: Document,
   context: AppContext,
@@ -36,9 +36,14 @@ export async function startInterface(
       return false;
     }),
   );
+  context.bridge.onOutsideRequest(() => {
+    app.takeOutsideRequest().catch((error: unknown) => {
+      app.reportUnexpectedError(error);
+    });
+  });
   mount(App, { target, props: { app } });
   started(app);
   target.dataset['started'] = 'true';
   await app.loadRecentProjects();
-  await app.startUpdates();
+  await app.startSetup();
 }

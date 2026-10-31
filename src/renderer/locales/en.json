@@ -805,5 +805,20 @@
     "notOpened": "The browser could not open this page.",
     "done": "Done",
     "footerLink": "Tasklace settings"
+  },
+  "setup": {
+    "welcomeTitle": "Welcome to Tasklace",
+    "welcomeIntro": "Two choices for this computer. You can change them at any time in Tasklace settings.",
+    "associateSwitch": "Open Tasklace files and links with this copy",
+    "associateHint": "Double-clicking a .tasklace file or clicking a Tasklace link opens this copy. Tasklace records this for your account only.",
+    "checkHint": "Once a day, Tasklace asks GitHub which version is the latest. GitHub sees the address of your connection and the version you use.",
+    "continue": "Continue",
+    "notApplied": "Tasklace could not keep these choices on this computer. You can change them in Tasklace settings.",
+    "filesHeading": "Files and links",
+    "thisCopy": ".tasklace files and Tasklace links open with this copy.",
+    "otherCopy": "They open with another copy:",
+    "noCopy": "Double-clicking a .tasklace file or clicking a Tasklace link does not open Tasklace.",
+    "notChanged": "Tasklace could not change which copy opens its files and links.",
+    "outsideLink": "You opened a link from outside Tasklace. Join only if you expected it."
   }
 }

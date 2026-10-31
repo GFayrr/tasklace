@@ -62,6 +62,12 @@ export const IPC_CHANNELS = {
   checkAtLaunch: 'updates:check-at-launch',
   checkNow: 'updates:check-now',
   openReleasePage: 'updates:open-release-page',
+  takeOutsideRequest: 'app:take-outside-request',
+  outsideRequestReceived: 'app:outside-request',
+  openOutsideFile: 'project:open-outside',
+  setupState: 'setup:state',
+  finishWelcome: 'setup:finish-welcome',
+  setFileAssociation: 'setup:set-file-association',
   relaySend: 'relay:send',
 } as const;
 
@@ -79,6 +85,25 @@ export type ReleaseCheck =
 export type LaunchCheck = ReleaseCheck | { readonly kind: 'skipped' };
 
 export interface UpdateSettings {
+  readonly checkForNewVersions: boolean;
+}
+
+export type OutsideRequest =
+  { readonly kind: 'file' } | { readonly kind: 'link'; readonly link: string };
+
+export type FileAssociation =
+  | { readonly kind: 'unavailable' }
+  | { readonly kind: 'none' }
+  | { readonly kind: 'thisCopy' }
+  | { readonly kind: 'otherCopy'; readonly path: string };
+
+export interface SetupState {
+  readonly welcome: boolean;
+  readonly association: FileAssociation;
+}
+
+export interface WelcomeChoices {
+  readonly associate: boolean;
   readonly checkForNewVersions: boolean;
 }
 
@@ -354,6 +379,12 @@ export interface TasklaceBridge {
   readonly checkAtLaunch: () => Promise<BridgeResult<LaunchCheck>>;
   readonly checkNow: () => Promise<BridgeResult<ReleaseCheck>>;
   readonly openReleasePage: (version: string) => Promise<BridgeResult<null>>;
+  readonly takeOutsideRequest: () => Promise<BridgeResult<OutsideRequest | null>>;
+  readonly openOutsideFile: () => Promise<BridgeResult<OpenedProject>>;
+  readonly setupState: () => Promise<BridgeResult<SetupState>>;
+  readonly finishWelcome: (choices: WelcomeChoices) => Promise<BridgeResult<FileAssociation>>;
+  readonly setFileAssociation: (on: boolean) => Promise<BridgeResult<FileAssociation>>;
+  readonly onOutsideRequest: (listener: () => void) => void;
   readonly sendToRelay: (outgoing: RelayOutgoing) => void;
   readonly sendToCollaboration: (to: CollaborationTarget, message: Uint8Array) => void;
   readonly onCollaborationEvent: (listener: (event: CollaborationEvent) => void) => void;
@@ -405,6 +436,11 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.checkAtLaunch]: BridgeResult<LaunchCheck>;
   readonly [IPC_CHANNELS.checkNow]: BridgeResult<ReleaseCheck>;
   readonly [IPC_CHANNELS.openReleasePage]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.takeOutsideRequest]: BridgeResult<OutsideRequest | null>;
+  readonly [IPC_CHANNELS.openOutsideFile]: BridgeResult<OpenedProject>;
+  readonly [IPC_CHANNELS.setupState]: BridgeResult<SetupState>;
+  readonly [IPC_CHANNELS.finishWelcome]: BridgeResult<FileAssociation>;
+  readonly [IPC_CHANNELS.setFileAssociation]: BridgeResult<FileAssociation>;
 }
 
 export interface ChannelArguments {
@@ -464,6 +500,11 @@ export interface ChannelArguments {
   readonly [IPC_CHANNELS.checkAtLaunch]: readonly [];
   readonly [IPC_CHANNELS.checkNow]: readonly [];
   readonly [IPC_CHANNELS.openReleasePage]: readonly [version: string];
+  readonly [IPC_CHANNELS.takeOutsideRequest]: readonly [];
+  readonly [IPC_CHANNELS.openOutsideFile]: readonly [];
+  readonly [IPC_CHANNELS.setupState]: readonly [];
+  readonly [IPC_CHANNELS.finishWelcome]: readonly [choices: WelcomeChoices];
+  readonly [IPC_CHANNELS.setFileAssociation]: readonly [on: boolean];
 }
 
 export type InvokeChannel = keyof ChannelAnswers & keyof ChannelArguments;

@@ -28,10 +28,15 @@ export interface UpdateServices {
   readonly now: () => Date;
   readonly fetchReleases: FetchReleases;
   readonly openInBrowser: (url: string) => Promise<boolean>;
+  readonly welcomePending: () => boolean;
 }
 
-/** Answers the channels of the version of Tasklace and of its check for new versions: the check at launch runs at most once a day and only in the built application, a manual check runs whenever asked, and only one check runs at a time. */
-export function registerUpdateHandlers(services: UpdateServices): void {
+export interface UpdateHandlers {
+  readonly setCheck: (check: boolean) => Promise<BridgeResult<null>>;
+}
+
+/** Answers the channels of the version and of the check for new versions, which runs at launch at most once a day, only built and once the welcome window got its answer, one check at a time, and returns how to turn the check on or off. */
+export function registerUpdateHandlers(services: UpdateServices): UpdateHandlers {
   const current = readVersion(services.version);
   if (current === null) {
     throw new Error(`The version of the application, ${services.version}, is not a version.`);
@@ -57,7 +62,7 @@ export function registerUpdateHandlers(services: UpdateServices): void {
     setCheck(services.storePath, value),
   );
   handle(IPC_CHANNELS.checkAtLaunch, async () => {
-    if (!services.isPackaged) {
+    if (!services.isPackaged || services.welcomePending()) {
       return success({ kind: 'skipped' });
     }
     const settings = await readSettings(services.storePath);
@@ -70,6 +75,7 @@ export function registerUpdateHandlers(services: UpdateServices): void {
       ? success(null)
       : failure({ code: 'TASK_FAILED' }),
   );
+  return { setCheck: (check) => setCheck(services.storePath, check) };
 }
 
 /** Gives the page the settings it shows, leaving out the day of the last check, which only the main process uses. */

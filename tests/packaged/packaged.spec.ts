@@ -1,10 +1,14 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
+import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
+import { createSharedDocument, requireDocumentId } from '../../src/core/shared/shared-document';
+import { project, workTask } from '../../src/core/testing/project-builder';
+import { zlibCompressor } from '../../src/main/zlib-compressor';
 
 const EXECUTABLE = process.env['TASKLACE_PACKAGED_APP'] ?? '';
 const LINUX_ARGUMENTS = process.platform === 'linux' ? ['--no-sandbox'] : [];
@@ -16,6 +20,14 @@ const REMOVAL_RETRY_STEP_MS = 200;
 const NODE_ANSWER = 'ran as node';
 const SAVE_WAIT_MS = 15_000;
 const COPY_EXTENSION = '.tasklace';
+const CLASSES = 'HKCU\\Software\\Classes';
+const COMMAND_KEY = `${CLASSES}\\Tasklace.Project\\shell\\open\\command`;
+const TASKLACE_KEYS = [
+  `${CLASSES}\\Tasklace.Project`,
+  `${CLASSES}\\tasklace`,
+  `${CLASSES}\\.tasklace`,
+];
+const DEFAULT_USER_DATA = join(process.env['APPDATA'] ?? '', 'Tasklace');
 
 interface Running {
   readonly child: ChildProcess;
@@ -70,13 +82,16 @@ async function freePort(): Promise<number> {
   return address.port;
 }
 
-/** Starts the packaged executable with its own user data folder and connects to its window through the debugging port of Chromium, since its fuses refuse the Node inspector that Playwright uses for Electron. */
-async function start(): Promise<Running> {
+/** Starts the packaged executable with its own user data folder, or the folder Windows gives it, and connects to its window through the debugging port of Chromium, since its fuses refuse the Node inspector that Playwright uses for Electron. */
+async function start(
+  options: { readonly ownFolder?: boolean; readonly env?: NodeJS.ProcessEnv } = {},
+): Promise<Running> {
   const port = await freePort();
+  const folder = options.ownFolder === false ? [] : [`--user-data-dir=${userData}`];
   const child = spawn(
     EXECUTABLE,
-    [...LINUX_ARGUMENTS, `--user-data-dir=${userData}`, `--remote-debugging-port=${String(port)}`],
-    { stdio: 'ignore' },
+    [...LINUX_ARGUMENTS, ...folder, `--remote-debugging-port=${String(port)}`],
+    { stdio: 'ignore', env: { ...process.env, ...options.env } },
   );
   for (let attempt = 0; attempt < CONNECT_ATTEMPTS; attempt += 1) {
     const browser = await chromium
@@ -178,4 +193,110 @@ test('shows its version in its settings, with the check for new versions turned 
     version: 1,
     settings: { checkForNewVersions: false, lastCheckedOn: null },
   });
+});
+
+/** Runs the registry tool of Windows and gives its exit code and output. */
+function registry(
+  args: readonly string[],
+): Promise<{ readonly code: number | null; readonly output: string }> {
+  return new Promise((resolve, reject) => {
+    const tool = spawn('reg.exe', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+    let output = '';
+    tool.stdout.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    tool.once('error', reject);
+    tool.once('close', (code) => {
+      resolve({ code, output });
+    });
+  });
+}
+
+/** Tells whether a file or folder exists. */
+async function exists(path: string): Promise<boolean> {
+  return access(path).then(
+    () => true,
+    () => false,
+  );
+}
+
+/** Opens a file the way a double-click does, through the program Windows has for its kind. */
+function openAsDoubleClick(path: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const shell = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-Command', `Start-Process -FilePath '${path}'`],
+      { stdio: 'ignore' },
+    );
+    shell.once('error', reject);
+    shell.once('close', () => {
+      resolve();
+    });
+  });
+}
+
+test('asks its two choices at the first launch of the portable version, then opens a double-clicked project file and gives the files back from its settings', async () => {
+  test.skip(process.platform !== 'win32', 'Only Windows opens files through the registry.');
+  const taken = await Promise.all(
+    TASKLACE_KEYS.map(async (key) => (await registry(['query', key])).code === 0),
+  );
+  test.skip(
+    taken.includes(true) || (await exists(DEFAULT_USER_DATA)),
+    'This computer already has Tasklace set up; the test never changes it.',
+  );
+  const plan = join(userData, 'Double-clicked plan.tasklace');
+  const named = { ...project([workTask('a')]), name: 'Double-clicked plan' };
+  const document = createSharedDocument(named, requireDocumentId(crypto.randomUUID()));
+  await writeFile(plan, encodeTasklaceFile(document, zlibCompressor));
+  try {
+    const { page } = await start({
+      ownFolder: false,
+      env: { PORTABLE_EXECUTABLE_FILE: win32.normalize(EXECUTABLE) },
+    });
+    const welcome = page.getByRole('dialog', { name: 'Welcome to Tasklace' });
+    const check = welcome.getByRole('switch', { name: 'Check for new versions' });
+    const associate = welcome.getByRole('switch', {
+      name: 'Open Tasklace files and links with this copy',
+    });
+    await expect(associate).toHaveAttribute('aria-checked', 'true');
+    await expect(check).toHaveAttribute('aria-checked', 'true');
+    await check.click();
+    await welcome.getByRole('button', { name: 'Continue' }).click();
+    await expect(welcome).toBeHidden();
+    expect((await registry(['query', COMMAND_KEY, '/ve'])).output).toContain(
+      `"${win32.normalize(EXECUTABLE)}" -- "%1"`,
+    );
+    expect(
+      JSON.parse(await readFile(join(DEFAULT_USER_DATA, 'update-check.json'), 'utf8')),
+    ).toEqual({ version: 1, settings: { checkForNewVersions: false, lastCheckedOn: null } });
+    await openAsDoubleClick(plan);
+    await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue(
+      'Double-clicked plan',
+    );
+    await page.getByRole('button', { name: 'Tasklace', exact: true }).click();
+    await page.getByRole('menuitem', { name: /Tasklace settings…/ }).click();
+    const settings = page.getByRole('dialog', { name: 'Tasklace settings' });
+    const files = settings.getByRole('switch', {
+      name: 'Open Tasklace files and links with this copy',
+    });
+    await expect(files).toHaveAttribute('aria-checked', 'true');
+    await files.click();
+    await expect(files).toHaveAttribute('aria-checked', 'false');
+    expect((await registry(['query', COMMAND_KEY])).code).toBe(1);
+  } finally {
+    if (running !== null) {
+      await running.browser.close().catch(() => undefined);
+      await stopProcessTree(running.child);
+      running = null;
+    }
+    for (const key of TASKLACE_KEYS) {
+      await registry(['delete', key, '/f']);
+    }
+    await rm(DEFAULT_USER_DATA, {
+      recursive: true,
+      force: true,
+      maxRetries: REMOVAL_RETRIES,
+      retryDelay: REMOVAL_RETRY_STEP_MS,
+    });
+  }
 });
