@@ -137,10 +137,11 @@ jobs:
       - run: npm ci
       - name: Build the portable executable and the installer, unsigned
         run: npm run dist
-      - name: Test the built application
+      - name: Test the built application and the installer
         run: npm run test:packaged
         env:
           TASKLACE_PACKAGED_APP: ${{ github.workspace }}/dist/win-unpacked/Tasklace.exe
+          TASKLACE_REQUIRE_WINDOWS_TESTS: '1'
       - name: Keep the unsigned executables for a week
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

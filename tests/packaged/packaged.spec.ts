@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
+import { skipUnlessRequired } from './windows-checks';
 import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
 import { createSharedDocument, requireDocumentId } from '../../src/core/shared/shared-document';
 import { project, workTask } from '../../src/core/testing/project-builder';
@@ -240,11 +241,14 @@ function openAsDoubleClick(path: string): Promise<void> {
 }
 
 test('asks its two choices at the first launch of the portable version, then opens a double-clicked project file and gives the files back from its settings', async () => {
-  test.skip(process.platform !== 'win32', 'Only Windows opens files through the registry.');
+  skipUnlessRequired(
+    process.platform !== 'win32',
+    'Only Windows opens files through the registry.',
+  );
   const taken = await Promise.all(
     TASKLACE_KEYS.map(async (key) => (await registry(['query', key])).code === 0),
   );
-  test.skip(
+  skipUnlessRequired(
     taken.includes(true) || (await exists(DEFAULT_USER_DATA)),
     'This computer already has Tasklace set up; the test never changes it.',
   );
@@ -268,10 +272,12 @@ test('asks its two choices at the first launch of the portable version, then ope
     await welcome.getByRole('button', { name: 'Continue' }).click();
     await expect(welcome).toBeHidden();
     await expect
-      .poll(async () => (await registry(['query', COMMAND_KEY, '/ve'])).output, {
-        timeout: SAVE_WAIT_MS,
-      })
-      .toContain(`"${win32.normalize(EXECUTABLE)}" -- "%1"`);
+      .poll(
+        async () =>
+          /REG_SZ\s+(.*?)\r?$/m.exec((await registry(['query', COMMAND_KEY, '/ve'])).output)?.[1],
+        { timeout: SAVE_WAIT_MS },
+      )
+      .toBe(`"${win32.normalize(EXECUTABLE)}" -- "%1"`);
     await expect(page.getByText('Tasklace could not keep these choices')).toHaveCount(0);
     expect(
       JSON.parse(await readFile(join(DEFAULT_USER_DATA, 'update-check.json'), 'utf8')),

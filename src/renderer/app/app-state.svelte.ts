@@ -577,13 +577,22 @@ export class AppState {
       return;
     }
     if (request.kind === 'link') {
-      this.#outsideLink = request.link;
-      await this.openJoin();
+      await this.#openOutsideLink(request.link);
       return;
     }
     if (await this.#readyToReplace()) {
       await this.#load(this.#files.openOutside(request.id));
     }
+  }
+
+  /** Fills the join window with a link opened from outside, unless a plan is being joined, which the link never interrupts and which is told. */
+  async #openOutsideLink(link: string): Promise<void> {
+    if (this.collaboration.mode.kind === 'joining' || this.collaboration.relay.isStarting) {
+      this.#notify('warning', this.messages.setup.linkWhileJoining);
+      return;
+    }
+    this.#outsideLink = link;
+    await this.openJoin();
   }
 
   /** Opens what Tasklace was started with from outside, then runs the check for new versions of a new launch. */

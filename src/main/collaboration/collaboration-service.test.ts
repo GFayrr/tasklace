@@ -111,6 +111,7 @@ beforeEach(async () => {
   uncopyable = '';
   draws.length = 0;
   trusted.mockClear();
+  ipcMain.handlers.clear();
   const registered = registerCollaborationHandlers({
     assertTrusted: trusted,
     userDataFolder: folder,
@@ -720,6 +721,7 @@ describe('a plan shared another way', () => {
   it('is not shared on the network as well, and is left when the page stops sharing', async () => {
     const elsewhere = new Set<unknown>();
     const left: unknown[] = [];
+    ipcMain.handlers.clear();
     const registered = registerCollaborationHandlers({
       assertTrusted: trusted,
       userDataFolder: folder,

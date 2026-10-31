@@ -823,6 +823,7 @@
     "linkUnreadable": "The link you opened is not the link of a shared plan, or it was cut. Ask the person who sent it for the whole link.",
     "fileUnreadable": "Tasklace could not open this file from where it was opened. Open it with “Open…” instead.",
     "otherProgram": "They open with another program.",
-    "unknownCopy": "Tasklace could not find out which program opens them."
+    "unknownCopy": "Tasklace could not find out which program opens them.",
+    "linkWhileJoining": "Tasklace is already joining a plan. Open the link again once it is done."
   }
 }

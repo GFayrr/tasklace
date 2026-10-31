@@ -108,12 +108,22 @@ test('fills the join window with a link clicked while Tasklace runs, joining not
   await expect(projectName()).toHaveValue('Beta');
 });
 
-test('ignores anything else Tasklace is started with', async () => {
+test('ignores anything else Tasklace is started with, then still takes what comes after it', async () => {
   const other = join(folder, 'Notes.txt');
   await writeFile(other, 'notes');
   await launch(['--', other]);
-  await expect(page.locator('.welcome')).toBeVisible();
   await launchAgainWith('--gpu-launcher=notepad');
+  await launchAgainWith(LINK);
+  const joinWindow = page.getByRole('dialog', { name: 'Join a shared plan' });
+  await expect(joinWindow.getByRole('textbox', { name: 'Link you received' })).toHaveValue(LINK);
+  await expect(page.locator('.notices')).not.toContainText('Tasklace could not');
+});
+
+test('tells that a link it cannot read was opened, without its text', async () => {
+  await launch();
+  await launchAgainWith('tasklace://relay.school.example/#e1.cut');
+  await expect(
+    page.getByText(/The link you opened is not the link of a shared plan/),
+  ).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Join a shared plan' })).not.toBeVisible();
-  await expect(page.locator('.welcome')).toBeVisible();
 });

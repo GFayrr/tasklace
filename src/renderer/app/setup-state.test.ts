@@ -179,6 +179,20 @@ describe('AppState and the setup', () => {
     expect([app.collaborationWindow, app.outsideLink]).toEqual([null, null]);
   });
 
+  it('never interrupts a plan being joined with a link from outside, telling the user', async () => {
+    const { app, control } = await startedApp();
+    control.setup.outsideResults = [{ ok: true, value: { kind: 'link', link: LINK } }];
+    vi.spyOn(app.collaboration.relay, 'isStarting', 'get').mockReturnValue(true);
+    await app.takeOutsideRequest();
+    expect([app.collaborationWindow, app.outsideLink]).toEqual([null, null]);
+    expect(app.notices.map(({ kind, text }) => ({ kind, text }))).toEqual([
+      {
+        kind: 'warning',
+        text: 'Tasklace is already joining a plan. Open the link again once it is done.',
+      },
+    ]);
+  });
+
   it('tells the user of a link or a file from outside it could not read, without opening anything', async () => {
     const { app, control } = await startedApp();
     control.setup.outsideResults = [
