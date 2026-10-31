@@ -263,9 +263,12 @@ test('asks its two choices at the first launch of the portable version, then ope
     await check.click();
     await welcome.getByRole('button', { name: 'Continue' }).click();
     await expect(welcome).toBeHidden();
-    expect((await registry(['query', COMMAND_KEY, '/ve'])).output).toContain(
-      `"${win32.normalize(EXECUTABLE)}" -- "%1"`,
-    );
+    await expect
+      .poll(async () => (await registry(['query', COMMAND_KEY, '/ve'])).output, {
+        timeout: SAVE_WAIT_MS,
+      })
+      .toContain(`"${win32.normalize(EXECUTABLE)}" -- "%1"`);
+    await expect(page.getByText('Tasklace could not keep these choices')).toHaveCount(0);
     expect(
       JSON.parse(await readFile(join(DEFAULT_USER_DATA, 'update-check.json'), 'utf8')),
     ).toEqual({ version: 1, settings: { checkForNewVersions: false, lastCheckedOn: null } });
@@ -282,7 +285,9 @@ test('asks its two choices at the first launch of the portable version, then ope
     await expect(files).toHaveAttribute('aria-checked', 'true');
     await files.click();
     await expect(files).toHaveAttribute('aria-checked', 'false');
-    expect((await registry(['query', COMMAND_KEY])).code).toBe(1);
+    await expect
+      .poll(async () => (await registry(['query', COMMAND_KEY])).code, { timeout: SAVE_WAIT_MS })
+      .toBe(1);
   } finally {
     if (running !== null) {
       await running.browser.close().catch(() => undefined);
