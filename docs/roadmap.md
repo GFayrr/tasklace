@@ -1,6 +1,6 @@
 # Roadmap
 
-_Last updated: 2026-10-30_
+_Last updated: 2026-10-31_
 
 This roadmap shows where Tasklace is heading: what is done, what comes next and what may come later. It states intent, not commitments, and gives no dates: Tasklace is a non-commercial project built in the open, and each step is finished only when it is reviewed and fully tested.
 
@@ -8,21 +8,21 @@ This roadmap shows where Tasklace is heading: what is done, what comes next and 
 
 Version 1 is the first release that people can download and use: steps 1 to 9 below, for Windows first.
 
-| Step | Content                                              | Status |
-| ---- | ---------------------------------------------------- | ------ |
-| 1    | Foundations and working-time calendar                | Done   |
-| 2    | Scheduling engine                                    | Done   |
-| 3    | Tags and person or team conflicts                    | Done   |
-| 4    | Shared model, project file, validation, JSON and CSV | Done   |
-| 5    | Secure Electron shell and Svelte user interface      | Done   |
-| 6    | PDF export                                           | Done   |
-| 7    | Real-time collaboration on the local network         | Done   |
-| 8    | End-to-end encrypted relay and deployment guide      | Done   |
-| 9    | Distribution                                         | Next   |
+| Step | Content                                              | Status      |
+| ---- | ---------------------------------------------------- | ----------- |
+| 1    | Foundations and working-time calendar                | Done        |
+| 2    | Scheduling engine                                    | Done        |
+| 3    | Tags and person or team conflicts                    | Done        |
+| 4    | Shared model, project file, validation, JSON and CSV | Done        |
+| 5    | Secure Electron shell and Svelte user interface      | Done        |
+| 6    | PDF export                                           | Done        |
+| 7    | Real-time collaboration on the local network         | Done        |
+| 8    | End-to-end encrypted relay and deployment guide      | Done        |
+| 9    | Distribution                                         | In progress |
 
 Once a step is done, only its status is kept here; its pull requests tell the rest.
 
-## Next: distribution (step 9)
+## In progress: distribution (step 9)
 
 - A portable Windows executable, signed, that runs with a double-click and nothing else to install.
 - An installer for those who prefer one.
