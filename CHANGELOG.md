@@ -19,4 +19,4 @@ The first public version, 0.1.0, is being prepared. It will bring:
 - Real-time collaboration on a local network with a short code, or from anywhere through an end-to-end encrypted relay that a school or a company hosts, with a guide to set it up.
 - A portable Windows executable and an installer.
 - Tasklace settings for this computer, with the version in use and a check for new versions once a day that can be turned off; Tasklace never updates itself.
-- On Windows, `.tasklace` files and Tasklace links open with Tasklace once the person agrees: the portable version asks at its first launch, and a link opens the Join window filled in, never joining on its own.
+- On Windows, `.tasklace` files and Tasklace links open with Tasklace once the person agrees: the installer asks on its own page, before installing, and the portable version at its first launch; the uninstaller removes what it set up and keeps the plans, and a link opens the Join window filled in, never joining on its own.

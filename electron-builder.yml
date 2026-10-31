@@ -48,6 +48,7 @@ nsis:
   createStartMenuShortcut: true
   createDesktopShortcut: false
   deleteAppDataOnUninstall: false
+  include: build/installer.nsh
   installerIcon: build/icons/tasklace.ico
   uninstallerIcon: build/icons/tasklace.ico
 linux:
