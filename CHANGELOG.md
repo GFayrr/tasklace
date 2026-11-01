@@ -6,7 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-The first public version, 0.1.0, is being prepared. It will bring:
+## [0.1.0] - 2026-11-01
+
+The first public version: a preview for Windows, not signed yet.
 
 ### Added
 
@@ -20,3 +22,6 @@ The first public version, 0.1.0, is being prepared. It will bring:
 - A portable Windows executable and an installer.
 - Tasklace settings for this computer, with the version in use and a check for new versions at most once a day, at launch, that can be turned off; Tasklace never updates itself.
 - On Windows, `.tasklace` files and Tasklace links open with Tasklace once the person agrees: the installer asks on its own page, before installing, and the first launch asks when no installer did; the uninstaller removes what it set up and keeps the plans, and a link opens the Join window filled in, never joining on its own.
+
+[Unreleased]: https://github.com/GFayrr/tasklace/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/GFayrr/tasklace/releases/tag/v0.1.0
