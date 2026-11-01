@@ -11,6 +11,7 @@
     preferredAddress,
     relayFailureText,
   } from '../collaboration/collaboration-text';
+  import { untrack } from 'svelte';
   import { fillMessage } from '../i18n/messages';
   import Icon from './Icon.svelte';
 
@@ -40,19 +41,27 @@
   });
   const message = $derived(refusal ?? ended);
 
-  /** Opens the dialog empty, with the name and port of this computer, when the join window opens, and closes it when it is closed elsewhere. */
+  /** Opens the dialog with the name and port of this computer and the link opened from outside, if any, when the join window opens, fills in a link opened from outside while it is open, and closes it when it is closed elsewhere. */
   function followOpening(dialog: HTMLDialogElement): void {
     const isOpen = app.collaborationWindow === 'join';
+    const outsideLink = app.outsideLink;
     if (isOpen && !dialog.open) {
-      linkDraft = '';
-      codeDraft = '';
-      addressDraft = '';
-      portDraft = collaboration.settings?.port ?? null;
-      nameDraft = collaboration.settings?.name ?? '';
-      chosen = null;
-      attempted = false;
-      refusal = null;
+      untrack(() => {
+        linkDraft = outsideLink ?? '';
+        codeDraft = '';
+        addressDraft = '';
+        portDraft = collaboration.settings?.port ?? null;
+        nameDraft = collaboration.settings?.name ?? '';
+        chosen = null;
+        attempted = false;
+        refusal = null;
+      });
       dialog.showModal();
+    } else if (isOpen && outsideLink !== null) {
+      untrack(() => {
+        linkDraft = outsideLink;
+        refusal = null;
+      });
     } else if (!isOpen && dialog.open) {
       dialog.close();
     }
@@ -176,6 +185,9 @@
       </button>
     </div>
     <fieldset class="body" disabled={joining}>
+      {#if app.outsideLink !== null}
+        <p class="outside" role="note">{app.messages.setup.outsideLink}</p>
+      {/if}
       <label class="field">
         <span>{relayText.linkLabel}</span>
         <input
@@ -327,6 +339,16 @@
     margin: 0;
     font-size: 20px;
     font-weight: 600;
+  }
+
+  .outside {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    font-size: 13px;
+    color: var(--color-warning);
+    background: color-mix(in srgb, var(--color-warning) 8%, var(--color-surface));
+    border: 1px solid color-mix(in srgb, var(--color-warning) 40%, var(--color-surface));
+    border-radius: var(--radius);
   }
 
   h3 {

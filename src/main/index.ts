@@ -1,7 +1,16 @@
 import { join } from 'node:path';
 import type { Worker } from 'node:worker_threads';
 import { Bonjour } from 'bonjour-service';
-import { app, BrowserWindow, clipboard, dialog, protocol, safeStorage, session } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  net,
+  protocol,
+  safeStorage,
+  session,
+} from 'electron';
 import {
   APP_ENTRY_URL,
   APP_SCHEME,
@@ -32,7 +41,10 @@ import {
   openInBrowser,
 } from './security';
 import { MESSAGES } from './messages';
+import { IPC_CHANNELS } from '../preload/bridge-contract';
+import { setApplicationIdentity } from './platform/application-identity';
 import { installApplicationMenu } from './platform/application-menu';
+import { keepSpellCheckingLocal } from './platform/spell-checking';
 import {
   captureConsole,
   createLogFile,
@@ -43,6 +55,13 @@ import {
   writeLogBeforeQuitting,
 } from './log-file';
 import { createMainWindow, createPrintWindow } from './window';
+import { registerUpdateHandlers } from './updates/update-service';
+import { createOutsideRequests, type OutsideRequests } from './outside-request';
+import { createFileAssociations } from './platform/file-associations';
+import { createRegistry, runRegistryTool } from './platform/registry';
+import { copyPlaceOf } from './platform/this-copy';
+import { registerSetupHandlers, type Setup } from './setup/setup-service';
+import iconPath from '../../resources/icon.png?asset';
 import { printFontsIn, registerPdfHandlers } from './pdf-export';
 
 const developmentUrl = app.isPackaged ? null : (process.env['ELECTRON_RENDERER_URL'] ?? null);
@@ -54,6 +73,9 @@ const fileWorkerPath = join(import.meta.dirname, 'file-worker.js');
 const EXIT_AFTER_FAILURE = 1;
 const LOG_FOLDER = 'logs';
 const RELAY_LINK_STORE = 'relay-links.json';
+const UPDATE_SETTINGS_STORE = 'update-check.json';
+const SETUP_STORE = 'setup.json';
+const FILE_ICON = 'tasklace-file.ico';
 const log = createLogFile(
   join(app.getPath('userData'), LOG_FOLDER),
   () => new Date(),
@@ -68,9 +90,16 @@ protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 app.enableSandbox();
+setApplicationIdentity(process.platform, app);
+
+const outside: OutsideRequests = createOutsideRequests();
+outside.receive(process.argv);
 
 if (app.requestSingleInstanceLock()) {
-  app.on('second-instance', focusFirstWindow);
+  app.on('second-instance', (_event, argv) => {
+    focusFirstWindow();
+    outside.receive(argv);
+  });
   app.on('web-contents-created', (_event, contents) => {
     hardenContents(contents);
   });
@@ -85,6 +114,7 @@ if (app.requestSingleInstanceLock()) {
 /** Protects the session, serves the interface and the pages printed to PDF, answers the bridge and opens the window, which saves its project before closing. */
 function start(): void {
   hardenSession(session.defaultSession, policy);
+  keepSpellCheckingLocal(process.platform, session.defaultSession);
   const printPages = createPrintPageStore();
   protocol.handle(
     APP_SCHEME,
@@ -92,10 +122,12 @@ function start(): void {
   );
   const assertTrusted = createTrustCheck((address) => isAppAddress(address, developmentOrigin));
   registerFlushHandler(assertTrusted);
+  outside.answer(assertTrusted, tellOutsideRequest);
   const files = registerProjectFileHandlers({
     assertTrusted,
     runTask: (task) => runInFileWorker(createFileWorker, task),
     userDataFolder: app.getPath('userData'),
+    takeOutsideFile: outside.takeFile,
   });
   const pdf = registerPdfHandlers({
     assertTrusted,
@@ -131,8 +163,26 @@ function start(): void {
     copyText: (text) => clipboard.writeText(text),
     openGuide: () => openInBrowser(WORKING_REMOTELY_GUIDE_URL),
   });
+  let setup: Setup | null = null;
+  const updates = registerUpdateHandlers({
+    assertTrusted,
+    storePath: join(app.getPath('userData'), UPDATE_SETTINGS_STORE),
+    version: app.getVersion(),
+    isPackaged: app.isPackaged,
+    now: () => new Date(),
+    fetchReleases: (url, init) => net.fetch(url, init),
+    openInBrowser,
+    mayCheckAtLaunch: () => setup?.mayCheckAtLaunch() ?? Promise.resolve(false),
+  });
+  setup = registerSetupHandlers({
+    assertTrusted,
+    storePath: join(app.getPath('userData'), SETUP_STORE),
+    isPackaged: app.isPackaged,
+    copy: thisCopy(),
+    setCheck: updates.setCheck,
+  });
   installApplicationMenu(process.platform);
-  const window = createMainWindow(preloadPath);
+  const window = createMainWindow(preloadPath, iconPath);
   logPageMessages(window.webContents, log);
   flushBeforeClosing(
     window,
@@ -186,6 +236,30 @@ function createMdns(): ReturnType<
       bonjour.destroy();
     },
   };
+}
+
+/** Describes the built copy of Tasklace for Windows that runs, with the registry of the current user and the files and links it may open, or returns null for any other copy. */
+function thisCopy(): Parameters<typeof registerSetupHandlers>[0]['copy'] {
+  const place = copyPlaceOf(process.platform, app.isPackaged, process.execPath, process.env);
+  if (place === null) {
+    return null;
+  }
+  const userDataFolder = app.getPath('userData');
+  const registry = createRegistry(runRegistryTool(process.env['SystemRoot']), userDataFolder);
+  const associations = createFileAssociations({
+    registry,
+    executable: place.executable,
+    fileIcon: join(process.resourcesPath, FILE_ICON),
+    userDataFolder,
+  });
+  return { ...place, registry, associations };
+}
+
+/** Tells the pages of every window that a file or a link arrived from outside, for the main window to take it once it runs. */
+function tellOutsideRequest(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(IPC_CHANNELS.outsideRequestReceived);
+  }
 }
 
 /** Brings the first window forward when the application is launched a second time. */

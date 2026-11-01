@@ -10,13 +10,21 @@ import {
   IPC_CHANNELS,
   type BridgeResult,
   type CollaborationEvent,
+  type FileAssociation,
+  type OutsideRequest,
+  type SetupState,
   type ChannelAnswers,
   type ChannelArguments,
   type ResultChannel,
+  type LaunchCheck,
   type RecentProject,
+  type ReleaseCheck,
+  type UpdateSettings,
   type TasklaceBridge,
 } from './bridge-contract';
 import { isCollaborationEvent } from './collaboration-events';
+import { readVersion } from '../core/version';
+import { MAX_FILE_PATH_LENGTH, MAX_RELAY_LINK_LENGTH } from '../core/limits';
 
 const LIST_SEPARATORS: readonly unknown[] = CSV_SEPARATORS;
 const DATE_ORDER_VALUES: readonly unknown[] = DATE_ORDERS;
@@ -86,6 +94,41 @@ const bridge: TasklaceBridge = {
   forgetSharedPlan: () => request(IPC_CHANNELS.forgetSharedPlan),
   copyRelayLink: (kind) => request(IPC_CHANNELS.copyRelayLink, kind),
   openGuide: () => request(IPC_CHANNELS.openGuide),
+  appVersion: () =>
+    checked(IPC_CHANNELS.appVersion, request(IPC_CHANNELS.appVersion), isVersionText),
+  openPrivacyPolicy: () => request(IPC_CHANNELS.openPrivacyPolicy),
+  updateSettings: () =>
+    checked(IPC_CHANNELS.updateSettings, request(IPC_CHANNELS.updateSettings), isUpdateSettings),
+  setCheckForNewVersions: (check) => request(IPC_CHANNELS.setCheckForNewVersions, check),
+  checkAtLaunch: () =>
+    checked(IPC_CHANNELS.checkAtLaunch, request(IPC_CHANNELS.checkAtLaunch), isLaunchCheck),
+  checkNow: () => checked(IPC_CHANNELS.checkNow, request(IPC_CHANNELS.checkNow), isReleaseCheck),
+  openReleasePage: (version) => request(IPC_CHANNELS.openReleasePage, version),
+  takeOutsideRequest: () =>
+    checked(
+      IPC_CHANNELS.takeOutsideRequest,
+      request(IPC_CHANNELS.takeOutsideRequest),
+      isOutsideRequestOrNone,
+      kindOnly,
+    ),
+  openOutsideFile: (id) => request(IPC_CHANNELS.openOutsideFile, id),
+  setupState: () =>
+    checked(IPC_CHANNELS.setupState, request(IPC_CHANNELS.setupState), isSetupState),
+  finishWelcome: (choices) =>
+    checked(
+      IPC_CHANNELS.finishWelcome,
+      request(IPC_CHANNELS.finishWelcome, choices),
+      isFileAssociation,
+    ),
+  setFileAssociation: (on) =>
+    checked(
+      IPC_CHANNELS.setFileAssociation,
+      request(IPC_CHANNELS.setFileAssociation, on),
+      isFileAssociation,
+    ),
+  onOutsideRequest: (listener) => {
+    outsideListener = listener;
+  },
   sendToRelay: (outgoing) => {
     ipcRenderer.send(IPC_CHANNELS.relaySend, outgoing);
   },
@@ -105,6 +148,7 @@ const bridge: TasklaceBridge = {
 
 let pageFlush: (() => Promise<boolean>) | null = null;
 let collaborationListener: ((event: CollaborationEvent) => void) | null = null;
+let outsideListener: (() => void) | null = null;
 
 ipcRenderer.on(IPC_CHANNELS.collaborationEvent, (_event, value: unknown) => {
   if (!isCollaborationEvent(value)) {
@@ -118,6 +162,10 @@ ipcRenderer.on(IPC_CHANNELS.collaborationEvent, (_event, value: unknown) => {
 });
 
 ipcRenderer.on(IPC_CHANNELS.flushRequested, answerCloseRequest);
+
+ipcRenderer.on(IPC_CHANNELS.outsideRequestReceived, () => {
+  outsideListener?.();
+});
 
 /** Answers a request to close the window: at once while the page has not started, since it holds nothing to save yet, otherwise once the page has saved and agreed, keeping the window open when the page fails unexpectedly. */
 function answerCloseRequest(): void {
@@ -149,6 +197,99 @@ async function request<C extends ResultChannel>(
   }
   console.error(`The main process answered ${channel} with an unexpected shape:`, result);
   return UNEXPECTED_ANSWER;
+}
+
+/** Checks the value of an answer the page relies on, besides its outcome, an answer of any other shape being logged as the caller describes it, never with a secret it may hold, and counting as a failed task. */
+async function checked<T>(
+  channel: ResultChannel,
+  request: Promise<BridgeResult<unknown>>,
+  isValue: (value: unknown) => value is T,
+  logged: (value: unknown) => unknown = (value) => value,
+): Promise<BridgeResult<T>> {
+  const answer = await request;
+  if (!answer.ok) {
+    return answer;
+  }
+  if (isValue(answer.value)) {
+    return { ok: true, value: answer.value };
+  }
+  console.error(
+    `The main process answered ${channel} with an unexpected value:`,
+    logged(answer.value),
+  );
+  return UNEXPECTED_ANSWER;
+}
+
+/** Describes an answer by its kind alone, for the log of an answer that may hold the keys of a shared plan. */
+function kindOnly(value: unknown): unknown {
+  const kind: unknown = Reflect.get(Object(value), 'kind');
+  return { kind };
+}
+
+/** Tells whether an answer is the text of a version. */
+function isVersionText(value: unknown): value is string {
+  return readVersion(value) !== null;
+}
+
+/** Tells whether an answer has the shape of the settings of new versions. */
+function isUpdateSettings(value: unknown): value is UpdateSettings {
+  return typeof Reflect.get(Object(value), 'checkForNewVersions') === 'boolean';
+}
+
+/** Tells whether an answer is the result of a check for new versions. */
+function isReleaseCheck(value: unknown): value is ReleaseCheck {
+  const kind: unknown = Reflect.get(Object(value), 'kind');
+  return (
+    kind === 'latest' ||
+    (kind === 'newer' && isVersionText(Reflect.get(Object(value), 'version'))) ||
+    kind === 'failed'
+  );
+}
+
+/** Tells whether an answer is the result of the check at launch, which may also have been skipped. */
+function isLaunchCheck(value: unknown): value is LaunchCheck {
+  return Reflect.get(Object(value), 'kind') === 'skipped' || isReleaseCheck(value);
+}
+
+/** Tells whether an answer is what Tasklace was started with from outside: a project file under its number, the link of a shared plan, a file or link it could not read, or nothing. */
+function isOutsideRequestOrNone(value: unknown): value is OutsideRequest | null {
+  if (value === null) {
+    return true;
+  }
+  const kind: unknown = Reflect.get(Object(value), 'kind');
+  const id: unknown = Reflect.get(Object(value), 'id');
+  const link: unknown = Reflect.get(Object(value), 'link');
+  const what: unknown = Reflect.get(Object(value), 'what');
+  return (
+    (kind === 'file' && Number.isSafeInteger(id)) ||
+    (kind === 'unreadable' && (what === 'file' || what === 'link')) ||
+    (kind === 'link' &&
+      typeof link === 'string' &&
+      link.length <= MAX_RELAY_LINK_LENGTH &&
+      link.toLowerCase().startsWith('tasklace://'))
+  );
+}
+
+/** Tells whether an answer says which copy of Tasklace opens project files. */
+function isFileAssociation(value: unknown): value is FileAssociation {
+  const kind: unknown = Reflect.get(Object(value), 'kind');
+  const path: unknown = Reflect.get(Object(value), 'path');
+  return (
+    kind === 'unavailable' ||
+    kind === 'unknown' ||
+    kind === 'none' ||
+    kind === 'thisCopy' ||
+    kind === 'otherProgram' ||
+    (kind === 'otherCopy' && typeof path === 'string' && path.length <= MAX_FILE_PATH_LENGTH)
+  );
+}
+
+/** Tells whether an answer is the setup of this copy: whether its welcome window must show, and which copy opens project files. */
+function isSetupState(value: unknown): value is SetupState {
+  return (
+    typeof Reflect.get(Object(value), 'welcome') === 'boolean' &&
+    isFileAssociation(Reflect.get(Object(value), 'association'))
+  );
 }
 
 /** Tells whether an answer to a file request has the shape of a bridge result, checking only its outcome, the rest being trusted since the main process types what each channel answers. */

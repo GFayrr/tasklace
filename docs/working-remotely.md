@@ -253,7 +253,7 @@ Without Docker, add each setting to an `Environment=` line of the service, for e
 
 ## Look after the relay
 
-- **Updates.** Each version of Tasklace fixes the exact versions of the images it uses. The relay and the application must be of the same version: `git pull` gets the latest files, and once Tasklace publishes numbered versions, `git checkout` followed by a version gets the one people use. To update, get the new files and build again:
+- **Updates.** Each version of Tasklace fixes the exact versions of the images it uses. The relay and the application must be of the same version: `git pull` gets the latest files, and `git checkout` followed by the version people use, such as `git checkout v0.1.0`, gets that one. To update, get the new files and build again:
 
   ```sh
   git pull
@@ -271,7 +271,7 @@ Without Docker, add each setting to an `Environment=` line of the service, for e
 
   People who are connected see the relay come back on its own; their changes are kept meanwhile. Keep the system of the server up to date as well.
 
-- **Backups** are optional. Every person in a plan keeps a full copy of it on their own computer, so if the relay loses its plans, the owner of each plan shares it again and sends the new links. To keep a copy of the encrypted plans anyway:
+- **Backups** are optional. Every person in a plan keeps a copy of it on their own computer, as of their last connection, so if the relay loses its plans, the owner of each plan shares it again and sends the new links. To keep a copy of the encrypted plans anyway:
 
   ```sh
   docker compose cp relay:/data ./relay-backup-$(date +%F)
@@ -282,6 +282,36 @@ Without Docker, add each setting to an `Environment=` line of the service, for e
 - **Removing a plan.** The relay cannot tell which plan is which, by design. Someone with the link to edit a plan empties its place on the relay with **Make new links** in Tasklace. A plan nobody opens is removed after `RELAY_ROOM_EXPIRY_DAYS` days.
 
 - **Stopping the relay** keeps its plans: `docker compose down`, or `sudo systemctl stop tasklace-relay` without Docker. To remove the plans as well: `docker compose down --volumes`, or remove `/var/lib/private/tasklace-relay`.
+
+## Remove the relay
+
+Removing the relay removes the encrypted plans it keeps. Nobody loses a plan: every person in it keeps a copy on their own computer, as of their last connection, and Tasklace shows them as offline. To go on working together, the owner of a plan shares it again through another relay and sends the new links.
+
+**With Docker**, from the folder `tasklace/relay`, stop both containers and remove their volumes, which hold the plans and the certificate of Caddy, then the images they used and the files of Tasklace:
+
+```sh
+docker compose down --volumes --rmi all
+cd ../..
+rm -rf tasklace
+```
+
+`docker image prune` and `docker builder prune` then free what the build of the relay left behind.
+
+**Without Docker**, stop the relay and remove its service, its plans and its files:
+
+```sh
+sudo systemctl disable --now tasklace-relay
+sudo rm /etc/systemd/system/tasklace-relay.service
+sudo systemctl daemon-reload
+sudo rm -rf /var/lib/tasklace-relay /var/lib/private/tasklace-relay /opt/tasklace
+```
+
+Then remove what passed the connections on to it:
+
+- Behind Apache: `sudo a2dissite tasklace-relay`, `sudo rm /etc/apache2/sites-available/tasklace-relay.conf` and `sudo systemctl reload apache2`.
+- Behind nginx: `sudo rm /etc/nginx/sites-enabled/tasklace-relay /etc/nginx/sites-available/tasklace-relay` and `sudo systemctl reload nginx`.
+
+Finally, remove the hook that reloads the certificate, `sudo rm /etc/letsencrypt/renewal-hooks/deploy/tasklace-relay`, then the certificate when nothing else uses it, `sudo certbot delete --cert-name tasklace.my-school.example`. Close the ports 80 and 443 if nothing else needs them, and remove the domain name, or point it elsewhere.
 
 ## Try it on a single computer
 

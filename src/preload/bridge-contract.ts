@@ -55,10 +55,57 @@ export const IPC_CHANNELS = {
   forgetSharedPlan: 'relay:forget',
   copyRelayLink: 'relay:copy-link',
   openGuide: 'relay:open-guide',
+  appVersion: 'app:version',
+  openPrivacyPolicy: 'app:open-privacy-policy',
+  updateSettings: 'updates:settings',
+  setCheckForNewVersions: 'updates:set-check',
+  checkAtLaunch: 'updates:check-at-launch',
+  checkNow: 'updates:check-now',
+  openReleasePage: 'updates:open-release-page',
+  takeOutsideRequest: 'app:take-outside-request',
+  outsideRequestReceived: 'app:outside-request',
+  openOutsideFile: 'project:open-outside',
+  setupState: 'setup:state',
+  finishWelcome: 'setup:finish-welcome',
+  setFileAssociation: 'setup:set-file-association',
   relaySend: 'relay:send',
 } as const;
 
 export type ExchangeKind = 'json' | 'csv';
+
+export type ReleaseCheck =
+  | { readonly kind: 'latest' }
+  | { readonly kind: 'newer'; readonly version: string }
+  | { readonly kind: 'failed' };
+
+export type LaunchCheck = ReleaseCheck | { readonly kind: 'skipped' };
+
+export interface UpdateSettings {
+  readonly checkForNewVersions: boolean;
+}
+
+export type OutsideRequest =
+  | { readonly kind: 'file'; readonly id: number }
+  | { readonly kind: 'link'; readonly link: string }
+  | { readonly kind: 'unreadable'; readonly what: 'file' | 'link' };
+
+export type FileAssociation =
+  | { readonly kind: 'unavailable' }
+  | { readonly kind: 'unknown' }
+  | { readonly kind: 'none' }
+  | { readonly kind: 'thisCopy' }
+  | { readonly kind: 'otherCopy'; readonly path: string }
+  | { readonly kind: 'otherProgram' };
+
+export interface SetupState {
+  readonly welcome: boolean;
+  readonly association: FileAssociation;
+}
+
+export interface WelcomeChoices {
+  readonly associate: boolean;
+  readonly checkForNewVersions: boolean;
+}
 
 export type FileFailureCode =
   | FileError['code']
@@ -325,6 +372,19 @@ export interface TasklaceBridge {
   readonly forgetSharedPlan: () => Promise<BridgeResult<null>>;
   readonly copyRelayLink: (kind: RelayLinkKind) => Promise<BridgeResult<null>>;
   readonly openGuide: () => Promise<BridgeResult<null>>;
+  readonly appVersion: () => Promise<BridgeResult<string>>;
+  readonly openPrivacyPolicy: () => Promise<BridgeResult<null>>;
+  readonly updateSettings: () => Promise<BridgeResult<UpdateSettings>>;
+  readonly setCheckForNewVersions: (check: boolean) => Promise<BridgeResult<null>>;
+  readonly checkAtLaunch: () => Promise<BridgeResult<LaunchCheck>>;
+  readonly checkNow: () => Promise<BridgeResult<ReleaseCheck>>;
+  readonly openReleasePage: (version: string) => Promise<BridgeResult<null>>;
+  readonly takeOutsideRequest: () => Promise<BridgeResult<OutsideRequest | null>>;
+  readonly openOutsideFile: (id: number) => Promise<BridgeResult<OpenedProject>>;
+  readonly setupState: () => Promise<BridgeResult<SetupState>>;
+  readonly finishWelcome: (choices: WelcomeChoices) => Promise<BridgeResult<FileAssociation>>;
+  readonly setFileAssociation: (on: boolean) => Promise<BridgeResult<FileAssociation>>;
+  readonly onOutsideRequest: (listener: () => void) => void;
   readonly sendToRelay: (outgoing: RelayOutgoing) => void;
   readonly sendToCollaboration: (to: CollaborationTarget, message: Uint8Array) => void;
   readonly onCollaborationEvent: (listener: (event: CollaborationEvent) => void) => void;
@@ -369,6 +429,18 @@ export interface ChannelAnswers {
   readonly [IPC_CHANNELS.forgetSharedPlan]: BridgeResult<null>;
   readonly [IPC_CHANNELS.copyRelayLink]: BridgeResult<null>;
   readonly [IPC_CHANNELS.openGuide]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.appVersion]: BridgeResult<string>;
+  readonly [IPC_CHANNELS.openPrivacyPolicy]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.updateSettings]: BridgeResult<UpdateSettings>;
+  readonly [IPC_CHANNELS.setCheckForNewVersions]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.checkAtLaunch]: BridgeResult<LaunchCheck>;
+  readonly [IPC_CHANNELS.checkNow]: BridgeResult<ReleaseCheck>;
+  readonly [IPC_CHANNELS.openReleasePage]: BridgeResult<null>;
+  readonly [IPC_CHANNELS.takeOutsideRequest]: BridgeResult<OutsideRequest | null>;
+  readonly [IPC_CHANNELS.openOutsideFile]: BridgeResult<OpenedProject>;
+  readonly [IPC_CHANNELS.setupState]: BridgeResult<SetupState>;
+  readonly [IPC_CHANNELS.finishWelcome]: BridgeResult<FileAssociation>;
+  readonly [IPC_CHANNELS.setFileAssociation]: BridgeResult<FileAssociation>;
 }
 
 export interface ChannelArguments {
@@ -421,6 +493,18 @@ export interface ChannelArguments {
   readonly [IPC_CHANNELS.forgetSharedPlan]: readonly [];
   readonly [IPC_CHANNELS.copyRelayLink]: readonly [kind: RelayLinkKind];
   readonly [IPC_CHANNELS.openGuide]: readonly [];
+  readonly [IPC_CHANNELS.appVersion]: readonly [];
+  readonly [IPC_CHANNELS.openPrivacyPolicy]: readonly [];
+  readonly [IPC_CHANNELS.updateSettings]: readonly [];
+  readonly [IPC_CHANNELS.setCheckForNewVersions]: readonly [check: boolean];
+  readonly [IPC_CHANNELS.checkAtLaunch]: readonly [];
+  readonly [IPC_CHANNELS.checkNow]: readonly [];
+  readonly [IPC_CHANNELS.openReleasePage]: readonly [version: string];
+  readonly [IPC_CHANNELS.takeOutsideRequest]: readonly [];
+  readonly [IPC_CHANNELS.openOutsideFile]: readonly [id: number];
+  readonly [IPC_CHANNELS.setupState]: readonly [];
+  readonly [IPC_CHANNELS.finishWelcome]: readonly [choices: WelcomeChoices];
+  readonly [IPC_CHANNELS.setFileAssociation]: readonly [on: boolean];
 }
 
 export type InvokeChannel = keyof ChannelAnswers & keyof ChannelArguments;

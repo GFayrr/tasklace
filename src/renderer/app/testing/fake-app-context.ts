@@ -25,6 +25,12 @@ import type {
   Sharing,
   TasklaceBridge,
   PdfExport,
+  LaunchCheck,
+  ReleaseCheck,
+  UpdateSettings,
+  FileAssociation,
+  OutsideRequest,
+  SetupState,
 } from '../../../preload/bridge-contract';
 import type { RelayOutgoing } from '../../../core/collaboration/relay/relay-member';
 import english from '../../locales/en.json';
@@ -65,6 +71,29 @@ export interface FakeBridgeControl {
   readonly pdfExports: { readonly document: PrintDocument; readonly name: string }[];
   readonly setAside: DocumentId[];
   readonly collaboration: FakeCollaboration;
+  readonly updates: FakeUpdates;
+  readonly setup: FakeSetup;
+}
+
+export interface FakeSetup {
+  stateResult: BridgeResult<SetupState>;
+  finishResult: BridgeResult<FileAssociation>;
+  associationResult: BridgeResult<FileAssociation>;
+  outsideResults: BridgeResult<OutsideRequest | null>[];
+  outsideFileResult: BridgeResult<OpenedProject>;
+  listener: (() => void) | null;
+  readonly requests: (readonly [string, ...unknown[]])[];
+}
+
+export interface FakeUpdates {
+  versionResult: BridgeResult<string>;
+  settingsResult: BridgeResult<UpdateSettings>;
+  setCheckResult: BridgeResult<null>;
+  launchResult: BridgeResult<LaunchCheck>;
+  checkNowResult: BridgeResult<ReleaseCheck>;
+  releasePageResult: BridgeResult<null>;
+  privacyResult: BridgeResult<null>;
+  readonly requests: (readonly [string, ...unknown[]])[];
 }
 
 export interface FakeCollaboration {
@@ -191,8 +220,37 @@ export function fakeBridge(): {
         sent: [],
       },
     },
+    updates: {
+      versionResult: { ok: true, value: '0.1.0' },
+      settingsResult: { ok: true, value: { checkForNewVersions: true } },
+      setCheckResult: { ok: true, value: null },
+      launchResult: { ok: true, value: { kind: 'skipped' } },
+      checkNowResult: { ok: true, value: { kind: 'latest' } },
+      releasePageResult: { ok: true, value: null },
+      privacyResult: { ok: true, value: null },
+      requests: [],
+    },
+    setup: {
+      stateResult: { ok: true, value: { welcome: false, association: { kind: 'unavailable' } } },
+      finishResult: { ok: true, value: { kind: 'thisCopy' } },
+      associationResult: { ok: true, value: { kind: 'thisCopy' } },
+      outsideResults: [],
+      outsideFileResult: NOT_ANSWERED,
+      listener: null,
+      requests: [],
+    },
   };
-  const { collaboration } = control;
+  const { collaboration, updates, setup } = control;
+  /** Records a request about the setup of this copy and answers it with a value. */
+  const askedSetup = <T>(request: readonly [string, ...unknown[]], value: T): Promise<T> => {
+    setup.requests.push(request);
+    return Promise.resolve(value);
+  };
+  /** Records a request about versions and answers it with a value. */
+  const askedUpdates = <T>(request: readonly [string, ...unknown[]], value: T): Promise<T> => {
+    updates.requests.push(request);
+    return Promise.resolve(value);
+  };
   const { relay } = collaboration;
   /** Records a request about a relay and answers it with a value. */
   const askedRelay = <T>(request: readonly [string, ...unknown[]], value: T): Promise<T> => {
@@ -292,6 +350,24 @@ export function fakeBridge(): {
     forgetSharedPlan: () => askedRelay(['forgetSharedPlan'], relay.forgetResult),
     copyRelayLink: (kind) => askedRelay(['copyRelayLink', kind], relay.copyLinkResult),
     openGuide: () => askedRelay(['openGuide'], relay.guideResult),
+    appVersion: () => askedUpdates(['appVersion'], updates.versionResult),
+    openPrivacyPolicy: () => askedUpdates(['openPrivacyPolicy'], updates.privacyResult),
+    updateSettings: () => askedUpdates(['updateSettings'], updates.settingsResult),
+    setCheckForNewVersions: (check) =>
+      askedUpdates(['setCheckForNewVersions', check], updates.setCheckResult),
+    checkAtLaunch: () => askedUpdates(['checkAtLaunch'], updates.launchResult),
+    checkNow: () => askedUpdates(['checkNow'], updates.checkNowResult),
+    openReleasePage: (version) =>
+      askedUpdates(['openReleasePage', version], updates.releasePageResult),
+    takeOutsideRequest: () =>
+      askedSetup(['takeOutsideRequest'], setup.outsideResults.shift() ?? { ok: true, value: null }),
+    openOutsideFile: (id) => askedSetup(['openOutsideFile', id], setup.outsideFileResult),
+    setupState: () => askedSetup(['setupState'], setup.stateResult),
+    finishWelcome: (choices) => askedSetup(['finishWelcome', choices], setup.finishResult),
+    setFileAssociation: (on) => askedSetup(['setFileAssociation', on], setup.associationResult),
+    onOutsideRequest: (listener) => {
+      setup.listener = listener;
+    },
     sendToRelay: (outgoing) => {
       relay.sent.push(outgoing);
     },

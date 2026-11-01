@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace is not released yet. The application is complete for its first version: planning, project settings, PDF export, and real-time collaboration on a local network or through an end-to-end encrypted relay. What remains is distribution, a signed Windows executable that runs with a double-click. Until then, Tasklace can only be run from the source code.
+> Tasklace 0.1.0 is a first preview for Windows: planning, project settings, PDF export, and real-time collaboration on a local network or through an end-to-end encrypted relay. It is not signed yet, so Windows warns before running it; signed versions are meant to follow, as the [code signing policy](#code-signing-policy) explains.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -22,9 +22,11 @@ Tasklace is designed for students and professionals who want clear project plans
 - [Background](#background)
 - [Features](#features)
 - [Install](#install)
+- [Uninstall](#uninstall)
 - [Usage](#usage)
 - [Roadmap](#roadmap)
 - [Security](#security)
+- [Code signing policy](#code-signing-policy)
 - [Development](#development)
 - [Maintainers](#maintainers)
 - [Acknowledgements](#acknowledgements)
@@ -89,9 +91,24 @@ Off by default, each one turned on per project:
 
 ## Install
 
-There is no release yet. Tasklace will ship as a portable Windows executable: download it and double-click to run, with nothing else to install. An installer will also be offered.
+Download Tasklace from the [releases](https://github.com/GFayrr/tasklace/releases), for Windows 10 or 11:
 
-Until then, Tasklace can be run from the source code, which needs [Node.js](https://nodejs.org/) 24 LTS and npm:
+- **`Tasklace-<version>-portable.exe`** runs with a double-click, with nothing to install. Keep it where you like, for example in your documents or on a USB stick.
+- **`Tasklace-<version>-setup.exe`** installs Tasklace for your account, without administrator rights, with a shortcut in the Start menu. Started as an administrator, it can also install Tasklace for everyone who uses the computer; each person then makes the two choices below at their first launch.
+
+The installer asks before installing, and the portable version at its first launch, whether Tasklace opens `.tasklace` files and Tasklace links, and whether it checks for new versions, at most once a day when it starts; nothing is sent before you chose; the [privacy policy](PRIVACY.md) tells what this check sends. Tasklace never updates itself: it only tells you when a new version is out.
+
+While a version is not signed, Windows warns before running it. SmartScreen shows “Windows protected your PC”: choose **More info**, then **Run anyway**. With Smart App Control on, Windows 11 does not run an unsigned program at all; wait for a signed version.
+
+To make sure a file is the one this project built, compare its fingerprint with the line of `SHA256SUMS.txt`, published with each release, in PowerShell; PowerShell writes it in capitals, which does not matter:
+
+```powershell
+Get-FileHash .\Tasklace-0.1.0-portable.exe -Algorithm SHA256
+```
+
+To install Tasklace on many computers, an IT department can run the installer silently with `/S`. Both choices are then on; `/NOASSOCIATE` keeps Tasklace from opening files and links, and `/NOUPDATECHECK` turns the check for new versions off.
+
+Tasklace can also be run from the source code, which needs [Node.js](https://nodejs.org/) 24 LTS and npm:
 
 ```sh
 git clone https://github.com/GFayrr/tasklace.git
@@ -103,6 +120,21 @@ npm run dev
 ### Hosting a relay
 
 A relay lets people share plans from anywhere. It is a small Node.js server that a school or a company runs on its own machine, with Docker and Caddy, behind Apache or nginx, or on its own with systemd. The guide [Working remotely: setting up a relay](docs/working-remotely.md) walks an IT department through every step.
+
+## Uninstall
+
+- **Installed version**: remove Tasklace in **Settings**, **Apps**, **Installed apps** (**Apps & features** on Windows 10). The uninstaller also stops Tasklace from opening `.tasklace` files and links, unless another copy opens them.
+- **Portable version**: open **Tasklace settings**, from the Tasklace menu at the end of the toolbar or at the foot of the welcome screen, turn off **Open Tasklace files and links with this copy**, then delete the executable.
+
+Your projects stay wherever you saved them. What Tasklace keeps for you also stays, in `%APPDATA%\Tasklace`: local copies of your projects, plans joined through a relay and changes kept apart, the list of recent projects, your settings, the links of shared plans and the log of errors. Delete this folder to remove them as well; to open it, type `%APPDATA%\Tasklace` in the address bar of the File Explorer.
+
+If a portable copy was deleted while it still opened `.tasklace` files, Windows offers to choose another program for them; to remove what it set up, run in PowerShell:
+
+```powershell
+reg delete HKCU\Software\Classes\Tasklace.Project /f
+reg delete HKCU\Software\Classes\tasklace /f
+reg delete HKCU\Software\Classes\.tasklace /ve /f
+```
 
 ## Usage
 
@@ -137,7 +169,17 @@ Tasklace treats every file it opens and every message it receives as untrusted:
 - On the local network, everything is encrypted after a key exchange based on the join code (CPace), and only computers on a private network are accepted.
 - Through a relay, plans and presence are encrypted end to end (AES-256-GCM) and every change is signed (Ed25519); the relay stores and passes on messages it cannot read. Links are kept in the vault of the system.
 
+What leaves your computer, when and to whom, is described in the [privacy policy](PRIVACY.md).
+
 To report a vulnerability, do not open a public issue: follow the [security policy](SECURITY.md).
+
+## Code signing policy
+
+Tasklace 0.1.0 is not signed. The project has applied to [SignPath Foundation](https://signpath.org/), which signs open source software for free; once it is accepted, the releases that follow will be signed with its certificate, and this section will say so.
+
+- **What is signed**: only the files built from this repository, the Tasklace executable, the portable executable, the installer and its uninstaller, built by continuous integration from a version tag. The files of other projects that Tasklace ships, such as the libraries of Electron, are not signed by this project.
+- **Who does what**: [@GFayrr](https://github.com/GFayrr) writes and reviews the code, and approves each release by hand before it is published.
+- **Privacy**: Tasklace sends nothing to the project, about you or your plans; the [privacy policy](PRIVACY.md) tells what leaves your computer, when, and to whom.
 
 ## Development
 

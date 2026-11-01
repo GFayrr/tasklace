@@ -41,6 +41,7 @@ import type {
   FileFailure,
   RecentProject,
   TasklaceBridge,
+  WelcomeChoices,
 } from '../../preload/bridge-contract';
 import { ownCopyName } from '../../core/collaboration/own-copy';
 import { createDayFormatter } from '../i18n/format';
@@ -101,6 +102,8 @@ import {
   type KeptOwnChanges,
 } from '../collaboration/collaboration-state.svelte';
 import type { Command } from './shortcuts';
+import { UpdateState } from './update-state.svelte';
+import { SetupState } from './setup-state.svelte';
 import type { NewIdentifier } from '../../core/identifiers';
 
 export type NoticeKind = 'error' | 'warning' | 'info';
@@ -174,12 +177,18 @@ export interface Report {
   readonly entries: readonly string[];
 }
 
+export interface NoticeAction {
+  readonly kind: 'openReleasePage';
+  readonly version: string;
+}
+
 export interface Notice {
   readonly id: number;
   readonly kind: NoticeKind;
   readonly text: string;
   readonly report: Report | null;
   readonly lasting: boolean;
+  readonly action: NoticeAction | null;
 }
 
 export interface HeavyPdf {
@@ -227,6 +236,11 @@ export class AppState {
     this.#startMove = null;
   });
   readonly collaboration: CollaborationState;
+  readonly updates: UpdateState;
+  readonly setup: SetupState;
+  #tasklaceSettingsOpen = $state(false);
+  #outsideLink = $state<string | null>(null);
+  #outsideQueue: Promise<void> = Promise.resolve();
   #closePrompt = $state.raw<ClosePrompt | null>(null);
   #pdfExport = $state.raw<PdfExportOpening | null>(null);
   #collaborationWindow = $state<CollaborationWindow | null>(null);
@@ -286,6 +300,8 @@ export class AppState {
       chooseLocalChanges: async (fileName) =>
         LOCAL_CHANGES_CHOICES[await this.#ask({ reason: 'localChanges', fileName })],
     });
+    this.updates = new UpdateState(context.bridge, context.now);
+    this.setup = new SetupState(context.bridge);
     this.collaboration = new CollaborationState({
       bridge: context.bridge,
       createId: context.createId,
@@ -492,6 +508,119 @@ export class AppState {
   /** Returns the detailed list behind a message shown to the user, or null. */
   get report(): Report | null {
     return this.#report;
+  }
+
+  /** Tells whether the window of the settings of this computer is open. */
+  get isTasklaceSettingsOpen(): boolean {
+    return this.#tasklaceSettingsOpen;
+  }
+
+  /** Opens the window of the settings of this computer, with the version and the check for new versions. */
+  openTasklaceSettings(): void {
+    this.#tasklaceSettingsOpen = true;
+  }
+
+  /** Closes the window of the settings of this computer. */
+  closeTasklaceSettings(): void {
+    this.#tasklaceSettingsOpen = false;
+  }
+
+  /** Learns the setup of this copy and, unless its welcome window must first ask its choices, opens what Tasklace was started with from outside and runs the check for new versions of a new launch. */
+  async startSetup(): Promise<void> {
+    await this.setup.load();
+    if (!this.setup.welcome) {
+      await this.#afterWelcome();
+    }
+  }
+
+  /** Applies the choices of the welcome window, telling the user when they could not be kept, then opens what Tasklace was started with from outside and runs the check for new versions. */
+  async finishWelcome(choices: WelcomeChoices): Promise<void> {
+    if (!(await this.setup.finishWelcome(choices))) {
+      this.#notify('error', this.messages.setup.notApplied);
+    }
+    await this.#afterWelcome();
+  }
+
+  /** Makes this copy open project files and links or stops it, telling whether it now does what was asked. */
+  setFileAssociation(on: boolean): Promise<boolean> {
+    return this.setup.setAssociation(on);
+  }
+
+  /** Returns the link of a shared plan opened from outside Tasklace, which the join window fills in and warns about, or null. */
+  get outsideLink(): string | null {
+    return this.#outsideLink;
+  }
+
+  /** Takes what Tasklace was started with from outside, one request after another, once its setup is known and its welcome answered: a file opens like a chosen file, a link fills the join window, and what cannot be read is told. */
+  takeOutsideRequest(): Promise<void> {
+    this.#outsideQueue = this.#outsideQueue.then(() => this.#takeOutsideRequest());
+    return this.#outsideQueue;
+  }
+
+  /** Takes one request from outside, unless the setup of this copy is not known yet or its welcome waits, in which case the request stays in the main process until then. */
+  async #takeOutsideRequest(): Promise<void> {
+    if (!this.setup.isLoaded || this.setup.welcome) {
+      return;
+    }
+    const taken = await this.#context.bridge.takeOutsideRequest();
+    if (!taken.ok) {
+      console.error('What Tasklace was started with could not be taken:', taken.error.code);
+      return;
+    }
+    const request = taken.value;
+    if (request === null) {
+      return;
+    }
+    if (request.kind === 'unreadable') {
+      const text = this.messages.setup;
+      this.#notify('warning', request.what === 'link' ? text.linkUnreadable : text.fileUnreadable);
+      return;
+    }
+    if (request.kind === 'link') {
+      await this.#openOutsideLink(request.link);
+      return;
+    }
+    if (await this.#readyToReplace()) {
+      await this.#load(this.#files.openOutside(request.id));
+    }
+  }
+
+  /** Fills the join window with a link opened from outside, unless a plan is being joined, which the link never interrupts and which is told. */
+  async #openOutsideLink(link: string): Promise<void> {
+    if (this.collaboration.mode.kind === 'joining' || this.collaboration.relay.isStarting) {
+      this.#notify('warning', this.messages.setup.linkWhileJoining);
+      return;
+    }
+    this.#outsideLink = link;
+    await this.openJoin();
+  }
+
+  /** Opens what Tasklace was started with from outside, then runs the check for new versions of a new launch. */
+  async #afterWelcome(): Promise<void> {
+    await this.takeOutsideRequest();
+    await this.startUpdates();
+  }
+
+  /** Learns the version in use and runs the check for new versions of a new launch, telling with a lasting message when a newer version is out. */
+  async startUpdates(): Promise<void> {
+    await this.updates.load();
+    const version = await this.updates.checkAtLaunch();
+    if (version !== null) {
+      this.#notify('info', fillMessage(this.messages.notices.newVersion, { version }), null, true, {
+        kind: 'openReleasePage',
+        version,
+      });
+    }
+  }
+
+  /** Runs the action a message offers, such as opening the page of a new release, telling the user when the browser could not open it. */
+  async runNoticeAction(action: NoticeAction): Promise<void> {
+    const actions: Readonly<Record<NoticeAction['kind'], () => Promise<boolean>>> = {
+      openReleasePage: () => this.updates.openReleasePage(action.version),
+    };
+    if (!(await actions[action.kind]())) {
+      this.#notify('error', this.messages.tasklace.notOpened);
+    }
   }
 
   /** Loads the list of recent projects, a list that cannot be loaded leaving the previous one and a warning, so that the action that asked for it still succeeds. */
@@ -916,6 +1045,7 @@ export class AppState {
   closeCollaborationWindow(): void {
     const closed = this.#collaborationWindow;
     this.#collaborationWindow = null;
+    this.#outsideLink = null;
     if (closed !== 'join') {
       return;
     }
@@ -1681,16 +1811,21 @@ export class AppState {
     console.error('A file action failed unexpectedly:', error);
   }
 
-  /** Adds a message and returns its identifier, replacing the same message already shown so that it is shown once with its latest details, a message with details or asked to last staying until the user dismisses it. */
+  /** Adds a message and returns its identifier, replacing the same message already shown so that it is shown once with its latest details, a message with details, an action or asked to last staying until the user dismisses it. */
   #notify(
     kind: NoticeKind,
     text: string,
     report: Report | null = null,
     lasting = report !== null,
+    action: NoticeAction | null = null,
   ): number {
     this.#nextNoticeId += 1;
     const others = this.notices.filter((notice) => notice.text !== text);
-    this.#notices = [...others, { id: this.#nextNoticeId, kind, text, report, lasting }];
+    const kept = lasting || action !== null;
+    this.#notices = [
+      ...others,
+      { id: this.#nextNoticeId, kind, text, report, lasting: kept, action },
+    ];
     return this.#nextNoticeId;
   }
 }

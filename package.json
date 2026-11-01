@@ -1,5 +1,7 @@
 {
   "name": "tasklace",
+  "productName": "Tasklace",
+  "author": "Fayr",
   "version": "0.1.0",
   "private": true,
   "description": "Desktop application to create, edit, share and export Gantt charts.",
@@ -11,7 +13,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "lint": "tsc --noEmit && tsc --noEmit -p src/main && tsc --noEmit -p src/preload && svelte-check --tsconfig src/renderer/tsconfig.json --fail-on-warnings --output human && tsc --noEmit -p tests && tsc --noEmit -p tests/e2e && tsc --noEmit -p tests/pdf-compare && tsc --noEmit -p relay && eslint .",
+    "lint": "tsc --noEmit && tsc --noEmit -p scripts && tsc --noEmit -p src/main && tsc --noEmit -p src/preload && svelte-check --tsconfig src/renderer/tsconfig.json --fail-on-warnings --output human && tsc --noEmit -p tests && tsc --noEmit -p tests/e2e && tsc --noEmit -p tests/pdf-compare && tsc --noEmit -p tests/packaged && tsc --noEmit -p relay && eslint .",
     "format": "prettier --write .",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
@@ -19,7 +21,10 @@
     "bench": "vitest run --config vitest.perf.config.ts",
     "bench:growth": "vitest run --config vitest.growth.config.ts",
     "test:e2e": "electron-vite build && playwright test",
-    "pdf:compare": "electron-vite build && playwright test --config playwright.pdf-compare.config.ts"
+    "icons": "electron scripts/make-icons.ts",
+    "pdf:compare": "electron-vite build && playwright test --config playwright.pdf-compare.config.ts",
+    "test:packaged": "playwright test --config playwright.packaged.config.ts",
+    "dist": "electron-vite build && node scripts/write-third-party-notices.ts && electron-builder --win --publish never"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
@@ -29,6 +34,7 @@
     "@types/ws": "8.18.2",
     "@vitest/coverage-v8": "^5.0.5",
     "electron": "^44.9.1",
+    "electron-builder": "26.17.0",
     "electron-vite": "^5.0.0",
     "eslint": "^10.11.0",
     "eslint-plugin-svelte": "^3.23.0",
@@ -36,6 +42,7 @@
     "happy-dom": "^21.0.4",
     "prettier": "^3.9.9",
     "prettier-plugin-svelte": "^4.1.1",
+    "svelte": "5.57.1",
     "svelte-check": "^4.7.6",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.1",
@@ -47,7 +54,6 @@
     "@noble/hashes": "2.4.0",
     "bonjour-service": "1.4.4",
     "pdfkit": "0.20.2",
-    "svelte": "5.57.1",
     "ws": "8.22.0",
     "yjs": "13.6.33"
   },

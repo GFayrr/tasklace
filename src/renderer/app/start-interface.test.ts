@@ -19,9 +19,14 @@ function addRoot(): HTMLElement {
 /** Starts the interface with a fake bridge whose close requests are kept, returning the state it started. */
 async function started() {
   const fake = fakeAppContext();
-  const captured: { app: AppState | null; flush: (() => Promise<boolean>) | null } = {
+  const captured: {
+    app: AppState | null;
+    flush: (() => Promise<boolean>) | null;
+    outside: (() => void) | null;
+  } = {
     app: null,
     flush: null,
+    outside: null,
   };
   const context = {
     ...fake.context,
@@ -29,6 +34,9 @@ async function started() {
       ...fake.context.bridge,
       onFlushRequested: (next: () => Promise<boolean>) => {
         captured.flush = next;
+      },
+      onOutsideRequest: (listener: () => void) => {
+        captured.outside = listener;
       },
     },
   };
@@ -38,11 +46,11 @@ async function started() {
     calls.push(...fake.control.calls);
     captured.app = running;
   });
-  const { app, flush } = captured;
-  if (app === null || flush === null) {
+  const { app, flush, outside } = captured;
+  if (app === null || flush === null || outside === null) {
     throw new Error('The interface did not start.');
   }
-  return { app, flush, root, calls, ...fake };
+  return { app, flush, outside, root, calls, ...fake };
 }
 
 describe('startInterface', () => {
@@ -68,6 +76,23 @@ describe('startInterface', () => {
     vi.spyOn(app, 'prepareClose').mockRejectedValueOnce(fault);
     const reported = vi.spyOn(app, 'reportUnexpectedError').mockImplementation(() => undefined);
     expect(await flush()).toBe(false);
+    expect(reported).toHaveBeenCalledWith(fault);
+  });
+});
+
+describe('what arrives from outside', () => {
+  it('is taken each time the main process tells of it, an unexpected error being reported', async () => {
+    const { app, outside, control } = await started();
+    expect(control.setup.requests).toEqual([['setupState'], ['takeOutsideRequest']]);
+    outside();
+    await settle();
+    expect(control.setup.requests.at(-1)).toEqual(['takeOutsideRequest']);
+    expect(control.setup.requests).toHaveLength(3);
+    const fault = new Error('broken on purpose');
+    vi.spyOn(app, 'takeOutsideRequest').mockRejectedValueOnce(fault);
+    const reported = vi.spyOn(app, 'reportUnexpectedError').mockImplementation(() => undefined);
+    outside();
+    await settle();
     expect(reported).toHaveBeenCalledWith(fault);
   });
 });
