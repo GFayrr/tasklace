@@ -67,7 +67,7 @@ jobs:
         run: npm run test:e2e
       - name: Keep the traces of failed application tests
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: application-test-results-${{ runner.os }}
           path: test-results/
@@ -143,7 +143,7 @@ jobs:
           TASKLACE_PACKAGED_APP: ${{ github.workspace }}/dist/win-unpacked/Tasklace.exe
           TASKLACE_REQUIRE_WINDOWS_TESTS: '1'
       - name: Keep the unsigned executables for a week
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tasklace-windows-unsigned
           path: |
@@ -151,7 +151,7 @@ jobs:
           retention-days: 7
       - name: Keep the traces of failed tests of the built application
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packaged-test-results
           path: test-results/
