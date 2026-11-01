@@ -54,9 +54,9 @@
       !insertmacro MUI_HEADER_TEXT "Before installing" "What Tasklace does on this computer"
       nsDialogs::Create 1018
       Pop $0
-      ${NSD_CreateLabel} 0 0 100% 20u "Tasklace has no account and sends no usage statistics. Your plans stay on your computer and on the computers of the people you share them with."
+      ${NSD_CreateLabel} 0 0 100% 20u "Tasklace has no account and sends no usage statistics. Your plans stay on your computer, on the computers of the people you share them with and, encrypted, on the relay you choose if you share through one."
       Pop $0
-      ${NSD_CreateLabel} 0 24u 100% 28u "Once a day, when it starts, Tasklace asks GitHub which version is the latest. GitHub sees the address of your connection and the version you use. You can turn this off below, or later in Tasklace settings."
+      ${NSD_CreateLabel} 0 24u 100% 28u "At most once a day, when it starts, Tasklace asks GitHub which version is the latest. GitHub sees the address of your connection and the version you use. You can turn this off below, or later in Tasklace settings."
       Pop $0
       ${NSD_CreateLink} 0 56u 100% 10u "The whole privacy policy: github.com/GFayrr/tasklace/blob/main/PRIVACY.md"
       Pop $0
@@ -66,7 +66,7 @@
       ${if} $tasklaceAssociate == 1
         ${NSD_Check} $tasklaceAssociateBox
       ${endIf}
-      ${NSD_CreateCheckbox} 0 90u 100% 12u "Check for new versions once a day"
+      ${NSD_CreateCheckbox} 0 90u 100% 12u "Check for new versions at most once a day"
       Pop $tasklaceCheckBox
       ${if} $tasklaceCheck == 1
         ${NSD_Check} $tasklaceCheckBox

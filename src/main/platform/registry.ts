@@ -57,7 +57,7 @@ export function runRegistryTool(systemRoot: string | undefined): RunRegistryTool
     });
 }
 
-/** Writes the lines of a registry file the way the registry tool reads it, in UTF-16 with its header. */
+/** Writes the lines of a registry file with the byte order mark and the header the registry tool expects, the file being written in UTF-16 when imported. */
 export function registryFileText(lines: readonly string[]): string {
   return [BYTE_ORDER_MARK + REGISTRY_FILE_HEADER, '', ...lines, ''].join(LINE_END);
 }

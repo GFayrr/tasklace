@@ -42,7 +42,7 @@ export function registerUpdateHandlers(services: UpdateServices): UpdateHandlers
     throw new Error(`The version of the application, ${services.version}, is not a version.`);
   }
   let running: Promise<ReleaseCheck> | null = null;
-  /** Runs one check for new versions, sharing the one that already runs, and notes the day of a check that reached GitHub. */
+  /** Runs one check for new versions, sharing the one that already runs, and notes the day of a check that succeeded. */
   const check = (): Promise<ReleaseCheck> => {
     running ??= checkAndNote(services, current).finally(() => {
       running = null;
@@ -83,7 +83,7 @@ function shownSettings(settings: StoredUpdateSettings): UpdateSettings {
   return { checkForNewVersions: settings.checkForNewVersions };
 }
 
-/** Runs the check at launch unless it is turned off or a check already reached GitHub today. */
+/** Runs the check at launch unless it is turned off or a check already succeeded today. */
 async function launchCheck(
   settings: StoredUpdateSettings,
   services: UpdateServices,
@@ -95,7 +95,7 @@ async function launchCheck(
   return check();
 }
 
-/** Asks GitHub for new versions and, when GitHub answered, notes the day so that the check at launch does not run again before tomorrow, a day that cannot be noted being only logged. */
+/** Asks GitHub for new versions and, when the check succeeded, notes the day so that the check at launch does not run again before tomorrow, a day that cannot be noted being only logged. */
 async function checkAndNote(services: UpdateServices, current: Version): Promise<ReleaseCheck> {
   const result = await checkReleases(services.fetchReleases, current);
   if (result.kind === 'failed') {

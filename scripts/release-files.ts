@@ -9,7 +9,7 @@ const SIGNATURE_NOTE = [
   '### Files',
   '',
   '- `Tasklace-{version}-portable.exe` runs with a double-click, with nothing to install.',
-  '- `Tasklace-{version}-setup.exe` installs Tasklace for your account only.',
+  '- `Tasklace-{version}-setup.exe` installs Tasklace for your account, without administrator rights.',
   '- `SHA256SUMS.txt` gives the fingerprint of each file, to compare with `Get-FileHash <file> -Algorithm SHA256`.',
   '',
   'This version is not signed: Windows warns before running it, and does not run it at all while Smart App Control is on. The [code signing policy](https://github.com/GFayrr/tasklace#code-signing-policy) tells why and what comes next.',
