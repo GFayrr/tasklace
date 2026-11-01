@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ipcMain as electronIpcMain } from 'electron';
@@ -371,15 +371,8 @@ describe('the portable version', () => {
 
   it('asks again when its setup cannot be read, never supposing a choice', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    await writeFile(storePath, '{}');
-    const fake = fakeCopy('portable');
-    const setup = registerSetupHandlers({
-      assertTrusted: () => undefined,
-      storePath: join(storePath, 'inside'),
-      isPackaged: true,
-      copy: fake.copy,
-      setCheck: () => Promise.resolve(KEPT),
-    });
+    await mkdir(storePath);
+    const setup = register(fakeCopy('portable').copy);
     expect(await state()).toEqual({
       ok: true,
       value: { welcome: true, association: { kind: 'none' } },
@@ -388,7 +381,7 @@ describe('the portable version', () => {
     expect(error.mock.calls).toEqual([
       [
         'The setup of Tasklace could not be read, so its choices are asked again:',
-        expect.objectContaining({ code: 'ENOTDIR' }),
+        expect.objectContaining({ code: 'EISDIR' }),
       ],
     ]);
   });
