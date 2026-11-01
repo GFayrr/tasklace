@@ -26,6 +26,12 @@ async function launch(): Promise<void> {
   await expect(page.locator('#app')).toHaveAttribute('data-started', 'true');
 }
 
+/** Writes the day of a moment in the time zone of this computer, as the main process notes the day of a check. */
+function localDay(moment: Date): string {
+  const month = String(moment.getMonth() + 1).padStart(2, '0');
+  return `${String(moment.getFullYear())}-${month}-${String(moment.getDate()).padStart(2, '0')}`;
+}
+
 /** Makes the main process answer the next requests for releases with a body, or fail to reach GitHub, instead of asking GitHub. */
 async function answerReleasesWith(body: string | null): Promise<void> {
   await application.evaluate(({ net }, answer) => {
@@ -71,6 +77,7 @@ test('checks now from the menu of the toolbar, telling of a newer version, then 
   await page.getByRole('button', { name: 'Tasklace', exact: true }).click();
   await page.getByRole('menuitem', { name: /Tasklace settings…/ }).click();
   const settings = page.getByRole('dialog', { name: 'Tasklace settings' });
+  const before = localDay(new Date());
   await answerReleasesWith(
     JSON.stringify([{ tag_name: 'v99.0.0', draft: false, prerelease: false }]),
   );
@@ -83,12 +90,16 @@ test('checks now from the menu of the toolbar, telling of a newer version, then 
   await expect(settings.getByRole('status')).toHaveText(
     'Tasklace could not find out which version is the latest. Try again later.',
   );
-  const today = await page.evaluate(() => {
-    const now = new Date();
-    return `${String(now.getFullYear())}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  });
-  expect(JSON.parse(await readFile(join(userData, 'update-check.json'), 'utf8'))).toEqual({
+  const stored: unknown = JSON.parse(await readFile(join(userData, 'update-check.json'), 'utf8'));
+  const after = localDay(new Date());
+  expect([before, after]).toContain(
+    Reflect.get(Object(Reflect.get(Object(stored), 'settings')), 'lastCheckedOn'),
+  );
+  expect(stored).toEqual({
     version: 1,
-    settings: { checkForNewVersions: true, lastCheckedOn: today },
+    settings: {
+      checkForNewVersions: true,
+      lastCheckedOn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+    },
   });
 });

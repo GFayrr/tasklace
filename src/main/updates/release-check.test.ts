@@ -95,11 +95,9 @@ describe('checkReleases', () => {
     const timedOut = new DOMException('The operation timed out.', 'TimeoutError');
     expect(await checkReleases(() => Promise.reject(cause), CURRENT)).toEqual({
       kind: 'failed',
-      reason: 'unreachable',
     });
     expect(await checkReleases(() => Promise.reject(timedOut), CURRENT)).toEqual({
       kind: 'failed',
-      reason: 'unreachable',
     });
     expect(warn.mock.calls).toEqual([
       ['The check for new versions could not reach GitHub:', cause],
@@ -121,11 +119,9 @@ describe('checkReleases', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect(await checkReleases(answering('limit', 403).fetchReleases, CURRENT)).toEqual({
       kind: 'failed',
-      reason: 'refused',
     });
     expect(await checkReleases(answering(null, 304).fetchReleases, CURRENT)).toEqual({
       kind: 'failed',
-      reason: 'refused',
     });
     expect(warn.mock.calls).toEqual([
       ['GitHub answered the check for new versions with the status 403.'],
@@ -150,7 +146,6 @@ describe('checkReleases', () => {
     });
     expect(await checkReleases(answering(tooLarge).fetchReleases, CURRENT)).toEqual({
       kind: 'failed',
-      reason: 'malformed',
     });
     expect(cancel.mock.calls.length).toBe(1);
     expect(sent).toBeLessThan(quarters);
@@ -172,7 +167,7 @@ describe('checkReleases', () => {
 
   it('tells when an answer stops in the middle, or sends pieces that are not bytes', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const cut = new Error('The connection was reset.');
+    const cut = new TypeError('terminated');
     const broken = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.error(cut);
@@ -180,7 +175,6 @@ describe('checkReleases', () => {
     });
     expect(await checkReleases(answering(broken).fetchReleases, CURRENT)).toEqual({
       kind: 'failed',
-      reason: 'unreachable',
     });
     const words = new ReadableStream({
       start(controller) {
@@ -192,15 +186,22 @@ describe('checkReleases', () => {
     Object.defineProperty(wordsResponse, 'body', { value: words });
     expect(await checkReleases(() => Promise.resolve(wordsResponse), CURRENT)).toEqual({
       kind: 'failed',
-      reason: 'unreachable',
     });
     expect(warn.mock.calls).toEqual([
       ['The check for new versions could not reach GitHub:', cut],
-      [
-        'The check for new versions could not reach GitHub:',
-        new TypeError('An answer of GitHub gave a piece that is not bytes.'),
-      ],
+      ['GitHub answered the check for new versions with something else than bytes.'],
     ]);
+  });
+
+  it('takes a request given up after its time for an unreachable GitHub, and lets through what is a fault of the program', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const late = new DOMException('The operation timed out.', 'TimeoutError');
+    expect(await checkReleases(() => Promise.reject(late), CURRENT)).toEqual({ kind: 'failed' });
+    expect(warn.mock.calls).toEqual([['The check for new versions could not reach GitHub:', late]]);
+    const fault = new RangeError('a fault of the program');
+    await expect(checkReleases(() => Promise.reject(fault), CURRENT)).rejects.toBe(fault);
+    const other = new DOMException('Data was cloned badly.', 'DataCloneError');
+    await expect(checkReleases(() => Promise.reject(other), CURRENT)).rejects.toBe(other);
   });
 
   it('tells when the answer is not a list of releases, whatever it is', async () => {
@@ -216,12 +217,10 @@ describe('checkReleases', () => {
         body.slice(0, 20),
       ).toEqual({
         kind: 'failed',
-        reason: 'malformed',
       });
     }
     expect(await checkReleases(answering(null).fetchReleases, CURRENT)).toEqual({
       kind: 'failed',
-      reason: 'malformed',
     });
     expect(warn.mock.calls).toEqual(
       Array.from({ length: 5 }, () => [

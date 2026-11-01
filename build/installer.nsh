@@ -3,6 +3,8 @@
 ; in the registry of the current user, where Tasklace applies them once at its first launch, and the uninstaller removes
 ; what this page set up for this installation only, keeping the plans and settings of the person.
 ; A silent installation keeps both choices unless /NOASSOCIATE or /NOUPDATECHECK turns one off.
+; Installed over an existing installation, as when the person runs a newer installer by hand, it neither shows the page
+; nor writes any choice, so that the choices made since in Tasklace settings stay as they are.
 
 !define TASKLACE_SETUP_KEY "Software\Tasklace\Setup"
 !define TASKLACE_PRIVACY_URL "https://github.com/GFayrr/tasklace/blob/main/PRIVACY.md"
@@ -12,12 +14,21 @@
 
   Var tasklaceAssociate
   Var tasklaceCheck
+  Var tasklaceExisting
   Var tasklaceAssociateBox
   Var tasklaceCheckBox
 
   !macro customInit
     StrCpy $tasklaceAssociate 1
     StrCpy $tasklaceCheck 1
+    StrCpy $tasklaceExisting 0
+    ReadRegStr $R2 HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
+    ${if} $R2 == ""
+      ReadRegStr $R2 HKLM "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
+    ${endIf}
+    ${if} $R2 != ""
+      StrCpy $tasklaceExisting 1
+    ${endIf}
     ${GetParameters} $R0
     ClearErrors
     ${GetOptions} $R0 "/NOASSOCIATE" $R1
@@ -37,14 +48,15 @@
 
     Function tasklaceChoicesShow
       ${if} ${isUpdated}
+      ${orIf} $tasklaceExisting == 1
         Abort
       ${endIf}
       !insertmacro MUI_HEADER_TEXT "Before installing" "What Tasklace does on this computer"
       nsDialogs::Create 1018
       Pop $0
-      ${NSD_CreateLabel} 0 0 100% 20u "Tasklace has no account and sends no usage statistics. Your plans stay on your computer and on the computers of the people you share them with."
+      ${NSD_CreateLabel} 0 0 100% 20u "Tasklace has no account and sends no usage statistics. Your plans stay on your computer, on the computers of the people you share them with and, encrypted, on the relay you choose if you share through one."
       Pop $0
-      ${NSD_CreateLabel} 0 24u 100% 28u "Once a day, when it starts, Tasklace asks GitHub which version is the latest. GitHub sees the address of your connection and the version you use. You can turn this off below, or later in Tasklace settings."
+      ${NSD_CreateLabel} 0 24u 100% 28u "At most once a day, when it starts, Tasklace asks GitHub which version is the latest. GitHub sees the address of your connection and the version you use. You can turn this off below, or later in Tasklace settings."
       Pop $0
       ${NSD_CreateLink} 0 56u 100% 10u "The whole privacy policy: github.com/GFayrr/tasklace/blob/main/PRIVACY.md"
       Pop $0
@@ -54,7 +66,7 @@
       ${if} $tasklaceAssociate == 1
         ${NSD_Check} $tasklaceAssociateBox
       ${endIf}
-      ${NSD_CreateCheckbox} 0 90u 100% 12u "Check for new versions once a day"
+      ${NSD_CreateCheckbox} 0 90u 100% 12u "Check for new versions at most once a day"
       Pop $tasklaceCheckBox
       ${if} $tasklaceCheck == 1
         ${NSD_Check} $tasklaceCheckBox
@@ -86,7 +98,10 @@
   !macroend
 
   !macro customInstall
-    ${ifNot} ${isUpdated}
+    ${if} ${isUpdated}
+    ${orIf} $tasklaceExisting == 1
+      DetailPrint "Tasklace was already installed: its choices about files and new versions stay as they are."
+    ${else}
       WriteRegDWORD HKCU "${TASKLACE_SETUP_KEY}" "Associate" $tasklaceAssociate
       WriteRegDWORD HKCU "${TASKLACE_SETUP_KEY}" "CheckForNewVersions" $tasklaceCheck
     ${endIf}
@@ -104,6 +119,8 @@
         DeleteRegValue HKCU "Software\Classes\.tasklace" ""
         DeleteRegKey /ifempty HKCU "Software\Classes\.tasklace"
       ${endIf}
+    ${elseIf} $0 != ""
+      DetailPrint "Another copy of Tasklace opens .tasklace files and Tasklace links, so they are left to it."
     ${endIf}
     DeleteRegKey HKCU "${TASKLACE_SETUP_KEY}"
     DeleteRegKey /ifempty HKCU "Software\Tasklace"

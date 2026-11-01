@@ -11,12 +11,21 @@ import {
   sameWindowsPath,
 } from './file-associations';
 import { registryFileText, registryString, type Registry } from './registry';
+import { isWindowsExecutablePath, type WindowsExecutablePath } from './this-copy';
 
-const EXECUTABLE = 'C:\\Users\\Maël\\Downloads\\Tasklace-0.1.0-portable.exe';
+const EXECUTABLE = windowsPath('C:\\Users\\Maël\\Downloads\\Tasklace-0.1.0-portable.exe');
 const ICON = 'C:\\Users\\Maël\\AppData\\Roaming\\Tasklace\\tasklace-file.ico';
 const COMMAND_KEY = 'HKEY_CURRENT_USER\\Software\\Classes\\Tasklace.Project\\shell\\open\\command';
 
 let folder = '';
+
+/** Gives a Windows path the tests know to be valid as the executable of a copy. */
+function windowsPath(path: string): WindowsExecutablePath {
+  if (!isWindowsExecutablePath(path)) {
+    throw new Error(`${path} is not a path an executable can have.`);
+  }
+  return path;
+}
 
 beforeEach(async () => {
   folder = await mkdtemp(join(tmpdir(), 'tasklace-associations-'));
@@ -103,17 +112,27 @@ describe('the keys of the files and links of Tasklace', () => {
 
   it('tells which copy opens project files from the registered command', () => {
     expect(ownerOfCommand(null, EXECUTABLE)).toEqual({ kind: 'none' });
-    expect(ownerOfCommand(openCommandOf(EXECUTABLE.toUpperCase()), EXECUTABLE)).toEqual({
+    expect(
+      ownerOfCommand(openCommandOf(windowsPath(EXECUTABLE.toUpperCase())), EXECUTABLE),
+    ).toEqual({
       kind: 'thisCopy',
     });
-    expect(ownerOfCommand(openCommandOf('D:\\Old\\Tasklace.exe'), EXECUTABLE)).toEqual({
-      kind: 'otherCopy',
-      path: 'D:\\Old\\Tasklace.exe',
-    });
-    expect(ownerOfCommand('"D:\\Other.exe" "%1"', EXECUTABLE)).toEqual({
-      kind: 'otherCopy',
-      path: '"D:\\Other.exe" "%1"',
-    });
+    expect(ownerOfCommand(openCommandOf(windowsPath('D:\\Old\\Tasklace.exe')), EXECUTABLE)).toEqual(
+      {
+        kind: 'otherCopy',
+        path: 'D:\\Old\\Tasklace.exe',
+      },
+    );
+    for (const command of [
+      '"D:\\Other.exe" "%1"',
+      '"relative\\Tasklace.exe" -- "%1"',
+      `"C:\\${'a'.repeat(40_000)}.exe" -- "%1"`,
+      'notepad.exe %1',
+    ]) {
+      expect(ownerOfCommand(command, EXECUTABLE), command.slice(0, 40)).toEqual({
+        kind: 'otherProgram',
+      });
+    }
   });
 });
 

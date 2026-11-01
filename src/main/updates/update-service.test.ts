@@ -56,7 +56,7 @@ function register(overrides: Partial<UpdateServices> = {}): void {
       opened.push(url);
       return Promise.resolve(true);
     },
-    welcomePending: () => false,
+    mayCheckAtLaunch: () => Promise.resolve(true),
     ...overrides,
   });
 }
@@ -152,11 +152,11 @@ describe('registerUpdateHandlers', () => {
     register({ fetchReleases: releasesAnswering('', 503) });
     expect(await ask(IPC_CHANNELS.checkAtLaunch)).toEqual({
       ok: true,
-      value: { kind: 'failed', reason: 'refused' },
+      value: { kind: 'failed' },
     });
     expect(await ask(IPC_CHANNELS.checkAtLaunch)).toEqual({
       ok: true,
-      value: { kind: 'failed', reason: 'refused' },
+      value: { kind: 'failed' },
     });
     expect(fetched).toBe(2);
   });
@@ -174,7 +174,7 @@ describe('registerUpdateHandlers', () => {
     expect(fetched).toBe(0);
   });
 
-  it('skips the check at launch while the welcome window has not got its answer, and turns the check on or off for it', async () => {
+  it('skips the check at launch while the choice about it is not known and applied, and turns the check on or off for it', async () => {
     let pending = true;
     ipcMain.handlers.clear();
     const handlers = registerUpdateHandlers({
@@ -185,7 +185,7 @@ describe('registerUpdateHandlers', () => {
       now: () => TODAY,
       fetchReleases: releasesAnswering(NEWER),
       openInBrowser: () => Promise.resolve(true),
-      welcomePending: () => pending,
+      mayCheckAtLaunch: () => Promise.resolve(!pending),
     });
     expect(await ask(IPC_CHANNELS.checkAtLaunch)).toEqual({ ok: true, value: { kind: 'skipped' } });
     expect(fetched).toBe(0);

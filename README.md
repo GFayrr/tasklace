@@ -94,13 +94,13 @@ Off by default, each one turned on per project:
 Download Tasklace from the [releases](https://github.com/GFayrr/tasklace/releases), for Windows 10 or 11:
 
 - **`Tasklace-<version>-portable.exe`** runs with a double-click, with nothing to install. Keep it where you like, for example in your documents or on a USB stick.
-- **`Tasklace-<version>-setup.exe`** installs Tasklace for your account only, without administrator rights, with a shortcut in the Start menu.
+- **`Tasklace-<version>-setup.exe`** installs Tasklace for your account, without administrator rights, with a shortcut in the Start menu. Started as an administrator, it can also install Tasklace for everyone who uses the computer; each person then makes the two choices below at their first launch.
 
-Both ask, before anything else, whether Tasklace opens `.tasklace` files and Tasklace links, and whether it checks for new versions once a day; the [privacy policy](PRIVACY.md) tells what this check sends. Tasklace never updates itself: it only tells you when a new version is out.
+The installer asks before installing, and the portable version at its first launch, whether Tasklace opens `.tasklace` files and Tasklace links, and whether it checks for new versions, at most once a day when it starts; nothing is sent before you chose; the [privacy policy](PRIVACY.md) tells what this check sends. Tasklace never updates itself: it only tells you when a new version is out.
 
 While a version is not signed, Windows warns before running it. SmartScreen shows “Windows protected your PC”: choose **More info**, then **Run anyway**. With Smart App Control on, Windows 11 does not run an unsigned program at all; wait for a signed version.
 
-To make sure a file is the one this project built, compare its fingerprint with the line of `SHA256SUMS.txt`, published with each release, in PowerShell:
+To make sure a file is the one this project built, compare its fingerprint with the line of `SHA256SUMS.txt`, published with each release, in PowerShell; PowerShell writes it in capitals, which does not matter:
 
 ```powershell
 Get-FileHash .\Tasklace-0.1.0-portable.exe -Algorithm SHA256
@@ -123,8 +123,8 @@ A relay lets people share plans from anywhere. It is a small Node.js server that
 
 ## Uninstall
 
-- **Installed version**: remove Tasklace in **Settings**, **Apps**, **Installed apps**. The uninstaller also stops Tasklace from opening `.tasklace` files and links, unless another copy opens them.
-- **Portable version**: open **Tasklace settings** from the Tasklace menu at the end of the toolbar, turn off **Open Tasklace files and links with this copy**, then delete the executable.
+- **Installed version**: remove Tasklace in **Settings**, **Apps**, **Installed apps** (**Apps & features** on Windows 10). The uninstaller also stops Tasklace from opening `.tasklace` files and links, unless another copy opens them.
+- **Portable version**: open **Tasklace settings**, from the Tasklace menu at the end of the toolbar or at the foot of the welcome screen, turn off **Open Tasklace files and links with this copy**, then delete the executable.
 
 Your projects stay wherever you saved them. What Tasklace keeps for you also stays, in `%APPDATA%\Tasklace`: local copies of your projects, plans joined through a relay and changes kept apart, the list of recent projects, your settings, the links of shared plans and the log of errors. Delete this folder to remove them as well; to open it, type `%APPDATA%\Tasklace` in the address bar of the File Explorer.
 
@@ -133,7 +133,7 @@ If a portable copy was deleted while it still opened `.tasklace` files, Windows 
 ```powershell
 reg delete HKCU\Software\Classes\Tasklace.Project /f
 reg delete HKCU\Software\Classes\tasklace /f
-reg delete HKCU\Software\Classes\.tasklace /f
+reg delete HKCU\Software\Classes\.tasklace /ve /f
 ```
 
 ## Usage
@@ -177,7 +177,7 @@ To report a vulnerability, do not open a public issue: follow the [security poli
 
 Tasklace 0.1.0 is not signed. The project has applied to [SignPath Foundation](https://signpath.org/), which signs open source software for free; once it is accepted, the releases that follow will be signed with its certificate, and this section will say so.
 
-- **What is signed**: only the files built from this repository, the Tasklace executable, the installer and the uninstaller, built by continuous integration from a version tag. The files of other projects that Tasklace ships, such as the libraries of Electron, keep the signature of their authors.
+- **What is signed**: only the files built from this repository, the Tasklace executable, the portable executable, the installer and its uninstaller, built by continuous integration from a version tag. The files of other projects that Tasklace ships, such as the libraries of Electron, are not signed by this project.
 - **Who does what**: [@GFayrr](https://github.com/GFayrr) writes and reviews the code, and approves each release by hand before it is published.
 - **Privacy**: Tasklace sends nothing to the project, about you or your plans; the [privacy policy](PRIVACY.md) tells what leaves your computer, when, and to whom.
 

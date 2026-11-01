@@ -18,6 +18,8 @@ export const RELEASES_URL = `https://api.github.com/repos/GFayrr/tasklace/releas
 
 const OK_STATUS = 200;
 const RELEASE_TAG_PREFIX = 'v';
+const NOT_BYTES = Symbol('not bytes');
+const NETWORK_ABORTS: readonly string[] = ['TimeoutError', 'AbortError'];
 
 /** Asks GitHub for the latest releases of Tasklace and tells whether one is newer than the current version, reading the answer as untrusted and telling why the check failed, each failure being logged. */
 export async function checkReleases(
@@ -35,13 +37,17 @@ export async function checkReleases(
     console.warn(
       `GitHub answered the check for new versions with the status ${String(response.status)}.`,
     );
-    return { kind: 'failed', reason: 'refused' };
+    return { kind: 'failed' };
   }
-  let text: string | null;
+  let text: string | typeof NOT_BYTES | null;
   try {
     text = await readCapped(response);
   } catch (error) {
     return unreachable(error);
+  }
+  if (text === NOT_BYTES) {
+    console.warn('GitHub answered the check for new versions with something else than bytes.');
+    return { kind: 'failed' };
   }
   return text === null ? tooLarge() : checkOf(text, current);
 }
@@ -61,13 +67,21 @@ function requestOf(current: Version): RequestInit {
   };
 }
 
-/** Logs that GitHub could not be reached and tells so, letting through a thrown value that is not an error. */
+/** Logs that GitHub could not be reached, as a failed connection, a refused redirection or a request given up after its time, and tells so, letting through any other thrown value, which is a fault of the program. */
 function unreachable(error: unknown): ReleaseCheck {
-  if (!(error instanceof Error)) {
+  if (!isNetworkFailure(error)) {
     throw error;
   }
   console.warn('The check for new versions could not reach GitHub:', error);
-  return { kind: 'failed', reason: 'unreachable' };
+  return { kind: 'failed' };
+}
+
+/** Tells whether a value thrown by a request comes from the network: the error a fetch throws for a failed connection or a refused redirection, or the one of a request aborted after its time. */
+function isNetworkFailure(error: unknown): boolean {
+  return (
+    error instanceof TypeError ||
+    (error instanceof DOMException && NETWORK_ABORTS.includes(error.name))
+  );
 }
 
 /** Logs an answer too large to be a list of releases and tells so. */
@@ -75,11 +89,11 @@ function tooLarge(): ReleaseCheck {
   console.warn(
     `GitHub answered the check for new versions with more than ${String(MAX_RELEASES_RESPONSE_BYTES)} bytes.`,
   );
-  return { kind: 'failed', reason: 'malformed' };
+  return { kind: 'failed' };
 }
 
-/** Reads the text of an answer, stopping and returning null as soon as it grows beyond the size a list of releases can have. */
-async function readCapped(response: Response): Promise<string | null> {
+/** Reads the text of an answer, stopping and returning null as soon as it grows beyond the size a list of releases can have, or a mark when a piece of it is not bytes. */
+async function readCapped(response: Response): Promise<string | typeof NOT_BYTES | null> {
   const reader = response.body?.getReader();
   if (reader === undefined) {
     return '';
@@ -89,7 +103,8 @@ async function readCapped(response: Response): Promise<string | null> {
   for (let read = await reader.read(); !read.done; read = await reader.read()) {
     const chunk: unknown = read.value;
     if (!(chunk instanceof Uint8Array)) {
-      throw new TypeError('An answer of GitHub gave a piece that is not bytes.');
+      await reader.cancel();
+      return NOT_BYTES;
     }
     size += chunk.length;
     if (size > MAX_RELEASES_RESPONSE_BYTES) {
@@ -115,7 +130,7 @@ function checkOf(text: string, current: Version): ReleaseCheck {
   const releases = readReleases(value);
   if (releases === null) {
     console.warn('GitHub answered the check for new versions with something else than releases.');
-    return { kind: 'failed', reason: 'malformed' };
+    return { kind: 'failed' };
   }
   const newest = newestRelease(releases, current);
   return newest === null ? { kind: 'latest' } : { kind: 'newer', version: formatVersion(newest) };

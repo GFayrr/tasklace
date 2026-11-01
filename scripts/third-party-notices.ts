@@ -33,6 +33,22 @@ export function shippedPackages(lock: unknown): ShippedPackage[] {
     .flatMap(([folder, entry]) => (isShipped(entry) ? [packageOf(folder, entry)] : []));
 }
 
+/** Gives the lock file entries of the packages a bundle holds, which may be installed only to build the application, failing for a package the lock file does not install at the top of its folders. */
+export function bundledPackages(lock: unknown, names: readonly string[]): ShippedPackage[] {
+  const packages = isRecord(lock) && isRecord(lock['packages']) ? lock['packages'] : null;
+  if (packages === null) {
+    throw new Error('The lock file lists no packages.');
+  }
+  return names.map((name) => {
+    const folder = `${PACKAGE_FOLDER}${name}`;
+    const entry = packages[folder];
+    if (!isRecord(entry)) {
+      throw new Error(`The bundled package ${name} is not in the lock file.`);
+    }
+    return packageOf(folder, entry);
+  });
+}
+
 /** Tells whether an entry of the lock file is installed for running the application. */
 function isShipped(entry: unknown): entry is Record<string, unknown> {
   return isRecord(entry) && entry['dev'] !== true && entry['devOptional'] !== true;

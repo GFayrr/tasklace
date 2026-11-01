@@ -47,7 +47,7 @@ beforeEach(() => {
     now: () => new Date(2026, 9, 30),
     fetchReleases: () => Promise.resolve(new Response(NEWER)),
     openInBrowser: () => Promise.resolve(true),
-    welcomePending: () => false,
+    mayCheckAtLaunch: () => Promise.resolve(true),
   });
 });
 

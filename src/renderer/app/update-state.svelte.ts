@@ -81,10 +81,16 @@ export class UpdateState {
     return result.ok;
   }
 
-  /** Checks for a new version now, whatever the setting, showing the result under the version. */
+  /** Checks for a new version now, whatever the setting, showing the result under the version, and a failure when the bridge itself fails, which is thrown again. */
   async checkNow(): Promise<void> {
     this.#status = { kind: 'checking' };
-    const result = await this.#bridge.checkNow();
+    let result: Awaited<ReturnType<UpdateBridge['checkNow']>>;
+    try {
+      result = await this.#bridge.checkNow();
+    } catch (error) {
+      this.#status = { kind: 'failed' };
+      throw error;
+    }
     logFailure('The check for new versions could not run:', result);
     if (!result.ok || result.value.kind === 'failed') {
       this.#status = { kind: 'failed' };

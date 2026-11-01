@@ -75,8 +75,8 @@ function fakeBridge(
       return opening ?? Promise.resolve(openResult);
     },
     openRecentProject: () => Promise.resolve(openResult),
-    openOutsideFile: () => {
-      events.push('openOutside');
+    openOutsideFile: (id) => {
+      events.push(`openOutside ${String(id)}`);
       return Promise.resolve(openResult);
     },
     importProject: () => Promise.resolve(openResult),
@@ -236,7 +236,7 @@ describe('createProjectFiles', () => {
     expect(await files.saveAs()).toEqual(busy);
     expect(await files.open()).toEqual(busy);
     expect(await files.openRecent(0)).toEqual(busy);
-    expect(await files.openOutside()).toEqual(busy);
+    expect(await files.openOutside(5)).toEqual(busy);
     expect(await files.importFile('csv')).toEqual(busy);
     expect(await files.create(SAMPLE)).toEqual(busy);
     expect(await files.exportFile('csv', 'a', 'Plan')).toEqual(busy);
@@ -380,11 +380,11 @@ describe('createProjectFiles', () => {
   it('opens the project file Tasklace was started with from outside as a project with its file', async () => {
     const { bridge, events } = fakeBridge(openedOf(OTHER_ID));
     const files = createProjectFiles(bridge, QUIET, manualTimer());
-    const opened = await files.openOutside();
+    const opened = await files.openOutside(5);
     expect([opened.ok && opened.value.session.documentId, files.hasFile(), events]).toEqual([
       OTHER_ID,
       true,
-      ['openOutside', 'adopt'],
+      ['openOutside 5', 'adopt'],
     ]);
   });
 

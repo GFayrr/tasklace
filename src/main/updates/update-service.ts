@@ -28,21 +28,21 @@ export interface UpdateServices {
   readonly now: () => Date;
   readonly fetchReleases: FetchReleases;
   readonly openInBrowser: (url: string) => Promise<boolean>;
-  readonly welcomePending: () => boolean;
+  readonly mayCheckAtLaunch: () => Promise<boolean>;
 }
 
 export interface UpdateHandlers {
   readonly setCheck: (check: boolean) => Promise<BridgeResult<null>>;
 }
 
-/** Answers the channels of the version and of the check for new versions, which runs at launch at most once a day, only built and once the welcome window got its answer, one check at a time, and returns how to turn the check on or off. */
+/** Answers the channels of the version and of the check for new versions, which runs at launch at most once a day, only built and once the choice about it is known and applied, one check at a time, and returns how to turn the check on or off. */
 export function registerUpdateHandlers(services: UpdateServices): UpdateHandlers {
   const current = readVersion(services.version);
   if (current === null) {
     throw new Error(`The version of the application, ${services.version}, is not a version.`);
   }
   let running: Promise<ReleaseCheck> | null = null;
-  /** Runs one check for new versions, sharing the one that already runs, and notes the day of a check that reached GitHub. */
+  /** Runs one check for new versions, sharing the one that already runs, and notes the day of a check that succeeded. */
   const check = (): Promise<ReleaseCheck> => {
     running ??= checkAndNote(services, current).finally(() => {
       running = null;
@@ -62,7 +62,7 @@ export function registerUpdateHandlers(services: UpdateServices): UpdateHandlers
     setCheck(services.storePath, value),
   );
   handle(IPC_CHANNELS.checkAtLaunch, async () => {
-    if (!services.isPackaged || services.welcomePending()) {
+    if (!services.isPackaged || !(await services.mayCheckAtLaunch())) {
       return success({ kind: 'skipped' });
     }
     const settings = await readSettings(services.storePath);
@@ -83,7 +83,7 @@ function shownSettings(settings: StoredUpdateSettings): UpdateSettings {
   return { checkForNewVersions: settings.checkForNewVersions };
 }
 
-/** Runs the check at launch unless it is turned off or a check already reached GitHub today. */
+/** Runs the check at launch unless it is turned off or a check already succeeded today. */
 async function launchCheck(
   settings: StoredUpdateSettings,
   services: UpdateServices,
@@ -95,7 +95,7 @@ async function launchCheck(
   return check();
 }
 
-/** Asks GitHub for new versions and, when GitHub answered, notes the day so that the check at launch does not run again before tomorrow, a day that cannot be noted being only logged. */
+/** Asks GitHub for new versions and, when the check succeeded, notes the day so that the check at launch does not run again before tomorrow, a day that cannot be noted being only logged. */
 async function checkAndNote(services: UpdateServices, current: Version): Promise<ReleaseCheck> {
   const result = await checkReleases(services.fetchReleases, current);
   if (result.kind === 'failed') {

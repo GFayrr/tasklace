@@ -3,6 +3,7 @@ import { access, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, win32 } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { skipUnlessRequired } from './windows-checks';
 
 const EXECUTABLE = process.env['TASKLACE_PACKAGED_APP'] ?? '';
 const INSTALL_WAIT_MS = 60_000;
@@ -22,11 +23,11 @@ const REMOVAL_RETRY_STEP_MS = 200;
 let folder = '';
 
 test.beforeEach(async () => {
-  test.skip(process.platform !== 'win32', 'Only Windows runs the installer.');
+  skipUnlessRequired(process.platform !== 'win32', 'Only Windows runs the installer.');
   const taken = await Promise.all(
     TASKLACE_KEYS.map(async (key) => (await run('reg.exe', ['query', key])).code === 0),
   );
-  test.skip(
+  skipUnlessRequired(
     taken.includes(true),
     'This computer already has Tasklace set up; the test never changes it.',
   );
@@ -110,6 +111,13 @@ async function choice(name: string): Promise<number | null> {
   return code === 0 && match !== null ? Number.parseInt(match[1] ?? '', 16) : null;
 }
 
+/** Reads the default text value of a key, or null when it has none. */
+async function defaultText(key: string): Promise<string | null> {
+  const { code, output } = await run('reg.exe', ['query', key, '/ve']);
+  const match = /REG_(?:EXPAND_)?SZ\s+(.*?)\r?$/m.exec(output);
+  return code === 0 && match !== null ? (match[1] ?? '') : null;
+}
+
 test('leaves the choices of its page for the first launch, which opens files with the installed copy, and removes them all when uninstalled', async () => {
   const target = await install(['/NOUPDATECHECK']);
   expect([await choice('Associate'), await choice('CheckForNewVersions')]).toEqual([1, 0]);
@@ -118,10 +126,9 @@ test('leaves the choices of its page for the first launch, which opens files wit
   const app = spawn(executable, [`--user-data-dir=${userData}`], { stdio: 'ignore' });
   try {
     await expect
-      .poll(async () => (await run('reg.exe', ['query', COMMAND_KEY, '/ve'])).output, {
-        timeout: INSTALL_WAIT_MS,
-      })
-      .toContain(`"${executable}" -- "%1"`);
+      .poll(() => defaultText(COMMAND_KEY), { timeout: INSTALL_WAIT_MS })
+      .toBe(`"${executable}" -- "%1"`);
+    expect(await defaultText(`${CLASSES}\\.tasklace`)).toBe('Tasklace.Project');
     await expect.poll(() => choice('Associate'), { timeout: INSTALL_WAIT_MS }).toBeNull();
   } finally {
     await run('taskkill', ['/pid', String(app.pid), '/t', '/f']);
@@ -130,6 +137,7 @@ test('leaves the choices of its page for the first launch, which opens files wit
   for (const key of [COMMAND_KEY, `${CLASSES}\\tasklace`, 'HKCU\\Software\\Tasklace']) {
     expect((await run('reg.exe', ['query', key])).code, key).toBe(1);
   }
+  expect(await defaultText(`${CLASSES}\\.tasklace`)).toBeNull();
   expect(await exists(userData)).toBe(true);
 });
 
@@ -138,8 +146,15 @@ test('keeps the files of another copy and removes only its own choices when unin
   expect([await choice('Associate'), await choice('CheckForNewVersions')]).toEqual([0, 0]);
   await run('reg.exe', ['add', COMMAND_KEY, '/ve', '/d', `"${OTHER_COPY}" -- "%1"`, '/f']);
   await uninstall(target);
-  expect((await run('reg.exe', ['query', COMMAND_KEY, '/ve'])).output).toContain(
-    `"${OTHER_COPY}" -- "%1"`,
-  );
+  expect(await defaultText(COMMAND_KEY)).toBe(`"${OTHER_COPY}" -- "%1"`);
   expect((await run('reg.exe', ['query', SETUP_KEY])).code).toBe(1);
+});
+
+test('installed again over an existing installation, shows no page and writes no choice, keeping those made since', async () => {
+  const target = await install(['/NOUPDATECHECK']);
+  expect([await choice('Associate'), await choice('CheckForNewVersions')]).toEqual([1, 0]);
+  await run('reg.exe', ['delete', SETUP_KEY, '/f']);
+  await install(['/NOASSOCIATE']);
+  expect([await choice('Associate'), await choice('CheckForNewVersions')]).toEqual([null, null]);
+  await uninstall(target);
 });

@@ -8,20 +8,18 @@ import {
 } from '../../preload/bridge-contract';
 import { handleChannel, type ChannelHandler } from '../ipc-channels';
 import type { TrustCheck } from '../ipc-trust';
+import { sameWindowsPath, type FileAssociations } from '../platform/file-associations';
 import {
-  sameWindowsPath,
-  type AssociationOwner,
-  type FileAssociations,
-} from '../platform/file-associations';
-import { readRegistryNumber, RegistryToolError, type Registry } from '../platform/registry';
+  forgetInstallerChoices,
+  readInstallerChoices,
+  type InstallerChoices,
+} from '../platform/installer-choices';
+import { RegistryToolError, type Registry } from '../platform/registry';
+import type { CopyPlace } from '../platform/this-copy';
 import { isSystemError } from '../stored-files';
 import { loadSetupSettings, storeSetupSettings, type SetupSettings } from './setup-settings';
 
-export type CopyKind = 'portable' | 'installed';
-
-export interface ThisCopy {
-  readonly kind: CopyKind;
-  readonly executable: string;
+export interface ThisCopy extends CopyPlace {
   readonly registry: Registry;
   readonly associations: FileAssociations;
 }
@@ -29,25 +27,37 @@ export interface ThisCopy {
 export interface SetupServices {
   readonly assertTrusted: TrustCheck;
   readonly storePath: string;
+  readonly isPackaged: boolean;
   readonly copy: ThisCopy | null;
   readonly setCheck: (check: boolean) => Promise<BridgeResult<null>>;
 }
 
 export interface Setup {
-  readonly welcomePending: () => boolean;
+  readonly mayCheckAtLaunch: () => Promise<boolean>;
 }
 
-export const INSTALLER_CHOICES_KEY = 'HKEY_CURRENT_USER\\Software\\Tasklace\\Setup';
+interface Prepared {
+  readonly welcome: boolean;
+  readonly consent: boolean;
+}
 
-const CHOSEN = 1;
 const WELCOME_KEYS = ['associate', 'checkForNewVersions'];
+const UNANSWERED: Prepared = { welcome: true, consent: false };
 
-/** Prepares the setup of this copy as it starts, the installed version applying the choices of its installer and a moved copy keeping its files, and answers the channels of the welcome window and of the copy that opens files. */
+/** Prepares the setup of this copy and answers the channels of the welcome window and of the copy that opens files, allowing the check for new versions at launch only once the choice about it is known and applied. */
 export function registerSetupHandlers(services: SetupServices): Setup {
-  let pending = false;
-  const ready = prepare(services).then((welcome) => {
-    pending = welcome;
-  });
+  let welcome = false;
+  let consent = false;
+  const ready = prepare(services).then(
+    (prepared) => {
+      welcome = prepared.welcome;
+      consent = prepared.consent;
+    },
+    (error: unknown) => {
+      console.error('The setup of Tasklace failed unexpectedly:', error);
+      welcome = services.isPackaged;
+    },
+  );
   /** Registers the answer of a channel once the setup is prepared, which checks first that the page asking is trusted. */
   const handle = <C extends InvokeChannel>(channel: C, answer: ChannelHandler<C>): void => {
     handleChannel(services.assertTrusted, channel, async (event, ...values) => {
@@ -55,23 +65,22 @@ export function registerSetupHandlers(services: SetupServices): Setup {
       return answer(event, ...values);
     });
   };
-  handle(IPC_CHANNELS.setupState, async () => {
-    const association = await associationOf(services.copy);
-    return association.ok
-      ? success({ welcome: pending, association: association.value })
-      : association;
-  });
+  handle(IPC_CHANNELS.setupState, async () =>
+    success({ welcome, association: await associationOf(services.copy) }),
+  );
   handle(IPC_CHANNELS.finishWelcome, async (_event, value) => {
     const choices = readWelcomeChoices(value);
-    if (choices === null || !pending || services.copy === null) {
+    if (choices === null || !welcome) {
       console.error(
         'The page asked to finish a welcome that was not shown, or with other choices:',
         value,
       );
       return failure({ code: 'TASK_FAILED' });
     }
-    pending = false;
-    return finishWelcome(services, services.copy, choices);
+    welcome = false;
+    const finished = await finishWelcome(services, choices);
+    consent = finished.consent;
+    return finished.result;
   });
   handle(IPC_CHANNELS.setFileAssociation, async (_event, value) => {
     if (typeof value !== 'boolean' || services.copy === null) {
@@ -80,7 +89,12 @@ export function registerSetupHandlers(services: SetupServices): Setup {
     }
     return setAssociation(services, services.copy, value);
   });
-  return { welcomePending: () => pending };
+  return {
+    mayCheckAtLaunch: async () => {
+      await ready;
+      return consent && !welcome;
+    },
+  };
 }
 
 /** Reads the choices of the welcome window from an untrusted value, or returns null when it is not exactly such choices. */
@@ -100,57 +114,79 @@ export function readWelcomeChoices(value: unknown): WelcomeChoices | null {
     : null;
 }
 
-/** Prepares the setup as Tasklace starts, telling whether the welcome window must ask its choices, a setup that cannot be prepared being logged and asking again in the portable version, so that nothing is sent before the person chose. */
-async function prepare(services: SetupServices): Promise<boolean> {
-  const copy = services.copy;
-  if (copy === null) {
-    return false;
+/** Prepares the setup of a built copy: the installed version applies the choices of its installer, a copy whose choices are unknown asks them in its welcome, and a setup that cannot be read asks them again. */
+async function prepare(services: SetupServices): Promise<Prepared> {
+  if (!services.isPackaged) {
+    return { welcome: false, consent: false };
   }
+  const { copy } = services;
+  let settings: SetupSettings;
+  let choices: InstallerChoices | null = null;
   try {
-    const settings = await loadSetupSettings(services.storePath);
-    if (copy.kind === 'installed') {
-      await applyInstallerChoices(services, copy, settings);
-      return false;
+    settings = await loadSetupSettings(services.storePath);
+    if (copy?.kind === 'installed') {
+      choices = await readInstallerChoices(copy.registry);
     }
-    await followMove(services, copy, settings);
-    return !settings.welcomed;
   } catch (error) {
-    if (!isSetupFailure(error)) {
-      throw error;
-    }
-    console.error('The setup of Tasklace could not be prepared:', error);
-    return copy.kind === 'portable';
+    rethrowUnlessSetupFailure(error);
+    console.error(
+      'The setup of Tasklace could not be read, so its choices are asked again:',
+      error,
+    );
+    return UNANSWERED;
   }
+  if (copy !== null && choices !== null) {
+    return {
+      welcome: false,
+      consent: await applyInstallerChoices(services, copy, settings, choices),
+    };
+  }
+  if (copy !== null) {
+    await followMove(services, copy, settings);
+  }
+  return { welcome: !settings.welcomed, consent: settings.welcomed };
 }
 
-/** Applies once the choices the installer left in the registry, then removes them, the files and links being registered by the installer already unless it could not. */
+/** Applies the choices the installer left, keeping them in the registry until every one of them is applied so that a later launch tries again, and tells whether the choice about new versions is applied. */
 async function applyInstallerChoices(
   services: SetupServices,
   copy: ThisCopy,
   settings: SetupSettings,
-): Promise<void> {
-  const exported = await copy.registry.exportKey(INSTALLER_CHOICES_KEY);
-  if (exported === null) {
-    await followMove(services, copy, settings);
-    return;
-  }
-  const associate = readRegistryNumber(exported, 'Associate') === CHOSEN;
-  const check = readRegistryNumber(exported, 'CheckForNewVersions') === CHOSEN;
-  const checkKept = await services.setCheck(check);
+  choices: InstallerChoices,
+): Promise<boolean> {
+  const checkKept = await services.setCheck(choices.checkForNewVersions);
   if (!checkKept.ok) {
-    console.error('The choice of the installer about new versions could not be kept.');
+    console.error(
+      'The choice of the installer about new versions could not be kept; it is applied at the next launch.',
+    );
+    return false;
   }
-  if (associate && (await copy.associations.owner()).kind !== 'thisCopy') {
-    await copy.associations.register();
+  try {
+    const registered = choices.associate && (await registerUnlessOwner(copy));
+    await storeSetupSettings(services.storePath, {
+      welcomed: true,
+      registeredExecutable: registered ? copy.executable : settings.registeredExecutable,
+    });
+    await forgetInstallerChoices(copy.registry);
+  } catch (error) {
+    rethrowUnlessSetupFailure(error);
+    console.error(
+      'The choices of the installer could not all be applied; they are applied again at the next launch:',
+      error,
+    );
   }
-  await storeSetupSettings(services.storePath, {
-    welcomed: true,
-    registeredExecutable: associate ? copy.executable : null,
-  });
-  await copy.registry.deleteKey(INSTALLER_CHOICES_KEY);
+  return true;
 }
 
-/** Keeps a copy that moved opening the project files it opened from its former place, never taking them from another copy. */
+/** Makes this copy open project files and links unless it already does, telling that it does now. */
+async function registerUnlessOwner(copy: ThisCopy): Promise<boolean> {
+  if ((await copy.associations.owner()).kind !== 'thisCopy') {
+    await copy.associations.register();
+  }
+  return true;
+}
+
+/** Keeps a copy that moved opening the project files it opened from its former place, never taking them from another copy, a failure being only logged since nothing the person chose is lost. */
 async function followMove(
   services: SetupServices,
   copy: ThisCopy,
@@ -160,42 +196,49 @@ async function followMove(
   if (!settings.welcomed || former === null || sameWindowsPath(former, copy.executable)) {
     return;
   }
-  const owner = await copy.associations.owner();
-  if (owner.kind !== 'otherCopy' || !sameWindowsPath(owner.path, former)) {
-    return;
+  try {
+    const owner = await copy.associations.owner();
+    if (owner.kind !== 'otherCopy' || !sameWindowsPath(owner.path, former)) {
+      return;
+    }
+    await copy.associations.register();
+    await storeSetupSettings(services.storePath, {
+      ...settings,
+      registeredExecutable: copy.executable,
+    });
+  } catch (error) {
+    rethrowUnlessSetupFailure(error);
+    console.error('This copy moved, but could not keep opening project files:', error);
   }
-  await copy.associations.register();
-  await storeSetupSettings(services.storePath, {
-    ...settings,
-    registeredExecutable: copy.executable,
-  });
 }
 
-/** Keeps the choices of the welcome window, so that it never shows again, then applies them, giving which copy now opens project files, a choice that cannot be applied being logged and reported. */
+/** Applies the choices of the welcome window, new versions first so that a doubt never lets a check run, then the files and links, noting the answer last, and gives whether that choice applies and which copy opens files. */
 async function finishWelcome(
   services: SetupServices,
-  copy: ThisCopy,
   choices: WelcomeChoices,
-): Promise<BridgeResult<FileAssociation>> {
+): Promise<{ readonly consent: boolean; readonly result: BridgeResult<FileAssociation> }> {
+  const checkKept = await services.setCheck(choices.checkForNewVersions);
+  if (!checkKept.ok) {
+    return { consent: false, result: checkKept };
+  }
+  const { copy } = services;
   try {
-    await storeSetupSettings(services.storePath, {
-      welcomed: true,
-      registeredExecutable: choices.associate ? copy.executable : null,
-    });
-    const checkKept = await services.setCheck(choices.checkForNewVersions);
-    if (!checkKept.ok) {
-      return checkKept;
-    }
-    if (choices.associate) {
+    if (choices.associate && copy !== null) {
       await copy.associations.register();
     }
-    return success(await copy.associations.owner());
+    await storeSetupSettings(services.storePath, {
+      welcomed: true,
+      registeredExecutable: choices.associate && copy !== null ? copy.executable : null,
+    });
   } catch (error) {
-    return setupFailure(error, 'The choices of the welcome window could not be applied:');
+    rethrowUnlessSetupFailure(error);
+    console.error('The choices of the welcome window could not all be applied:', error);
+    return { consent: true, result: failure({ code: 'WRITE_FAILED' }) };
   }
+  return { consent: true, result: success(await associationOf(copy)) };
 }
 
-/** Makes this copy open project files and links, or stops it from opening them, a copy that does not open them leaving them to whichever copy does, and gives which copy opens them afterwards. */
+/** Makes this copy open project files and links or stops it, a copy that does not open them leaving them to whichever copy does, and gives which copy opens them afterwards. */
 async function setAssociation(
   services: SetupServices,
   copy: ThisCopy,
@@ -209,47 +252,34 @@ async function setAssociation(
       await copy.associations.unregister();
     }
     await storeSetupSettings(services.storePath, {
-      ...settings,
-      welcomed: true,
-      registeredExecutable: on ? copy.executable : null,
+      welcomed: settings.welcomed,
+      registeredExecutable: on && settings.welcomed ? copy.executable : null,
     });
-    return success(await copy.associations.owner());
   } catch (error) {
-    return setupFailure(error, 'The copy that opens project files could not be changed:');
+    rethrowUnlessSetupFailure(error);
+    console.error('The copy that opens project files could not be changed:', error);
+    return failure({ code: 'WRITE_FAILED' });
   }
+  return success(await associationOf(copy));
 }
 
-/** Finds out which copy opens project files, none being possible for a copy that is not a built application on Windows. */
-async function associationOf(copy: ThisCopy | null): Promise<BridgeResult<FileAssociation>> {
+/** Finds out which copy opens project files, unavailable for a copy that is not a built application on Windows, and unknown, which is logged, when the registry cannot be read. */
+async function associationOf(copy: ThisCopy | null): Promise<FileAssociation> {
   if (copy === null) {
-    return success({ kind: 'unavailable' });
+    return { kind: 'unavailable' };
   }
   try {
-    const owner: AssociationOwner = await copy.associations.owner();
-    return success(owner);
+    return await copy.associations.owner();
   } catch (error) {
-    return setupFailure(
-      error,
-      'Tasklace could not find out which copy opens project files:',
-      'READ_FAILED',
-    );
+    rethrowUnlessSetupFailure(error);
+    console.error('Tasklace could not find out which copy opens project files:', error);
+    return { kind: 'unknown' };
   }
 }
 
-/** Logs a failure of the registry or of the system and reports it, throwing again any other error. */
-function setupFailure(
-  error: unknown,
-  what: string,
-  code: 'READ_FAILED' | 'WRITE_FAILED' = 'WRITE_FAILED',
-): BridgeResult<never> {
-  if (!isSetupFailure(error)) {
+/** Throws again an error that comes neither from the registry tool nor from the system, so that a fault of the program is never taken for a refusal. */
+function rethrowUnlessSetupFailure(error: unknown): void {
+  if (!(error instanceof RegistryToolError || isSystemError(error))) {
     throw error;
   }
-  console.error(what, error);
-  return failure({ code });
-}
-
-/** Tells whether an error comes from the registry tool or from the system rather than from a fault of the program. */
-function isSetupFailure(error: unknown): boolean {
-  return error instanceof RegistryToolError || isSystemError(error);
 }

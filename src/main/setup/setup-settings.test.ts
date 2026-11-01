@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_FILE_PATH_LENGTH } from '../../core/limits';
+import type { WindowsExecutablePath } from '../platform/this-copy';
 import {
   DEFAULT_SETUP_SETTINGS,
   loadSetupSettings,
@@ -10,7 +11,8 @@ import {
   storeSetupSettings,
 } from './setup-settings';
 
-const EXECUTABLE = 'C:\\Users\\Lea\\Downloads\\Tasklace-0.1.0-portable.exe';
+const EXECUTABLE =
+  'C:\\Users\\Lea\\Downloads\\Tasklace-0.1.0-portable.exe' as WindowsExecutablePath;
 
 let folder = '';
 let storePath = '';
@@ -31,6 +33,10 @@ describe('readSetupSettings', () => {
       welcomed: false,
       registeredExecutable: null,
     });
+    expect(readSetupSettings({ welcomed: true, registeredExecutable: null })).toEqual({
+      welcomed: true,
+      registeredExecutable: null,
+    });
     expect(readSetupSettings({ welcomed: true, registeredExecutable: EXECUTABLE })).toEqual({
       welcomed: true,
       registeredExecutable: EXECUTABLE,
@@ -43,6 +49,7 @@ describe('readSetupSettings', () => {
       'setup',
       { welcomed: 'yes', registeredExecutable: null },
       { welcomed: true, registeredExecutable: 'Tasklace.exe' },
+      { welcomed: false, registeredExecutable: EXECUTABLE },
       { welcomed: true, registeredExecutable: '/opt/Tasklace/tasklace' },
       { welcomed: true, registeredExecutable: 'C:\\Users\\"Lea"\\Tasklace.exe' },
       { welcomed: true, registeredExecutable: 'C:\\Users\\Lea\0\\Tasklace.exe' },

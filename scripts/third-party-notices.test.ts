@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bundledPackages,
   licenseFileOf,
   mitLicenseText,
   noticesText,
@@ -99,5 +100,32 @@ describe('noticesText', () => {
         `${rule}\nws@1.0.0 · MIT\n${rule}\nws text`,
       ].join('\n\n') + '\n',
     );
+  });
+});
+
+describe('bundledPackages', () => {
+  it('gives the entries of the packages a bundle holds, even those only installed to build the application', () => {
+    const lock = {
+      packages: {
+        'node_modules/svelte': { version: '5.57.1', license: 'MIT', dev: true },
+        'node_modules/@noble/hashes': { version: '2.4.0', license: 'MIT' },
+      },
+    };
+    expect(bundledPackages(lock, ['svelte', '@noble/hashes'])).toEqual([
+      { folder: 'node_modules/svelte', name: 'svelte', version: '5.57.1', license: 'MIT' },
+      {
+        folder: 'node_modules/@noble/hashes',
+        name: '@noble/hashes',
+        version: '2.4.0',
+        license: 'MIT',
+      },
+    ]);
+  });
+
+  it('fails for a package the lock file does not have, and for a lock file without packages', () => {
+    expect(() => bundledPackages({ packages: {} }, ['clsx'])).toThrow(
+      'The bundled package clsx is not in the lock file.',
+    );
+    expect(() => bundledPackages({}, [])).toThrow('The lock file lists no packages.');
   });
 });

@@ -19,7 +19,6 @@ import {
   type LaunchCheck,
   type RecentProject,
   type ReleaseCheck,
-  RELEASE_CHECK_FAILURES,
   type UpdateSettings,
   type TasklaceBridge,
 } from './bridge-contract';
@@ -110,8 +109,9 @@ const bridge: TasklaceBridge = {
       IPC_CHANNELS.takeOutsideRequest,
       request(IPC_CHANNELS.takeOutsideRequest),
       isOutsideRequestOrNone,
+      kindOnly,
     ),
-  openOutsideFile: () => request(IPC_CHANNELS.openOutsideFile),
+  openOutsideFile: (id) => request(IPC_CHANNELS.openOutsideFile, id),
   setupState: () =>
     checked(IPC_CHANNELS.setupState, request(IPC_CHANNELS.setupState), isSetupState),
   finishWelcome: (choices) =>
@@ -199,11 +199,12 @@ async function request<C extends ResultChannel>(
   return UNEXPECTED_ANSWER;
 }
 
-/** Checks the value of an answer the page relies on, besides its outcome, an answer of any other shape being logged and counting as a failed task. */
+/** Checks the value of an answer the page relies on, besides its outcome, an answer of any other shape being logged as the caller describes it, never with a secret it may hold, and counting as a failed task. */
 async function checked<T>(
   channel: ResultChannel,
   request: Promise<BridgeResult<unknown>>,
   isValue: (value: unknown) => value is T,
+  logged: (value: unknown) => unknown = (value) => value,
 ): Promise<BridgeResult<T>> {
   const answer = await request;
   if (!answer.ok) {
@@ -212,8 +213,17 @@ async function checked<T>(
   if (isValue(answer.value)) {
     return { ok: true, value: answer.value };
   }
-  console.error(`The main process answered ${channel} with an unexpected value:`, answer.value);
+  console.error(
+    `The main process answered ${channel} with an unexpected value:`,
+    logged(answer.value),
+  );
   return UNEXPECTED_ANSWER;
+}
+
+/** Describes an answer by its kind alone, for the log of an answer that may hold the keys of a shared plan. */
+function kindOnly(value: unknown): unknown {
+  const kind: unknown = Reflect.get(Object(value), 'kind');
+  return { kind };
 }
 
 /** Tells whether an answer is the text of a version. */
@@ -229,11 +239,10 @@ function isUpdateSettings(value: unknown): value is UpdateSettings {
 /** Tells whether an answer is the result of a check for new versions. */
 function isReleaseCheck(value: unknown): value is ReleaseCheck {
   const kind: unknown = Reflect.get(Object(value), 'kind');
-  const failures: readonly unknown[] = RELEASE_CHECK_FAILURES;
   return (
     kind === 'latest' ||
     (kind === 'newer' && isVersionText(Reflect.get(Object(value), 'version'))) ||
-    (kind === 'failed' && failures.includes(Reflect.get(Object(value), 'reason')))
+    kind === 'failed'
   );
 }
 
@@ -242,15 +251,18 @@ function isLaunchCheck(value: unknown): value is LaunchCheck {
   return Reflect.get(Object(value), 'kind') === 'skipped' || isReleaseCheck(value);
 }
 
-/** Tells whether an answer is what Tasklace was started with from outside, a project file or the link of a shared plan, or nothing. */
+/** Tells whether an answer is what Tasklace was started with from outside: a project file under its number, the link of a shared plan, a file or link it could not read, or nothing. */
 function isOutsideRequestOrNone(value: unknown): value is OutsideRequest | null {
   if (value === null) {
     return true;
   }
   const kind: unknown = Reflect.get(Object(value), 'kind');
+  const id: unknown = Reflect.get(Object(value), 'id');
   const link: unknown = Reflect.get(Object(value), 'link');
+  const what: unknown = Reflect.get(Object(value), 'what');
   return (
-    kind === 'file' ||
+    (kind === 'file' && Number.isSafeInteger(id)) ||
+    (kind === 'unreadable' && (what === 'file' || what === 'link')) ||
     (kind === 'link' &&
       typeof link === 'string' &&
       link.length <= MAX_RELAY_LINK_LENGTH &&
@@ -264,8 +276,10 @@ function isFileAssociation(value: unknown): value is FileAssociation {
   const path: unknown = Reflect.get(Object(value), 'path');
   return (
     kind === 'unavailable' ||
+    kind === 'unknown' ||
     kind === 'none' ||
     kind === 'thisCopy' ||
+    kind === 'otherProgram' ||
     (kind === 'otherCopy' && typeof path === 'string' && path.length <= MAX_FILE_PATH_LENGTH)
   );
 }

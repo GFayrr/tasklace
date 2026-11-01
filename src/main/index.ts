@@ -56,7 +56,7 @@ import {
 } from './log-file';
 import { createMainWindow, createPrintWindow } from './window';
 import { registerUpdateHandlers } from './updates/update-service';
-import { registerOutsideRequests, type OutsideRequests } from './outside-request';
+import { createOutsideRequests, type OutsideRequests } from './outside-request';
 import { createFileAssociations } from './platform/file-associations';
 import { createRegistry, runRegistryTool } from './platform/registry';
 import { copyPlaceOf } from './platform/this-copy';
@@ -92,17 +92,13 @@ protocol.registerSchemesAsPrivileged([
 app.enableSandbox();
 setApplicationIdentity(process.platform, app);
 
-let outside: OutsideRequests | null = null;
-let startArguments: readonly string[] = process.argv;
+const outside: OutsideRequests = createOutsideRequests();
+outside.receive(process.argv);
 
 if (app.requestSingleInstanceLock()) {
   app.on('second-instance', (_event, argv) => {
     focusFirstWindow();
-    if (outside === null) {
-      startArguments = argv;
-    } else {
-      outside.receive(argv);
-    }
+    outside.receive(argv);
   });
   app.on('web-contents-created', (_event, contents) => {
     hardenContents(contents);
@@ -126,14 +122,12 @@ function start(): void {
   );
   const assertTrusted = createTrustCheck((address) => isAppAddress(address, developmentOrigin));
   registerFlushHandler(assertTrusted);
-  const requests = registerOutsideRequests({ assertTrusted, notify: tellOutsideRequest });
-  outside = requests;
-  requests.receive(startArguments);
+  outside.answer(assertTrusted, tellOutsideRequest);
   const files = registerProjectFileHandlers({
     assertTrusted,
     runTask: (task) => runInFileWorker(createFileWorker, task),
     userDataFolder: app.getPath('userData'),
-    takeOutsideFile: requests.takeFile,
+    takeOutsideFile: outside.takeFile,
   });
   const pdf = registerPdfHandlers({
     assertTrusted,
@@ -178,11 +172,12 @@ function start(): void {
     now: () => new Date(),
     fetchReleases: (url, init) => net.fetch(url, init),
     openInBrowser,
-    welcomePending: () => setup?.welcomePending() ?? true,
+    mayCheckAtLaunch: () => setup?.mayCheckAtLaunch() ?? Promise.resolve(false),
   });
   setup = registerSetupHandlers({
     assertTrusted,
     storePath: join(app.getPath('userData'), SETUP_STORE),
+    isPackaged: app.isPackaged,
     copy: thisCopy(),
     setCheck: updates.setCheck,
   });
@@ -260,7 +255,7 @@ function thisCopy(): Parameters<typeof registerSetupHandlers>[0]['copy'] {
   return { ...place, registry, associations };
 }
 
-/** Tells the page of the window that a file or a link arrived from outside, for it to take once it runs. */
+/** Tells the pages of every window that a file or a link arrived from outside, for the main window to take it once it runs. */
 function tellOutsideRequest(): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send(IPC_CHANNELS.outsideRequestReceived);

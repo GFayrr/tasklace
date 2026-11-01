@@ -1,11 +1,15 @@
 import { MAX_VERSION_LENGTH } from './limits';
 
-export interface Version {
+declare const READ_VERSION: unique symbol;
+
+export interface VersionParts {
   readonly major: number;
   readonly minor: number;
   readonly patch: number;
   readonly preRelease: readonly string[];
 }
+
+export type Version = VersionParts & { readonly [READ_VERSION]: true };
 
 export interface PublishedRelease {
   readonly version: Version;
@@ -30,22 +34,23 @@ export function readVersion(value: unknown): Version | null {
     return null;
   }
   const [, major = '', minor = '', patch = '', preRelease] = match;
-  return {
+  const parts: VersionParts = {
     major: Number(major),
     minor: Number(minor),
     patch: Number(patch),
     preRelease: preRelease === undefined ? [] : preRelease.split('.'),
   };
+  return asRead(parts);
 }
 
 /** Writes a version as Semantic Versioning does, without a leading “v”. */
-export function formatVersion(version: Version): string {
+export function formatVersion(version: VersionParts): string {
   const core = `${String(version.major)}.${String(version.minor)}.${String(version.patch)}`;
   return version.preRelease.length === 0 ? core : `${core}-${version.preRelease.join('.')}`;
 }
 
 /** Compares two versions by the precedence of Semantic Versioning, returning a negative number when the first comes before the second, zero when they are equal and a positive number otherwise. */
-export function compareVersions(first: Version, second: Version): number {
+export function compareVersions(first: VersionParts, second: VersionParts): number {
   const core =
     first.major - second.major || first.minor - second.minor || first.patch - second.patch;
   return core === 0 ? comparePreReleases(first.preRelease, second.preRelease) : Math.sign(core);
@@ -94,4 +99,9 @@ export function newestRelease(
     }
   }
   return newest;
+}
+
+/** Marks the parts of a version as read by `readVersion`, the only place a version comes from, so that a version written by hand can never reach a check or an address. */
+function asRead(parts: VersionParts): Version {
+  return parts as Version;
 }

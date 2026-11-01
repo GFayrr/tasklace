@@ -799,7 +799,7 @@
     "failed": "Tasklace could not find out which version is the latest. Try again later.",
     "checkOff": "Tasklace does not check for new versions. You can still use “Check now”.",
     "checkSwitch": "Check for new versions",
-    "checkHint": "Once a day, Tasklace asks GitHub which version is the latest. GitHub sees the address of your connection and the version you use; nothing else is sent.",
+    "checkHint": "At most once a day, when it starts, Tasklace asks GitHub which version is the latest. GitHub sees the address of your connection and the version you use; nothing else is sent.",
     "privacyPolicy": "Privacy policy",
     "notKept": "This setting could not be kept on this computer.",
     "notOpened": "The browser could not open this page.",
@@ -811,7 +811,7 @@
     "welcomeIntro": "Two choices for this computer. You can change them at any time in Tasklace settings.",
     "associateSwitch": "Open Tasklace files and links with this copy",
     "associateHint": "Double-clicking a .tasklace file or clicking a Tasklace link opens this copy. Tasklace records this for your account only.",
-    "checkHint": "Once a day, Tasklace asks GitHub which version is the latest. GitHub sees the address of your connection and the version you use.",
+    "checkHint": "At most once a day, when it starts, Tasklace asks GitHub which version is the latest. GitHub sees the address of your connection and the version you use.",
     "continue": "Continue",
     "notApplied": "Tasklace could not keep these choices on this computer. You can change them in Tasklace settings.",
     "filesHeading": "Files and links",
@@ -819,6 +819,11 @@
     "otherCopy": "They open with another copy:",
     "noCopy": "Double-clicking a .tasklace file or clicking a Tasklace link does not open Tasklace.",
     "notChanged": "Tasklace could not change which copy opens its files and links.",
-    "outsideLink": "You opened a link from outside Tasklace. Join only if you expected it."
+    "outsideLink": "You opened a link from outside Tasklace. Join only if you expected it.",
+    "linkUnreadable": "The link you opened is not the link of a shared plan, or it was cut. Ask the person who sent it for the whole link.",
+    "fileUnreadable": "Tasklace could not open this file from where it was opened. Open it with “Open…” instead.",
+    "otherProgram": "They open with another program.",
+    "unknownCopy": "Tasklace could not find out which program opens them.",
+    "linkWhileJoining": "Tasklace is already joining a plan. Open the link again once it is done."
   }
 }

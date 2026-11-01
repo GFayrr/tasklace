@@ -240,6 +240,7 @@ export class AppState {
   readonly setup: SetupState;
   #tasklaceSettingsOpen = $state(false);
   #outsideLink = $state<string | null>(null);
+  #outsideQueue: Promise<void> = Promise.resolve();
   #closePrompt = $state.raw<ClosePrompt | null>(null);
   #pdfExport = $state.raw<PdfExportOpening | null>(null);
   #collaborationWindow = $state<CollaborationWindow | null>(null);
@@ -550,9 +551,15 @@ export class AppState {
     return this.#outsideLink;
   }
 
-  /** Takes what Tasklace was started with from outside once the welcome got its answer, a project file opening like a file chosen to open and a link filling the join window, nothing being joined before the person asks. */
-  async takeOutsideRequest(): Promise<void> {
-    if (this.setup.welcome) {
+  /** Takes what Tasklace was started with from outside, one request after another, once its setup is known and its welcome answered: a file opens like a chosen file, a link fills the join window, and what cannot be read is told. */
+  takeOutsideRequest(): Promise<void> {
+    this.#outsideQueue = this.#outsideQueue.then(() => this.#takeOutsideRequest());
+    return this.#outsideQueue;
+  }
+
+  /** Takes one request from outside, unless the setup of this copy is not known yet or its welcome waits, in which case the request stays in the main process until then. */
+  async #takeOutsideRequest(): Promise<void> {
+    if (!this.setup.isLoaded || this.setup.welcome) {
       return;
     }
     const taken = await this.#context.bridge.takeOutsideRequest();
@@ -561,16 +568,31 @@ export class AppState {
       return;
     }
     const request = taken.value;
-    if (request?.kind === 'file') {
-      if (await this.#readyToReplace()) {
-        await this.#load(this.#files.openOutside());
-      }
+    if (request === null) {
       return;
     }
-    if (request !== null) {
-      this.#outsideLink = request.link;
-      await this.openJoin();
+    if (request.kind === 'unreadable') {
+      const text = this.messages.setup;
+      this.#notify('warning', request.what === 'link' ? text.linkUnreadable : text.fileUnreadable);
+      return;
     }
+    if (request.kind === 'link') {
+      await this.#openOutsideLink(request.link);
+      return;
+    }
+    if (await this.#readyToReplace()) {
+      await this.#load(this.#files.openOutside(request.id));
+    }
+  }
+
+  /** Fills the join window with a link opened from outside, unless a plan is being joined, which the link never interrupts and which is told. */
+  async #openOutsideLink(link: string): Promise<void> {
+    if (this.collaboration.mode.kind === 'joining' || this.collaboration.relay.isStarting) {
+      this.#notify('warning', this.messages.setup.linkWhileJoining);
+      return;
+    }
+    this.#outsideLink = link;
+    await this.openJoin();
   }
 
   /** Opens what Tasklace was started with from outside, then runs the check for new versions of a new launch. */
@@ -593,7 +615,10 @@ export class AppState {
 
   /** Runs the action a message offers, such as opening the page of a new release, telling the user when the browser could not open it. */
   async runNoticeAction(action: NoticeAction): Promise<void> {
-    if (!(await this.updates.openReleasePage(action.version))) {
+    const actions: Readonly<Record<NoticeAction['kind'], () => Promise<boolean>>> = {
+      openReleasePage: () => this.updates.openReleasePage(action.version),
+    };
+    if (!(await actions[action.kind]())) {
       this.#notify('error', this.messages.tasklace.notOpened);
     }
   }
@@ -1786,7 +1811,7 @@ export class AppState {
     console.error('A file action failed unexpectedly:', error);
   }
 
-  /** Adds a message and returns its identifier, replacing the same message already shown so that it is shown once with its latest details, a message with details or asked to last staying until the user dismisses it. */
+  /** Adds a message and returns its identifier, replacing the same message already shown so that it is shown once with its latest details, a message with details, an action or asked to last staying until the user dismisses it. */
   #notify(
     kind: NoticeKind,
     text: string,
@@ -1796,7 +1821,11 @@ export class AppState {
   ): number {
     this.#nextNoticeId += 1;
     const others = this.notices.filter((notice) => notice.text !== text);
-    this.#notices = [...others, { id: this.#nextNoticeId, kind, text, report, lasting, action }];
+    const kept = lasting || action !== null;
+    this.#notices = [
+      ...others,
+      { id: this.#nextNoticeId, kind, text, report, lasting: kept, action },
+    ];
     return this.#nextNoticeId;
   }
 }

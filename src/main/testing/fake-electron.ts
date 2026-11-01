@@ -23,8 +23,11 @@ export class FakeIpcMain {
   readonly handlers = new Map<string, (event: unknown, ...values: unknown[]) => unknown>();
   readonly listeners = new Map<string, (event: unknown, ...values: unknown[]) => void>();
 
-  /** Records a handler answering invocations on a channel. */
+  /** Records a handler answering invocations on a channel, refusing a second handler for the same channel as Electron does. */
   handle(channel: string, handler: (event: unknown, ...values: unknown[]) => unknown): void {
+    if (this.handlers.has(channel)) {
+      throw new Error(`Attempted to register a second handler for '${channel}'`);
+    }
     this.handlers.set(channel, handler);
   }
 

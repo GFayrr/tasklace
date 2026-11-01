@@ -167,6 +167,7 @@ beforeEach(async () => {
   noted = [];
   offered = [];
   guideOpens = true;
+  ipcMain.handlers.clear();
   handlers = registerRelayHandlers({
     assertTrusted: () => undefined,
     runTask: <T extends FileTask>(task: T) => {

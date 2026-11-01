@@ -1,4 +1,5 @@
-# How electron-builder packs Tasklace for Windows: a portable executable and an installer for the current user.
+# How electron-builder packs Tasklace for Windows: a portable executable and an installer for the current user, or for
+# everyone when an administrator chooses so.
 # The Windows executables are built by continuous integration only; nothing is signed yet.
 appId: io.github.gfayrr.tasklace
 productName: Tasklace
