@@ -156,7 +156,8 @@ Projects are saved automatically.
 - [x] PDF export
 - [x] Real-time collaboration on the local network
 - [x] End-to-end encrypted relay and deployment guide
-- [ ] Portable Windows executable
+- [x] Portable Windows executable and installer (preview, not signed yet)
+- [ ] Signed Windows builds
 
 Windows comes first; the code stays cross-platform so that macOS and Linux versions can follow. The [roadmap](docs/roadmap.md) tells what comes next, what may come later and what is not planned.
 

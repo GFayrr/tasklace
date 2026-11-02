@@ -24,6 +24,8 @@ Once a step is done, only its status is kept here; its pull requests tell the re
 
 ## In progress: distribution (step 9)
 
+Version 0.1.0 is out as an unsigned preview; signing is what remains.
+
 - A portable Windows executable, signed, that runs with a double-click and nothing else to install.
 - An installer for those who prefer one.
 - `.tasklace` files and `tasklace://` invitation links that open in Tasklace, set up for the current user without administrator rights.
