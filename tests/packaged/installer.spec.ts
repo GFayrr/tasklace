@@ -17,10 +17,13 @@ const TASKLACE_KEYS = [
   'HKCU\\Software\\Tasklace',
 ];
 const OTHER_COPY = 'C:\\Other\\Tasklace-0.1.0-portable.exe';
+const UNINSTALL_KEYS = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall';
+const UNINSTALLER = 'Uninstall Tasklace.exe';
 const REMOVAL_RETRIES = 10;
 const REMOVAL_RETRY_STEP_MS = 200;
 
 let folder = '';
+let installed = new Set<string>();
 
 test.beforeEach(async () => {
   skipUnlessRequired(process.platform !== 'win32', 'Only Windows runs the installer.');
@@ -28,7 +31,7 @@ test.beforeEach(async () => {
     TASKLACE_KEYS.map(async (key) => (await run('reg.exe', ['query', key])).code === 0),
   );
   skipUnlessRequired(
-    taken.includes(true),
+    taken.includes(true) || (await uninstallEntries('Tasklace')) > 0,
     'This computer already has Tasklace set up; the test never changes it.',
   );
   folder = await mkdtemp(join(tmpdir(), 'tasklace-installer-'));
@@ -38,6 +41,10 @@ test.afterEach(async () => {
   if (folder === '') {
     return;
   }
+  for (const target of installed) {
+    await removeInstallation(target);
+  }
+  installed = new Set();
   for (const key of TASKLACE_KEYS) {
     await run('reg.exe', ['delete', key, '/f']);
   }
@@ -89,6 +96,7 @@ async function exists(path: string): Promise<boolean> {
 /** Installs Tasklace silently for the current user in a folder of the test, with the options given, and gives the folder. */
 async function install(options: readonly string[]): Promise<string> {
   const target = win32.join(folder, 'Tasklace');
+  installed.add(target);
   await run(await installer(), ['/S', ...options, `/D=${target}`]);
   await expect
     .poll(() => exists(win32.join(target, 'Tasklace.exe')), { timeout: INSTALL_WAIT_MS })
@@ -96,12 +104,27 @@ async function install(options: readonly string[]): Promise<string> {
   return target;
 }
 
-/** Uninstalls Tasklace silently from its folder and waits until its program is gone. */
+/** Counts the entries of the installed programs whose values contain a text, such as the folder of an installation. */
+async function uninstallEntries(text: string): Promise<number> {
+  const { output } = await run('reg.exe', ['query', UNINSTALL_KEYS, '/s', '/f', text, '/d']);
+  return output.split(/\r?\n/).filter((line) => line.startsWith('HKEY_')).length;
+}
+
+/** Uninstalls Tasklace silently from its folder and waits until its uninstaller has finished, which removes the entry of the installed program only after the files. */
 async function uninstall(target: string): Promise<void> {
-  await run(win32.join(target, 'Uninstall Tasklace.exe'), ['/S']);
+  await run(win32.join(target, UNINSTALLER), ['/S']);
   await expect
     .poll(() => exists(win32.join(target, 'Tasklace.exe')), { timeout: INSTALL_WAIT_MS })
     .toBe(false);
+  await expect.poll(() => uninstallEntries(target), { timeout: INSTALL_WAIT_MS }).toBe(0);
+}
+
+/** Removes an installation a test left behind, so that a test that failed halfway never makes the next ones see an existing installation. */
+async function removeInstallation(target: string): Promise<void> {
+  if (await exists(win32.join(target, UNINSTALLER))) {
+    await uninstall(target);
+  }
+  await expect.poll(() => uninstallEntries(target), { timeout: INSTALL_WAIT_MS }).toBe(0);
 }
 
 /** Reads a number the installer left among its choices, or null when it is not there. */
