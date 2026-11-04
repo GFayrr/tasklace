@@ -18,7 +18,7 @@ import {
 } from '../../src/core/testing/project-builder';
 import { readIndexText } from '../../src/main/local-copies';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
-import { closeDiscarding, launchApplication } from './application';
+import { closeDiscarding, expectAllSaved, launchApplication } from './application';
 import { addTaskButton } from './table';
 import { answerDialogs, askedQuestion, suggestedPath } from './dialogs';
 
@@ -251,7 +251,7 @@ test('saves a changed project to its file and its local copy a little after the 
   await field.press('Enter');
   await expect(page.getByRole('status').filter({ hasText: 'Unsaved changes' })).toBeVisible();
   await expect.poll(() => projectNameIn(path)).toBe('Plan, renamed');
-  await expect(page.getByRole('status').filter({ hasText: 'All changes saved' })).toBeVisible();
+  await expectAllSaved(page);
   expect(await readFile(join(userData, 'local-copies', `${TEST_DOCUMENT_ID}.tasklace`))).toEqual(
     await readFile(path),
   );

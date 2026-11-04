@@ -1,6 +1,13 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import { _electron as electron, test, type ElectronApplication, type Page } from '@playwright/test';
+import {
+  _electron as electron,
+  expect,
+  test,
+  type ElectronApplication,
+  type Page,
+} from '@playwright/test';
 
+const SAVE_LIMIT_MS = 32_768;
 const CLOSE_LIMIT_MS = 15_000;
 const PROBE_LIMIT_MS = 1_000;
 const EXIT_LIMIT_MS = 5_000;
@@ -33,6 +40,13 @@ export async function launchApplication(
     throw error;
   }
   return application;
+}
+
+/** Waits until the status says that everything is saved, leaving room for a save that retries its file and its local copy on a slow Windows computer. */
+export async function expectAllSaved(page: Page): Promise<void> {
+  await expect(page.getByRole('status').filter({ hasText: 'All changes saved' })).toBeVisible({
+    timeout: SAVE_LIMIT_MS,
+  });
 }
 
 /** Closes the application unless a test already closed it, answering “Do not save” to the question about a project without file, keeping the trace of a failed test, and stopping a process that does not close in time with a description of its state. */

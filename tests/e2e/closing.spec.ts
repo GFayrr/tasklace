@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import english from '../../src/renderer/locales/en.json' with { type: 'json' };
-import { closeDiscarding, launchApplication } from './application';
+import { closeDiscarding, expectAllSaved, launchApplication } from './application';
 import { answerDialogs, answerQuestions, askedDetails, suggestedPath } from './dialogs';
 
 let folder: string;
@@ -104,7 +104,7 @@ test('keeps the window open when the last save fails, until the user saves elsew
   await mkdir(subfolder);
   await answerDialogs(application, { save: join(subfolder, 'Thesis.tasklace') });
   await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('All changes saved')).toBeVisible();
+  await expectAllSaved(page);
   await rm(subfolder, { recursive: true, force: true });
   await rename('Thesis');
   await closeWindow();

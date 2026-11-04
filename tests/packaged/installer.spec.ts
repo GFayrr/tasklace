@@ -17,21 +17,21 @@ const TASKLACE_KEYS = [
   'HKCU\\Software\\Tasklace',
 ];
 const OTHER_COPY = 'C:\\Other\\Tasklace-0.1.0-portable.exe';
-const UNINSTALL_KEYS = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall';
+const UNINSTALL_PATH = 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall';
+const UNINSTALL_KEYS = [`HKCU\\${UNINSTALL_PATH}`, `HKLM\\${UNINSTALL_PATH}`];
+const REG_NOTHING_FOUND = 1;
 const UNINSTALLER = 'Uninstall Tasklace.exe';
 const REMOVAL_RETRIES = 10;
 const REMOVAL_RETRY_STEP_MS = 200;
 
 let folder = '';
-let installed = new Set<string>();
+const installed = new Set<string>();
 
 test.beforeEach(async () => {
   skipUnlessRequired(process.platform !== 'win32', 'Only Windows runs the installer.');
-  const taken = await Promise.all(
-    TASKLACE_KEYS.map(async (key) => (await run('reg.exe', ['query', key])).code === 0),
-  );
+  const taken = await Promise.all(TASKLACE_KEYS.map(keyExists));
   skipUnlessRequired(
-    taken.includes(true) || (await uninstallEntries('Tasklace')) > 0,
+    taken.includes(true) || (await uninstallEntries('Tasklace')).length > 0,
     'This computer already has Tasklace set up; the test never changes it.',
   );
   folder = await mkdtemp(join(tmpdir(), 'tasklace-installer-'));
@@ -41,38 +41,76 @@ test.afterEach(async () => {
   if (folder === '') {
     return;
   }
-  for (const target of installed) {
-    await removeInstallation(target);
-  }
-  installed = new Set();
-  for (const key of TASKLACE_KEYS) {
-    await run('reg.exe', ['delete', key, '/f']);
-  }
-  await rm(folder, {
-    recursive: true,
-    force: true,
-    maxRetries: REMOVAL_RETRIES,
-    retryDelay: REMOVAL_RETRY_STEP_MS,
-  });
+  const leftFolder = folder;
+  const leftInstallations = [...installed];
   folder = '';
+  installed.clear();
+  await runEveryStep([
+    ...leftInstallations.map((target) => () => removeInstallation(target)),
+    ...TASKLACE_KEYS.map((key) => () => removeKey(key)),
+    () =>
+      rm(leftFolder, {
+        recursive: true,
+        force: true,
+        maxRetries: REMOVAL_RETRIES,
+        retryDelay: REMOVAL_RETRY_STEP_MS,
+      }),
+  ]);
 });
 
-/** Runs a program to its end and gives its exit code and output. */
+/** Runs every step of a cleaning, even after one failed, and then reports all the failures together. */
+async function runEveryStep(steps: readonly (() => Promise<void>)[]): Promise<void> {
+  const failures: unknown[] = [];
+  for (const step of steps) {
+    await step().catch((failure: unknown) => {
+      failures.push(failure);
+    });
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'The installer test could not clean up after itself.');
+  }
+}
+
+/** Runs a program to its end and gives its exit code, its output and what it wrote as errors. */
 function run(
   program: string,
   args: readonly string[],
-): Promise<{ readonly code: number | null; readonly output: string }> {
+): Promise<{ readonly code: number | null; readonly output: string; readonly errors: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(program, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+    const child = spawn(program, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
+    let errors = '';
     child.stdout.on('data', (chunk: Buffer) => {
       output += chunk.toString();
     });
+    child.stderr.on('data', (chunk: Buffer) => {
+      errors += chunk.toString();
+    });
     child.once('error', reject);
     child.once('close', (code) => {
-      resolve({ code, output });
+      resolve({ code, output, errors });
     });
   });
+}
+
+/** Runs a program that must succeed, and fails with what it said when it does not. */
+async function runToSuccess(program: string, args: readonly string[]): Promise<void> {
+  const { code, errors } = await run(program, args);
+  if (code !== 0) {
+    throw new Error(`${program} ${args.join(' ')} ended with ${String(code)}: ${errors}`);
+  }
+}
+
+/** Tells whether a registry key exists. */
+async function keyExists(key: string): Promise<boolean> {
+  return (await run('reg.exe', ['query', key])).code === 0;
+}
+
+/** Removes a registry key if it exists. */
+async function removeKey(key: string): Promise<void> {
+  if (await keyExists(key)) {
+    await runToSuccess('reg.exe', ['delete', key, '/f']);
+  }
 }
 
 /** Finds the installer built beside the unpacked application. */
@@ -85,11 +123,12 @@ async function installer(): Promise<string> {
   return join(dist, name);
 }
 
-/** Tells whether a file exists. */
+/** Tells whether a file is there, anything but its proven absence counting as there, since Windows refuses access to a file being deleted. */
 async function exists(path: string): Promise<boolean> {
   return access(path).then(
     () => true,
-    () => false,
+    (failure: unknown) =>
+      !(failure instanceof Error && 'code' in failure && failure.code === 'ENOENT'),
   );
 }
 
@@ -97,34 +136,60 @@ async function exists(path: string): Promise<boolean> {
 async function install(options: readonly string[]): Promise<string> {
   const target = win32.join(folder, 'Tasklace');
   installed.add(target);
-  await run(await installer(), ['/S', ...options, `/D=${target}`]);
+  await runToSuccess(await installer(), ['/S', ...options, `/D=${target}`]);
   await expect
     .poll(() => exists(win32.join(target, 'Tasklace.exe')), { timeout: INSTALL_WAIT_MS })
     .toBe(true);
+  await expect.poll(() => entryCountOf(target), { timeout: INSTALL_WAIT_MS }).toBe(1);
   return target;
 }
 
-/** Counts the entries of the installed programs whose values contain a text, such as the folder of an installation. */
-async function uninstallEntries(text: string): Promise<number> {
-  const { output } = await run('reg.exe', ['query', UNINSTALL_KEYS, '/s', '/f', text, '/d']);
-  return output.split(/\r?\n/).filter((line) => line.startsWith('HKEY_')).length;
+/** Keeps the registry keys that exist, a computer on which nothing was installed for this user having no list of installed programs at all. */
+async function keysThatExist(keys: readonly string[]): Promise<readonly string[]> {
+  const found = await Promise.all(keys.map(keyExists));
+  return keys.filter((_, index) => found[index]);
 }
 
-/** Uninstalls Tasklace silently from its folder and waits until its uninstaller has finished, which removes the entry of the installed program only after the files. */
+/** Lists the keys of the installed programs with a value whose data contain a text, failing when the registry cannot tell. */
+async function uninstallEntries(text: string): Promise<readonly string[]> {
+  const entries: string[] = [];
+  for (const key of await keysThatExist(UNINSTALL_KEYS)) {
+    const { code, output, errors } = await run('reg.exe', ['query', key, '/s', '/f', text, '/d']);
+    if ((code !== 0 && code !== REG_NOTHING_FOUND) || errors !== '') {
+      throw new Error(`reg.exe could not search ${key}, ended with ${String(code)}: ${errors}`);
+    }
+    entries.push(...output.split(/\r?\n/).filter((line) => line.startsWith('HKEY_')));
+  }
+  return entries;
+}
+
+/** Lists the keys of the installed programs that name an installation, by the unique name of its test folder since Windows may shorten the rest of the path. */
+function entriesOf(target: string): Promise<readonly string[]> {
+  return uninstallEntries(win32.basename(win32.dirname(target)));
+}
+
+/** Counts the keys of the installed programs that name an installation. */
+async function entryCountOf(target: string): Promise<number> {
+  return (await entriesOf(target)).length;
+}
+
+/** Uninstalls Tasklace silently from its folder and waits until its program and its entry among the installed programs are gone, the uninstaller removing that entry only after the files. */
 async function uninstall(target: string): Promise<void> {
   await run(win32.join(target, UNINSTALLER), ['/S']);
   await expect
     .poll(() => exists(win32.join(target, 'Tasklace.exe')), { timeout: INSTALL_WAIT_MS })
     .toBe(false);
-  await expect.poll(() => uninstallEntries(target), { timeout: INSTALL_WAIT_MS }).toBe(0);
+  await expect.poll(() => entryCountOf(target), { timeout: INSTALL_WAIT_MS }).toBe(0);
 }
 
-/** Removes an installation a test left behind, so that a test that failed halfway never makes the next ones see an existing installation. */
+/** Removes an installation a test left behind, and any entry an installation stopped halfway left without its uninstaller, so that the next test never sees an existing installation. */
 async function removeInstallation(target: string): Promise<void> {
   if (await exists(win32.join(target, UNINSTALLER))) {
     await uninstall(target);
   }
-  await expect.poll(() => uninstallEntries(target), { timeout: INSTALL_WAIT_MS }).toBe(0);
+  for (const entry of await entriesOf(target)) {
+    await runToSuccess('reg.exe', ['delete', entry, '/f']);
+  }
 }
 
 /** Reads a number the installer left among its choices, or null when it is not there. */
@@ -154,7 +219,7 @@ test('leaves the choices of its page for the first launch, which opens files wit
     expect(await defaultText(`${CLASSES}\\.tasklace`)).toBe('Tasklace.Project');
     await expect.poll(() => choice('Associate'), { timeout: INSTALL_WAIT_MS }).toBeNull();
   } finally {
-    await run('taskkill', ['/pid', String(app.pid), '/t', '/f']);
+    await runToSuccess('taskkill', ['/pid', String(app.pid), '/t', '/f']);
   }
   await uninstall(target);
   for (const key of [COMMAND_KEY, `${CLASSES}\\tasklace`, 'HKCU\\Software\\Tasklace']) {
@@ -167,7 +232,7 @@ test('leaves the choices of its page for the first launch, which opens files wit
 test('keeps the files of another copy and removes only its own choices when uninstalled', async () => {
   const target = await install(['/NOASSOCIATE', '/NOUPDATECHECK']);
   expect([await choice('Associate'), await choice('CheckForNewVersions')]).toEqual([0, 0]);
-  await run('reg.exe', ['add', COMMAND_KEY, '/ve', '/d', `"${OTHER_COPY}" -- "%1"`, '/f']);
+  await runToSuccess('reg.exe', ['add', COMMAND_KEY, '/ve', '/d', `"${OTHER_COPY}" -- "%1"`, '/f']);
   await uninstall(target);
   expect(await defaultText(COMMAND_KEY)).toBe(`"${OTHER_COPY}" -- "%1"`);
   expect((await run('reg.exe', ['query', SETUP_KEY])).code).toBe(1);
@@ -176,7 +241,7 @@ test('keeps the files of another copy and removes only its own choices when unin
 test('installed again over an existing installation, shows no page and writes no choice, keeping those made since', async () => {
   const target = await install(['/NOUPDATECHECK']);
   expect([await choice('Associate'), await choice('CheckForNewVersions')]).toEqual([1, 0]);
-  await run('reg.exe', ['delete', SETUP_KEY, '/f']);
+  await runToSuccess('reg.exe', ['delete', SETUP_KEY, '/f']);
   await install(['/NOASSOCIATE']);
   expect([await choice('Associate'), await choice('CheckForNewVersions')]).toEqual([null, null]);
   await uninstall(target);

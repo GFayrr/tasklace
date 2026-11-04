@@ -10,7 +10,7 @@ import { readSharedProject } from '../../src/core/shared/shared-project';
 import { unwrap } from '../../src/core/testing/arbitraries';
 import { link, project, scheduleOrThrow, workTask } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
-import { closeDiscarding, launchApplication } from './application';
+import { closeDiscarding, expectAllSaved, launchApplication } from './application';
 import { answerDialogs } from './dialogs';
 import { addTask, tableTexts, taskRow, typeInCell } from './table';
 
@@ -65,7 +65,7 @@ async function writeProject(name: string): Promise<string> {
 async function save(path: string): Promise<void> {
   await answerDialogs(application, { save: path });
   await page.keyboard.press('Control+s');
-  await expect(page.getByText('All changes saved')).toBeVisible();
+  await expectAllSaved(page);
 }
 
 /** Opens a file from the Open menu of the toolbar. */
@@ -118,7 +118,7 @@ test('keeps a whole project, milestone included, across a restart of the applica
   await expect(recent).toHaveText([`Thesis ${folder}`]);
   await recent.click();
   await expect(projectName()).toHaveValue('Thesis');
-  await expect(page.getByText('All changes saved')).toBeVisible();
+  await expectAllSaved(page);
   expect(await tableTexts(page)).toEqual(shown);
   expect(await projectIn(path)).toEqual(saved);
 });
@@ -245,7 +245,7 @@ async function fileBehindItsCopy(): Promise<string> {
   await copyFile(path, older);
   await addTask(page, 'Kept here');
   await page.keyboard.press('Control+s');
-  await expect(page.getByText('All changes saved')).toBeVisible();
+  await expectAllSaved(page);
   await closeDiscarding(application, page);
   await copyFile(older, path);
   await launch();
@@ -262,7 +262,7 @@ test('adds to a file the changes its local copy kept, once asked', async () => {
   await expect(
     page.getByText('The changes kept on this computer were added to the plan.'),
   ).toBeVisible();
-  await expect(page.getByText('All changes saved')).toBeVisible();
+  await expectAllSaved(page);
   expect((await projectIn(path)).tasks.map((task) => task.name).sort()).toEqual([
     'Kept here',
     'Research',
