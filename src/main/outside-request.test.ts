@@ -1,4 +1,6 @@
 import { ipcMain as electronIpcMain } from 'electron';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { drawRelayAccess } from '../core/collaboration/relay/relay-keys';
 import { encodeRelayLink } from '../core/collaboration/relay/relay-link';
@@ -8,6 +10,21 @@ import { IPC_CHANNELS } from '../preload/bridge-contract';
 import { createOutsideRequests, readOutsideRequest } from './outside-request';
 import type { FakeIpcMain } from './testing/fake-electron';
 
+const address = vi.hoisted(() => ({ failure: null as Error | null }));
+
+vi.mock('node:url', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:url')>();
+  return {
+    ...real,
+    fileURLToPath: (url: URL) => {
+      if (address.failure !== null) {
+        throw address.failure;
+      }
+      return real.fileURLToPath(url);
+    },
+  };
+});
+
 vi.mock('electron', async () => {
   const fakes = await import('./testing/fake-electron');
   return { ipcMain: new fakes.FakeIpcMain() };
@@ -16,6 +33,7 @@ vi.mock('electron', async () => {
 const ipcMain = electronIpcMain as unknown as FakeIpcMain;
 const EXECUTABLE = '/opt/Tasklace/tasklace';
 const PROJECT = '/home/lea/Plans/Thesis.tasklace';
+const SPACED_PROJECT = resolve('/home/léa/Mes plans/Thèse 2.tasklace');
 const LINK = encodeRelayLink({
   address: { host: 'relay.school.example', port: null, path: '/' },
   access: drawRelayAccess(seededRandom(9)),
@@ -27,7 +45,13 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  address.failure = null;
 });
+
+/** Writes a path of this computer as the address the Linux desktop passes for a file. */
+function fileAddress(path: string): string {
+  return pathToFileURL(path).href;
+}
 
 /** Asks a channel as the page would. */
 async function ask(channel: string): Promise<unknown> {
@@ -58,6 +82,20 @@ describe('readOutsideRequest', () => {
     });
   });
 
+  it('reads a project file given as an address of this computer, as the Linux desktop passes it', () => {
+    const written = fileAddress(SPACED_PROJECT);
+    for (const value of [
+      written,
+      written.replace('file:', 'FILE:'),
+      written.replace('file:///', 'file://localhost/'),
+    ]) {
+      expect(readOutsideRequest([EXECUTABLE, '--', value]), value).toEqual({
+        kind: 'file',
+        path: SPACED_PROJECT,
+      });
+    }
+  });
+
   it('ignores a launch without anything, or with anything but a project file or a link, such as the script of the application or an option', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     for (const argv of [
@@ -68,10 +106,39 @@ describe('readOutsideRequest', () => {
       [EXECUTABLE, '--', '/home/lea/Plans/Thesis.csv'],
       [EXECUTABLE, '--', '/home/lea/Plans/Thesis.tasklace.exe'],
       [EXECUTABLE, '--', '--updated'],
+      [EXECUTABLE, '--', fileAddress(resolve('/home/lea/Plans/Thesis.csv'))],
+      [EXECUTABLE, '--', `${fileAddress(resolve('/home/lea/Thesis.tasklace'))}.exe`],
     ]) {
       expect(readOutsideRequest(argv), JSON.stringify(argv)).toBeNull();
     }
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('refuses a file address that names another computer or hides a path, without its text', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const refused = [
+      'file://server.school.example/Plans/Thesis.tasklace',
+      'file://[malformed/Thesis.tasklace',
+      'file:///home/lea/..%2F..%2Fetc%2FThesis.tasklace',
+      'file:///home/lea/%00.tasklace',
+    ];
+    for (const value of refused) {
+      expect(readOutsideRequest([EXECUTABLE, '--', value]), value).toEqual({
+        kind: 'unreadable',
+        what: 'file',
+      });
+    }
+    expect(warn.mock.calls).toEqual(
+      refused.map(() => ['Tasklace was started with a project file whose path it cannot use.']),
+    );
+  });
+
+  it('lets a fault of the program through, which is no bad address', () => {
+    const fault = new RangeError('a fault of the program');
+    address.failure = fault;
+    expect(() => readOutsideRequest([EXECUTABLE, '--', fileAddress(SPACED_PROJECT)])).toThrow(
+      fault,
+    );
   });
 
   it('tells of a link it cannot read and a project path it cannot use, logging them without their text, a link holding the keys of a plan', () => {
