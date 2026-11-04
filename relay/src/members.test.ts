@@ -92,6 +92,9 @@ async function join(keys: RelayKeys, clientId: number, creates: boolean): Promis
     bytesSinceSnapshot: 0,
     randomBytes: seededRandom(clientId + 100),
     send: (outgoing) => {
+      if (outgoing.kind === 'catchUpAgain') {
+        throw new Error('A member found a change left out by a relay that keeps them all.');
+      }
       if (outgoing.kind === 'presence') {
         const sealed = sealRelayPresence(keys, number, outgoing.bytes, crypto);
         if (sealed.ok) {
