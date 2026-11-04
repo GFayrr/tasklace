@@ -143,6 +143,22 @@ describe('the rooms of a relay', () => {
     ).toEqual([2]);
   });
 
+  it('gives a member who opens a room still being created that very room, so that its sequences never start again', async () => {
+    const store = await storeWith(ROOMY);
+    const creating = store.create(ROOM_KEYS.roomId, ROOM_KEYS.verifyKey);
+    const opened = await store.open(ROOM_KEYS.roomId);
+    const created = await creating;
+    if (opened === null || typeof created === 'string') {
+      throw new Error('The room was not there.');
+    }
+    expect(opened).toBe(created);
+    const sequences = [
+      ...(await appendAll(store, created, [sealedRecord('update', 1)])),
+      ...(await appendAll(store, opened, [sealedRecord('update', 2)])),
+    ];
+    expect(sequences).toEqual([1, 2]);
+  });
+
   it('refuses a room already there, beyond the number of rooms or beyond the bytes of the relay', async () => {
     const store = await storeWith({ ...ROOMY, maxRooms: 1 });
     await createdRoom(store);
