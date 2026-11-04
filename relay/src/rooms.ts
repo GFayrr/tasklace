@@ -247,6 +247,27 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
       loading.delete(name);
     }
   };
+  /** Writes the file of a new room and keeps the room in memory, forgetting its name when the file cannot be written. */
+  const writeNewRoom = async (
+    name: string,
+    roomId: Uint8Array,
+    verifyKey: Uint8Array,
+    verify: Verifier,
+  ): Promise<LoadedRoom> => {
+    const file = fileOf(name);
+    try {
+      await writeNewFile(file, encodeRoomHeader(verifyKey));
+    } catch (error) {
+      known.delete(name);
+      storedBytes -= ROOM_HEADER_BYTES;
+      throw error;
+    }
+    const room = roomOf({ name, roomId, path: file, verifyKey, verify });
+    room.bytes = ROOM_HEADER_BYTES;
+    room.holds = 1;
+    loaded.set(name, room);
+    return room;
+  };
   /** Lets go of a room a member held, and once nobody holds it, forgets it from memory after its writes, noting when it was last opened. */
   const release = async (room: Room): Promise<void> => {
     const target = loaded.get(room.name);
@@ -376,19 +397,16 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
       }
       known.set(name, { bytes: ROOM_HEADER_BYTES, touchedAt: now() });
       storedBytes += ROOM_HEADER_BYTES;
-      const file = fileOf(name);
+      const creating = writeNewRoom(name, roomId, verifyKey, verify);
+      loading.set(
+        name,
+        creating.catch(() => null),
+      );
       try {
-        await writeNewFile(file, encodeRoomHeader(verifyKey));
-      } catch (error) {
-        known.delete(name);
-        storedBytes -= ROOM_HEADER_BYTES;
-        throw error;
+        return await creating;
+      } finally {
+        loading.delete(name);
       }
-      const room = roomOf({ name, roomId, path: file, verifyKey, verify });
-      room.bytes = ROOM_HEADER_BYTES;
-      room.holds = 1;
-      loaded.set(name, room);
-      return room;
     },
     stage: (room) => {
       let pending: Pending | null = null;
