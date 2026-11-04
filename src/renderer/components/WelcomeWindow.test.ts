@@ -102,6 +102,29 @@ describe('the welcome window of the portable version', () => {
     expect(fake.control.updates.requests.at(-1)).toEqual(['checkAtLaunch']);
   });
 
+  it('asks only about new versions in a copy whose package already opens project files, as on Linux', async () => {
+    const fake = fakeAppContext();
+    fake.control.setup.stateResult = {
+      ok: true,
+      value: { welcome: true, association: { kind: 'unavailable' } },
+    };
+    const app = new AppState(fake.context);
+    const root = render(App, { app });
+    await app.startSetup();
+    update();
+    const dialog = dialogOf(root, 'dialog.welcome-window');
+    expect(dialog.querySelector('#welcome-associate-title')).toBeNull();
+    expect([...dialog.querySelectorAll('[role="switch"]')]).toEqual([
+      switchOf(dialog, 'welcome-check-title'),
+    ]);
+    await clickAndSettle(button(dialog, TEXT.continue));
+    expect(fake.control.setup.requests.slice(0, 2)).toEqual([
+      ['setupState'],
+      ['finishWelcome', { associate: false, checkForNewVersions: true }],
+    ]);
+    expect(dialog.open).toBe(false);
+  });
+
   it('opens the privacy policy, telling when the browser could not', async () => {
     const fake = fakeAppContext();
     fake.control.setup.stateResult = {

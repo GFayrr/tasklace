@@ -2,6 +2,7 @@
   "name": "tasklace",
   "productName": "Tasklace",
   "author": "Fayr",
+  "desktopName": "tasklace.desktop",
   "version": "0.1.0",
   "private": true,
   "description": "Desktop application to create, edit, share and export Gantt charts.",
@@ -24,7 +25,8 @@
     "icons": "electron scripts/make-icons.ts",
     "pdf:compare": "electron-vite build && playwright test --config playwright.pdf-compare.config.ts",
     "test:packaged": "playwright test --config playwright.packaged.config.ts",
-    "dist": "electron-vite build && node scripts/write-third-party-notices.ts && electron-builder --win --publish never"
+    "dist": "electron-vite build && node scripts/write-third-party-notices.ts && electron-builder --win --publish never",
+    "dist:linux": "electron-vite build && node scripts/write-third-party-notices.ts && electron-builder --linux --publish never"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
