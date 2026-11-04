@@ -250,6 +250,16 @@ describe('the rooms of a relay when the disk fails', () => {
     ]);
   });
 
+  it('finds no room for a member who opens one whose file could not be created', async () => {
+    const store = await storeOf();
+    failing.create = true;
+    const creating = store.create(ROOM_KEYS.roomId, ROOM_KEYS.verifyKey);
+    const opened = store.open(ROOM_KEYS.roomId);
+    await expect(creating).rejects.toThrow('No space left on device');
+    expect(await opened).toBeNull();
+    failing.create = false;
+  });
+
   it('still opens a room whose file cannot keep the date it was opened, warning about it', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const store = await storeOf();
