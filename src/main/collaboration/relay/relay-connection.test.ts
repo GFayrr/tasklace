@@ -504,6 +504,37 @@ describe('a session with a relay that lies', () => {
     ]);
   });
 
+  it('comes back from the first record when the page finds a change left out, telling so in the log', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const heard: ClientFrame[] = [];
+    const port = await lyingRelay(
+      [
+        encodeRelayFrame(WELCOME),
+        encodeRelayFrame({ type: 'record', seq: 4, record: sealedUpdate(EDIT_KEYS, 1) }),
+      ],
+      TEST_CERTIFICATE,
+      heard,
+    );
+    const member = joinRelay(port, VIEW_KEYS);
+    await until(() => member.kinds().includes('delivery'));
+    expect(member.session.send({ kind: 'catchUpAgain' })).toEqual({ ok: true, value: undefined });
+    await until(() => heard.length >= 2);
+    expect([
+      heard.slice(0, 2).map((frame) => (frame.type === 'hello' ? frame.since : null)),
+      member.kinds().includes('reconnecting'),
+      warn.mock.calls.filter(([message]) => String(message).includes('left out')).length,
+    ]).toEqual([[0, 0], true, 1]);
+  });
+
+  it('asks nothing of a relay it is not in', async () => {
+    const relay = await startedRelay();
+    const editor = joinRelay(relay.port, EDIT_KEYS, { creates: true });
+    expect(editor.session.send({ kind: 'catchUpAgain' })).toEqual({
+      ok: false,
+      error: 'NOT_OPEN',
+    });
+  });
+
   it('comes back from the first record once it had to drop a record for want of room, so that no change is lost for good', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const heard: ClientFrame[] = [];

@@ -21,11 +21,15 @@ export interface RelayPerson {
 
 export type RelayOutgoing =
   | { readonly kind: 'message'; readonly message: RelayMessage }
-  | { readonly kind: 'presence'; readonly bytes: Uint8Array };
+  | { readonly kind: 'presence'; readonly bytes: Uint8Array }
+  | { readonly kind: 'catchUpAgain' };
 
 export type RelayMemberEvent =
   | { readonly kind: 'repairs'; readonly repairs: readonly SharedRepair[] }
-  | { readonly kind: 'refused'; readonly reason: SyncRefusal | MessageRefusal }
+  | {
+      readonly kind: 'refused';
+      readonly reason: SyncRefusal | MessageRefusal | 'MISSING_CHANGES';
+    }
   | { readonly kind: 'people'; readonly people: ReadonlyMap<number, RelayPerson> }
   | { readonly kind: 'unsharedChanges' };
 
@@ -72,6 +76,7 @@ export function createRelayMember(options: RelayMemberOptions): RelayMember {
   let live = false;
   let unshared = false;
   let snapshotting = false;
+  let recovery: 'none' | 'asked' | 'told' = 'none';
   /** Sends a change of the plan to the relay. */
   const sendUpdate = ({ messageId, update }: Unconfirmed): void => {
     send({
@@ -142,6 +147,23 @@ export function createRelayMember(options: RelayMemberOptions): RelayMember {
       },
     });
   };
+  /** Acts on a change still waiting for another once the relay gave all it has: a relay keeps changes in order, so one is missing, and the member asks for them all once, then tells that its plan may differ. */
+  const recoverMissingChanges = (): void => {
+    if (!merger.isWaiting()) {
+      recovery = 'none';
+      return;
+    }
+    if (recovery === 'none') {
+      recovery = 'asked';
+      live = false;
+      send({ kind: 'catchUpAgain' });
+      return;
+    }
+    if (recovery === 'asked') {
+      recovery = 'told';
+      report({ kind: 'refused', reason: 'MISSING_CHANGES' });
+    }
+  };
   /** Takes back a change of this member that the relay passed on, telling whether it was one. */
   const confirm = (messageId: Uint8Array): boolean => {
     const key = bytesToHex(messageId);
@@ -162,6 +184,7 @@ export function createRelayMember(options: RelayMemberOptions): RelayMember {
       if (unshared) {
         report({ kind: 'unsharedChanges' });
       }
+      recoverMissingChanges();
     },
     disconnected: () => {
       live = false;
@@ -191,6 +214,9 @@ export function createRelayMember(options: RelayMemberOptions): RelayMember {
       const merged = merger.merge(read.value.update);
       if (!merged.ok && merged.error !== 'incompleteUpdate') {
         report({ kind: 'refused', reason: merged.error });
+      }
+      if (live) {
+        recoverMissingChanges();
       }
     },
     presence: (member, presence) => {
