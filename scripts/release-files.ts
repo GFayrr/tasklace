@@ -8,11 +8,12 @@ const SECTION_START = /^## \[(.+?)\]/;
 const SIGNATURE_NOTE = [
   '### Files',
   '',
-  '- `Tasklace-{version}-portable.exe` runs with a double-click, with nothing to install.',
-  '- `Tasklace-{version}-setup.exe` installs Tasklace for your account, without administrator rights.',
-  '- `SHA256SUMS.txt` gives the fingerprint of each file, to compare with `Get-FileHash <file> -Algorithm SHA256`.',
+  '- `Tasklace-{version}-amd64.deb` installs Tasklace on Debian, Ubuntu and Linux Mint.',
+  '- `Tasklace-{version}-portable.exe` runs on Windows with a double-click, with nothing to install.',
+  '- `Tasklace-{version}-setup.exe` installs Tasklace on Windows for your account, without administrator rights.',
+  '- `SHA256SUMS.txt` gives the fingerprint of each file, to check with `sha256sum --check --ignore-missing SHA256SUMS.txt` on Linux or to compare with `Get-FileHash <file> -Algorithm SHA256` on Windows.',
   '',
-  'This version is not signed: Windows warns before running it, and does not run it at all while Smart App Control is on. The [code signing policy](https://github.com/GFayrr/tasklace#code-signing-policy) tells why and what comes next.',
+  'The Windows files are not signed: Windows warns before running it, and does not run it at all while Smart App Control is on. The [code signing policy](https://github.com/GFayrr/tasklace#code-signing-policy) tells why and what comes next.',
 ].join('\n');
 
 export interface ReleaseVersion {
@@ -66,7 +67,7 @@ export interface ReleaseFiles {
   readonly files: readonly string[];
 }
 
-/** Checks what a release needs before it is prepared: a tag naming the version of the application, its part of the changelog, and exactly its portable executable and installer among the built files, the only files it publishes with their fingerprints. */
+/** Checks what a release needs before it is prepared: a tag naming the version of the application, its part of the changelog, and among the built files exactly the three it publishes with their fingerprints. */
 export function checkRelease(
   tag: string,
   packageVersion: unknown,
@@ -87,10 +88,14 @@ export function checkRelease(
   if (section === null || section === '') {
     throw new Error(`CHANGELOG.md has no part for the version ${version}.`);
   }
-  const files = [`Tasklace-${version}-portable.exe`, `Tasklace-${version}-setup.exe`];
+  const files = [
+    `Tasklace-${version}-amd64.deb`,
+    `Tasklace-${version}-portable.exe`,
+    `Tasklace-${version}-setup.exe`,
+  ];
   const missing = files.filter((file) => !builtFiles.includes(file));
   if (missing.length > 0) {
-    throw new Error(`The release needs ${missing.join(' and ')}, which the build did not make.`);
+    throw new Error(`The release needs ${missing.join(', ')}, which the build did not make.`);
   }
   return { version, preRelease, notes: releaseNotes(section, version), files };
 }

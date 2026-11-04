@@ -6,7 +6,7 @@ This roadmap shows where Tasklace is heading: what is done, what comes next and 
 
 ## Version 1 at a glance
 
-Version 1 is the first release that people can download and use: steps 1 to 9 below, for Windows first.
+Version 1 is the first release that people can download and use: steps 1 to 10 below, for Linux first and for Windows.
 
 | Step | Content                                              | Status |
 | ---- | ---------------------------------------------------- | ------ |
@@ -19,8 +19,9 @@ Version 1 is the first release that people can download and use: steps 1 to 9 be
 | 7    | Real-time collaboration on the local network         | Done   |
 | 8    | End-to-end encrypted relay and deployment guide      | Done   |
 | 9    | Distribution                                         | Done   |
+| 10   | Linux package                                        | Done   |
 
-Once a step is done, only its status is kept here; its pull requests tell the rest. Version 0.1.0 is out as an unsigned preview.
+Once a step is done, only its status is kept here; its pull requests tell the rest. Version 0.1.0 is out as an unsigned preview for Windows.
 
 ## Before version 1.0
 
@@ -32,7 +33,7 @@ Once a step is done, only its status is kept here; its pull requests tell the re
 
 - Signed Windows builds, through [SignPath Foundation](https://signpath.org/) if it accepts the project, or another way that keeps the project independent. Until then, releases stay unsigned.
 - The relay tried on a public server, with certificates obtained and renewed on their own.
-- macOS and Linux versions: the code already avoids anything specific to Windows outside one folder.
+- A macOS version, and more Linux packages, such as `.rpm` for Fedora and openSUSE: the code already avoids anything specific to one system outside one folder.
 - Languages other than English.
 - Custom themes, so that a school or a company can apply its own visual identity. A theme would be a plain data file (colors only, never code or style sheets) dropped into a `themes` folder, and checked like any untrusted file. Official themes must pass WCAG AA contrasts; a custom theme whose contrasts fail would still be accepted with a warning.
 
