@@ -144,10 +144,16 @@ async function install(options: readonly string[]): Promise<string> {
   return target;
 }
 
+/** Keeps the registry keys that exist, a computer on which nothing was installed for this user having no list of installed programs at all. */
+async function keysThatExist(keys: readonly string[]): Promise<readonly string[]> {
+  const found = await Promise.all(keys.map(keyExists));
+  return keys.filter((_, index) => found[index]);
+}
+
 /** Lists the keys of the installed programs with a value whose data contain a text, failing when the registry cannot tell. */
 async function uninstallEntries(text: string): Promise<readonly string[]> {
   const entries: string[] = [];
-  for (const key of UNINSTALL_KEYS) {
+  for (const key of await keysThatExist(UNINSTALL_KEYS)) {
     const { code, output, errors } = await run('reg.exe', ['query', key, '/s', '/f', text, '/d']);
     if ((code !== 0 && code !== REG_NOTHING_FOUND) || errors !== '') {
       throw new Error(`reg.exe could not search ${key}, ended with ${String(code)}: ${errors}`);
