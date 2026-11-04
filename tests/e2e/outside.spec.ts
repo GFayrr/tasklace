@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { drawRelayAccess } from '../../src/core/collaboration/relay/relay-keys';
 import { encodeRelayLink } from '../../src/core/collaboration/relay/relay-link';
@@ -91,6 +92,12 @@ test('opens the project file Tasklace was started with, as a double-click on it 
   await launch(['--', await writeProject('Alpha')]);
   await expect(projectName()).toHaveValue('Alpha');
   await expect(page.locator('dialog.welcome-window')).not.toBeVisible();
+});
+
+test('opens a project file double-clicked on a Linux desktop, which passes it as an address', async () => {
+  await launch();
+  await launchAgainWith(pathToFileURL(await writeProject('Mes plans 2')).href);
+  await expect(projectName()).toHaveValue('Mes plans 2');
 });
 
 test('fills the join window with a link clicked while Tasklace runs, joining nothing, then opens a file double-clicked', async () => {

@@ -1,4 +1,5 @@
 import { extname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readRelayLink } from '../core/collaboration/relay/relay-link';
 import { MAX_WAITING_OUTSIDE_FILES } from '../core/limits';
 import { success } from '../core/result';
@@ -20,7 +21,21 @@ export interface OutsideRequests {
 
 const PROJECT_EXTENSION = '.tasklace';
 const LINK_START = 'tasklace:';
+const FILE_ADDRESS_START = 'file:';
 const PROGRAM_ARGUMENTS = 1;
+
+/** Gives the path of a file address of this computer, as the Linux desktop passes a file, or null for an address that is malformed or names another computer. */
+function pathOfFileAddress(value: string): string | null {
+  try {
+    const address = new URL(value);
+    return address.hostname === '' ? fileURLToPath(address) : null;
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return null;
+    }
+    throw error;
+  }
+}
 
 /** Reads the project file or link Tasklace was started with from its last argument, put after the separator that keeps it from being an option, ignoring anything else and logging, without its text, what looked like one but cannot be used. */
 export function readOutsideRequest(argv: readonly string[]): ReceivedRequest | null {
@@ -35,11 +50,14 @@ export function readOutsideRequest(argv: readonly string[]): ReceivedRequest | n
     console.warn('Tasklace was started with a link it cannot read.');
     return { kind: 'unreadable', what: 'link' };
   }
-  if (extname(value).toLowerCase() !== PROJECT_EXTENSION) {
+  const path = value.toLowerCase().startsWith(FILE_ADDRESS_START)
+    ? pathOfFileAddress(value)
+    : value;
+  if (path !== null && extname(path).toLowerCase() !== PROJECT_EXTENSION) {
     return null;
   }
-  if (isStoredPath(value)) {
-    return { kind: 'file', path: value };
+  if (isStoredPath(path)) {
+    return { kind: 'file', path };
   }
   console.warn('Tasklace was started with a project file whose path it cannot use.');
   return { kind: 'unreadable', what: 'file' };
