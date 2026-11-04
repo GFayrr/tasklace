@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace 0.1.0 is a first preview for Windows: planning, project settings, PDF export, and real-time collaboration on a local network or through an end-to-end encrypted relay. It is not signed yet, so Windows warns before running it; signed versions are meant to follow, as the [code signing policy](#code-signing-policy) explains.
+> Tasklace 0.1.0 is a first preview for Windows: planning, project settings, PDF export, and real-time collaboration on a local network or through an end-to-end encrypted relay. It is not signed, so Windows warns before running it, as the [code signing policy](#code-signing-policy) explains.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -98,7 +98,7 @@ Download Tasklace from the [releases](https://github.com/GFayrr/tasklace/release
 
 The installer asks before installing, and the portable version at its first launch, whether Tasklace opens `.tasklace` files and Tasklace links, and whether it checks for new versions, at most once a day when it starts; nothing is sent before you chose; the [privacy policy](PRIVACY.md) tells what this check sends. Tasklace never updates itself: it only tells you when a new version is out.
 
-While a version is not signed, Windows warns before running it. SmartScreen shows “Windows protected your PC”: choose **More info**, then **Run anyway**. With Smart App Control on, Windows 11 does not run an unsigned program at all; wait for a signed version.
+Releases are not signed, so Windows warns before running them. SmartScreen shows “Windows protected your PC”: choose **More info**, then **Run anyway**. With Smart App Control on, Windows 11 does not run an unsigned program at all, so Tasklace cannot run on that computer for now.
 
 To make sure a file is the one this project built, compare its fingerprint with the line of `SHA256SUMS.txt`, published with each release, in PowerShell; PowerShell writes it in capitals, which does not matter:
 
@@ -156,8 +156,7 @@ Projects are saved automatically.
 - [x] PDF export
 - [x] Real-time collaboration on the local network
 - [x] End-to-end encrypted relay and deployment guide
-- [x] Portable Windows executable and installer (preview, not signed yet)
-- [ ] Signed Windows builds
+- [x] Portable Windows executable and installer (preview, not signed)
 
 Windows comes first; the code stays cross-platform so that macOS and Linux versions can follow. The [roadmap](docs/roadmap.md) tells what comes next, what may come later and what is not planned.
 
@@ -176,9 +175,9 @@ To report a vulnerability, do not open a public issue: follow the [security poli
 
 ## Code signing policy
 
-Tasklace 0.1.0 is not signed. The project has applied to [SignPath Foundation](https://signpath.org/), which signs open source software for free; once it is accepted, the releases that follow will be signed with its certificate, and this section will say so.
+Tasklace releases are not signed for now, and will stay unsigned until the project has a way to sign them that keeps it independent. The project has applied to [SignPath Foundation](https://signpath.org/), which signs open source software for free; if it is accepted, the releases that follow will be signed with its certificate, and this section will say so. Until then, `SHA256SUMS.txt`, published with each release, lets you check that a file is the one this project built.
 
-- **What is signed**: only the files built from this repository, the Tasklace executable, the portable executable, the installer and its uninstaller, built by continuous integration from a version tag. The files of other projects that Tasklace ships, such as the libraries of Electron, are not signed by this project.
+- **What will be signed**: only the files built from this repository, the Tasklace executable, the portable executable, the installer and its uninstaller, built by continuous integration from a version tag. The files of other projects that Tasklace ships, such as the libraries of Electron, are not signed by this project.
 - **Who does what**: [@GFayrr](https://github.com/GFayrr) writes and reviews the code, and approves each release by hand before it is published.
 - **Privacy**: Tasklace sends nothing to the project, about you or your plans; the [privacy policy](PRIVACY.md) tells what leaves your computer, when, and to whom.
 
