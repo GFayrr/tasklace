@@ -84,6 +84,15 @@ async function start(): Promise<Page> {
   return connected.page;
 }
 
+/** Writes a small project named after its file and gives its path. */
+async function writeProject(name: string): Promise<string> {
+  const path = join(configFolder, `${name}.tasklace`);
+  const named = { ...project([workTask('a')]), name };
+  const document = createSharedDocument(named, requireDocumentId(crypto.randomUUID()));
+  await writeFile(path, encodeTasklaceFile(document, zlibCompressor));
+  return path;
+}
+
 /** Opens a file or a link as a double-click on the desktop does. */
 async function openOnDesktop(value: string): Promise<void> {
   await run('gio', ['open', value], { env: sharedEnvironment() });
@@ -96,8 +105,7 @@ test('declares its files and links to the desktop, keeping the separator before 
     'MimeType=x-scheme-handler/tasklace;application/x-tasklace;',
     'Categories=Office;',
   ]);
-  const file = join(configFolder, 'Thesis.tasklace');
-  await writeFile(file, '');
+  const file = await writeProject('Thesis');
   const { stdout: type } = await run('gio', ['info', '-a', 'standard::content-type', file]);
   expect(type.split('\n').map((line) => line.trim())).toContain(
     'standard::content-type: application/x-tasklace',
@@ -110,11 +118,7 @@ test('declares its files and links to the desktop, keeping the separator before 
 
 test('opens a project file and fills the join window with a link from the desktop, its sandbox on', async () => {
   const page = await start();
-  const path = join(configFolder, 'Mes plans 2.tasklace');
-  const named = { ...project([workTask('a')]), name: 'Mes plans 2' };
-  const document = createSharedDocument(named, requireDocumentId(crypto.randomUUID()));
-  await writeFile(path, encodeTasklaceFile(document, zlibCompressor));
-  await openOnDesktop(path);
+  await openOnDesktop(await writeProject('Mes plans 2'));
   await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('Mes plans 2');
   await openOnDesktop(LINK);
   const joinWindow = page.getByRole('dialog', { name: 'Join a shared plan' });
