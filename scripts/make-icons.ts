@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { app, BrowserWindow } from 'electron';
 import { encodeIco, pngSize, type IcoImage } from './ico-file.ts';
@@ -8,6 +8,9 @@ const WINDOW_ICON = join(import.meta.dirname, '..', 'resources', 'icon.png');
 const SMALL_SIZES = [16, 20, 24];
 const LARGE_SIZES = [32, 40, 48, 64, 256];
 const WINDOW_ICON_SIZE = 256;
+const LINUX_SIZES = [16, 24, 32, 48, 64, 128, 256, 512];
+const LINUX_FOLDER = join(ICON_FOLDER, 'linux');
+const SMALLEST_LARGE_SIZE = 32;
 const PNG_DATA_URL_PREFIX = 'data:image/png;base64,';
 const ICONS = [
   { name: 'tasklace', small: 'tasklace-small.svg', large: 'tasklace.svg' },
@@ -59,6 +62,17 @@ async function makeIcon(page: BrowserWindow, icon: (typeof ICONS)[number]): Prom
   return largest.png;
 }
 
+/** Draws the application icon at every size a Linux desktop asks for, as the files that electron-builder puts in the package. */
+async function makeLinuxIcons(page: BrowserWindow): Promise<void> {
+  const small = await readFile(join(ICON_FOLDER, 'tasklace-small.svg'), 'utf8');
+  const large = await readFile(join(ICON_FOLDER, 'tasklace.svg'), 'utf8');
+  await mkdir(LINUX_FOLDER, { recursive: true });
+  for (const size of LINUX_SIZES) {
+    const png = await drawPng(page, size < SMALLEST_LARGE_SIZE ? small : large, size);
+    await writeFile(join(LINUX_FOLDER, `${String(size)}x${String(size)}.png`), png);
+  }
+}
+
 /** Draws every icon of the application from its SVG sources, one after the other, and writes the window icon from the application icon. */
 async function makeIcons(): Promise<void> {
   const page = new BrowserWindow({
@@ -76,6 +90,7 @@ async function makeIcons(): Promise<void> {
       throw new Error('No icon was drawn.');
     }
     await writeFile(WINDOW_ICON, applicationIcon);
+    await makeLinuxIcons(page);
   } finally {
     page.destroy();
   }
