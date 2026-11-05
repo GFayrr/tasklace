@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- A Linux package for Debian, Ubuntu and Linux Mint, with the sandbox of the application on, which makes Tasklace open `.tasklace` files and Tasklace links.
+
+### Fixed
+
+- A member of a plan shared through a relay that left a change out now reads the plan again, and is told when its plan may differ from the plan of the others.
+
 ## [0.1.0] - 2026-11-01
 
 The first public version: a preview for Windows, not signed yet.
