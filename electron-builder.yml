@@ -1,6 +1,7 @@
-# How electron-builder packs Tasklace for Windows: a portable executable and an installer for the current user, or for
-# everyone when an administrator chooses so.
-# The Windows executables are built by continuous integration only; nothing is signed yet.
+# How electron-builder packs Tasklace: for Linux a .deb package, which keeps the sandbox of Chromium on Ubuntu 24 and
+# later through its AppArmor profile, and for Windows a portable executable and an installer for the current user, or
+# for everyone when an administrator chooses so.
+# Releases are built by continuous integration only, the Windows executables on Windows; nothing is signed.
 appId: io.github.gfayrr.tasklace
 productName: Tasklace
 copyright: © Fayr
@@ -21,9 +22,6 @@ extraFiles:
     to: licenses/Jost-OFL.txt
   - from: out/licenses/THIRD-PARTY-NOTICES.txt
     to: licenses/THIRD-PARTY-NOTICES.txt
-extraResources:
-  - from: build/icons/tasklace-file.ico
-    to: tasklace-file.ico
 electronFuses:
   runAsNode: false
   enableCookieEncryption: true
@@ -35,6 +33,9 @@ electronFuses:
   grantFileProtocolExtraPrivileges: false
 win:
   icon: build/icons/tasklace.ico
+  extraResources:
+    - from: build/icons/tasklace-file.ico
+      to: tasklace-file.ico
   target:
     - portable
     - nsis
@@ -53,6 +54,38 @@ nsis:
   installerIcon: build/icons/tasklace.ico
   uninstallerIcon: build/icons/tasklace.ico
 linux:
+  icon: build/icons/linux
+  category: Office
+  synopsis: Create, share and export Gantt charts
+  description: A simple desktop application to create, edit, share and export Gantt charts.
+  maintainer: Fayr <199396723+GFayrr@users.noreply.github.com>
+  vendor: Fayr
+  executableName: tasklace
+  syncDesktopName: true
+  executableArgs:
+    - '--'
+    - '%U'
+  mimeTypes:
+    - x-scheme-handler/tasklace
+  fileAssociations:
+    - ext: tasklace
+      name: Tasklace project
+      mimeType: application/x-tasklace
   target:
-    - dir
+    - deb
+deb:
+  artifactName: Tasklace-${version}-amd64.${ext}
+  depends:
+    - libasound2
+    - libgbm1
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - desktop-file-utils
 publish: null

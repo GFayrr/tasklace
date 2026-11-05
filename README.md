@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace 0.1.0 is a first preview for Windows: planning, project settings, PDF export, and real-time collaboration on a local network or through an end-to-end encrypted relay. It is not signed, so Windows warns before running it, as the [code signing policy](#code-signing-policy) explains.
+> Tasklace is a preview: planning, project settings, PDF export, and real-time collaboration on a local network or through an end-to-end encrypted relay. Version 0.1.0 is for Windows, and the Linux package comes with version 0.2.0. The Windows files are not signed, so Windows warns before running them, as the [code signing policy](#code-signing-policy) explains.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
@@ -85,28 +85,52 @@ Off by default, each one turned on per project:
 ### Collaboration
 
 - **On the local network**: share a plan and give the people near you its six-character code; they find it nearby or type the address of the host. Newcomers join in read only until the host lets them edit.
-- **From anywhere, through a relay**: share a plan through the relay of your school or company and send one of its two links, to edit or to view. A plan joined this way stays on your computer and reopens from the recent projects.
+- **From anywhere, through a relay**: share a plan through the relay of your school or company and send one of its two links, to edit or to view. A plan joined this way stays on your computer and, when your system has a vault for its link, reopens from the recent projects.
 - People in a shared plan see who is there and which task each one has selected.
 - A shared plan keeps going on its own: a lost connection comes back without any action, on the local network someone else takes over when the host leaves, and changes made offline are shared on return, or kept in a copy of your own when you were in read only.
 
 ## Install
 
-Download Tasklace from the [releases](https://github.com/GFayrr/tasklace/releases), for Windows 10 or 11:
+Download Tasklace from the [releases](https://github.com/GFayrr/tasklace/releases).
+
+### Linux
+
+The Linux package comes with version 0.2.0; version 0.1.0 is for Windows only.
+
+**`Tasklace-<version>-amd64.deb`** is for Debian, Ubuntu, Linux Mint and the systems built on them, on 64-bit Intel or AMD processors. It is tested on Ubuntu 24.04, and its dependencies are checked on Debian 12 and 13 and Ubuntu 22.04 and 26.04. Open it with your software center, or install it in a terminal, which asks for the password of an administrator:
+
+```sh
+sudo apt install ./Tasklace-<version>-amd64.deb
+```
+
+The package makes Tasklace open `.tasklace` files and Tasklace links, and keeps the sandbox of the application on. At its first launch, Tasklace asks whether it checks for new versions, at most once a day when it starts; nothing is sent before you chose; the [privacy policy](PRIVACY.md) tells what this check sends. Tasklace never updates itself: it only tells you when a new version is out.
+
+To make sure a file is the one this project built, check it against `SHA256SUMS.txt`, published with each release, from the folder that holds them both:
+
+```sh
+sha256sum --check --ignore-missing SHA256SUMS.txt
+```
+
+### Windows
+
+For Windows 10 or 11:
 
 - **`Tasklace-<version>-portable.exe`** runs with a double-click, with nothing to install. Keep it where you like, for example in your documents or on a USB stick.
 - **`Tasklace-<version>-setup.exe`** installs Tasklace for your account, without administrator rights, with a shortcut in the Start menu. Started as an administrator, it can also install Tasklace for everyone who uses the computer; each person then makes the two choices below at their first launch.
 
 The installer asks before installing, and the portable version at its first launch, whether Tasklace opens `.tasklace` files and Tasklace links, and whether it checks for new versions, at most once a day when it starts; nothing is sent before you chose; the [privacy policy](PRIVACY.md) tells what this check sends. Tasklace never updates itself: it only tells you when a new version is out.
 
-Releases are not signed, so Windows warns before running them. SmartScreen shows “Windows protected your PC”: choose **More info**, then **Run anyway**. With Smart App Control on, Windows 11 does not run an unsigned program at all, so Tasklace cannot run on that computer for now.
+The Windows files are not signed, so Windows warns before running them. SmartScreen shows “Windows protected your PC”: choose **More info**, then **Run anyway**. With Smart App Control on, Windows 11 does not run an unsigned program at all, so Tasklace cannot run on that computer for now.
 
-To make sure a file is the one this project built, compare its fingerprint with the line of `SHA256SUMS.txt`, published with each release, in PowerShell; PowerShell writes it in capitals, which does not matter:
+To make sure a file is the one this project built, compare its fingerprint with the line of `SHA256SUMS.txt`, published with each release, in PowerShell, putting the version in the name of the file; PowerShell writes it in capitals, which does not matter:
 
 ```powershell
 Get-FileHash .\Tasklace-0.1.0-portable.exe -Algorithm SHA256
 ```
 
 To install Tasklace on many computers, an IT department can run the installer silently with `/S`. Both choices are then on; `/NOASSOCIATE` keeps Tasklace from opening files and links, and `/NOUPDATECHECK` turns the check for new versions off.
+
+### From the source code
 
 Tasklace can also be run from the source code, which needs [Node.js](https://nodejs.org/) 24 LTS and npm:
 
@@ -122,6 +146,18 @@ npm run dev
 A relay lets people share plans from anywhere. It is a small Node.js server that a school or a company runs on its own machine, with Docker and Caddy, behind Apache or nginx, or on its own with systemd. The guide [Working remotely: setting up a relay](docs/working-remotely.md) walks an IT department through every step.
 
 ## Uninstall
+
+### Linux
+
+Remove Tasklace with your software center, or in a terminal:
+
+```sh
+sudo apt remove tasklace
+```
+
+Your projects stay wherever you saved them. What Tasklace keeps for you also stays, in `~/.config/Tasklace`: local copies of your projects, plans joined through a relay and changes kept apart, the list of recent projects, your settings, the links of shared plans and the log of errors. Delete this folder to remove them as well.
+
+### Windows
 
 - **Installed version**: remove Tasklace in **Settings**, **Apps**, **Installed apps** (**Apps & features** on Windows 10). The uninstaller also stops Tasklace from opening `.tasklace` files and links, unless another copy opens them.
 - **Portable version**: open **Tasklace settings**, from the Tasklace menu at the end of the toolbar or at the foot of the welcome screen, turn off **Open Tasklace files and links with this copy**, then delete the executable.
@@ -157,8 +193,9 @@ Projects are saved automatically.
 - [x] Real-time collaboration on the local network
 - [x] End-to-end encrypted relay and deployment guide
 - [x] Portable Windows executable and installer (preview, not signed)
+- [ ] Linux package (in the next version)
 
-Windows comes first; the code stays cross-platform so that macOS and Linux versions can follow. The [roadmap](docs/roadmap.md) tells what comes next, what may come later and what is not planned.
+Linux is the priority, since it needs no paid certificate; Windows stays available with unsigned files, and the code stays cross-platform so that a macOS version can follow. The [roadmap](docs/roadmap.md) tells what comes next, what may come later and what is not planned.
 
 ## Security
 
@@ -167,7 +204,7 @@ Tasklace treats every file it opens and every message it receives as untrusted:
 - Project files and network messages are size-limited and fully validated before use; files are decoded in an isolated worker with capped memory.
 - The desktop shell runs with context isolation, a sandbox and a strict content security policy, and loads no remote content.
 - On the local network, everything is encrypted after a key exchange based on the join code (CPace), and only computers on a private network are accepted.
-- Through a relay, plans and presence are encrypted end to end (AES-256-GCM) and every change is signed (Ed25519); the relay stores and passes on messages it cannot read. Links are kept in the vault of the system.
+- Through a relay, plans and presence are encrypted end to end (AES-256-GCM) and every change is signed (Ed25519); the relay stores and passes on messages it cannot read. Links are kept in the vault of the system, or not kept at all when it has none.
 
 What leaves your computer, when and to whom, is described in the [privacy policy](PRIVACY.md).
 
@@ -175,7 +212,7 @@ To report a vulnerability, do not open a public issue: follow the [security poli
 
 ## Code signing policy
 
-Tasklace releases are not signed for now, and will stay unsigned until the project has a way to sign them that keeps it independent. The project has applied to [SignPath Foundation](https://signpath.org/), which signs open source software for free; if it is accepted, the releases that follow will be signed with its certificate, and this section will say so. Until then, `SHA256SUMS.txt`, published with each release, lets you check that a file is the one this project built.
+The Linux package is not signed either, as a package installed from a file does not need to be. The Windows files are not signed for now, and will stay so until the project has a way to sign them that keeps it independent. The project has applied to [SignPath Foundation](https://signpath.org/), which signs open source software for free; if it is accepted, the releases that follow will be signed with its certificate, and this section will say so. Until then, `SHA256SUMS.txt`, published with each release, lets you check that a file is the one this project built.
 
 - **What will be signed**: only the files built from this repository, the Tasklace executable, the portable executable, the installer and its uninstaller, built by continuous integration from a version tag. The files of other projects that Tasklace ships, such as the libraries of Electron, are not signed by this project.
 - **Who does what**: [@GFayrr](https://github.com/GFayrr) writes and reviews the code, and approves each release by hand before it is published.
@@ -185,23 +222,27 @@ Tasklace releases are not signed for now, and will stay unsigned until the proje
 
 ### Commands
 
-| Command                | Purpose                                                         |
-| ---------------------- | --------------------------------------------------------------- |
-| `npm run dev`          | Start the desktop application in development mode               |
-| `npm run build`        | Build the main process, the preload bridge and the page         |
-| `npm test`             | Run unit and property-based tests with coverage                 |
-| `npm run test:watch`   | Run tests in watch mode                                         |
-| `npm run test:e2e`     | Build, then test the running application end to end             |
-| `npm run bench`        | Check performance on 10,000 tasks and 20,000 links              |
-| `npm run bench:growth` | Check that key operations grow as their complexity says         |
-| `npm run pdf:compare`  | Print three sample plans with both PDF engines and compare them |
-| `npm run lint`         | Type-check TypeScript and Svelte, lint with ESLint              |
-| `npm run format`       | Format the code with Prettier                                   |
-| `npm run format:check` | Check formatting without changing files                         |
+| Command                 | Purpose                                                         |
+| ----------------------- | --------------------------------------------------------------- |
+| `npm run dev`           | Start the desktop application in development mode               |
+| `npm run build`         | Build the main process, the preload bridge and the page         |
+| `npm test`              | Run unit and property-based tests with coverage                 |
+| `npm run test:watch`    | Run tests in watch mode                                         |
+| `npm run test:e2e`      | Build, then test the running application end to end             |
+| `npm run bench`         | Check performance on 10,000 tasks and 20,000 links              |
+| `npm run bench:growth`  | Check that key operations grow as their complexity says         |
+| `npm run pdf:compare`   | Print three sample plans with both PDF engines and compare them |
+| `npm run dist`          | Build the Windows files, on Windows only                        |
+| `npm run dist:linux`    | Build the Linux package                                         |
+| `npm run test:packaged` | Test the built application given by `TASKLACE_PACKAGED_APP`     |
+| `npm run icons`         | Make the icons again from their SVG files                       |
+| `npm run lint`          | Type-check TypeScript and Svelte, lint with ESLint              |
+| `npm run format`        | Format the code with Prettier                                   |
+| `npm run format:check`  | Check formatting without changing files                         |
 
 ### Tests
 
-The test suite covers edge cases extensively and uses property-based testing to check scheduling invariants, merges and data exchange on thousands of random projects, and to make sure that no malformed input is ever accepted. Every file keeps at least 90% coverage. Continuous integration runs formatting, linting, unit tests and end-to-end tests on Windows and Linux, the unit tests again in two time zones far from UTC, the growth checks of key operations, and builds and checks the relay image, for every push and pull request.
+The test suite covers edge cases extensively and uses property-based testing to check scheduling invariants, merges and data exchange on thousands of random projects, and to make sure that no malformed input is ever accepted. Every file keeps at least 90% coverage. Continuous integration runs formatting, linting, unit tests and end-to-end tests on Windows and Linux, the unit tests again in two time zones far from UTC, the growth checks of key operations, builds and checks the relay image, and builds the Linux and Windows files, installs them and tests them installed, for every push and pull request.
 
 ### Project structure
 
@@ -229,6 +270,7 @@ docs/                roadmap, and the guide to setting up a relay
 tests/e2e/           end-to-end journeys in the running application (Playwright)
 tests/file/          .tasklace files with real compression and generated decompression bombs
 tests/fixtures/      large test projects and PDF sample plans generated from fixed seeds
+tests/packaged/      the built application and its packages, tested as installed, run in CI
 tests/growth/        growth checks of key operations, run in CI
 tests/perf/          performance benchmark
 tests/pdf-compare/   comparison of the two PDF engines on the sample plans

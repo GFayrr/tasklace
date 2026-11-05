@@ -1,5 +1,7 @@
 import { readdir, type FileHandle } from 'node:fs/promises';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ROOM_HEADER_BYTES } from './room-file.ts';
 import { openRoomStore, type Room, type RoomStore } from './rooms.ts';
 import {
   OTHER_KEYS,
@@ -13,6 +15,7 @@ const failing = vi.hoisted(() => ({
   append: false,
   rewrite: false,
   create: false,
+  createWrite: false,
   utimes: false,
   rm: null as string | null,
   heldUtimes: null as Promise<void> | null,
@@ -36,6 +39,9 @@ vi.mock('node:fs/promises', async (importOriginal) => {
         throw diskFull();
       }
       const handle = await original.open(...args);
+      if (failing.createWrite && flags === 'wx') {
+        handle.write = () => Promise.reject(diskFull());
+      }
       return flags === 'a' ? countingSyncs(handle) : handle;
     },
     rm: (...args: Parameters<typeof original.rm>) =>
@@ -75,6 +81,7 @@ beforeEach(async () => {
     append: false,
     rewrite: false,
     create: false,
+    createWrite: false,
     utimes: false,
     rm: null,
     heldUtimes: null,
@@ -88,13 +95,13 @@ afterEach(async () => {
 });
 
 /** Opens the rooms of the folder of the test, at a time of its clock. */
-function storeOf(now = (): number => 0): Promise<RoomStore> {
+function storeOf(now = (): number => 0, maxStoredBytes = 4_194_304): Promise<RoomStore> {
   return openRoomStore({
     directory: folder,
     limits: {
       maxRooms: 8,
       maxRoomBytes: 1_048_576,
-      maxStoredBytes: 4_194_304,
+      maxStoredBytes,
       expiryMilliseconds: 1_000,
     },
     now,
@@ -248,6 +255,58 @@ describe('the rooms of a relay when the disk fails', () => {
       [],
       [`${room.name}.room`],
     ]);
+  });
+
+  it('gives back the room a new file took when it could not be written, so that failures never fill the relay', async () => {
+    const store = await storeOf(() => 0, 2 * ROOM_HEADER_BYTES);
+    failing.createWrite = true;
+    await expect(store.create(ROOM_KEYS.roomId, ROOM_KEYS.verifyKey)).rejects.toThrow(
+      'No space left on device',
+    );
+    failing.createWrite = false;
+    const [first, second] = await Promise.all([
+      createdRoom(store),
+      store.create(OTHER_KEYS.roomId, OTHER_KEYS.verifyKey),
+    ]);
+    expect([first.entries, typeof second]).toEqual([[], 'object']);
+  });
+
+  it('removes a new room file it could not write, so that the room can be created again', async () => {
+    const store = await storeOf();
+    failing.createWrite = true;
+    await expect(store.create(ROOM_KEYS.roomId, ROOM_KEYS.verifyKey)).rejects.toThrow(
+      'No space left on device',
+    );
+    const left = await readdir(folder);
+    failing.createWrite = false;
+    const room = await createdRoom(store);
+    expect([left, await readdir(folder)]).toEqual([[], [`${room.name}.room`]]);
+  });
+
+  it('keeps the failure of the write when a new room file cannot be removed either, logging the second', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const store = await storeOf();
+    const name = Buffer.from(ROOM_KEYS.roomId).toString('hex');
+    failing.createWrite = true;
+    failing.rm = name;
+    await expect(store.create(ROOM_KEYS.roomId, ROOM_KEYS.verifyKey)).rejects.toThrow(
+      'No space left on device',
+    );
+    failing.createWrite = false;
+    failing.rm = null;
+    expect(logged.mock.calls.map(([message]: unknown[]) => message)).toEqual([
+      `The room file ${path.join(folder, `${name}.room`)} could not be written or removed:`,
+    ]);
+  });
+
+  it('finds no room for a member who opens one whose file could not be created', async () => {
+    const store = await storeOf();
+    failing.create = true;
+    const creating = store.create(ROOM_KEYS.roomId, ROOM_KEYS.verifyKey);
+    const opened = store.open(ROOM_KEYS.roomId);
+    await expect(creating).rejects.toThrow('No space left on device');
+    expect(await opened).toBeNull();
+    failing.create = false;
   });
 
   it('still opens a room whose file cannot keep the date it was opened, warning about it', async () => {

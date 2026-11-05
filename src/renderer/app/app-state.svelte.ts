@@ -583,6 +583,10 @@ export class AppState {
     if (await this.#readyToReplace()) {
       await this.#load(this.#files.openOutside(request.id));
     }
+    if (request.unopened > 0) {
+      const unopened = this.messages.setup.filesNotOpened;
+      this.#notify('warning', countMessage(unopened, request.unopened, this.locale));
+    }
   }
 
   /** Fills the join window with a link opened from outside, unless a plan is being joined, which the link never interrupts and which is told. */

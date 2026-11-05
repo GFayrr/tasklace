@@ -153,13 +153,72 @@ describe('a member of a plan shared through a relay', () => {
     rename(author.session, 'a', 'One');
     rename(author.session, 'a', 'Two');
     editor.member.receive(delivered(author.sent[1]));
+    editor.member.disconnected();
+    editor.member.caughtUp();
     rename(editor.session, 'b', 'Mine');
-    editor.member.receive(delivered(editor.sent[0], 5, 1));
+    editor.member.receive(delivered(editor.sent[1], 5, 1));
     const whileWaiting = editor.sent.length;
     editor.member.receive({ ...delivered(author.sent[0]), kind: 'snapshot', covers: 2 });
     rename(editor.session, 'b', 'Mine again');
-    editor.member.receive(delivered(editor.sent[1], 7, 1));
-    expect([whileWaiting, editor.sent.length, nameOf(editor.session, 'a')]).toEqual([1, 2, 'Two']);
+    editor.member.receive(delivered(editor.sent[2], 7, 1));
+    expect([whileWaiting, editor.sent.length, nameOf(editor.session, 'a')]).toEqual([2, 3, 'Two']);
+  });
+
+  it('reads the plan again when a change waits for one the relay left out, keeping its own changes until it is back', () => {
+    const member = harness(true, 1);
+    const author = harness(true, 2);
+    member.member.caughtUp();
+    author.member.caughtUp();
+    rename(author.session, 'a', 'One');
+    rename(author.session, 'a', 'Two');
+    member.member.receive(delivered(author.sent[1]));
+    rename(member.session, 'b', 'Mine');
+    expect(member.sent).toEqual([{ kind: 'catchUpAgain' }]);
+    member.member.disconnected();
+    member.member.receive(delivered(author.sent[0]));
+    member.member.receive(delivered(author.sent[1]));
+    member.member.caughtUp();
+    expect([
+      nameOf(member.session, 'a'),
+      member.sent.map((outgoing) => outgoing.kind),
+      member.events.filter((event) => event.kind === 'refused'),
+    ]).toEqual(['Two', ['catchUpAgain', 'message'], []]);
+  });
+
+  it('asks again from a catch up that ends with a change waiting', () => {
+    const member = harness(true, 1);
+    const author = harness(true, 2);
+    author.member.caughtUp();
+    rename(author.session, 'a', 'One');
+    rename(author.session, 'a', 'Two');
+    member.member.receive(delivered(author.sent[1]));
+    member.member.caughtUp();
+    expect(member.sent).toEqual([{ kind: 'catchUpAgain' }]);
+  });
+
+  it('tells once that its plan may differ when the relay still leaves the change out, without asking without end, and asks again for a later gap', () => {
+    const member = harness(true, 1);
+    const author = harness(true, 2);
+    member.member.caughtUp();
+    author.member.caughtUp();
+    rename(author.session, 'a', 'One');
+    rename(author.session, 'a', 'Two');
+    rename(author.session, 'a', 'Three');
+    rename(author.session, 'a', 'Four');
+    member.member.receive(delivered(author.sent[1]));
+    member.member.disconnected();
+    member.member.caughtUp();
+    member.member.receive(delivered(author.sent[1]));
+    member.member.disconnected();
+    member.member.caughtUp();
+    expect([
+      member.sent.filter((outgoing) => outgoing.kind === 'catchUpAgain').length,
+      member.events.filter((event) => event.kind === 'refused'),
+    ]).toEqual([1, [{ kind: 'refused', reason: 'MISSING_CHANGES' }]]);
+    member.member.receive(delivered(author.sent[0]));
+    expect(nameOf(member.session, 'a')).toBe('Two');
+    member.member.receive(delivered(author.sent[3]));
+    expect(member.sent.filter((outgoing) => outgoing.kind === 'catchUpAgain').length).toBe(2);
   });
 
   it('puts the whole plan on the relay when asked once in, only for a member who may edit', () => {

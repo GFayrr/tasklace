@@ -1126,6 +1126,12 @@ describe('what a page sends a relay', () => {
     expect(readRelayOutgoing(value) === null).toBe(!valid);
   });
 
+  it('reads a request to read the plan again as its kind alone', () => {
+    expect(readRelayOutgoing({ kind: 'catchUpAgain', more: true })).toEqual({
+      kind: 'catchUpAgain',
+    });
+  });
+
   it('reads a message as its kind, identifier, sequence and bytes', () => {
     const messageId = new Uint8Array(16).fill(3);
     expect(

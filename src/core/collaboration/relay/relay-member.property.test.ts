@@ -57,7 +57,7 @@ interface Client {
   readonly keys: RelayKeys;
   readonly session: SharedSession;
   readonly member: RelayMember;
-  readonly assembler: RelayAssembler;
+  assembler: RelayAssembler;
   readonly inbox: Frame[];
   connected: boolean;
   lastSeq: number;
@@ -172,6 +172,13 @@ function playScenario(editorCount: number, steps: readonly Step[]): void {
         bytesSinceSnapshot: 0,
         randomBytes: seededRandom(clientId + 1_000),
         send: (outgoing) => {
+          if (client.connected && outgoing.kind === 'catchUpAgain') {
+            client.lastSeq = 0;
+            client.assembler = createRelayAssembler(keys, crypto);
+            client.member.disconnected();
+            relay.connect(client);
+            return;
+          }
           if (!client.connected || outgoing.kind !== 'message') {
             return;
           }
@@ -301,6 +308,22 @@ function playScenario(editorCount: number, steps: readonly Step[]): void {
 }
 
 describe('a plan shared through a relay', () => {
+  it('brings back a member that lost a record to a relay giving two out of order, the case the property once found', () => {
+    const steps: readonly Step[] = [
+      { kind: 'deliver', who: 2 },
+      { kind: 'edit', who: 1, task: 0, mark: 0 },
+      { kind: 'edit', who: 1, task: 0, mark: 1 },
+      { kind: 'deliver', who: 1 },
+      { kind: 'deliver', who: 0 },
+      { kind: 'edit', who: 0, task: 0, mark: 0 },
+      { kind: 'deliver', who: 0 },
+      { kind: 'swap', who: 2 },
+      { kind: 'edit', who: 0, task: 0, mark: 0 },
+      { kind: 'deliver', who: 0 },
+    ];
+    playScenario(FEW_EDITORS, steps);
+  });
+
   it(
     'ends with the same plan for every member and a newcomer, whatever connections are lost, records repeated or reordered and forged records the relay lets through',
     { timeout: CONVERGENCE_TEST_TIMEOUT_MS },

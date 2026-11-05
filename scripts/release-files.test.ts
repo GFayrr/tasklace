@@ -83,11 +83,12 @@ describe('releaseNotes', () => {
         '',
         '### Files',
         '',
-        '- `Tasklace-0.1.0-portable.exe` runs with a double-click, with nothing to install.',
-        '- `Tasklace-0.1.0-setup.exe` installs Tasklace for your account, without administrator rights.',
-        '- `SHA256SUMS.txt` gives the fingerprint of each file, to compare with `Get-FileHash <file> -Algorithm SHA256`.',
+        '- `Tasklace-0.1.0-amd64.deb` installs Tasklace on Debian, Ubuntu and Linux Mint.',
+        '- `Tasklace-0.1.0-portable.exe` runs on Windows with a double-click, with nothing to install.',
+        '- `Tasklace-0.1.0-setup.exe` installs Tasklace on Windows for your account, without administrator rights.',
+        '- `SHA256SUMS.txt` gives the fingerprint of each file, to check with `sha256sum --check --ignore-missing SHA256SUMS.txt` on Linux or to compare with `Get-FileHash <file> -Algorithm SHA256` on Windows.',
         '',
-        'This version is not signed: Windows warns before running it, and does not run it at all while Smart App Control is on. The [code signing policy](https://github.com/GFayrr/tasklace#code-signing-policy) tells why and what comes next.',
+        'The Windows files are not signed: Windows warns before running them, and does not run them at all while Smart App Control is on. The [code signing policy](https://github.com/GFayrr/tasklace#code-signing-policy) tells why and what comes next.',
         '',
       ].join('\n'),
     );
@@ -141,9 +142,15 @@ describe('the tags a release accepts', () => {
 });
 
 describe('checkRelease', () => {
-  const built = ['Tasklace-0.1.0-portable.exe', 'Tasklace-0.1.0-setup.exe', 'win-unpacked'];
+  const built = [
+    'Tasklace-0.1.0-amd64.deb',
+    'Tasklace-0.1.0-portable.exe',
+    'Tasklace-0.1.0-setup.exe',
+    'win-unpacked',
+    'linux-unpacked',
+  ];
 
-  it('gives the version, its kind, its notes and exactly its two executables', () => {
+  it('gives the version, its kind, its notes and exactly its package and two executables', () => {
     expect(checkRelease('v0.1.0', '0.1.0', CHANGELOG, built)).toEqual({
       version: '0.1.0',
       preRelease: true,
@@ -151,7 +158,11 @@ describe('checkRelease', () => {
         '### Added\n\n- The first preview.\n\n[0.1.0]: https://github.com/GFayrr/tasklace/releases/tag/v0.1.0',
         '0.1.0',
       ),
-      files: ['Tasklace-0.1.0-portable.exe', 'Tasklace-0.1.0-setup.exe'],
+      files: [
+        'Tasklace-0.1.0-amd64.deb',
+        'Tasklace-0.1.0-portable.exe',
+        'Tasklace-0.1.0-setup.exe',
+      ],
     });
   });
 
@@ -171,11 +182,12 @@ describe('checkRelease', () => {
     expect(() =>
       checkRelease('v0.1.0', '0.1.0', CHANGELOG, [
         'Tasklace-0.0.9-setup.exe',
+        'Tasklace-0.1.0-amd64.deb',
         'Tasklace-0.1.0-setup.exe',
       ]),
     ).toThrow('The release needs Tasklace-0.1.0-portable.exe, which the build did not make.');
     expect(() => checkRelease('v0.1.0', '0.1.0', CHANGELOG, [])).toThrow(
-      'The release needs Tasklace-0.1.0-portable.exe and Tasklace-0.1.0-setup.exe, which the build did not make.',
+      'The release needs Tasklace-0.1.0-amd64.deb, Tasklace-0.1.0-portable.exe, Tasklace-0.1.0-setup.exe, which the build did not make.',
     );
   });
 });

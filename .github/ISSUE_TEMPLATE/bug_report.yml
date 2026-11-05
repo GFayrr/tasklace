@@ -55,12 +55,12 @@ body:
     id: system
     attributes:
       label: Operating system
-      placeholder: such as Windows 11 24H2
+      placeholder: such as Ubuntu 24.04 or Windows 11 24H2
     validations:
       required: true
   - type: textarea
     id: log
     attributes:
       label: Lines from the log
-      description: Tasklace writes its errors to `%APPDATA%\Tasklace\logs\tasklace.log` on Windows. Paste the lines from around the problem, after reading them, as they may name your files or plans.
+      description: Tasklace writes its errors to `~/.config/Tasklace/logs/tasklace.log` on Linux and `%APPDATA%\Tasklace\logs\tasklace.log` on Windows. Paste the lines from around the problem, after reading them, as they may name your files or plans.
       render: text

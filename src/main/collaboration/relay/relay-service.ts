@@ -496,11 +496,14 @@ function eventForPage(event: RelaySessionEvent): CollaborationEvent {
   }
 }
 
-/** Reads what a page sends a relay: a message of the plan with its kind, identifier, the sequence it covers and its bytes, or a presence, or null for any other shape. */
+/** Reads what a page sends a relay: a message of the plan with its kind, identifier, the sequence it covers and its bytes, a presence, a request to read the plan again from its start, or null for any other shape. */
 export function readRelayOutgoing(value: unknown): RelayOutgoing | null {
   /** Reads a field of a value, whatever its shape. */
   const field = (of: unknown, name: string): unknown => Reflect.get(Object(of), name);
   const kind = field(value, 'kind');
+  if (kind === 'catchUpAgain') {
+    return { kind };
+  }
   if (kind === 'presence') {
     const bytes = field(value, 'bytes');
     return isMessageBytes(bytes) ? { kind, bytes } : null;

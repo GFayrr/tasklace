@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { access, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, win32 } from 'node:path';
@@ -99,6 +99,17 @@ async function runToSuccess(program: string, args: readonly string[]): Promise<v
   if (code !== 0) {
     throw new Error(`${program} ${args.join(' ')} ended with ${String(code)}: ${errors}`);
   }
+}
+
+/** Stops the application with its child processes and waits until it is gone, which is what counts since taskkill also fails on a child already ending. */
+async function stopApplication(application: ChildProcess): Promise<void> {
+  const { code, errors } = await run('taskkill', ['/pid', String(application.pid), '/t', '/f']);
+  await expect
+    .poll(() => application.exitCode !== null || application.signalCode !== null, {
+      timeout: INSTALL_WAIT_MS,
+      message: `The application is still running; taskkill ended with ${String(code)}: ${errors}`,
+    })
+    .toBe(true);
 }
 
 /** Tells whether a registry key exists. */
@@ -219,7 +230,7 @@ test('leaves the choices of its page for the first launch, which opens files wit
     expect(await defaultText(`${CLASSES}\\.tasklace`)).toBe('Tasklace.Project');
     await expect.poll(() => choice('Associate'), { timeout: INSTALL_WAIT_MS }).toBeNull();
   } finally {
-    await runToSuccess('taskkill', ['/pid', String(app.pid), '/t', '/f']);
+    await stopApplication(app);
   }
   await uninstall(target);
   for (const key of [COMMAND_KEY, `${CLASSES}\\tasklace`, 'HKCU\\Software\\Tasklace']) {

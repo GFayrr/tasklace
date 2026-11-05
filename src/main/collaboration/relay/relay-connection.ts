@@ -210,8 +210,14 @@ export function startRelaySession(options: RelaySessionOptions): RelaySession {
       since = seq;
     }
     if (LOST_RECORDS.includes(refusal)) {
-      since = 0;
-      assembler = createRelayAssembler(keys, crypto);
+      comeBackFromFirstRecord(current);
+    }
+  };
+  /** Forgets what was received and leaves the room, if this window has a connection to it, so that the next connection comes back from the first record. */
+  const comeBackFromFirstRecord = (current: WebSocket | null): void => {
+    since = 0;
+    assembler = createRelayAssembler(keys, crypto);
+    if (current !== null) {
       fail(current, 'UNREACHABLE');
     }
   };
@@ -332,7 +338,15 @@ export function startRelaySession(options: RelaySessionOptions): RelaySession {
   connect();
   return {
     send: (outgoing) => {
-      if (!isIn) {
+      if (outgoing.kind === 'catchUpAgain') {
+        if (!wasIn || isStopped) {
+          return failure('NOT_OPEN');
+        }
+        console.warn(`The relay ${relay} left out a change, so the plan is read from its start.`);
+        comeBackFromFirstRecord(socket);
+        return success(undefined);
+      }
+      if (!isIn || socket === null) {
         return failure('NOT_OPEN');
       }
       if (outgoing.kind === 'presence') {

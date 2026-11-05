@@ -32,7 +32,13 @@ import {
 } from '../../../core/collaboration/relay/relay-wire';
 import { MAX_OPEN_RELAY_MESSAGES } from '../../../core/limits';
 import { AEAD_TAG_BYTES } from '../../../core/collaboration/secure/channel';
+import { encodeMessage } from '../../../core/collaboration/messages';
+import { createSharedDocument } from '../../../core/shared/shared-document';
+import type { SharedSession } from '../../../core/shared/shared-session';
+import { project, TEST_DOCUMENT_ID, workTask } from '../../../core/testing/project-builder';
+import { sessionOn } from '../../../core/testing/session-copy';
 import { seededRandom } from '../../../core/testing/test-crypto';
+import { joinThroughRelay } from '../../testing/relay-team';
 import { aesGcm, systemRandomBytes } from '../aes-gcm';
 import { zlibCompressor } from '../../zlib-compressor';
 import { freePort, LOOPBACK, until } from '../../testing/plan-host';
@@ -225,6 +231,7 @@ async function lyingRelay(
   certificate = TEST_CERTIFICATE,
   heard: ClientFrame[] = [],
   closings: number[] = [],
+  afterFrames: (socket: WebSocket) => void = () => undefined,
 ): Promise<number> {
   const port = await freePort();
   const server = createHttpsServer({ cert: certificate.certificate, key: certificate.key });
@@ -240,6 +247,7 @@ async function lyingRelay(
       frames.forEach((frame) => {
         socket.send(frame);
       });
+      afterFrames(socket);
     });
   });
   await new Promise((resolve) =>
@@ -248,6 +256,34 @@ async function lyingRelay(
     }),
   );
   return port;
+}
+
+const GAP_PLAN = createSharedDocument(project([workTask('a')]), TEST_DOCUMENT_ID);
+const GAP_AUTHOR = 1;
+const GAP_READER = 2;
+
+/** Renames the task of a session and seals the change as its author would, giving its one record. */
+function renamedUpdate(session: SharedSession, name: string, byte: number): Uint8Array {
+  const before = session.encodeStateVector();
+  const [task] = session.project().tasks;
+  if (task === undefined) {
+    throw new Error('The plan has no task.');
+  }
+  session.apply({ type: 'putTask', task: { ...task, name } });
+  const sealed = sealRelayMessage(
+    EDIT_KEYS,
+    {
+      ...update(byte),
+      bytes: encodeMessage({ kind: 'update', update: session.encodeState(before) }),
+      seen: 0,
+    },
+    CRYPTO,
+  );
+  const [record] = sealed.ok ? sealed.value : [];
+  if (record === undefined) {
+    throw new Error('The change could not be sealed.');
+  }
+  return record;
 }
 
 const WELCOME: RelayFrame = {
@@ -502,6 +538,132 @@ describe('a session with a relay that lies', () => {
         ['A presence in the shared plan did not open and was set aside.'],
       ],
     ]);
+  });
+
+  it('comes back from the first record when the page finds a change left out, telling so in the log', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const heard: ClientFrame[] = [];
+    const port = await lyingRelay(
+      [
+        encodeRelayFrame(WELCOME),
+        encodeRelayFrame({ type: 'record', seq: 4, record: sealedUpdate(EDIT_KEYS, 1) }),
+      ],
+      TEST_CERTIFICATE,
+      heard,
+    );
+    const member = joinRelay(port, VIEW_KEYS);
+    await until(() => member.kinds().includes('delivery'));
+    expect(member.session.send({ kind: 'catchUpAgain' })).toEqual({ ok: true, value: undefined });
+    await until(() => heard.length >= 2);
+    expect([
+      heard.slice(0, 2).map((frame) => (frame.type === 'hello' ? frame.since : null)),
+      member.kinds().includes('reconnecting'),
+      warn.mock.calls,
+    ]).toEqual([
+      [0, 0],
+      true,
+      [
+        [
+          `The relay ${LOOPBACK}:${String(port)} left out a change, so the plan is read from its start.`,
+        ],
+      ],
+    ]);
+  });
+
+  it('keeps a request to come back from the first record made while the connection is lost, as the page cannot know that it just dropped', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const heard: ClientFrame[] = [];
+    const frames = [
+      encodeRelayFrame(WELCOME),
+      encodeRelayFrame({ type: 'record', seq: 4, record: sealedUpdate(EDIT_KEYS, 1) }),
+    ];
+    const port = await lyingRelay(frames, TEST_CERTIFICATE, heard, [], (socket) => {
+      frames.length = 0;
+      socket.close();
+    });
+    const member = joinRelay(port, VIEW_KEYS);
+    await until(() => member.kinds().includes('reconnecting'));
+    expect(member.session.send({ kind: 'catchUpAgain' })).toEqual({ ok: true, value: undefined });
+    await until(() => {
+      const last = heard.at(-1);
+      return last?.type === 'hello' && last.since === 0;
+    });
+    expect(member.kinds().includes('ended')).toBe(false);
+  });
+
+  it('heals a plan through a change the relay left out, the member asking and the connection reading it all again', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const author = sessionOn(GAP_PLAN, GAP_AUTHOR);
+    const [first, second] = [renamedUpdate(author, 'One', 1), renamedUpdate(author, 'Two', 2)];
+    const caughtUp = encodeRelayFrame({ type: 'caughtUp' });
+    const frames = [
+      encodeRelayFrame(WELCOME),
+      encodeRelayFrame({ type: 'record', seq: 2, record: second }),
+      caughtUp,
+    ];
+    const port = await lyingRelay(frames, TEST_CERTIFICATE, [], [], () => {
+      frames.splice(
+        0,
+        frames.length,
+        encodeRelayFrame(WELCOME),
+        encodeRelayFrame({ type: 'record', seq: 1, record: first }),
+        encodeRelayFrame({ type: 'record', seq: 2, record: second }),
+        caughtUp,
+      );
+    });
+    const reader = sessionOn(GAP_PLAN, GAP_READER);
+    const member = joinThroughRelay({
+      port,
+      session: reader,
+      keys: VIEW_KEYS,
+      creates: false,
+    });
+    sessions.push(member.connection);
+    await until(() => reader.project().tasks[0]?.name === 'Two');
+    await until(() => member.problems.includes('reconnecting'));
+    expect(member.problems).toEqual(['reconnecting']);
+  });
+
+  it('forgets the messages it was assembling when it comes back from the first record, or the same limit would stop it again', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const heard: ClientFrame[] = [];
+    const frames = [
+      encodeRelayFrame(WELCOME),
+      ...Array.from({ length: MAX_OPEN_RELAY_MESSAGES + 1 }, (_unused, index) =>
+        encodeRelayFrame({ type: 'record', seq: index + 1, record: firstOfTwoChunks(index + 1) }),
+      ),
+    ];
+    const port = await lyingRelay(frames, TEST_CERTIFICATE, heard, [], () => {
+      frames.splice(
+        0,
+        frames.length,
+        encodeRelayFrame(WELCOME),
+        encodeRelayFrame({ type: 'record', seq: 1, record: sealedUpdate(EDIT_KEYS, 1) }),
+      );
+    });
+    const member = joinRelay(port, VIEW_KEYS);
+    await until(() => member.kinds().includes('delivery'));
+    expect(heard.map((frame) => (frame.type === 'hello' ? frame.since : null))).toEqual([0, 0]);
+  });
+
+  it('asks nothing of a relay it left', async () => {
+    const relay = await startedRelay();
+    const editor = joinRelay(relay.port, EDIT_KEYS, { creates: true });
+    await until(() => editor.kinds().includes('caughtUp'));
+    editor.session.close();
+    expect(editor.session.send({ kind: 'catchUpAgain' })).toEqual({
+      ok: false,
+      error: 'NOT_OPEN',
+    });
+  });
+
+  it('asks nothing of a relay it is not in', async () => {
+    const relay = await startedRelay();
+    const editor = joinRelay(relay.port, EDIT_KEYS, { creates: true });
+    expect(editor.session.send({ kind: 'catchUpAgain' })).toEqual({
+      ok: false,
+      error: 'NOT_OPEN',
+    });
   });
 
   it('comes back from the first record once it had to drop a record for want of room, so that no change is lost for good', async () => {

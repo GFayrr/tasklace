@@ -6,7 +6,7 @@ Thank you for your interest in Tasklace. The project is at an early stage and is
 
 Open a [bug report](https://github.com/GFayrr/tasklace/issues/new/choose) and fill in the form. The most useful reports say what you did, what you expected and what happened instead, with the commit or version and the operating system.
 
-Tasklace writes its errors to a log file: on Windows, `%APPDATA%\Tasklace\logs\tasklace.log`. Adding the lines from around the problem helps a lot. Read them first: they may name your files or plans.
+Tasklace writes its errors to a log file: `~/.config/Tasklace/logs/tasklace.log` on Linux, `%APPDATA%\Tasklace\logs\tasklace.log` on Windows. Adding the lines from around the problem helps a lot. Read them first: they may name your files or plans.
 
 Never paste a relay link: the part after `#` holds the keys of a plan.
 
@@ -29,7 +29,7 @@ npm install
 npm run dev
 ```
 
-The [README](README.md#development) lists every command. Before sharing a change, these must pass:
+The [README](README.md#development) lists the commands. Before sharing a change, these must pass:
 
 ```sh
 npm run lint

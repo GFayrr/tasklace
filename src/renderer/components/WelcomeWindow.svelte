@@ -6,6 +6,7 @@
   let associate = $state(true);
   let checkForNewVersions = $state(true);
   let finishing = $state(false);
+  const opensFiles = $derived(app.setup.association?.kind !== 'unavailable');
   let notOpened = $state(false);
 
   /** Opens the window as a modal dialog while the welcome window asks its choices, and closes it otherwise. */
@@ -20,10 +21,10 @@
     });
   }
 
-  /** Gives the two choices to the application, which closes the window. */
+  /** Gives the choices to the application, which closes the window. */
   async function finish(): Promise<void> {
     finishing = true;
-    await app.finishWelcome({ associate, checkForNewVersions });
+    await app.finishWelcome({ associate: associate && opensFiles, checkForNewVersions });
     finishing = false;
   }
 
@@ -42,23 +43,25 @@
   }}
 >
   <h2 id="welcome-window-title">{text.welcomeTitle}</h2>
-  <p class="hint">{text.welcomeIntro}</p>
-  <section class="part">
-    <div class="row">
-      <h3 id="welcome-associate-title">{text.associateSwitch}</h3>
-      <button
-        type="button"
-        class="switch"
-        role="switch"
-        aria-checked={associate}
-        aria-labelledby="welcome-associate-title"
-        onclick={() => {
-          associate = !associate;
-        }}
-      ></button>
-    </div>
-    <p class="hint">{text.associateHint}</p>
-  </section>
+  <p class="hint">{opensFiles ? text.welcomeIntro : text.welcomeIntroOneChoice}</p>
+  {#if opensFiles}
+    <section class="part">
+      <div class="row">
+        <h3 id="welcome-associate-title">{text.associateSwitch}</h3>
+        <button
+          type="button"
+          class="switch"
+          role="switch"
+          aria-checked={associate}
+          aria-labelledby="welcome-associate-title"
+          onclick={() => {
+            associate = !associate;
+          }}
+        ></button>
+      </div>
+      <p class="hint">{text.associateHint}</p>
+    </section>
+  {/if}
   <section class="part">
     <div class="row">
       <h3 id="welcome-check-title">{app.messages.tasklace.checkSwitch}</h3>

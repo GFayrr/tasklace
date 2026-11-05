@@ -1,10 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { access, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from '@playwright/test';
+import { connectToWindow, freePort, watchEnding } from './connection';
+import { isPackageInstalled, refuseMissingPackage } from './linux-checks';
 import { skipUnlessRequired } from './windows-checks';
 import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
 import { createSharedDocument, requireDocumentId } from '../../src/core/shared/shared-document';
@@ -12,9 +13,7 @@ import { project, workTask } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 
 const EXECUTABLE = process.env['TASKLACE_PACKAGED_APP'] ?? '';
-const LINUX_ARGUMENTS = process.platform === 'linux' ? ['--no-sandbox'] : [];
-const CONNECT_ATTEMPTS = 60;
-const CONNECT_STEP_MS = 500;
+const LINUX_ARGUMENTS = process.platform === 'linux' && !isPackageInstalled ? ['--no-sandbox'] : [];
 const RUN_AS_NODE_WAIT_MS = 10_000;
 const REMOVAL_RETRIES = 10;
 const REMOVAL_RETRY_STEP_MS = 200;
@@ -43,6 +42,7 @@ test.beforeAll(() => {
   if (EXECUTABLE === '') {
     throw new Error('TASKLACE_PACKAGED_APP must give the path of the packaged executable.');
   }
+  refuseMissingPackage();
 });
 
 test.beforeEach(async () => {
@@ -71,22 +71,6 @@ test.afterEach(async () => {
   });
 });
 
-/** Finds a free port on this computer for the debugging connection. */
-async function freePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  await new Promise<void>((resolve) => {
-    server.close(() => {
-      resolve();
-    });
-  });
-  if (address === null || typeof address === 'string') {
-    throw new Error('No port could be found for the debugging connection.');
-  }
-  return address.port;
-}
-
 /** Starts the packaged executable with its own user data folder, or the folder Windows gives it, and connects to its window through the debugging port of Chromium, since its fuses refuse the Node inspector that Playwright uses for Electron. */
 async function start(
   options: { readonly ownFolder?: boolean; readonly env?: NodeJS.ProcessEnv } = {},
@@ -96,22 +80,16 @@ async function start(
   const child = spawn(
     EXECUTABLE,
     [...LINUX_ARGUMENTS, ...folder, `--remote-debugging-port=${String(port)}`],
-    { stdio: 'ignore', env: { ...process.env, ...options.env } },
+    { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, ...options.env } },
   );
-  for (let attempt = 0; attempt < CONNECT_ATTEMPTS; attempt += 1) {
-    const browser = await chromium
-      .connectOverCDP(`http://127.0.0.1:${String(port)}`)
-      .catch(() => null);
-    const page = browser?.contexts()[0]?.pages()[0];
-    if (browser !== null && page !== undefined) {
-      running = { child, browser, page };
-      return running;
-    }
-    await browser?.close();
-    await delay(CONNECT_STEP_MS);
+  const ending = watchEnding(child);
+  const connected = await connectToWindow(port, child);
+  if (connected === null) {
+    await stopProcessTree(child);
+    throw new Error(`The packaged application did not open its window. ${ending()}`);
   }
-  await stopProcessTree(child);
-  throw new Error('The packaged application did not open its window.');
+  running = { child, ...connected };
+  return running;
 }
 
 /** Counts the local copies of projects the application wrote, none while its folder does not exist yet. */
