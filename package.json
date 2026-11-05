@@ -56,7 +56,7 @@
     "@noble/hashes": "2.4.0",
     "bonjour-service": "1.4.4",
     "pdfkit": "0.20.2",
-    "ws": "8.22.0",
+    "ws": "8.22.1",
     "yjs": "13.6.33"
   },
   "main": "out/main/index.js"
