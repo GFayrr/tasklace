@@ -247,7 +247,7 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
       loading.delete(name);
     }
   };
-  /** Writes the file of a new room and keeps the room in memory, forgetting its name when the file cannot be written. */
+  /** Takes the place of a new room before anything can come between, writes its file and keeps the room in memory, giving the place back when the file cannot be written. */
   const writeNewRoom = async (
     name: string,
     roomId: Uint8Array,
@@ -255,6 +255,8 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
     verify: Verifier,
   ): Promise<LoadedRoom> => {
     const file = fileOf(name);
+    known.set(name, { bytes: ROOM_HEADER_BYTES, touchedAt: now() });
+    storedBytes += ROOM_HEADER_BYTES;
     try {
       await writeNewFile(file, encodeRoomHeader(verifyKey));
     } catch (error) {
@@ -395,8 +397,6 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
       if (storedBytes + ROOM_HEADER_BYTES > limits.maxStoredBytes) {
         return 'RELAY_FULL';
       }
-      known.set(name, { bytes: ROOM_HEADER_BYTES, touchedAt: now() });
-      storedBytes += ROOM_HEADER_BYTES;
       const creating = writeNewRoom(name, roomId, verifyKey, verify);
       loading.set(
         name,
