@@ -1,7 +1,7 @@
 # How electron-builder packs Tasklace: for Linux a .deb package, which keeps the sandbox of Chromium on Ubuntu 24 and
 # later through its AppArmor profile, and for Windows a portable executable and an installer for the current user, or
 # for everyone when an administrator chooses so.
-# Everything is built by continuous integration only, the Windows executables on Windows; nothing is signed.
+# Releases are built by continuous integration only, the Windows executables on Windows; nothing is signed.
 appId: io.github.gfayrr.tasklace
 productName: Tasklace
 copyright: © Fayr
@@ -77,6 +77,7 @@ deb:
   artifactName: Tasklace-${version}-amd64.${ext}
   depends:
     - libasound2
+    - libgbm1
     - libgtk-3-0
     - libnotify4
     - libnss3

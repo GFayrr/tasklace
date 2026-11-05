@@ -88,7 +88,7 @@ describe('releaseNotes', () => {
         '- `Tasklace-0.1.0-setup.exe` installs Tasklace on Windows for your account, without administrator rights.',
         '- `SHA256SUMS.txt` gives the fingerprint of each file, to check with `sha256sum --check --ignore-missing SHA256SUMS.txt` on Linux or to compare with `Get-FileHash <file> -Algorithm SHA256` on Windows.',
         '',
-        'The Windows files are not signed: Windows warns before running it, and does not run it at all while Smart App Control is on. The [code signing policy](https://github.com/GFayrr/tasklace#code-signing-policy) tells why and what comes next.',
+        'The Windows files are not signed: Windows warns before running them, and does not run them at all while Smart App Control is on. The [code signing policy](https://github.com/GFayrr/tasklace#code-signing-policy) tells why and what comes next.',
         '',
       ].join('\n'),
     );

@@ -127,7 +127,7 @@ jobs:
 
   linux-package:
     timeout-minutes: 30
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -137,6 +137,12 @@ jobs:
       - run: npm ci
       - name: Build the package
         run: npm run dist:linux
+      - name: Check that the other systems it is made for find all it depends on
+        run: |
+          for image in debian:12 debian:13 ubuntu:22.04 ubuntu:26.04; do
+            docker run --rm --volume "$PWD/dist:/package:ro" "$image" \
+              sh -c 'apt-get update -qq && apt-get install --simulate --yes /package/Tasklace-*-amd64.deb'
+          done
       - name: Install the package as a person would
         run: |
           sudo apt-get update
@@ -146,12 +152,23 @@ jobs:
         env:
           TASKLACE_PACKAGED_APP: /opt/Tasklace/tasklace
           TASKLACE_INSTALLED_PACKAGE: '1'
-      - name: Uninstall the package and check that nothing stays
+      - name: Uninstall the package and check that no file of it stays
         run: |
+          test -e /etc/apparmor.d/tasklace
+          test -e /usr/bin/tasklace
+          dpkg --listfiles tasklace > installed-files
+          grep --quiet '^/usr/share/applications/tasklace.desktop$' installed-files
           sudo apt-get remove --yes tasklace
+          while read -r path; do
+            if [ -f "$path" ]; then
+              echo "$path stayed"
+              exit 1
+            fi
+          done < installed-files
           test ! -e /opt/Tasklace
           test ! -e /etc/apparmor.d/tasklace
           test ! -e /usr/bin/tasklace
+          ! gio mime x-scheme-handler/tasklace | grep --quiet tasklace.desktop
       - name: Keep the package for a week
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

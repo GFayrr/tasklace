@@ -229,7 +229,7 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
     room.floor = whole.floor;
     return room;
   };
-  /** Gives the room already in memory, or loads it once however many members ask at the same time. */
+  /** Gives the room already in memory, or waits for the one being created, or loads it once however many members ask at the same time. */
   const loadOnce = async (name: string, roomId: Uint8Array): Promise<LoadedRoom | null> => {
     const ready = loaded.get(name);
     if (ready !== undefined) {
@@ -247,7 +247,7 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
       loading.delete(name);
     }
   };
-  /** Writes the file of a new room and keeps the room in memory, forgetting its name when the file cannot be written. */
+  /** Takes the place of a new room before anything can come between, writes its file and keeps the room in memory, giving the place back when the file cannot be written. */
   const writeNewRoom = async (
     name: string,
     roomId: Uint8Array,
@@ -255,6 +255,8 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
     verify: Verifier,
   ): Promise<LoadedRoom> => {
     const file = fileOf(name);
+    known.set(name, { bytes: ROOM_HEADER_BYTES, touchedAt: now() });
+    storedBytes += ROOM_HEADER_BYTES;
     try {
       await writeNewFile(file, encodeRoomHeader(verifyKey));
     } catch (error) {
@@ -395,8 +397,6 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
       if (storedBytes + ROOM_HEADER_BYTES > limits.maxStoredBytes) {
         return 'RELAY_FULL';
       }
-      known.set(name, { bytes: ROOM_HEADER_BYTES, touchedAt: now() });
-      storedBytes += ROOM_HEADER_BYTES;
       const creating = writeNewRoom(name, roomId, verifyKey, verify);
       loading.set(
         name,
@@ -677,13 +677,25 @@ async function cutShort(
   await truncate(file, validBytes);
 }
 
-/** Writes the file of a new room, failing if one is already there. */
+/** Removes the file of a new room that could not be written, logging a failure so that it never hides the failure of the write. */
+async function removeUnwrittenFile(file: string): Promise<void> {
+  await rm(file, { force: true }).catch((error: unknown) => {
+    console.error(`The room file ${file} could not be written or removed:`, error);
+  });
+}
+
+/** Writes the file of a new room, failing if one is already there and leaving nothing behind when it cannot be written. */
 async function writeNewFile(file: string, bytes: Uint8Array): Promise<void> {
   const handle = await open(file, 'wx');
+  let isWritten = false;
   try {
     await handle.write(bytes);
+    isWritten = true;
   } finally {
     await handle.close();
+    if (!isWritten) {
+      await removeUnwrittenFile(file);
+    }
   }
 }
 

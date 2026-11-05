@@ -29,7 +29,7 @@ npm install
 npm run dev
 ```
 
-The [README](README.md#development) lists every command. Before sharing a change, these must pass:
+The [README](README.md#development) lists the commands. Before sharing a change, these must pass:
 
 ```sh
 npm run lint

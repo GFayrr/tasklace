@@ -21,7 +21,7 @@
     });
   }
 
-  /** Gives the two choices to the application, which closes the window. */
+  /** Gives the choices to the application, which closes the window. */
   async function finish(): Promise<void> {
     finishing = true;
     await app.finishWelcome({ associate: associate && opensFiles, checkForNewVersions });
@@ -43,7 +43,7 @@
   }}
 >
   <h2 id="welcome-window-title">{text.welcomeTitle}</h2>
-  <p class="hint">{text.welcomeIntro}</p>
+  <p class="hint">{opensFiles ? text.welcomeIntro : text.welcomeIntroOneChoice}</p>
   {#if opensFiles}
     <section class="part">
       <div class="row">

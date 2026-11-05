@@ -12,7 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- A member of a plan shared through a relay that left a change out now reads the plan again, and is told when its plan may differ from the plan of the others.
+- A member of a plan shared through a relay who misses a change now reads the plan again from its start, and is told if its plan may still differ from the plan of the others.
+- A relay no longer gives two messages the same number, or loses the first one for newcomers, when a member joins a room still being created.
 
 ## [0.1.0] - 2026-11-01
 

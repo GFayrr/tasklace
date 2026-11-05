@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { once } from 'node:events';
+import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -11,11 +12,32 @@ import { createSharedDocument, requireDocumentId } from '../../src/core/shared/s
 import { project, workTask } from '../../src/core/testing/project-builder';
 import { seededRandom } from '../../src/core/testing/test-crypto';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
-import { connectToWindow, freePort } from './connection';
+import { connectToWindow, freePort, watchEnding } from './connection';
+import { skipUnlessInstalled } from './linux-checks';
 
 const EXECUTABLE = process.env['TASKLACE_PACKAGED_APP'] ?? '';
 const DESKTOP_FILE = '/usr/share/applications/tasklace.desktop';
 const DESKTOP_NAME = 'tasklace.desktop';
+const LARGEST_ICON = '/usr/share/icons/hicolor/512x512/apps/tasklace.png';
+const SYSTEM_CALL_FILTER = 'Seccomp:\t2';
+const NO_NEW_PRIVILEGES = 'NoNewPrivs:\t1';
+const OWN_PROCESS_NAMESPACE = /^NSpid:\t\d+(\t\d+)+$/;
+const REMOVAL_RETRIES = 8;
+const REMOVAL_RETRY_STEP_MS = 256;
+const PACKAGE_DEPENDENCIES = [
+  'libasound2',
+  'libgbm1',
+  'libgtk-3-0',
+  'libnotify4',
+  'libnss3',
+  'libxss1',
+  'libxtst6',
+  'xdg-utils',
+  'libatspi2.0-0',
+  'libuuid1',
+  'libsecret-1-0',
+  'desktop-file-utils',
+];
 const RELAY_LINK_SEED = 11;
 const LINK = encodeRelayLink({
   address: { host: 'relay.school.example', port: null, path: '/' },
@@ -33,10 +55,7 @@ let configFolder = '';
 let running: Running | null = null;
 
 test.beforeEach(async () => {
-  test.skip(
-    process.env['TASKLACE_INSTALLED_PACKAGE'] !== '1',
-    'Only a computer with the package installed runs this test.',
-  );
+  skipUnlessInstalled();
   configFolder = await mkdtemp(join(tmpdir(), 'tasklace-package-'));
   const userData = join(configFolder, 'Tasklace');
   await mkdir(userData);
@@ -53,14 +72,28 @@ test.beforeEach(async () => {
 test.afterEach(async () => {
   if (running !== null) {
     await running.browser.close().catch(() => undefined);
-    running.child.kill('SIGKILL');
+    await stopProcess(running.child);
     running = null;
   }
   if (configFolder !== '') {
-    await rm(configFolder, { recursive: true, force: true });
+    await rm(configFolder, {
+      recursive: true,
+      force: true,
+      maxRetries: REMOVAL_RETRIES,
+      retryDelay: REMOVAL_RETRY_STEP_MS,
+    });
     configFolder = '';
   }
 });
+
+/** Stops a process and waits until it has ended, so that it no longer holds its folders. */
+async function stopProcess(child: ChildProcess): Promise<void> {
+  const ended = child.exitCode !== null || child.signalCode !== null;
+  child.kill('SIGKILL');
+  if (!ended) {
+    await once(child, 'exit');
+  }
+}
 
 /** Gives the environment in which the application and the desktop tools share one folder of settings, which the single instance of the application goes by. */
 function sharedEnvironment(): NodeJS.ProcessEnv {
@@ -71,13 +104,14 @@ function sharedEnvironment(): NodeJS.ProcessEnv {
 async function start(): Promise<Page> {
   const port = await freePort();
   const child = spawn(EXECUTABLE, [`--remote-debugging-port=${String(port)}`], {
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
     env: sharedEnvironment(),
   });
-  const connected = await connectToWindow(port);
+  const ending = watchEnding(child);
+  const connected = await connectToWindow(port, child);
   if (connected === null) {
-    child.kill('SIGKILL');
-    throw new Error('The installed application did not open its window.');
+    await stopProcess(child);
+    throw new Error(`The installed application did not open its window. ${ending()}`);
   }
   running = { child, ...connected };
   await expect(connected.page.locator('#app')).toHaveAttribute('data-started', 'true');
@@ -98,10 +132,72 @@ async function openOnDesktop(value: string): Promise<void> {
   await run('gio', ['open', value], { env: sharedEnvironment() });
 }
 
+/** Gives the arguments of every process of the application, by process number, Chromium writing those of its children as one text. */
+async function applicationProcesses(): Promise<readonly (readonly [string, string[]])[]> {
+  const numbers = (await readdir('/proc')).filter((name) => /^\d+$/.test(name));
+  const processes = await Promise.all(
+    numbers.map(async (pid) => {
+      const line = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');
+      return [pid, line.replaceAll('\0', ' ').trimEnd().split(' ')] as const;
+    }),
+  );
+  return processes.filter(([, words]) => words[0] === EXECUTABLE);
+}
+
+test('asks for every library the application needs and shows up valid on the desktop', async () => {
+  const { stdout: depends } = await run('dpkg-query', [
+    '--show',
+    '--showformat=${Depends}',
+    'tasklace',
+  ]);
+  expect(depends.split(', ')).toEqual(PACKAGE_DEPENDENCIES);
+  await run('desktop-file-validate', [DESKTOP_FILE]);
+  await access(LARGEST_ICON);
+});
+
+test('runs every page in the sandbox of Chromium, under the AppArmor profile of the package', async () => {
+  const page = await start();
+  await expect(page.locator('#app')).toHaveAttribute('data-started', 'true');
+  const processes = await applicationProcesses();
+  expect(processes.filter(([, words]) => words.includes('--no-sandbox'))).toEqual([]);
+  const renderers = processes.filter(([, words]) => words.includes('--type=renderer'));
+  expect(renderers).not.toEqual([]);
+  for (const [pid] of renderers) {
+    const status = (await readFile(`/proc/${pid}/status`, 'utf8')).split('\n');
+    expect(status).toEqual(expect.arrayContaining([SYSTEM_CALL_FILTER, NO_NEW_PRIVILEGES]));
+    expect(status.find((line) => line.startsWith('NSpid:'))).toMatch(OWN_PROCESS_NAMESPACE);
+  }
+  const pid = String(running?.child.pid);
+  const profile = await readFile(`/proc/${pid}/attr/current`, 'utf8');
+  expect(profile.replace(/[\0\n]+$/, '')).toBe('tasklace (unconfined)');
+});
+
+test('asks only about new versions on a first launch, the package opening files on its own', async () => {
+  const userData = join(configFolder, 'Tasklace');
+  await rm(join(userData, 'setup.json'));
+  await rm(join(userData, 'update-check.json'));
+  const page = await start();
+  const welcome = page.getByRole('dialog', { name: 'Welcome to Tasklace' });
+  await expect(welcome.getByText('One choice for this computer.', { exact: false })).toBeVisible();
+  await expect(welcome.getByRole('switch')).toHaveCount(1);
+  await welcome.getByRole('switch').click();
+  await welcome.getByRole('button', { name: 'Continue' }).click();
+  await expect(welcome).toBeHidden();
+  const settings: unknown = JSON.parse(await readFile(join(userData, 'update-check.json'), 'utf8'));
+  expect(settings).toMatchObject({ settings: { checkForNewVersions: false } });
+});
+
 test('declares its files and links to the desktop, keeping the separator before what it is given', async () => {
   const entry = await readFile(DESKTOP_FILE, 'utf8');
-  expect(entry.split('\n').filter((line) => /^(Exec|MimeType|Categories)=/.test(line))).toEqual([
+  expect(
+    entry
+      .split('\n')
+      .filter((line) => /^(Name|Exec|Icon|StartupWMClass|MimeType|Categories)=/.test(line)),
+  ).toEqual([
+    'Name=Tasklace',
     'Exec=/opt/Tasklace/tasklace -- %U',
+    'Icon=tasklace',
+    'StartupWMClass=tasklace',
     'MimeType=x-scheme-handler/tasklace;application/x-tasklace;',
     'Categories=Office;',
   ]);

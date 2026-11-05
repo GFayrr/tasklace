@@ -103,10 +103,11 @@ async function runToSuccess(program: string, args: readonly string[]): Promise<v
 
 /** Stops the application with its child processes and waits until it is gone, which is what counts since taskkill also fails on a child already ending. */
 async function stopApplication(application: ChildProcess): Promise<void> {
-  await run('taskkill', ['/pid', String(application.pid), '/t', '/f']);
+  const { code, errors } = await run('taskkill', ['/pid', String(application.pid), '/t', '/f']);
   await expect
     .poll(() => application.exitCode !== null || application.signalCode !== null, {
       timeout: INSTALL_WAIT_MS,
+      message: `The application is still running; taskkill ended with ${String(code)}: ${errors}`,
     })
     .toBe(true);
 }

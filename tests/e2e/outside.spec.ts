@@ -100,6 +100,19 @@ test('opens a project file double-clicked on a Linux desktop, which passes it as
   await expect(projectName()).toHaveValue('Mes plans 2');
 });
 
+test('opens a project file a Linux desktop starts Tasklace with, passed as an address', async () => {
+  await launch(['--', pathToFileURL(await writeProject('Mes plans 3')).href]);
+  await expect(projectName()).toHaveValue('Mes plans 3');
+});
+
+test('opens the last of the files a Linux desktop passes at once and tells about the others', async () => {
+  await launch(['--', await writeProject('Beta'), await writeProject('Gamma')]);
+  await expect(projectName()).toHaveValue('Gamma');
+  await expect(
+    page.getByText('Tasklace opens one plan at a time, so 1 other file was not opened.'),
+  ).toBeVisible();
+});
+
 test('fills the join window with a link clicked while Tasklace runs, joining nothing, then opens a file double-clicked', async () => {
   await launch();
   await launchAgainWith(LINK);

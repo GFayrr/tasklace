@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import { connectToWindow, freePort } from './connection';
+import { connectToWindow, freePort, watchEnding } from './connection';
+import { isPackageInstalled, refuseMissingPackage } from './linux-checks';
 import { skipUnlessRequired } from './windows-checks';
 import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
 import { createSharedDocument, requireDocumentId } from '../../src/core/shared/shared-document';
@@ -12,8 +13,7 @@ import { project, workTask } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 
 const EXECUTABLE = process.env['TASKLACE_PACKAGED_APP'] ?? '';
-const INSTALLED_PACKAGE = process.env['TASKLACE_INSTALLED_PACKAGE'] === '1';
-const LINUX_ARGUMENTS = process.platform === 'linux' && !INSTALLED_PACKAGE ? ['--no-sandbox'] : [];
+const LINUX_ARGUMENTS = process.platform === 'linux' && !isPackageInstalled ? ['--no-sandbox'] : [];
 const RUN_AS_NODE_WAIT_MS = 10_000;
 const REMOVAL_RETRIES = 10;
 const REMOVAL_RETRY_STEP_MS = 200;
@@ -42,6 +42,7 @@ test.beforeAll(() => {
   if (EXECUTABLE === '') {
     throw new Error('TASKLACE_PACKAGED_APP must give the path of the packaged executable.');
   }
+  refuseMissingPackage();
 });
 
 test.beforeEach(async () => {
@@ -79,12 +80,13 @@ async function start(
   const child = spawn(
     EXECUTABLE,
     [...LINUX_ARGUMENTS, ...folder, `--remote-debugging-port=${String(port)}`],
-    { stdio: 'ignore', env: { ...process.env, ...options.env } },
+    { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, ...options.env } },
   );
-  const connected = await connectToWindow(port);
+  const ending = watchEnding(child);
+  const connected = await connectToWindow(port, child);
   if (connected === null) {
     await stopProcessTree(child);
-    throw new Error('The packaged application did not open its window.');
+    throw new Error(`The packaged application did not open its window. ${ending()}`);
   }
   running = { child, ...connected };
   return running;
