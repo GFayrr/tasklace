@@ -19,8 +19,9 @@ const EXECUTABLE = process.env['TASKLACE_PACKAGED_APP'] ?? '';
 const DESKTOP_FILE = '/usr/share/applications/tasklace.desktop';
 const DESKTOP_NAME = 'tasklace.desktop';
 const LARGEST_ICON = '/usr/share/icons/hicolor/512x512/apps/tasklace.png';
-const SANDBOXED_FILTER = 'Seccomp:\t2';
+const SYSTEM_CALL_FILTER = 'Seccomp:\t2';
 const NO_NEW_PRIVILEGES = 'NoNewPrivs:\t1';
+const OWN_PROCESS_NAMESPACE = /^NSpid:\t\d+(\t\d+)+$/;
 const REMOVAL_RETRIES = 8;
 const REMOVAL_RETRY_STEP_MS = 256;
 const PACKAGE_DEPENDENCIES = [
@@ -131,13 +132,13 @@ async function openOnDesktop(value: string): Promise<void> {
   await run('gio', ['open', value], { env: sharedEnvironment() });
 }
 
-/** Gives the arguments of every process of the application, by process number. */
+/** Gives the arguments of every process of the application, by process number, Chromium writing those of its children as one text. */
 async function applicationProcesses(): Promise<readonly (readonly [string, string[]])[]> {
   const numbers = (await readdir('/proc')).filter((name) => /^\d+$/.test(name));
   const processes = await Promise.all(
     numbers.map(async (pid) => {
       const line = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');
-      return [pid, line.split('\0')] as const;
+      return [pid, line.replaceAll('\0', ' ').trimEnd().split(' ')] as const;
     }),
   );
   return processes.filter(([, words]) => words[0] === EXECUTABLE);
@@ -163,7 +164,8 @@ test('runs every page in the sandbox of Chromium, under the AppArmor profile of 
   expect(renderers).not.toEqual([]);
   for (const [pid] of renderers) {
     const status = (await readFile(`/proc/${pid}/status`, 'utf8')).split('\n');
-    expect(status).toEqual(expect.arrayContaining([SANDBOXED_FILTER, NO_NEW_PRIVILEGES]));
+    expect(status).toEqual(expect.arrayContaining([SYSTEM_CALL_FILTER, NO_NEW_PRIVILEGES]));
+    expect(status.find((line) => line.startsWith('NSpid:'))).toMatch(OWN_PROCESS_NAMESPACE);
   }
   const pid = String(running?.child.pid);
   const profile = await readFile(`/proc/${pid}/attr/current`, 'utf8');

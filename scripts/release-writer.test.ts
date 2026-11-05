@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -45,6 +45,11 @@ describe('writeReleaseFiles', () => {
       '- A change.',
     );
     expect(await readFile(output, 'utf8')).toBe('prerelease=true\n');
+  });
+
+  it('writes no output when continuous integration gives no file for it', async () => {
+    expect(await writeReleaseFiles(root, `v${VERSION}`, undefined)).toBe(VERSION);
+    expect((await readdir(root)).sort()).toEqual(['CHANGELOG.md', 'dist', 'package.json']);
   });
 
   it.skipIf(process.platform === 'win32')(
