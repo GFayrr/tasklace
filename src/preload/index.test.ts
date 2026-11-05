@@ -402,7 +402,8 @@ describe('the shared plan through the bridge', () => {
     };
     for (const value of [
       null,
-      { kind: 'file', id: 4 },
+      { kind: 'file', id: 4, unopened: 0 },
+      { kind: 'file', id: 4, unopened: 2 },
       { kind: 'link', link },
       { kind: 'link', link: longest },
       { kind: 'unreadable', what: 'link' },
@@ -416,7 +417,10 @@ describe('the shared plan through the bridge', () => {
       { kind: 'link', link: `${longest}a` },
       { kind: 'link' },
       { kind: 'file' },
-      { kind: 'file', id: 1.5 },
+      { kind: 'file', id: 1.5, unopened: 0 },
+      { kind: 'file', id: 1 },
+      { kind: 'file', id: 1, unopened: -1 },
+      { kind: 'file', id: 1, unopened: 0.5 },
       { kind: 'unreadable', what: 'folder' },
       { kind: 'folder' },
     ];

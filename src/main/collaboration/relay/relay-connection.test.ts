@@ -225,6 +225,7 @@ async function lyingRelay(
   certificate = TEST_CERTIFICATE,
   heard: ClientFrame[] = [],
   closings: number[] = [],
+  afterFrames: (socket: WebSocket) => void = () => undefined,
 ): Promise<number> {
   const port = await freePort();
   const server = createHttpsServer({ cert: certificate.certificate, key: certificate.key });
@@ -240,6 +241,7 @@ async function lyingRelay(
       frames.forEach((frame) => {
         socket.send(frame);
       });
+      afterFrames(socket);
     });
   });
   await new Promise((resolve) =>
@@ -524,6 +526,38 @@ describe('a session with a relay that lies', () => {
       member.kinds().includes('reconnecting'),
       warn.mock.calls.filter(([message]) => String(message).includes('left out')).length,
     ]).toEqual([[0, 0], true, 1]);
+  });
+
+  it('keeps a request to come back from the first record made while the connection is lost, as the page cannot know that it just dropped', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const heard: ClientFrame[] = [];
+    const frames = [
+      encodeRelayFrame(WELCOME),
+      encodeRelayFrame({ type: 'record', seq: 4, record: sealedUpdate(EDIT_KEYS, 1) }),
+    ];
+    const port = await lyingRelay(frames, TEST_CERTIFICATE, heard, [], (socket) => {
+      frames.length = 0;
+      socket.close();
+    });
+    const member = joinRelay(port, VIEW_KEYS);
+    await until(() => member.kinds().includes('reconnecting'));
+    expect(member.session.send({ kind: 'catchUpAgain' })).toEqual({ ok: true, value: undefined });
+    await until(() => {
+      const last = heard.at(-1);
+      return last?.type === 'hello' && last.since === 0;
+    });
+    expect(member.kinds().includes('ended')).toBe(false);
+  });
+
+  it('asks nothing of a relay it left', async () => {
+    const relay = await startedRelay();
+    const editor = joinRelay(relay.port, EDIT_KEYS, { creates: true });
+    await until(() => editor.kinds().includes('caughtUp'));
+    editor.session.close();
+    expect(editor.session.send({ kind: 'catchUpAgain' })).toEqual({
+      ok: false,
+      error: 'NOT_OPEN',
+    });
   });
 
   it('asks nothing of a relay it is not in', async () => {

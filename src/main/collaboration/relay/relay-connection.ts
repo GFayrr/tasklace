@@ -213,11 +213,13 @@ export function startRelaySession(options: RelaySessionOptions): RelaySession {
       comeBackFromFirstRecord(current);
     }
   };
-  /** Forgets what was received and leaves the room to come back from its first record. */
-  const comeBackFromFirstRecord = (current: WebSocket): void => {
+  /** Forgets what was received and leaves the room, if this window has a connection to it, so that the next connection comes back from the first record. */
+  const comeBackFromFirstRecord = (current: WebSocket | null): void => {
     since = 0;
     assembler = createRelayAssembler(keys, crypto);
-    fail(current, 'UNREACHABLE');
+    if (current !== null) {
+      fail(current, 'UNREACHABLE');
+    }
   };
   /** Acts on a frame the relay sent. */
   const receive = (current: WebSocket, frame: RelayFrame): void => {
@@ -336,13 +338,16 @@ export function startRelaySession(options: RelaySessionOptions): RelaySession {
   connect();
   return {
     send: (outgoing) => {
-      if (!isIn || socket === null) {
-        return failure('NOT_OPEN');
-      }
       if (outgoing.kind === 'catchUpAgain') {
+        if (!wasIn || isStopped) {
+          return failure('NOT_OPEN');
+        }
         console.warn(`The relay ${relay} left out a change, so the plan is read from its start.`);
         comeBackFromFirstRecord(socket);
         return success(undefined);
+      }
+      if (!isIn || socket === null) {
+        return failure('NOT_OPEN');
       }
       if (outgoing.kind === 'presence') {
         const sealed = sealRelayPresence(keys, member, outgoing.bytes, crypto);

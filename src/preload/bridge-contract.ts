@@ -85,7 +85,7 @@ export interface UpdateSettings {
 }
 
 export type OutsideRequest =
-  | { readonly kind: 'file'; readonly id: number }
+  | { readonly kind: 'file'; readonly id: number; readonly unopened: number }
   | { readonly kind: 'link'; readonly link: string }
   | { readonly kind: 'unreadable'; readonly what: 'file' | 'link' };
 

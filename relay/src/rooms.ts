@@ -677,13 +677,25 @@ async function cutShort(
   await truncate(file, validBytes);
 }
 
-/** Writes the file of a new room, failing if one is already there. */
+/** Removes the file of a new room that could not be written, logging a failure so that it never hides the failure of the write. */
+async function removeUnwrittenFile(file: string): Promise<void> {
+  await rm(file, { force: true }).catch((error: unknown) => {
+    console.error(`The room file ${file} could not be written or removed:`, error);
+  });
+}
+
+/** Writes the file of a new room, failing if one is already there and leaving nothing behind when it cannot be written. */
 async function writeNewFile(file: string, bytes: Uint8Array): Promise<void> {
   const handle = await open(file, 'wx');
+  let isWritten = false;
   try {
     await handle.write(bytes);
+    isWritten = true;
   } finally {
     await handle.close();
+    if (!isWritten) {
+      await removeUnwrittenFile(file);
+    }
   }
 }
 

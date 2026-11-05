@@ -63,10 +63,12 @@ describe('readOutsideRequest', () => {
     expect(readOutsideRequest([EXECUTABLE, '--', PROJECT])).toEqual({
       kind: 'file',
       path: PROJECT,
+      unopened: 0,
     });
     expect(readOutsideRequest([EXECUTABLE, '--', '/home/lea/Old.TASKLACE'])).toEqual({
       kind: 'file',
       path: '/home/lea/Old.TASKLACE',
+      unopened: 0,
     });
     expect(readOutsideRequest([EXECUTABLE, '--allow-file-access', '--', LINK])).toEqual({
       kind: 'link',
@@ -79,6 +81,7 @@ describe('readOutsideRequest', () => {
     expect(readOutsideRequest([EXECUTABLE, '--', '/home/léa/Mes plans/Thèse 2.tasklace'])).toEqual({
       kind: 'file',
       path: '/home/léa/Mes plans/Thèse 2.tasklace',
+      unopened: 0,
     });
   });
 
@@ -92,6 +95,7 @@ describe('readOutsideRequest', () => {
       expect(readOutsideRequest([EXECUTABLE, '--', value]), value).toEqual({
         kind: 'file',
         path: SPACED_PROJECT,
+        unopened: 0,
       });
     }
   });
@@ -121,6 +125,12 @@ describe('readOutsideRequest', () => {
       'file://[malformed/Thesis.tasklace',
       'file:///home/lea/..%2F..%2Fetc%2FThesis.tasklace',
       'file:///home/lea/%00.tasklace',
+      'file:///home/l%E9a/Thesis.tasklace',
+      'file:///home/lea/%FF.tasklace',
+      'file:///home/lea/a%ZZ.tasklace',
+      'file:Thesis.tasklace',
+      'file:../Thesis.tasklace',
+      'file:/home/lea/Thesis.tasklace',
     ];
     for (const value of refused) {
       expect(readOutsideRequest([EXECUTABLE, '--', value]), value).toEqual({
@@ -131,6 +141,32 @@ describe('readOutsideRequest', () => {
     expect(warn.mock.calls).toEqual(
       refused.map(() => ['Tasklace was started with a project file whose path it cannot use.']),
     );
+  });
+
+  it('opens the last of the files passed at once, as the Linux desktop passes them, counting the others in the log without their text', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(
+      readOutsideRequest([
+        EXECUTABLE,
+        '--',
+        '/home/lea/One.tasklace',
+        '/home/lea/Two.csv',
+        PROJECT,
+      ]),
+    ).toEqual({ kind: 'file', path: PROJECT, unopened: 2 });
+    expect(warn.mock.calls).toEqual([
+      ['Tasklace was started with 3 files and opens the last one.'],
+    ]);
+  });
+
+  it('counts nothing alongside a file passed without the separator', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(readOutsideRequest([EXECUTABLE, '/home/lea/One.tasklace', PROJECT])).toEqual({
+      kind: 'file',
+      path: PROJECT,
+      unopened: 0,
+    });
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('lets a fault of the program through, which is no bad address', () => {
@@ -181,7 +217,7 @@ describe('createOutsideRequests', () => {
     expect(told).toBe(0);
     expect(await ask(IPC_CHANNELS.takeOutsideRequest)).toEqual({
       ok: true,
-      value: { kind: 'file', id: 1 },
+      value: { kind: 'file', id: 1, unopened: 0 },
     });
     expect(await ask(IPC_CHANNELS.takeOutsideRequest)).toEqual({ ok: true, value: null });
     requests.receive([EXECUTABLE, '--', LINK]);
@@ -210,7 +246,7 @@ describe('createOutsideRequests', () => {
     requests.receive([EXECUTABLE, '--', '/home/lea/Other.tasklace']);
     expect(await ask(IPC_CHANNELS.takeOutsideRequest)).toEqual({
       ok: true,
-      value: { kind: 'file', id: 2 },
+      value: { kind: 'file', id: 2, unopened: 0 },
     });
     expect(requests.takeFile(2)).toBe('/home/lea/Other.tasklace');
     expect(requests.takeFile(1)).toBe(PROJECT);

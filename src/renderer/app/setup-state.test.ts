@@ -215,7 +215,7 @@ describe('AppState and the setup', () => {
   it('opens a project file from outside under its number like a file chosen to open', async () => {
     const { app, control } = await openedAppOf(PLAN);
     await app.setup.load();
-    control.setup.outsideResults = [{ ok: true, value: { kind: 'file', id: 3 } }];
+    control.setup.outsideResults = [{ ok: true, value: { kind: 'file', id: 3, unopened: 0 } }];
     control.setup.outsideFileResult = openedProjectOf(OUTSIDE_PLAN);
     await app.takeOutsideRequest();
     await settle();
@@ -227,11 +227,31 @@ describe('AppState and the setup', () => {
     ]);
   });
 
+  it('tells how many files stayed unopened when several were opened from outside at once', async () => {
+    const { app, control } = await openedAppOf(PLAN);
+    await app.setup.load();
+    control.setup.outsideResults = [{ ok: true, value: { kind: 'file', id: 3, unopened: 1 } }];
+    control.setup.outsideFileResult = openedProjectOf(OUTSIDE_PLAN);
+    await app.takeOutsideRequest();
+    await settle();
+    control.setup.outsideResults = [{ ok: true, value: { kind: 'file', id: 4, unopened: 2 } }];
+    control.setup.outsideFileResult = openedProjectOf(OUTSIDE_PLAN);
+    await app.takeOutsideRequest();
+    await settle();
+    expect([app.project?.name, app.notices.map((notice) => notice.text)]).toEqual([
+      'Report',
+      [
+        'Tasklace opens one plan at a time, so 1 other file was not opened.',
+        'Tasklace opens one plan at a time, so 2 other files were not opened.',
+      ],
+    ]);
+  });
+
   it('takes the requests from outside one after the other, each file under its own number', async () => {
     const { app, control } = await startedApp();
     control.setup.outsideResults = [
-      { ok: true, value: { kind: 'file', id: 1 } },
-      { ok: true, value: { kind: 'file', id: 2 } },
+      { ok: true, value: { kind: 'file', id: 1, unopened: 0 } },
+      { ok: true, value: { kind: 'file', id: 2, unopened: 0 } },
     ];
     control.setup.outsideFileResult = openedProjectOf(OUTSIDE_PLAN);
     await Promise.all([app.takeOutsideRequest(), app.takeOutsideRequest()]);
@@ -249,7 +269,7 @@ describe('AppState and the setup', () => {
     await app.newProject();
     expect(app.rename('Changed')).toBe(true);
     await settle();
-    control.setup.outsideResults = [{ ok: true, value: { kind: 'file', id: 1 } }];
+    control.setup.outsideResults = [{ ok: true, value: { kind: 'file', id: 1, unopened: 0 } }];
     const taking = app.takeOutsideRequest();
     await settle();
     expect(app.closePrompt?.reason).toBe('unsaved');

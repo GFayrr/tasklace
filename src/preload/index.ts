@@ -251,7 +251,7 @@ function isLaunchCheck(value: unknown): value is LaunchCheck {
   return Reflect.get(Object(value), 'kind') === 'skipped' || isReleaseCheck(value);
 }
 
-/** Tells whether an answer is what Tasklace was started with from outside: a project file under its number, the link of a shared plan, a file or link it could not read, or nothing. */
+/** Tells whether an answer is what Tasklace was started with from outside: a project file under its number with how many files stayed unopened, the link of a shared plan, a file or link it could not read, or nothing. */
 function isOutsideRequestOrNone(value: unknown): value is OutsideRequest | null {
   if (value === null) {
     return true;
@@ -260,8 +260,12 @@ function isOutsideRequestOrNone(value: unknown): value is OutsideRequest | null 
   const id: unknown = Reflect.get(Object(value), 'id');
   const link: unknown = Reflect.get(Object(value), 'link');
   const what: unknown = Reflect.get(Object(value), 'what');
+  const unopened: unknown = Reflect.get(Object(value), 'unopened');
   return (
-    (kind === 'file' && Number.isSafeInteger(id)) ||
+    (kind === 'file' &&
+      Number.isSafeInteger(id) &&
+      Number.isSafeInteger(unopened) &&
+      Number(unopened) >= 0) ||
     (kind === 'unreadable' && (what === 'file' || what === 'link')) ||
     (kind === 'link' &&
       typeof link === 'string' &&

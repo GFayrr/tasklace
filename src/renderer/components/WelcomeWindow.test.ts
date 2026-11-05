@@ -102,6 +102,21 @@ describe('the welcome window of the portable version', () => {
     expect(fake.control.updates.requests.at(-1)).toEqual(['checkAtLaunch']);
   });
 
+  it('speaks of one choice in a copy whose package already opens project files, as on Linux', async () => {
+    const fake = fakeAppContext();
+    fake.control.setup.stateResult = {
+      ok: true,
+      value: { welcome: true, association: { kind: 'unavailable' } },
+    };
+    const app = new AppState(fake.context);
+    const root = render(App, { app });
+    await app.startSetup();
+    update();
+    expect(dialogOf(root, 'dialog.welcome-window').querySelector('p.hint')?.textContent).toBe(
+      'One choice for this computer. You can change it at any time in Tasklace settings.',
+    );
+  });
+
   it('asks only about new versions in a copy whose package already opens project files, as on Linux', async () => {
     const fake = fakeAppContext();
     fake.control.setup.stateResult = {

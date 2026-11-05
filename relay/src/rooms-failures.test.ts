@@ -1,4 +1,5 @@
 import { readdir, type FileHandle } from 'node:fs/promises';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openRoomStore, type Room, type RoomStore } from './rooms.ts';
 import {
@@ -13,6 +14,7 @@ const failing = vi.hoisted(() => ({
   append: false,
   rewrite: false,
   create: false,
+  createWrite: false,
   utimes: false,
   rm: null as string | null,
   heldUtimes: null as Promise<void> | null,
@@ -36,6 +38,9 @@ vi.mock('node:fs/promises', async (importOriginal) => {
         throw diskFull();
       }
       const handle = await original.open(...args);
+      if (failing.createWrite && flags === 'wx') {
+        handle.write = () => Promise.reject(diskFull());
+      }
       return flags === 'a' ? countingSyncs(handle) : handle;
     },
     rm: (...args: Parameters<typeof original.rm>) =>
@@ -75,6 +80,7 @@ beforeEach(async () => {
     append: false,
     rewrite: false,
     create: false,
+    createWrite: false,
     utimes: false,
     rm: null,
     heldUtimes: null,
@@ -247,6 +253,34 @@ describe('the rooms of a relay when the disk fails', () => {
       'No space left on device',
       [],
       [`${room.name}.room`],
+    ]);
+  });
+
+  it('removes a new room file it could not write, so that the room can be created again', async () => {
+    const store = await storeOf();
+    failing.createWrite = true;
+    await expect(store.create(ROOM_KEYS.roomId, ROOM_KEYS.verifyKey)).rejects.toThrow(
+      'No space left on device',
+    );
+    const left = await readdir(folder);
+    failing.createWrite = false;
+    const room = await createdRoom(store);
+    expect([left, await readdir(folder)]).toEqual([[], [`${room.name}.room`]]);
+  });
+
+  it('keeps the failure of the write when a new room file cannot be removed either, logging the second', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const store = await storeOf();
+    const name = Buffer.from(ROOM_KEYS.roomId).toString('hex');
+    failing.createWrite = true;
+    failing.rm = name;
+    await expect(store.create(ROOM_KEYS.roomId, ROOM_KEYS.verifyKey)).rejects.toThrow(
+      'No space left on device',
+    );
+    failing.createWrite = false;
+    failing.rm = null;
+    expect(logged.mock.calls.map(([message]: unknown[]) => message)).toEqual([
+      `The room file ${path.join(folder, `${name}.room`)} could not be written or removed:`,
     ]);
   });
 
