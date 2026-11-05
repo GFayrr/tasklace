@@ -128,6 +128,7 @@ describe('readOutsideRequest', () => {
       'file:///home/l%E9a/Thesis.tasklace',
       'file:///home/lea/%FF.tasklace',
       'file:///home/lea/a%ZZ.tasklace',
+      'file://127.0.0.1/Plans/Thesis.tasklace',
       'file:Thesis.tasklace',
       'file:../Thesis.tasklace',
       'file:/home/lea/Thesis.tasklace',
@@ -142,6 +143,22 @@ describe('readOutsideRequest', () => {
       refused.map(() => ['Tasklace was started with a project file whose path it cannot use.']),
     );
   });
+
+  it.runIf(process.platform === 'win32')(
+    'refuses on Windows a file address that hides a path behind encoded separators',
+    () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      for (const value of [
+        'file:///C:/Plans/..%2F..%5CThesis.tasklace',
+        'file:///C:/Plans/%00.tasklace',
+      ]) {
+        expect(readOutsideRequest([EXECUTABLE, '--', value]), value).toEqual({
+          kind: 'unreadable',
+          what: 'file',
+        });
+      }
+    },
+  );
 
   it('opens the last of the files passed at once, as the Linux desktop passes them, counting the others in the log without their text', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

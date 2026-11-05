@@ -1,6 +1,7 @@
 import { readdir, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ROOM_HEADER_BYTES } from './room-file.ts';
 import { openRoomStore, type Room, type RoomStore } from './rooms.ts';
 import {
   OTHER_KEYS,
@@ -94,13 +95,13 @@ afterEach(async () => {
 });
 
 /** Opens the rooms of the folder of the test, at a time of its clock. */
-function storeOf(now = (): number => 0): Promise<RoomStore> {
+function storeOf(now = (): number => 0, maxStoredBytes = 4_194_304): Promise<RoomStore> {
   return openRoomStore({
     directory: folder,
     limits: {
       maxRooms: 8,
       maxRoomBytes: 1_048_576,
-      maxStoredBytes: 4_194_304,
+      maxStoredBytes,
       expiryMilliseconds: 1_000,
     },
     now,
@@ -254,6 +255,20 @@ describe('the rooms of a relay when the disk fails', () => {
       [],
       [`${room.name}.room`],
     ]);
+  });
+
+  it('gives back the room a new file took when it could not be written, so that failures never fill the relay', async () => {
+    const store = await storeOf(() => 0, 2 * ROOM_HEADER_BYTES);
+    failing.createWrite = true;
+    await expect(store.create(ROOM_KEYS.roomId, ROOM_KEYS.verifyKey)).rejects.toThrow(
+      'No space left on device',
+    );
+    failing.createWrite = false;
+    const [first, second] = await Promise.all([
+      createdRoom(store),
+      store.create(OTHER_KEYS.roomId, OTHER_KEYS.verifyKey),
+    ]);
+    expect([first.entries, typeof second]).toEqual([[], 'object']);
   });
 
   it('removes a new room file it could not write, so that the room can be created again', async () => {
