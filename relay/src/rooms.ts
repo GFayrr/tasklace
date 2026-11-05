@@ -229,7 +229,7 @@ export async function openRoomStore(options: RoomStoreOptions): Promise<RoomStor
     room.floor = whole.floor;
     return room;
   };
-  /** Gives the room already in memory, or loads it once however many members ask at the same time. */
+  /** Gives the room already in memory, or waits for the one being created, or loads it once however many members ask at the same time. */
   const loadOnce = async (name: string, roomId: Uint8Array): Promise<LoadedRoom | null> => {
     const ready = loaded.get(name);
     if (ready !== undefined) {

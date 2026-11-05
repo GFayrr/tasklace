@@ -73,7 +73,7 @@ function readFileRequest(value: string, argv: readonly string[]): ReceivedReques
   return { kind: 'file', path, unopened };
 }
 
-/** Reads the project file or link Tasklace was started with from its last argument, put after the separator that keeps it from being an option, ignoring anything else and logging, without its text, what looked like one but cannot be used. */
+/** Reads the project file, as a path or a file address, or the link Tasklace was started with from its last argument, put after the separator that keeps it from being an option, ignoring anything else. */
 export function readOutsideRequest(argv: readonly string[]): ReceivedRequest | null {
   const value = argv.length > PROGRAM_ARGUMENTS ? argv.at(-1) : undefined;
   if (value === undefined) {
