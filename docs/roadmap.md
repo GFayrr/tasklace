@@ -1,6 +1,6 @@
 # Roadmap
 
-_Last updated: 2026-11-04_
+_Last updated: 2026-11-14_
 
 This roadmap shows where Tasklace is heading: what is done, what comes next and what may come later. It states intent, not commitments, and gives no dates: Tasklace is a non-commercial project built in the open, and each step is finished only when it is reviewed and fully tested.
 
@@ -8,20 +8,20 @@ This roadmap shows where Tasklace is heading: what is done, what comes next and 
 
 Version 1 is the first stable release: steps 1 to 10 below and the list in [Before version 1.0](#before-version-10), for Linux first and for Windows. Previews come out before it.
 
-| Step | Content                                              | Status      |
-| ---- | ---------------------------------------------------- | ----------- |
-| 1    | Foundations and working-time calendar                | Done        |
-| 2    | Scheduling engine                                    | Done        |
-| 3    | Tags and person or team conflicts                    | Done        |
-| 4    | Shared model, project file, validation, JSON and CSV | Done        |
-| 5    | Secure Electron shell and Svelte user interface      | Done        |
-| 6    | PDF export                                           | Done        |
-| 7    | Real-time collaboration on the local network         | Done        |
-| 8    | End-to-end encrypted relay and deployment guide      | Done        |
-| 9    | Distribution                                         | Done        |
-| 10   | Linux package                                        | In progress |
+| Step | Content                                              | Status |
+| ---- | ---------------------------------------------------- | ------ |
+| 1    | Foundations and working-time calendar                | Done   |
+| 2    | Scheduling engine                                    | Done   |
+| 3    | Tags and person or team conflicts                    | Done   |
+| 4    | Shared model, project file, validation, JSON and CSV | Done   |
+| 5    | Secure Electron shell and Svelte user interface      | Done   |
+| 6    | PDF export                                           | Done   |
+| 7    | Real-time collaboration on the local network         | Done   |
+| 8    | End-to-end encrypted relay and deployment guide      | Done   |
+| 9    | Distribution                                         | Done   |
+| 10   | Linux package                                        | Done   |
 
-Once a step is done, only its status is kept here; its pull requests tell the rest. Version 0.1.0 is out as an unsigned preview for Windows.
+Once a step is done, only its status is kept here; its pull requests tell the rest. Version 0.2.0 is out as a preview for Linux and Windows, with the Windows files not signed.
 
 ## Before version 1.0
 
