@@ -66,8 +66,12 @@ linux:
   executableArgs:
     - '--'
     - '%U'
-  mimeTypes:
-    - x-scheme-handler/tasklace
+  # Links are declared as a protocol, not in mimeTypes: electron-builder 26 adds the file types to that list in place, so
+  # the second package built in the same run declared them twice.
+  protocols:
+    - name: Tasklace link
+      schemes:
+        - tasklace
   fileAssociations:
     - ext: tasklace
       name: Tasklace project

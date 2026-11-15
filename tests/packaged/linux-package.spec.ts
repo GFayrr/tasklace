@@ -263,7 +263,7 @@ test('declares its files and links to the desktop, keeping the separator before 
     'Exec=/opt/Tasklace/tasklace -- %U',
     'Icon=tasklace',
     'StartupWMClass=tasklace',
-    'MimeType=x-scheme-handler/tasklace;application/x-tasklace;',
+    'MimeType=application/x-tasklace;x-scheme-handler/tasklace;',
     'Categories=Office;',
   ]);
   const file = await writeProject('Thesis');
