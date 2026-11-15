@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- A Linux package for Fedora and openSUSE, `.rpm`, which keeps the sandbox of the application on and makes Tasklace open `.tasklace` files and Tasklace links, like the `.deb` package.
+
 ## [0.2.0] - 2026-11-14
 
 The first version for Linux, as a preview, with the Windows files still not signed.
