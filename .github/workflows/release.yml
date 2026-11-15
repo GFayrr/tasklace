@@ -1,7 +1,7 @@
 name: Release
 
 # Builds a version tag pushed from main on Linux and on Windows, tests what it built, and prepares a draft release with
-# the package, the executables and their fingerprints, which a maintainer reads and publishes by hand. The jobs that
+# the packages, the executables and their fingerprints, which a maintainer reads and publishes by hand. The jobs that
 # build never hold the right to write to the repository; only the last job, which runs no code of the project, does.
 
 on:
@@ -31,22 +31,30 @@ jobs:
         with:
           node-version: 24
       - run: npm ci
-      - name: Build the package
+      - name: Install the tool that builds the RPM package
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes rpm
+      - name: Build the packages
         run: npm run dist:linux
-      - name: Install the package as a person would
+      - name: Install the RPM package on Fedora, test it as a person, upgrade it and uninstall it
+        run: scripts/test-rpm-package.sh
+      - name: Install the .deb package as a person would
         run: |
           sudo apt-get update
           sudo apt-get install --yes ./dist/Tasklace-*-amd64.deb
-      - name: Test the installed application, its sandbox on
+      - name: Test the application installed by the .deb package, its sandbox on
         run: xvfb-run --auto-servernum npm run test:packaged
         env:
           TASKLACE_PACKAGED_APP: /opt/Tasklace/tasklace
-          TASKLACE_INSTALLED_PACKAGE: '1'
-      - name: Keep the package
+          TASKLACE_INSTALLED_PACKAGE: deb
+      - name: Keep the packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: built-linux
-          path: dist/Tasklace-*-amd64.deb
+          path: |
+            dist/Tasklace-*-amd64.deb
+            dist/Tasklace-*-x86_64.rpm
           if-no-files-found: error
           retention-days: 7
 
@@ -116,6 +124,7 @@ jobs:
             dist/Tasklace-*-amd64.deb
             dist/Tasklace-*-portable.exe
             dist/Tasklace-*-setup.exe
+            dist/Tasklace-*-x86_64.rpm
             dist/SHA256SUMS.txt
             dist/release-notes.md
           if-no-files-found: error
@@ -141,5 +150,5 @@ jobs:
           flags=(--draft --verify-tag --title "Tasklace ${TAG#v}" --notes-file release/release-notes.md)
           if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${flags[@]}" \
-            release/Tasklace-*-amd64.deb release/Tasklace-*-portable.exe release/Tasklace-*-setup.exe \
-            release/SHA256SUMS.txt
+            release/Tasklace-*-amd64.deb release/Tasklace-*-x86_64.rpm \
+            release/Tasklace-*-portable.exe release/Tasklace-*-setup.exe release/SHA256SUMS.txt

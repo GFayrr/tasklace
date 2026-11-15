@@ -84,6 +84,7 @@ describe('releaseNotes', () => {
         '### Files',
         '',
         '- `Tasklace-0.1.0-amd64.deb` installs Tasklace on Debian, Ubuntu and Linux Mint.',
+        '- `Tasklace-0.1.0-x86_64.rpm` installs Tasklace on Fedora and openSUSE; it is not signed, so on openSUSE `zypper` installs it with `--allow-unsigned-rpm`.',
         '- `Tasklace-0.1.0-portable.exe` runs on Windows with a double-click, with nothing to install.',
         '- `Tasklace-0.1.0-setup.exe` installs Tasklace on Windows for your account, without administrator rights.',
         '- `SHA256SUMS.txt` gives the fingerprint of each file, to check with `sha256sum --check --ignore-missing SHA256SUMS.txt` on Linux or to compare with `Get-FileHash <file> -Algorithm SHA256` on Windows.',
@@ -146,11 +147,12 @@ describe('checkRelease', () => {
     'Tasklace-0.1.0-amd64.deb',
     'Tasklace-0.1.0-portable.exe',
     'Tasklace-0.1.0-setup.exe',
+    'Tasklace-0.1.0-x86_64.rpm',
     'win-unpacked',
     'linux-unpacked',
   ];
 
-  it('gives the version, its kind, its notes and exactly its package and two executables', () => {
+  it('gives the version, its kind, its notes and exactly its two packages and two executables', () => {
     expect(checkRelease('v0.1.0', '0.1.0', CHANGELOG, built)).toEqual({
       version: '0.1.0',
       preRelease: true,
@@ -162,6 +164,7 @@ describe('checkRelease', () => {
         'Tasklace-0.1.0-amd64.deb',
         'Tasklace-0.1.0-portable.exe',
         'Tasklace-0.1.0-setup.exe',
+        'Tasklace-0.1.0-x86_64.rpm',
       ],
     });
   });
@@ -184,10 +187,11 @@ describe('checkRelease', () => {
         'Tasklace-0.0.9-setup.exe',
         'Tasklace-0.1.0-amd64.deb',
         'Tasklace-0.1.0-setup.exe',
+        'Tasklace-0.1.0-x86_64.rpm',
       ]),
     ).toThrow('The release needs Tasklace-0.1.0-portable.exe, which the build did not make.');
     expect(() => checkRelease('v0.1.0', '0.1.0', CHANGELOG, [])).toThrow(
-      'The release needs Tasklace-0.1.0-amd64.deb, Tasklace-0.1.0-portable.exe, Tasklace-0.1.0-setup.exe, which the build did not make.',
+      'The release needs Tasklace-0.1.0-amd64.deb, Tasklace-0.1.0-portable.exe, Tasklace-0.1.0-setup.exe, Tasklace-0.1.0-x86_64.rpm, which the build did not make.',
     );
   });
 });
