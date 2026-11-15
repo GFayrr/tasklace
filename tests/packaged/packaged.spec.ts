@@ -5,7 +5,7 @@ import { join, win32 } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { connectToWindow, freePort, watchEnding } from './connection';
-import { isPackageInstalled, refuseMissingPackage } from './linux-checks';
+import { launchesWithSandbox, refuseMissingPackage } from './linux-checks';
 import { skipUnlessRequired } from './windows-checks';
 import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
 import { createSharedDocument, requireDocumentId } from '../../src/core/shared/shared-document';
@@ -13,7 +13,8 @@ import { project, workTask } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 
 const EXECUTABLE = process.env['TASKLACE_PACKAGED_APP'] ?? '';
-const LINUX_ARGUMENTS = process.platform === 'linux' && !isPackageInstalled ? ['--no-sandbox'] : [];
+const LINUX_ARGUMENTS =
+  process.platform === 'linux' && !launchesWithSandbox ? ['--no-sandbox'] : [];
 const RUN_AS_NODE_WAIT_MS = 10_000;
 const REMOVAL_RETRIES = 10;
 const REMOVAL_RETRY_STEP_MS = 200;

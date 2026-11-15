@@ -11,9 +11,15 @@ import { encodeTasklaceFile } from '../../src/core/file/tasklace-file';
 import { createSharedDocument, requireDocumentId } from '../../src/core/shared/shared-document';
 import { project, workTask } from '../../src/core/testing/project-builder';
 import { seededRandom } from '../../src/core/testing/test-crypto';
+import { isMissingFile } from '../../src/main/stored-files';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 import { connectToWindow, freePort, watchEnding } from './connection';
-import { skipUnlessInstalled } from './linux-checks';
+import {
+  isInContainer,
+  requireInstalledPackage,
+  skipUnlessInstalled,
+  type PackageKind,
+} from './linux-checks';
 
 const EXECUTABLE = process.env['TASKLACE_PACKAGED_APP'] ?? '';
 const DESKTOP_FILE = '/usr/share/applications/tasklace.desktop';
@@ -24,20 +30,41 @@ const NO_NEW_PRIVILEGES = 'NoNewPrivs:\t1';
 const OWN_PROCESS_NAMESPACE = /^NSpid:\t\d+(\t\d+)+$/;
 const REMOVAL_RETRIES = 8;
 const REMOVAL_RETRY_STEP_MS = 256;
-const PACKAGE_DEPENDENCIES = [
-  'libasound2',
-  'libgbm1',
-  'libgtk-3-0',
-  'libnotify4',
-  'libnss3',
-  'libxss1',
-  'libxtst6',
-  'xdg-utils',
-  'libatspi2.0-0',
-  'libuuid1',
-  'libsecret-1-0',
-  'desktop-file-utils',
-];
+const PACKAGE_DEPENDENCIES: Readonly<Record<PackageKind, readonly string[]>> = {
+  deb: [
+    'libasound2',
+    'libgbm1',
+    'libgtk-3-0',
+    'libnotify4',
+    'libnss3',
+    'libxss1',
+    'libxtst6',
+    'xdg-utils',
+    'libatspi2.0-0',
+    'libuuid1',
+    'libsecret-1-0',
+    'desktop-file-utils',
+  ],
+  rpm: [
+    '(alsa-lib or libasound2)',
+    '(mesa-libgbm or libgbm1)',
+    '(gtk3 or libgtk-3-0)',
+    '(libnotify or libnotify4)',
+    '(nss or mozilla-nss)',
+    '(libXScrnSaver or libXss1)',
+    '(libXtst or libXtst6)',
+    'xdg-utils',
+    'at-spi2-core',
+    '(libuuid or libuuid1)',
+    '(libsecret or libsecret-1-0)',
+    'desktop-file-utils',
+  ],
+};
+const RPM_INTERNAL_REQUIREMENT = /^(rpmlib\(|\/bin\/)/;
+const APPARMOR_SWITCH = '/sys/module/apparmor/parameters/enabled';
+const APPARMOR_ON = 'Y';
+const PACKAGE_PROFILE = 'tasklace (unconfined)';
+const CONTAINER_ARGUMENTS = isInContainer ? ['--no-sandbox'] : [];
 const RELAY_LINK_SEED = 11;
 const LINK = encodeRelayLink({
   address: { host: 'relay.school.example', port: null, path: '/' },
@@ -100,13 +127,17 @@ function sharedEnvironment(): NodeJS.ProcessEnv {
   return { ...process.env, XDG_CONFIG_HOME: configFolder };
 }
 
-/** Starts the installed application with its sandbox on and connects to its window. */
+/** Starts the installed application, its sandbox on unless a container refuses it, and connects to its window. */
 async function start(): Promise<Page> {
   const port = await freePort();
-  const child = spawn(EXECUTABLE, [`--remote-debugging-port=${String(port)}`], {
-    stdio: ['ignore', 'ignore', 'pipe'],
-    env: sharedEnvironment(),
-  });
+  const child = spawn(
+    EXECUTABLE,
+    [...CONTAINER_ARGUMENTS, `--remote-debugging-port=${String(port)}`],
+    {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      env: sharedEnvironment(),
+    },
+  );
   const ending = watchEnding(child);
   const connected = await connectToWindow(port, child);
   if (connected === null) {
@@ -144,18 +175,45 @@ async function applicationProcesses(): Promise<readonly (readonly [string, strin
   return processes.filter(([, words]) => words[0] === EXECUTABLE);
 }
 
+/** Tells whether AppArmor is on in the kernel of this computer, as its module says. */
+async function isAppArmorOn(): Promise<boolean> {
+  const switchValue = await readFile(APPARMOR_SWITCH, 'utf8').catch((error: unknown) => {
+    if (isMissingFile(error)) {
+      return '';
+    }
+    throw error;
+  });
+  return switchValue.trim() === APPARMOR_ON;
+}
+
+/** Gives what the installed package asks for, in any order, leaving out the RPM features and the shell its scripts need. */
+async function packageDependencies(kind: PackageKind): Promise<readonly string[]> {
+  if (kind === 'deb') {
+    const { stdout } = await run('dpkg-query', ['--show', '--showformat=${Depends}', 'tasklace']);
+    return stdout.split(', ');
+  }
+  const { stdout } = await run('rpm', ['--query', '--requires', 'tasklace']);
+  return stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !RPM_INTERNAL_REQUIREMENT.test(line));
+}
+
 test('asks for every library the application needs and shows up valid on the desktop', async () => {
-  const { stdout: depends } = await run('dpkg-query', [
-    '--show',
-    '--showformat=${Depends}',
-    'tasklace',
-  ]);
-  expect(depends.split(', ')).toEqual(PACKAGE_DEPENDENCIES);
+  const kind = requireInstalledPackage();
+  expect([...(await packageDependencies(kind))].sort()).toEqual(
+    [...PACKAGE_DEPENDENCIES[kind]].sort(),
+  );
   await run('desktop-file-validate', [DESKTOP_FILE]);
   await access(LARGEST_ICON);
 });
 
-test('runs every page in the sandbox of Chromium, under the AppArmor profile of the package', async () => {
+test('runs every page in the sandbox of Chromium, under the AppArmor profile of the package where AppArmor is on', async () => {
+  test.skip(
+    isInContainer,
+    'A container refuses the user namespaces the sandbox needs, so it is to be checked by hand on a Fedora computer.',
+  );
+  const expectsProfile = requireInstalledPackage() === 'deb' || (await isAppArmorOn());
   const page = await start();
   await expect(page.locator('#app')).toHaveAttribute('data-started', 'true');
   const processes = await applicationProcesses();
@@ -167,9 +225,16 @@ test('runs every page in the sandbox of Chromium, under the AppArmor profile of 
     expect(status).toEqual(expect.arrayContaining([SYSTEM_CALL_FILTER, NO_NEW_PRIVILEGES]));
     expect(status.find((line) => line.startsWith('NSpid:'))).toMatch(OWN_PROCESS_NAMESPACE);
   }
+  if (!expectsProfile) {
+    test.info().annotations.push({
+      type: 'note',
+      description: 'AppArmor is off on this computer, so no profile was checked.',
+    });
+    return;
+  }
   const pid = String(running?.child.pid);
   const profile = await readFile(`/proc/${pid}/attr/current`, 'utf8');
-  expect(profile.replace(/[\0\n]+$/, '')).toBe('tasklace (unconfined)');
+  expect(profile.replace(/[\0\n]+$/, '')).toBe(PACKAGE_PROFILE);
 });
 
 test('asks only about new versions on a first launch, the package opening files on its own', async () => {
@@ -212,7 +277,11 @@ test('declares its files and links to the desktop, keeping the separator before 
   }
 });
 
-test('opens a project file and fills the join window with a link from the desktop, its sandbox on', async () => {
+test('opens a project file and fills the join window with a link from the desktop', async () => {
+  test.skip(
+    isInContainer,
+    'The desktop starts Tasklace with its sandbox on, which a container refuses, so it is to be checked by hand on a Fedora computer.',
+  );
   const page = await start();
   await openOnDesktop(await writeProject('Mes plans 2'));
   await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('Mes plans 2');

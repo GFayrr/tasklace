@@ -14,6 +14,8 @@ CLAUDE.md
 *.key
 
 test-results/
+rpm-test-results/
+rpm-upgrade/
 /pdf-compare/
 playwright-report/
 blob-report/
