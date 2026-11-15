@@ -1,6 +1,6 @@
 # Roadmap
 
-_Last updated: 2026-11-14_
+_Last updated: 2026-11-15_
 
 This roadmap shows where Tasklace is heading: what is done, what comes next and what may come later. It states intent, not commitments, and gives no dates: Tasklace is a non-commercial project built in the open, and each step is finished only when it is reviewed and fully tested.
 
@@ -21,7 +21,7 @@ Version 1 is the first stable release: steps 1 to 10 below and the list in [Befo
 | 9    | Distribution                                         | Done   |
 | 10   | Linux package                                        | Done   |
 
-Once a step is done, only its status is kept here; its pull requests tell the rest. Version 0.2.0 is out as a preview for Linux and Windows, with the Windows files not signed. A `.rpm` package for Fedora and openSUSE comes next.
+Once a step is done, only its status is kept here; its pull requests tell the rest. Version 0.3.0 is out as a preview for Linux, as `.deb` and `.rpm` packages, and for Windows, with the Windows files not signed.
 
 ## Before version 1.0
 

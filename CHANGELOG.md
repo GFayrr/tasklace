@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-15
+
+Linux packages for Fedora and openSUSE too, as a preview, with the Windows files still not signed.
+
 ### Added
 
 - A Linux package for Fedora and openSUSE, `.rpm`, which keeps the sandbox of the application on and makes Tasklace open `.tasklace` files and Tasklace links, like the `.deb` package.
@@ -44,6 +48,7 @@ The first public version: a preview for Windows, not signed yet.
 - Tasklace settings for this computer, with the version in use and a check for new versions at most once a day, at launch, that can be turned off; Tasklace never updates itself.
 - On Windows, `.tasklace` files and Tasklace links open with Tasklace once the person agrees: the installer asks on its own page, before installing, and the first launch asks when no installer did; the uninstaller removes what it set up and keeps the plans, and a link opens the Join window filled in, never joining on its own.
 
-[Unreleased]: https://github.com/GFayrr/tasklace/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/GFayrr/tasklace/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/GFayrr/tasklace/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/GFayrr/tasklace/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/GFayrr/tasklace/releases/tag/v0.1.0
