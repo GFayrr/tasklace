@@ -21,7 +21,7 @@ Version 1 is the first stable release: steps 1 to 10 below and the list in [Befo
 | 9    | Distribution                                         | Done   |
 | 10   | Linux package                                        | Done   |
 
-Once a step is done, only its status is kept here; its pull requests tell the rest. Version 0.2.0 is out as a preview for Linux and Windows, with the Windows files not signed.
+Once a step is done, only its status is kept here; its pull requests tell the rest. Version 0.2.0 is out as a preview for Linux and Windows, with the Windows files not signed. A `.rpm` package for Fedora and openSUSE comes next.
 
 ## Before version 1.0
 
@@ -33,7 +33,7 @@ Once a step is done, only its status is kept here; its pull requests tell the re
 
 - Signed Windows builds, through [SignPath Foundation](https://signpath.org/) if it accepts the project, or another way that keeps the project independent. Until then, Windows releases stay unsigned.
 - The relay tried on a public server, with certificates obtained and renewed on their own.
-- A macOS version, and more Linux packages, such as `.rpm` for Fedora and openSUSE: the code keeps what is specific to one system in a few small places.
+- A macOS version, and more Linux packages: the code keeps what is specific to one system in a few small places.
 - Languages other than English.
 - Custom themes, so that a school or a company can apply its own visual identity. A theme would be a plain data file (colors only, never code or style sheets) dropped into a `themes` folder, and checked like any untrusted file. Official themes must pass WCAG AA contrasts; a custom theme whose contrasts fail would still be accepted with a warning.
 

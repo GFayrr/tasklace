@@ -95,15 +95,22 @@ Download Tasklace from the [releases](https://github.com/GFayrr/tasklace/release
 
 ### Linux
 
-The Linux package comes with version 0.2.0 and later.
+The `.deb` package comes with version 0.2.0 and later, the `.rpm` package with version 0.3.0 and later. Both are for 64-bit Intel or AMD processors.
 
-**`Tasklace-<version>-amd64.deb`** is for Debian, Ubuntu, Linux Mint and the systems built on them, on 64-bit Intel or AMD processors. It is tested on Ubuntu 24.04, and its dependencies are checked on Debian 12 and 13 and Ubuntu 22.04 and 26.04. Open it with your software center, or install it in a terminal, which asks for the password of an administrator:
+**`Tasklace-<version>-amd64.deb`** is for Debian, Ubuntu, Linux Mint and the systems built on them. It is tested on Ubuntu 24.04, and its dependencies are checked on Debian 12 and 13 and Ubuntu 22.04 and 26.04. Open it with your software center, or install it in a terminal, which asks for the password of an administrator:
 
 ```sh
 sudo apt install ./Tasklace-<version>-amd64.deb
 ```
 
-The package makes Tasklace open `.tasklace` files and Tasklace links, and keeps the sandbox of the application on. At its first launch, Tasklace asks whether it checks for new versions, at most once a day when it starts; nothing is sent before you chose; the [privacy policy](PRIVACY.md) tells what this check sends. Tasklace never updates itself: it only tells you when a new version is out.
+**`Tasklace-<version>-x86_64.rpm`** is for Fedora and openSUSE. It is installed, tested, upgraded and removed on Fedora 45, its dependencies are checked on Fedora 44, and it is installed and removed on openSUSE Leap 16.0 and Tumbleweed. Install it in a terminal; the package is not signed, which Fedora accepts as it is and openSUSE asks you to allow:
+
+```sh
+sudo dnf install ./Tasklace-<version>-x86_64.rpm                          # Fedora
+sudo zypper install --allow-unsigned-rpm ./Tasklace-<version>-x86_64.rpm  # openSUSE
+```
+
+Either package makes Tasklace open `.tasklace` files and Tasklace links, and keeps the sandbox of the application on. At its first launch, Tasklace asks whether it checks for new versions, at most once a day when it starts; nothing is sent before you chose; the [privacy policy](PRIVACY.md) tells what this check sends. Tasklace never updates itself: it only tells you when a new version is out.
 
 To make sure a file is the one this project built, check it against `SHA256SUMS.txt`, published with each release, from the folder that holds them both:
 
@@ -152,7 +159,9 @@ A relay lets people share plans from anywhere. It is a small Node.js server that
 Remove Tasklace with your software center, or in a terminal:
 
 ```sh
-sudo apt remove tasklace
+sudo apt remove tasklace     # Debian, Ubuntu, Linux Mint
+sudo dnf remove tasklace     # Fedora
+sudo zypper remove tasklace  # openSUSE
 ```
 
 Your projects stay wherever you saved them. What Tasklace keeps for you also stays, in `~/.config/Tasklace`: local copies of your projects, plans joined through a relay and changes kept apart, the list of recent projects, your settings, the links of shared plans and the log of errors. Delete this folder to remove them as well.
@@ -212,7 +221,7 @@ To report a vulnerability, do not open a public issue: follow the [security poli
 
 ## Code signing policy
 
-The Linux package is not signed either, as a package installed from a file does not need to be. The Windows files are not signed for now, and will stay so until the project has a way to sign them that keeps it independent. The project has applied to [SignPath Foundation](https://signpath.org/), which signs open source software for free; if it is accepted, the releases that follow will be signed with its certificate, and this section will say so. Until then, `SHA256SUMS.txt`, published with each release, lets you check that a file is the one this project built.
+The Linux packages are not signed either: a `.deb` installed from a file does not need to be, Fedora installs the `.rpm` as it is, and openSUSE once you allow it, as [Install](#linux) shows. The Windows files are not signed for now, and will stay so until the project has a way to sign them that keeps it independent. The project has applied to [SignPath Foundation](https://signpath.org/), which signs open source software for free; if it is accepted, the releases that follow will be signed with its certificate, and this section will say so. Until then, `SHA256SUMS.txt`, published with each release, lets you check that a file is the one this project built.
 
 - **What will be signed**: only the files built from this repository, the Tasklace executable, the portable executable, the installer and its uninstaller, built by continuous integration from a version tag. The files of other projects that Tasklace ships, such as the libraries of Electron, are not signed by this project.
 - **Who does what**: [@GFayrr](https://github.com/GFayrr) writes and reviews the code, and approves each release by hand before it is published.
@@ -222,23 +231,23 @@ The Linux package is not signed either, as a package installed from a file does 
 
 ### Commands
 
-| Command                 | Purpose                                                         |
-| ----------------------- | --------------------------------------------------------------- |
-| `npm run dev`           | Start the desktop application in development mode               |
-| `npm run build`         | Build the main process, the preload bridge and the page         |
-| `npm test`              | Run unit and property-based tests with coverage                 |
-| `npm run test:watch`    | Run tests in watch mode                                         |
-| `npm run test:e2e`      | Build, then test the running application end to end             |
-| `npm run bench`         | Check performance on 10,000 tasks and 20,000 links              |
-| `npm run bench:growth`  | Check that key operations grow as their complexity says         |
-| `npm run pdf:compare`   | Print three sample plans with both PDF engines and compare them |
-| `npm run dist`          | Build the Windows files, on Windows only                        |
-| `npm run dist:linux`    | Build the Linux package                                         |
-| `npm run test:packaged` | Test the built application given by `TASKLACE_PACKAGED_APP`     |
-| `npm run icons`         | Make the icons again from their SVG files                       |
-| `npm run lint`          | Type-check TypeScript and Svelte, lint with ESLint              |
-| `npm run format`        | Format the code with Prettier                                   |
-| `npm run format:check`  | Check formatting without changing files                         |
+| Command                 | Purpose                                                                                                          |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `npm run dev`           | Start the desktop application in development mode                                                                |
+| `npm run build`         | Build the main process, the preload bridge and the page                                                          |
+| `npm test`              | Run unit and property-based tests with coverage                                                                  |
+| `npm run test:watch`    | Run tests in watch mode                                                                                          |
+| `npm run test:e2e`      | Build, then test the running application end to end                                                              |
+| `npm run bench`         | Check performance on 10,000 tasks and 20,000 links                                                               |
+| `npm run bench:growth`  | Check that key operations grow as their complexity says                                                          |
+| `npm run pdf:compare`   | Print three sample plans with both PDF engines and compare them                                                  |
+| `npm run dist`          | Build the Windows files, on Windows only                                                                         |
+| `npm run dist:linux`    | Build the Linux packages; the `.rpm` needs `rpmbuild` (package `rpm` on Debian or Ubuntu, `rpm-build` on Fedora) |
+| `npm run test:packaged` | Test the built application given by `TASKLACE_PACKAGED_APP`                                                      |
+| `npm run icons`         | Make the icons again from their SVG files                                                                        |
+| `npm run lint`          | Type-check TypeScript and Svelte, lint with ESLint                                                               |
+| `npm run format`        | Format the code with Prettier                                                                                    |
+| `npm run format:check`  | Check formatting without changing files                                                                          |
 
 ### Tests
 

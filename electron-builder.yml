@@ -1,6 +1,7 @@
 # How electron-builder packs Tasklace: for Linux a .deb package, which keeps the sandbox of Chromium on Ubuntu 24 and
-# later through its AppArmor profile, and for Windows a portable executable and an installer for the current user, or
-# for everyone when an administrator chooses so.
+# later through its AppArmor profile, and a .rpm package for Fedora and openSUSE, whose dependencies name the package
+# of either system; for Windows a portable executable and an installer for the current user, or for everyone when an
+# administrator chooses so.
 # Releases are built by continuous integration only, the Windows executables on Windows; nothing is signed.
 appId: io.github.gfayrr.tasklace
 productName: Tasklace
@@ -65,14 +66,19 @@ linux:
   executableArgs:
     - '--'
     - '%U'
-  mimeTypes:
-    - x-scheme-handler/tasklace
+  # Links are declared as a protocol, not in mimeTypes: electron-builder 26 adds the file types to that list in place, so
+  # the second package built in the same run declared them twice.
+  protocols:
+    - name: Tasklace link
+      schemes:
+        - tasklace
   fileAssociations:
     - ext: tasklace
       name: Tasklace project
       mimeType: application/x-tasklace
   target:
     - deb
+    - rpm
 deb:
   artifactName: Tasklace-${version}-amd64.${ext}
   depends:
@@ -87,5 +93,27 @@ deb:
     - libatspi2.0-0
     - libuuid1
     - libsecret-1-0
+    - desktop-file-utils
+rpm:
+  artifactName: Tasklace-${version}-x86_64.${ext}
+  # fpm writes MD5 fingerprints of the files by default, which systems in FIPS mode refuse, and lists only files, which
+  # would leave the empty folders of the application behind on removal.
+  fpm:
+    - --rpm-digest
+    - sha256
+    - --rpm-auto-add-directories
+  afterRemove: build/linux/rpm-after-remove.tpl
+  depends:
+    - (alsa-lib or libasound2)
+    - (mesa-libgbm or libgbm1)
+    - (gtk3 or libgtk-3-0)
+    - (libnotify or libnotify4)
+    - (nss or mozilla-nss)
+    - (libXScrnSaver or libXss1)
+    - (libXtst or libXtst6)
+    - xdg-utils
+    - at-spi2-core
+    - (libuuid or libuuid1)
+    - (libsecret or libsecret-1-0)
     - desktop-file-utils
 publish: null

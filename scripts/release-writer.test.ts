@@ -11,6 +11,7 @@ const FILES = [
   `Tasklace-${VERSION}-amd64.deb`,
   `Tasklace-${VERSION}-portable.exe`,
   `Tasklace-${VERSION}-setup.exe`,
+  `Tasklace-${VERSION}-x86_64.rpm`,
 ];
 const CHANGELOG = `# Changelog\n\n## [${VERSION}] - 2026-12-01\n\n- A change.\n`;
 

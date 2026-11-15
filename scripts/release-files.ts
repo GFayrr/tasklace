@@ -9,6 +9,7 @@ const SIGNATURE_NOTE = [
   '### Files',
   '',
   '- `Tasklace-{version}-amd64.deb` installs Tasklace on Debian, Ubuntu and Linux Mint.',
+  '- `Tasklace-{version}-x86_64.rpm` installs Tasklace on Fedora and openSUSE; it is not signed, so on openSUSE `zypper` installs it with `--allow-unsigned-rpm`.',
   '- `Tasklace-{version}-portable.exe` runs on Windows with a double-click, with nothing to install.',
   '- `Tasklace-{version}-setup.exe` installs Tasklace on Windows for your account, without administrator rights.',
   '- `SHA256SUMS.txt` gives the fingerprint of each file, to check with `sha256sum --check --ignore-missing SHA256SUMS.txt` on Linux or to compare with `Get-FileHash <file> -Algorithm SHA256` on Windows.',
@@ -67,7 +68,7 @@ export interface ReleaseFiles {
   readonly files: readonly string[];
 }
 
-/** Checks what a release needs before it is prepared: a tag naming the version of the application, its part of the changelog, and among the built files exactly the three it publishes with their fingerprints. */
+/** Checks what a release needs before it is prepared: a tag naming the version of the application, its part of the changelog, and among the built files exactly the four it publishes with their fingerprints. */
 export function checkRelease(
   tag: string,
   packageVersion: unknown,
@@ -92,6 +93,7 @@ export function checkRelease(
     `Tasklace-${version}-amd64.deb`,
     `Tasklace-${version}-portable.exe`,
     `Tasklace-${version}-setup.exe`,
+    `Tasklace-${version}-x86_64.rpm`,
   ];
   const missing = files.filter((file) => !builtFiles.includes(file));
   if (missing.length > 0) {

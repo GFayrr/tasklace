@@ -6,6 +6,8 @@ import { APPLICATION_USER_MODEL_ID } from '../../src/main/platform/application-i
 
 const ICON_SIZES = [16, 20, 24, 32, 40, 48, 64, 256];
 const WINDOW_ICON_SIZE = 256;
+const ARTIFACT_EXTENSIONS = { amd64: 'deb', x86_64: 'rpm', portable: 'exe', setup: 'exe' } as const;
+const RELEASE_JOBS = [['build-linux', 'build-windows'], ['collect'], ['draft']] as const;
 const SEMANTIC_VERSION =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/;
 
@@ -23,18 +25,37 @@ function packageFile(): PackageFile {
 function builtNames(version: string): readonly string[] {
   const settings = readFileSync('electron-builder.yml', 'utf8');
   return [...settings.matchAll(/artifactName: (\S+)/g)].map((match) => {
-    const extension = String(match[1]).includes('amd64') ? 'deb' : 'exe';
-    return String(match[1]).replace('${version}', version).replace('${ext}', extension);
+    const name = String(match[1]);
+    const extension = Object.entries(ARTIFACT_EXTENSIONS).find(([kind]) =>
+      name.includes(`-${kind}.`),
+    )?.[1];
+    if (extension === undefined) {
+      throw new Error(`No extension is known for the built file ${name}.`);
+    }
+    return name.replace('${version}', version).replace('${ext}', extension);
   });
 }
 
-/** Gives the patterns of built files the release workflow collects. */
-function collectedPatterns(): readonly RegExp[] {
+/** Gives the text of each job of the release workflow, by name. */
+function releaseJobs(): ReadonlyMap<string, string> {
   const workflow = readFileSync('.github/workflows/release.yml', 'utf8');
-  const patterns = [...workflow.matchAll(/^\s+dist\/(Tasklace-\S+)$/gm)].map(([, glob]) =>
-    String(glob),
-  );
-  return [...new Set(patterns)].map(
+  const jobs = workflow.slice(workflow.indexOf('\njobs:\n')).split(/^ {2}(?=[\w-]+:$)/m);
+  return new Map(jobs.slice(1).map((job) => [job.slice(0, job.indexOf(':')), job]));
+}
+
+/** Gives the patterns of built files that some jobs of the release workflow upload, one a line, or publish. */
+function patternsOfJobs(names: readonly string[]): readonly RegExp[] {
+  const jobs = releaseJobs();
+  const globs = names.flatMap((name) => {
+    const job = jobs.get(name);
+    if (job === undefined) {
+      throw new Error(`The release workflow has no job ${name}.`);
+    }
+    return [...job.matchAll(/^\s+dist\/(Tasklace-\S+)$|release\/(Tasklace-[^\s\\]+)/gm)].map(
+      ([, uploaded, published]) => String(uploaded ?? published),
+    );
+  });
+  return globs.map(
     (glob) => new RegExp(`^${glob.replaceAll('.', String.raw`\.`).replaceAll('*', '.*')}$`),
   );
 }
@@ -53,11 +74,14 @@ describe('release files', () => {
     const names = builtNames(version);
     const changelog = `## [${version}]\n\n- A change.\n`;
     expect(checkRelease(`v${version}`, version, changelog, names).files).toEqual([...names].sort());
-    const patterns = collectedPatterns();
-    expect(names.map((name) => patterns.filter((pattern) => pattern.test(name)).length)).toEqual(
-      names.map(() => 1),
-    );
-    expect(patterns.length).toBe(names.length);
+    for (const jobs of RELEASE_JOBS) {
+      const patterns = patternsOfJobs(jobs);
+      expect(
+        names.map((name) => patterns.filter((pattern) => pattern.test(name)).length),
+        jobs.join(' and '),
+      ).toEqual(names.map(() => 1));
+      expect(patterns.length, jobs.join(' and ')).toBe(names.length);
+    }
   });
 
   it.each([
