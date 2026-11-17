@@ -1,0 +1,144 @@
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
+import { describe, expect, it } from 'vitest';
+import * as Y from 'yjs';
+import { encodeTasklaceFile, readTasklaceDocument } from '../../src/core/file/tasklace-file';
+import type { Project } from '../../src/core/model/project';
+import { scheduleProject } from '../../src/core/scheduling/schedule-project';
+import { createSharedDocument } from '../../src/core/shared/shared-document';
+import {
+  openSharedSession,
+  openSharedSessionFromState,
+  type SharedSession,
+} from '../../src/core/shared/shared-session';
+import { TEST_DOCUMENT_ID } from '../../src/core/testing/project-builder';
+import { zlibCompressor } from '../../src/main/zlib-compressor';
+import { conflictLines, dateConflictLines } from '../../src/renderer/plan/conflict-lines';
+import { buildPlanOutline, groupIncoming } from '../../src/renderer/plan/plan-outline';
+import { tagStylesOf } from '../../src/renderer/plan/tag-styles';
+import { buildLargeProject, LARGE_PROJECT_SEED } from '../fixtures/large-project';
+import { medianDuration } from '../growth/measure-growth';
+
+const USUAL_TASK_COUNT = 10_000;
+const LARGEST_TASK_COUNT = 50_000;
+const TASK_COUNTS =
+  process.env['TASKLACE_BENCH_LARGEST'] === '1'
+    ? [USUAL_TASK_COUNT, LARGEST_TASK_COUNT]
+    : [USUAL_TASK_COUNT];
+const MEBIBYTE = 1_048_576;
+const MEASURED_RUNS = 5;
+const TIMEOUT_MILLISECONDS = 1_800_000;
+
+/** Opens a session on a copy of a document, failing the test when it cannot be opened. */
+function openCopy(document: Y.Doc): SharedSession {
+  const copy = new Y.Doc();
+  Y.applyUpdate(copy, Y.encodeStateAsUpdate(document));
+  const session = openSharedSession(copy);
+  if (!session.ok) {
+    throw new Error(JSON.stringify(session.error));
+  }
+  return session.value;
+}
+
+/** Measures the median duration of a step and writes it to the console with its label. */
+function report(label: string, step: (index: number) => void): number {
+  const duration = medianDuration(step, MEASURED_RUNS);
+  console.info(`${label.padEnd(44)} ${duration.toFixed(1).padStart(8)} ms`);
+  return duration;
+}
+
+/** Tells whether a value can be called without arguments. */
+function isCallable(value: unknown): value is () => void {
+  return typeof value === 'function';
+}
+
+/** Collects the garbage, then returns the bytes the heap holds. */
+function heapBytes(): number {
+  setFlagsFromString('--expose-gc');
+  const collect: unknown = runInNewContext('gc');
+  if (!isCallable(collect)) {
+    throw new Error('The garbage collector cannot be called.');
+  }
+  collect();
+  return process.memoryUsage().heapUsed;
+}
+
+/** Schedules a project, failing the test when it cannot be scheduled. */
+function scheduleOf(project: Project) {
+  const schedule = scheduleProject(project);
+  if (!schedule.ok) {
+    throw new Error('The large project cannot be scheduled.');
+  }
+  return schedule.value;
+}
+
+describe.each(TASK_COUNTS)('where the time goes in a plan of %i tasks', (taskCount) => {
+  it(
+    'measures each step of an edit, of a large merge and of an opening',
+    () => {
+      const origin = createSharedDocument(
+        buildLargeProject(LARGE_PROJECT_SEED, taskCount),
+        TEST_DOCUMENT_ID,
+      );
+      const heapBefore = heapBytes();
+      const session = openCopy(origin);
+      console.info(
+        `heap held by an open session: ${((heapBytes() - heapBefore) / MEBIBYTE).toFixed(0)} MiB`,
+      );
+      const tasks = session.project().tasks;
+      console.info(`--- ${String(taskCount)} tasks ---`);
+      report('apply (rename one task)', (index) => {
+        const task = tasks[index];
+        if (task !== undefined) {
+          session.apply({ type: 'putTask', task: { ...task, name: `Renamed ${String(index)}` } });
+        }
+      });
+      report('apply + session.project()', (index) => {
+        const task = tasks[index];
+        if (task !== undefined) {
+          session.apply({ type: 'putTask', task: { ...task, name: `Again ${String(index)}` } });
+        }
+        session.project();
+      });
+      const project = session.project();
+      report('buildPlanOutline', () => buildPlanOutline(project.tasks, new Set()));
+      report('groupIncoming', () => groupIncoming(project.dependencies));
+      report('tagStylesOf', () => tagStylesOf(project));
+      report('structuredClone(project) (to the worker)', () => structuredClone(project));
+      report('scheduleProject', () => scheduleOf(project));
+      const schedule = scheduleOf(project);
+      report('structuredClone(schedule) (from the worker)', () => structuredClone(schedule));
+      report('conflictLines', () => conflictLines(schedule, project));
+      report('dateConflictLines', () => dateConflictLines(schedule, project));
+
+      const remote = openCopy(origin);
+      const before = Y.encodeStateVector(new Y.Doc());
+      remote.applyAll(
+        remote.project().tasks.map((task, index) => ({
+          type: 'putTask' as const,
+          task: { ...task, name: `Remote ${String(index)}` },
+        })),
+      );
+      const update = remote.encodeState(before);
+      console.info(`update renaming every task: ${(update.byteLength / MEBIBYTE).toFixed(1)} MiB`);
+      const withMerge = report('openCopy + merge (every task renamed)', () => {
+        openCopy(origin).merge(update);
+      });
+      const openingAlone = report('openCopy alone', () => openCopy(origin));
+      console.info(`merge alone: about ${(withMerge - openingAlone).toFixed(0)} ms`);
+
+      const file = encodeTasklaceFile(origin, zlibCompressor);
+      console.info(`file: ${(file.byteLength / MEBIBYTE).toFixed(1)} MiB`);
+      report('readTasklaceDocument (worker)', () => readTasklaceDocument(file, zlibCompressor));
+      const read = readTasklaceDocument(file, zlibCompressor);
+      if (!read.ok) {
+        throw new Error('File refused');
+      }
+      report('openSharedSessionFromState (page)', () =>
+        openSharedSessionFromState(read.value.state),
+      );
+      expect(project.tasks).toHaveLength(taskCount);
+    },
+    TIMEOUT_MILLISECONDS,
+  );
+});
