@@ -28,9 +28,16 @@ export interface ProjectState {
   readonly links: Map<TaskId, Set<DependencyId>>;
   readonly pairs: Map<string, DependencyId>;
   readonly tasksByTag: Map<TagId, Set<TaskId>>;
+  readonly touched: TouchedIds;
 }
 
-/** Builds an indexed state from a valid project. */
+export interface TouchedIds {
+  readonly tasks: Set<TaskId>;
+  readonly dependencies: Set<DependencyId>;
+  readonly tags: Set<TagId>;
+}
+
+/** Builds an indexed state from a valid project, with nothing noted as touched. */
 export function createProjectState(project: Project): ProjectState {
   const { tasks, dependencies, tags, ...header } = project;
   const state: ProjectState = {
@@ -42,6 +49,7 @@ export function createProjectState(project: Project): ProjectState {
     links: new Map(),
     pairs: new Map(),
     tasksByTag: new Map(),
+    touched: { tasks: new Set(), dependencies: new Set(), tags: new Set() },
   };
   tasks.forEach((task) => {
     putTask(state, task);
@@ -52,6 +60,7 @@ export function createProjectState(project: Project): ProjectState {
   tags.forEach((tag) => {
     putTag(state, tag);
   });
+  forgetTouched(state);
   return state;
 }
 
@@ -68,9 +77,71 @@ export function toProject(state: ProjectState): Project {
   };
 }
 
-/** Adds or replaces a task and updates the indexes. */
+/** Turns an indexed state into a project after the changes noted since an earlier project of the same state, keeping each list nothing touched and rebuilding the others in one walk, then forgets what was touched. */
+export function projectAfterChanges(state: ProjectState, previous: Project): Project {
+  const { touched } = state;
+  const project: Project = {
+    ...state.header,
+    tasks: listAfterChanges(previous.tasks, touched.tasks, state.tasks),
+    dependencies: listAfterChanges(previous.dependencies, touched.dependencies, state.dependencies),
+    tags: listAfterChanges(previous.tags, touched.tags, state.tags),
+  };
+  forgetTouched(state);
+  return project;
+}
+
+/** Forgets the identifiers touched in a state since its project was last built. */
+export function forgetTouched(state: ProjectState): void {
+  state.touched.tasks.clear();
+  state.touched.dependencies.clear();
+  state.touched.tags.clear();
+}
+
+/** Rebuilds a list sorted by identifier from an earlier one and the identifiers touched since, walking both once, so that untouched items keep their place and their identity. */
+function listAfterChanges<Id extends string, Item extends { readonly id: Id }>(
+  previous: readonly Item[],
+  touched: ReadonlySet<Id>,
+  current: ReadonlyMap<Id, Item>,
+): readonly Item[] {
+  if (touched.size === 0) {
+    return previous;
+  }
+  const list: Item[] = [];
+  let next = 0;
+  for (const id of [...touched].sort(compareStrings)) {
+    next = copyItemsBefore(previous, next, id, list);
+    const item = current.get(id);
+    if (item !== undefined) {
+      list.push(item);
+    }
+  }
+  copyItemsBefore(previous, next, null, list);
+  return list;
+}
+
+/** Copies to a list the items of a sorted list from a position up to an identifier, or to its end without one, and returns the position after them, past the item with that identifier when there is one. */
+function copyItemsBefore<Item extends { readonly id: string }>(
+  previous: readonly Item[],
+  start: number,
+  id: string | null,
+  list: Item[],
+): number {
+  let next = start;
+  for (
+    let item = previous[next];
+    item !== undefined && (id === null || compareStrings(item.id, id) < 0);
+    item = previous[next]
+  ) {
+    list.push(item);
+    next += 1;
+  }
+  return previous[next]?.id === id ? next + 1 : next;
+}
+
+/** Adds or replaces a task, noting it as touched, and updates the indexes. */
 export function putTask(state: ProjectState, task: Task): void {
   removeTask(state, task.id);
+  state.touched.tasks.add(task.id);
   state.tasks.set(task.id, task);
   if (task.parentId !== null) {
     addToIndex(state.children, task.parentId, task.id);
@@ -80,12 +151,13 @@ export function putTask(state: ProjectState, task: Task): void {
   }
 }
 
-/** Removes a task and its index entries, keeping its dependencies and children. */
+/** Removes a task and its index entries, noting it as touched and keeping its dependencies and children. */
 export function removeTask(state: ProjectState, id: TaskId): void {
   const task = state.tasks.get(id);
   if (task === undefined) {
     return;
   }
+  state.touched.tasks.add(id);
   state.tasks.delete(id);
   if (task.parentId !== null) {
     removeFromIndex(state.children, task.parentId, id);
@@ -95,21 +167,23 @@ export function removeTask(state: ProjectState, id: TaskId): void {
   }
 }
 
-/** Adds or replaces a dependency and updates the indexes. */
+/** Adds or replaces a dependency, noting it as touched, and updates the indexes. */
 export function putDependency(state: ProjectState, dependency: Dependency): void {
   removeDependency(state, dependency.id);
+  state.touched.dependencies.add(dependency.id);
   state.dependencies.set(dependency.id, dependency);
   addToIndex(state.links, dependency.predecessorId, dependency.id);
   addToIndex(state.links, dependency.successorId, dependency.id);
   state.pairs.set(blockPairKey(dependency), dependency.id);
 }
 
-/** Removes a dependency and its index entries. */
+/** Removes a dependency and its index entries, noting it as touched. */
 export function removeDependency(state: ProjectState, id: DependencyId): void {
   const dependency = state.dependencies.get(id);
   if (dependency === undefined) {
     return;
   }
+  state.touched.dependencies.add(id);
   state.dependencies.delete(id);
   removeFromIndex(state.links, dependency.predecessorId, id);
   removeFromIndex(state.links, dependency.successorId, id);
@@ -118,13 +192,15 @@ export function removeDependency(state: ProjectState, id: DependencyId): void {
   }
 }
 
-/** Adds or replaces a tag. */
+/** Adds or replaces a tag, noting it as touched. */
 export function putTag(state: ProjectState, tag: Tag): void {
+  state.touched.tags.add(tag.id);
   state.tags.set(tag.id, tag);
 }
 
-/** Removes a tag, leaving the tasks that use it unchanged. */
+/** Removes a tag, noting it as touched and leaving the tasks that use it unchanged. */
 export function removeTag(state: ProjectState, id: TagId): void {
+  state.touched.tags.add(id);
   state.tags.delete(id);
 }
 

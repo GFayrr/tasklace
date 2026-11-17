@@ -8,6 +8,8 @@ import { readProject, STORED_VALUE_CODEC } from '../validation/read-project';
 import type { ValidationIssue, ValidationIssues } from '../validation/validation-issues';
 import {
   createProjectState,
+  forgetTouched,
+  projectAfterChanges,
   putDependency,
   putTag,
   putTask,
@@ -90,7 +92,13 @@ interface SessionState {
   state: ProjectState;
   shadow: Y.Doc;
   project: Project | null;
+  built: BuiltProject;
   stateChanged: boolean;
+}
+
+interface BuiltProject {
+  readonly state: ProjectState;
+  readonly project: Project;
 }
 
 interface ShadowChange {
@@ -193,14 +201,16 @@ function validatedSession(
     });
   }, REPAIR_ORIGIN);
   const opened = { ...project, tasks };
+  const state = createProjectState(opened);
   const session: SessionState = {
     documentId,
-    state: createProjectState(opened),
+    state,
     shadow:
       decodedFrom === null || cleared.length > 0
         ? copyDocument(document, newRepairClientId(document))
         : documentFrom(decodedFrom, newRepairClientId(document)),
     project: opened,
+    built: { state, project: opened },
     stateChanged: false,
   };
   document.on('update', (update: Uint8Array, origin: unknown) => {
@@ -315,10 +325,18 @@ function replayStep(
   return replayed;
 }
 
-/** Returns the project of a session, rebuilt from the indexed state only after it changed. */
+/** Returns the project of a session, rebuilt only after a change: from the last project and what was touched since when the indexed state is the same, and in full when it was rebuilt. */
 function currentProject(session: SessionState): Project {
-  session.project ??= toProject(session.state);
-  return session.project;
+  if (session.project !== null) {
+    return session.project;
+  }
+  const { state, built } = session;
+  const project =
+    built.state === state ? projectAfterChanges(state, built.project) : toProject(state);
+  forgetTouched(state);
+  session.project = project;
+  session.built = { state, project };
+  return project;
 }
 
 /** Checks an operation on the indexed state and writes only what it touched to the document, the state matching the document again when the check or the write raises. */
