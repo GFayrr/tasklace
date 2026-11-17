@@ -14,7 +14,14 @@ import {
 import { TEST_DOCUMENT_ID } from '../../src/core/testing/project-builder';
 import { zlibCompressor } from '../../src/main/zlib-compressor';
 import { conflictLines, dateConflictLines } from '../../src/renderer/plan/conflict-lines';
-import { buildPlanOutline, groupIncoming } from '../../src/renderer/plan/plan-outline';
+import { valueAt } from '../../src/core/table-value';
+import {
+  buildPlanOutline,
+  groupIncoming,
+  nextIncoming,
+  nextPlanOutline,
+  NOTHING_COLLAPSED,
+} from '../../src/renderer/plan/plan-outline';
 import { tagStylesOf } from '../../src/renderer/plan/tag-styles';
 import { buildLargeProject, LARGE_PROJECT_SEED } from '../fixtures/large-project';
 import { medianDuration } from '../growth/measure-growth';
@@ -99,6 +106,32 @@ describe.each(TASK_COUNTS)('where the time goes in a plan of %i tasks', (taskCou
           session.apply({ type: 'putTask', task: { ...task, name: `Again ${String(index)}` } });
         }
         session.project();
+      });
+      const start = session.project();
+      let outline = nextPlanOutline(null, start.tasks, NOTHING_COLLAPSED);
+      let incoming = nextIncoming(null, start.dependencies);
+      report('rename + project + outline + incoming', (index) => {
+        const task = valueAt(tasks, index);
+        const applied = session.apply({
+          type: 'putTask',
+          task: { ...task, name: `Once more ${String(index)}` },
+        });
+        expect(applied.ok).toBe(true);
+        const next = session.project();
+        outline = nextPlanOutline(outline, next.tasks, NOTHING_COLLAPSED);
+        incoming = nextIncoming(incoming, next.dependencies);
+      });
+      const links = start.dependencies;
+      report('lag + project + outline + incoming', (index) => {
+        const dependency = valueAt(links, index);
+        const applied = session.apply({
+          type: 'putDependency',
+          dependency: { ...dependency, lagHours: dependency.lagHours + 1 },
+        });
+        expect(applied.ok).toBe(true);
+        const next = session.project();
+        outline = nextPlanOutline(outline, next.tasks, NOTHING_COLLAPSED);
+        incoming = nextIncoming(incoming, next.dependencies);
       });
       const project = session.project();
       report('buildPlanOutline', () => buildPlanOutline(project.tasks, new Set()));

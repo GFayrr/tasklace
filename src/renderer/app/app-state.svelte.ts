@@ -55,9 +55,12 @@ import {
 } from '../i18n/messages';
 import type { CurrentSchedule, EditableColumn } from '../plan/cell-editing';
 import {
-  buildPlanOutline,
+  nextIncoming,
+  nextPlanOutline,
   NOTHING_COLLAPSED,
   predecessorText,
+  type IncomingBasis,
+  type OutlineBasis,
   toggledSummary,
   withAncestorsOpen,
 } from '../plan/plan-outline';
@@ -251,7 +254,20 @@ export class AppState {
   #lastQuestion: Promise<unknown> = Promise.resolve();
   #collapsed = $state.raw<ReadonlySet<TaskId>>(NOTHING_COLLAPSED);
   #openedCount = $state(0);
-  readonly outline = $derived(buildPlanOutline(this.project?.tasks ?? [], this.#collapsed));
+  #outlineBasis: OutlineBasis | null = null;
+  #incomingBasis: IncomingBasis | null = null;
+  readonly outline = $derived.by(() => {
+    this.#outlineBasis = nextPlanOutline(
+      this.#outlineBasis,
+      this.project?.tasks ?? [],
+      this.#collapsed,
+    );
+    return this.#outlineBasis.outline;
+  });
+  readonly incoming = $derived.by(() => {
+    this.#incomingBasis = nextIncoming(this.#incomingBasis, this.project?.dependencies ?? []);
+    return this.#incomingBasis.incoming;
+  });
   readonly calendar = $derived.by(() => {
     const compiled = this.project === null ? null : compileCalendar(this.project.calendar);
     return compiled?.ok === true ? compiled.value : null;
@@ -1279,8 +1295,7 @@ export class AppState {
 
   /** Writes what a block of a task waits for, as in the task table. */
   blockWaitText(id: TaskId, block: number): string {
-    const incoming = this.project?.dependencies.filter((link) => link.successorId === id);
-    return predecessorText(incoming, this.outline.wbsById, block);
+    return predecessorText(this.incoming.get(id), this.outline.wbsById, block);
   }
 
   /** Describes a task and the links that touch it, so that the details panel can tell whether it changed while open. */

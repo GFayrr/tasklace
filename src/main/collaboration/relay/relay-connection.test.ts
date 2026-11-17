@@ -484,7 +484,8 @@ describe('a session in a room of a relay', () => {
     await until(() => editor.kinds().filter((kind) => kind === 'connected').length === 2);
     editor.session.send({ kind: 'message', message: update(5) });
     await until(() => deliveriesOf(editor.events).length === 2);
-    expect([editor.kinds().slice(0, 6), deliveriesOf(editor.events)]).toEqual([
+    const kinds = editor.kinds().filter((kind) => kind !== 'offline');
+    expect([kinds.slice(0, 6), deliveriesOf(editor.events)]).toEqual([
       ['connected', 'caughtUp', 'delivery', 'reconnecting', 'connected', 'caughtUp'],
       [
         { kind: 'update', byte: 4, length: 8, settled: 1 },

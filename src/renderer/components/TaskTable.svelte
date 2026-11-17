@@ -15,7 +15,7 @@
     type CellSource,
     type EditableColumn,
   } from '../plan/cell-editing';
-  import { groupIncoming, predecessorText, type PlanRow } from '../plan/plan-outline';
+  import { predecessorText, type PlanRow } from '../plan/plan-outline';
   import { failure } from '../../core/result';
   import { valueAt } from '../../core/table-value';
   import { isPickerRefusal, PICKER_BOUNDS } from '../plan/table-dates';
@@ -78,7 +78,7 @@
     fillMessage(text.unknownFloat, { firstYear: String(MIN_PROJECT_YEAR) }),
   );
   const rows = $derived(app.outline.rows);
-  const incoming = $derived(groupIncoming(app.project?.dependencies ?? []));
+  const incoming = $derived(app.incoming);
   const tagsById = $derived(new Map((app.project?.tags ?? []).map((tag) => [tag.id, tag])));
   const tagChoices = $derived(
     [...(app.project?.tags ?? [])].sort((left, right) =>
