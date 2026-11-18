@@ -1,49 +1,123 @@
 import type { Project } from '../../core/model/project';
 import type { Result } from '../../core/result';
-import {
-  scheduleProject,
-  type Schedule,
-  type SchedulingFailure,
-} from '../../core/scheduling/schedule-project';
+import type { Schedule, SchedulingFailure } from '../../core/scheduling/schedule-project';
+import type { DescriptionDelta, ProjectDelta, ScheduleDelta } from './schedule-changes';
 
-export const SCHEDULE_PROTOCOL_VERSION = 1;
+export const SCHEDULE_PROTOCOL_VERSION = 2;
 
-export interface ScheduleRequest {
+interface Numbered {
   readonly version: typeof SCHEDULE_PROTOCOL_VERSION;
   readonly generation: number;
-  readonly project: Project;
 }
 
-export interface ScheduleResponse {
-  readonly version: typeof SCHEDULE_PROTOCOL_VERSION;
-  readonly generation: number;
-  readonly result: Result<Schedule, SchedulingFailure>;
+export type ScheduleRequest =
+  | (Numbered & { readonly kind: 'whole'; readonly project: Project })
+  | (Numbered & {
+      readonly kind: 'changes';
+      readonly basis: number;
+      readonly changes: ProjectDelta;
+    });
+
+export type ScheduleAnswer =
+  | { readonly kind: 'whole'; readonly schedule: Schedule }
+  | { readonly kind: 'changes'; readonly changes: ScheduleDelta };
+
+export interface ScheduleResponse extends Numbered {
+  readonly result: Result<ScheduleAnswer, SchedulingFailure>;
+  readonly description: DescriptionDelta;
 }
 
-/** Computes the schedule asked by a request of the current protocol version, throwing on any other message so that the worker fails and is replaced instead of leaving the computation waiting forever. */
-export function answerScheduleRequest(message: unknown): ScheduleResponse {
-  if (!isScheduleRequest(message)) {
-    throw new Error('The schedule worker received a message that is not a schedule request.');
-  }
-  return {
-    version: SCHEDULE_PROTOCOL_VERSION,
-    generation: message.generation,
-    result: scheduleProject(message.project),
-  };
-}
-
-/** Tells whether a message is a schedule response of the current protocol version: a failure of a known kind, or a schedule with every field of its first level, the contents of its tables being trusted since the worker runs the code of this application. */
-export function isScheduleResponse(message: unknown): message is ScheduleResponse {
-  if (!hasVersionAndGeneration(message) || !('result' in message)) {
+/** Tells whether a message is a schedule request of the current protocol version: a whole project, or the changes since the request of a given generation. */
+export function isScheduleRequest(message: unknown): message is ScheduleRequest {
+  if (!hasVersionAndGeneration(message)) {
     return false;
   }
-  const ok: unknown = Reflect.get(Object(message.result), 'ok');
+  const kind: unknown = Reflect.get(message, 'kind');
+  if (kind === 'whole') {
+    return isObject(Reflect.get(message, 'project'));
+  }
+  const basis: unknown = Reflect.get(message, 'basis');
+  return (
+    kind === 'changes' && Number.isSafeInteger(basis) && isObject(Reflect.get(message, 'changes'))
+  );
+}
+
+/** Tells whether a message is a schedule response of the current protocol version: a known failure, a whole schedule or its changes, and the changes of its conflicts, the contents of the tables being trusted as code of this application. */
+export function isScheduleResponse(message: unknown): message is ScheduleResponse {
+  if (!hasVersionAndGeneration(message) || !holdsDescription(Reflect.get(message, 'description'))) {
+    return false;
+  }
+  const result: unknown = Reflect.get(message, 'result');
+  const ok: unknown = Reflect.get(Object(result), 'ok');
   if (ok === false) {
-    const error: unknown = Reflect.get(Object(message.result), 'error');
+    const error: unknown = Reflect.get(Object(result), 'error');
     const kind: unknown = Reflect.get(Object(error), 'kind');
     return typeof kind === 'string' && Object.hasOwn(FAILURE_KINDS, kind);
   }
-  return ok === true && holdsSchedule(Reflect.get(Object(message.result), 'value'));
+  return ok === true && holdsAnswer(Reflect.get(Object(result), 'value'));
+}
+
+/** Tells whether a value is a whole schedule or the changes of one. */
+function holdsAnswer(value: unknown): boolean {
+  const kind: unknown = Reflect.get(Object(value), 'kind');
+  if (kind === 'whole') {
+    return holdsSchedule(Reflect.get(Object(value), 'schedule'));
+  }
+  return kind === 'changes' && holdsScheduleDelta(Reflect.get(Object(value), 'changes'));
+}
+
+/** Tells whether a value holds every field of the changes of a schedule. */
+function holdsScheduleDelta(value: unknown): boolean {
+  const floats: unknown = Reflect.get(Object(value), 'floats');
+  const conflicts: unknown = Reflect.get(Object(value), 'conflicts');
+  const tagConflicts: unknown = Reflect.get(Object(value), 'tagConflicts');
+  return (
+    SCHEDULE_TABLES.every((table) => holdsMapDelta(Reflect.get(Object(value), table))) &&
+    holdsFloatsDelta(floats) &&
+    (conflicts === null || Array.isArray(conflicts)) &&
+    (tagConflicts === null || holdsTagReport(tagConflicts))
+  );
+}
+
+/** Tells whether a value holds the changes of the floats of a schedule. */
+function holdsFloatsDelta(value: unknown): boolean {
+  const kind: unknown = Reflect.get(Object(value), 'kind');
+  const floats: unknown = Reflect.get(Object(value), 'floats');
+  return (
+    kind === 'same' ||
+    (kind === 'whole' && (floats === null || floats instanceof Map)) ||
+    (kind === 'changes' && holdsMapDelta(Reflect.get(Object(value), 'changes')))
+  );
+}
+
+/** Tells whether a value holds the entries to put and the keys to remove of a table. */
+function holdsMapDelta(value: unknown): boolean {
+  return (
+    Array.isArray(Reflect.get(Object(value), 'put')) &&
+    Array.isArray(Reflect.get(Object(value), 'removed'))
+  );
+}
+
+/** Tells whether a value holds what changed in the description of the conflicts: for people and for dates, all the lines or the error that kept them from being described, or the lines changed by position with the new length. */
+function holdsDescription(value: unknown): boolean {
+  return (['people', 'dates'] as const).every((part) => {
+    const delta: unknown = Reflect.get(Object(value), part);
+    const kind: unknown = Reflect.get(Object(delta), 'kind');
+    if (kind === 'changes') {
+      return (
+        Number.isSafeInteger(Reflect.get(Object(delta), 'length')) &&
+        Array.isArray(Reflect.get(Object(delta), 'put'))
+      );
+    }
+    const lines: unknown = Reflect.get(Object(delta), 'lines');
+    const ok: unknown = Reflect.get(Object(lines), 'ok');
+    return (
+      kind === 'whole' &&
+      (ok === true
+        ? Array.isArray(Reflect.get(Object(lines), 'value'))
+        : ok === false && isObject(lines) && Object.hasOwn(lines, 'error'))
+    );
+  });
 }
 
 /** Tells whether a value holds every field of a schedule: its tables, its floats when computed, its conflicts and the report of its tags. */
@@ -54,8 +128,15 @@ function holdsSchedule(value: unknown): boolean {
     SCHEDULE_TABLES.every((table) => Reflect.get(Object(value), table) instanceof Map) &&
     (floats === null || floats instanceof Map) &&
     Array.isArray(Reflect.get(Object(value), 'conflicts')) &&
-    Array.isArray(Reflect.get(Object(tagConflicts), 'conflicts')) &&
-    Array.isArray(Reflect.get(Object(tagConflicts), 'tasksWithUnknownTag'))
+    holdsTagReport(tagConflicts)
+  );
+}
+
+/** Tells whether a value holds the conflicts and the tasks with an unknown tag of a report on tags. */
+function holdsTagReport(value: unknown): boolean {
+  return (
+    Array.isArray(Reflect.get(Object(value), 'conflicts')) &&
+    Array.isArray(Reflect.get(Object(value), 'tasksWithUnknownTag'))
   );
 }
 
@@ -66,11 +147,6 @@ const FAILURE_KINDS = {
   structure: true,
   task: true,
 } as const satisfies Readonly<Record<SchedulingFailure['kind'], true>>;
-
-/** Tells whether a message is a schedule request of the current protocol version. */
-function isScheduleRequest(message: unknown): message is ScheduleRequest {
-  return hasVersionAndGeneration(message) && 'project' in message;
-}
 
 /** Tells whether a message carries the current protocol version and a whole generation number. */
 function hasVersionAndGeneration(
@@ -84,4 +160,9 @@ function hasVersionAndGeneration(
     'generation' in message &&
     Number.isSafeInteger(message.generation)
   );
+}
+
+/** Tells whether a value is an object other than null. */
+function isObject(value: unknown): value is object {
+  return typeof value === 'object' && value !== null;
 }
