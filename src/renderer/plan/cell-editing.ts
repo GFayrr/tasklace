@@ -1,6 +1,6 @@
-import type { Dependency, Task, TaskId } from '../../core/model/project';
+import type { Task, TaskId } from '../../core/model/project';
 import type { Schedule } from '../../core/scheduling/schedule-project';
-import { predecessorText } from './plan-outline';
+import { predecessorText, type IncomingLookup } from './plan-outline';
 import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
 import { formatDateTime, parseDateTime } from '../../core/civil-format';
 import { formatTableDateTime } from './table-dates';
@@ -41,7 +41,7 @@ export interface CellSource {
   readonly schedule: Schedule | null;
   readonly current: CurrentSchedule;
   readonly calendar: CompiledCalendar | null;
-  readonly incoming: ReadonlyMap<TaskId, readonly Dependency[]>;
+  readonly incoming: IncomingLookup;
   readonly wbsById: ReadonlyMap<TaskId, string>;
 }
 
