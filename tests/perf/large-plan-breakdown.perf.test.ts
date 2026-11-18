@@ -166,6 +166,7 @@ describe.each(TASK_COUNTS)('where the time goes in a plan of %i tasks', (taskCou
       report('structuredClone(schedule) (from the worker)', () => structuredClone(schedule));
       report('conflictLines', () => conflictLines(schedule, project));
       report('dateConflictLines', () => dateConflictLines(schedule, project));
+      /** Prepares the page side of the schedule for an edit: the changes sent, the answer copied back and applied to a copy of the whole schedule, with the conflicts. */
       const pageSide = (next: Project) => {
         const host = createScheduleHost();
         const first = host.answer({
