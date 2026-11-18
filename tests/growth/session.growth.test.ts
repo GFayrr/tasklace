@@ -112,6 +112,33 @@ describe('growth of shared session operations with the size of the project', () 
     expect(ratio).toBeLessThanOrEqual(CONSTANT_MAX_RATIO);
   });
 
+  it('changes the lag of a dependency in a time that does not depend on how much follows it', () => {
+    /** Changes the lag of the link from the hub to the first task of the chain, which every task follows. */
+    const lagChanger = (session: SharedSession) => {
+      const first = session
+        .project()
+        .dependencies.find((dependency) => dependency.id === testId(`${HUB_ID}-t0`));
+      if (first === undefined) {
+        throw new Error('The hub does not lead to the first task.');
+      }
+      return (index: number) => {
+        const changed = session.apply({
+          type: 'putDependency',
+          dependency: { ...first, lagHours: index % 2 },
+        });
+        expect(changed.ok).toBe(true);
+      };
+    };
+    const small = openCopy(hubProject(SMALL_TASK_COUNT));
+    const large = openCopy(hubProject(LARGE_TASK_COUNT));
+    const ratio = growthRatio(
+      batched(BATCH_SIZE, lagChanger(small)),
+      batched(BATCH_SIZE, lagChanger(large)),
+    );
+    console.info(`Lag of a dependency: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(CONSTANT_MAX_RATIO);
+  });
+
   it('merges a received edit in a time that does not depend on the size of the project', () => {
     const smallUpdates = recordRemoteEdits(smallDocument);
     const largeUpdates = recordRemoteEdits(largeDocument);

@@ -3,7 +3,7 @@ import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { encodeTasklaceFile, readTasklaceDocument } from '../../src/core/file/tasklace-file';
-import type { Project } from '../../src/core/model/project';
+import type { Project, TaskId } from '../../src/core/model/project';
 import { scheduleProject } from '../../src/core/scheduling/schedule-project';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
 import {
@@ -132,6 +132,20 @@ describe.each(TASK_COUNTS)('where the time goes in a plan of %i tasks', (taskCou
         const next = session.project();
         outline = nextPlanOutline(outline, next.tasks, NOTHING_COLLAPSED);
         incoming = nextIncoming(incoming, next.dependencies);
+      });
+      report('move a task and back + project + outline (2 edits)', (index) => {
+        const task = valueAt(tasks, index);
+        const other = valueAt(tasks, (index * 7919) % tasks.length);
+        for (const sortKey of [other.sortKey, task.sortKey]) {
+          const moved = session.apply({ type: 'putTask', task: { ...task, sortKey } });
+          expect(moved.ok).toBe(true);
+          outline = nextPlanOutline(outline, session.project().tasks, NOTHING_COLLAPSED);
+        }
+      });
+      report('outline walked again (collapsed set changed)', (index) => {
+        const collapsed: ReadonlySet<TaskId> =
+          index % 2 === 0 ? new Set([valueAt(tasks, 0).id]) : NOTHING_COLLAPSED;
+        outline = nextPlanOutline(outline, session.project().tasks, collapsed);
       });
       const project = session.project();
       report('buildPlanOutline', () => buildPlanOutline(project.tasks, new Set()));

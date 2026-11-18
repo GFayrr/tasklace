@@ -17,6 +17,7 @@ import {
   workTask,
   TEST_DOCUMENT_ID,
   segmentsOrThrow,
+  splitTask,
   testId,
 } from '../testing/project-builder';
 import { createSharedDocument, readSharedData, TASKS_ROOT } from './shared-document';
@@ -331,6 +332,35 @@ describe('shared session edge cases', () => {
     return session;
   }
 
+  it('searches for a loop again when a dependency keeps its tasks but another type makes it lead to another block, and not when only its lag changes', () => {
+    const toLastBlock = link('b', 'a', 'finishToFinish');
+    const fromFirstBlock = { ...link('a', 'b'), predecessorBlock: 0 };
+    const session = openOne(
+      project(
+        [
+          splitTask('a', [
+            [3, 0],
+            [3, 1],
+          ]),
+          workTask('b'),
+        ],
+        [fromFirstBlock, toLastBlock],
+      ),
+    );
+    expect(
+      session.apply({ type: 'putDependency', dependency: { ...toLastBlock, lagHours: 2 } }),
+    ).toEqual({ ok: true, value: undefined });
+    expect(
+      session.apply({
+        type: 'putDependency',
+        dependency: { ...toLastBlock, type: 'finishToStart' },
+      }),
+    ).toEqual({
+      ok: false,
+      error: [{ path: `dependencies.${toLastBlock.id}`, code: 'DEPENDENCY_CYCLE' }],
+    });
+  });
+
   it.each<[string, SharedOperation]>([
     [
       'a dependency with an invalid lag',
@@ -537,6 +567,12 @@ type OperationShape =
     }
   | { readonly type: 'blocks'; readonly task: number; readonly count: number }
   | { readonly type: 'unlink'; readonly index: number }
+  | {
+      readonly type: 'relink';
+      readonly index: number;
+      readonly kind: DependencyType;
+      readonly lagHours: number;
+    }
   | { readonly type: 'putTag'; readonly id: string }
   | { readonly type: 'removeTag'; readonly id: string }
   | { readonly type: 'day'; readonly fullDay: boolean }
@@ -606,6 +642,17 @@ const operationArbitrary: fc.Arbitrary<OperationShape> = fc.oneof(
     count: fc.integer({ min: 1, max: 3 }),
   }),
   fc.record({ type: fc.constant('unlink' as const), index: position }),
+  fc.record({
+    type: fc.constant('relink' as const),
+    index: position,
+    kind: fc.constantFrom<DependencyType>(
+      'finishToStart',
+      'startToStart',
+      'finishToFinish',
+      'startToFinish',
+    ),
+    lagHours: fc.integer({ min: -4, max: 4 }),
+  }),
   fc.record({ type: fc.constant('putTag' as const), id: tagId }),
   fc.record({ type: fc.constant('removeTag' as const), id: tagId }),
   fc.record({ type: fc.constant('day' as const), fullDay: fc.boolean() }),
@@ -749,6 +796,16 @@ function toOperation(shape: OperationShape, current: Project, newId: string): Sh
             },
           }
         : noOperation();
+    case 'relink': {
+      const dependency =
+        current.dependencies[shape.index % Math.max(current.dependencies.length, 1)];
+      return dependency === undefined
+        ? noOperation()
+        : {
+            type: 'putDependency',
+            dependency: { ...dependency, type: shape.kind, lagHours: shape.lagHours },
+          };
+    }
     case 'unlink':
       return {
         type: 'removeDependency',
