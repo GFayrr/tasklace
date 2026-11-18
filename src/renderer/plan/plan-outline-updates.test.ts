@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import type { Dependency, Task, TaskId } from '../../core/model/project';
+import { valueAt } from '../../core/table-value';
 import { link, summary, testId, workTask } from '../../core/testing/project-builder';
 import {
   buildPlanOutline,
@@ -11,7 +12,9 @@ import {
   nextPlanOutline,
   taskIdOfNumber,
   toggledSummary,
+  type PlanOutline,
 } from './plan-outline';
+import { outlineShape } from './testing/outline-shape';
 
 const IDS = ['a', 'b', 'c', 'd', 'e', 'f'] as const;
 const SORT_KEYS = ['k0', 'k1', 'k2'] as const;
@@ -27,31 +30,43 @@ function replacing(tasks: readonly Task[], ...replacements: readonly Task[]): re
   return tasks.map((task) => replacements.find((next) => next.id === task.id) ?? task);
 }
 
+/** Reads an outline and the outline a full build gives, for the same tasks, as comparable tables. */
+function expectBuilt(outline: PlanOutline, tasks: readonly Task[], collapsed: ReadonlySet<TaskId>) {
+  expect(outlineShape(outline, tasks)).toEqual(
+    outlineShape(buildPlanOutline(tasks, collapsed), tasks),
+  );
+}
+
+interface Shape {
+  readonly present: boolean;
+  readonly parent: string | null;
+  readonly sortKey: string;
+}
+
 describe('nextPlanOutline', () => {
-  const basis = nextPlanOutline(null, TASKS, NOTHING_COLLAPSED);
+  /** Builds a new basis on the tasks, since a basis shares its records with the ones made from it. */
+  const fresh = (collapsed: ReadonlySet<TaskId> = NOTHING_COLLAPSED) =>
+    nextPlanOutline(null, TASKS, collapsed);
 
   it('builds the outline the first time and gives the same one back when neither the tasks nor the collapsed summaries changed', () => {
-    expect(basis.outline).toEqual(buildPlanOutline(TASKS, NOTHING_COLLAPSED));
+    const basis = fresh();
+    expectBuilt(basis.outline, TASKS, NOTHING_COLLAPSED);
     expect(nextPlanOutline(basis, TASKS, NOTHING_COLLAPSED)).toBe(basis);
   });
 
-  it('swaps renamed tasks into the outline, shown or hidden, keeping its numbers, its row indices and the other rows', () => {
+  it('swaps renamed tasks into the outline, shown or hidden, without numbering again and keeping the other rows', () => {
     const collapsed = new Set([testId('p')]);
-    const folded = nextPlanOutline(null, TASKS, collapsed);
+    const folded = fresh(collapsed);
+    const generation = folded.table.generation;
     const tasks = replacing(TASKS, { ...second, name: 'Renamed' }, { ...alone, name: 'Moved on' });
     const next = nextPlanOutline(folded, tasks, collapsed);
-    expect(next.outline).toEqual(buildPlanOutline(tasks, collapsed));
-    expect([next.outline.wbsById, next.outline.rowIndexById, next.outline.rows[0]]).toEqual([
-      folded.outline.wbsById,
-      folded.outline.rowIndexById,
-      folded.outline.rows[0],
-    ]);
-    expect(next.outline.wbsById).toBe(folded.outline.wbsById);
-    expect(next.outline.rowIndexById).toBe(folded.outline.rowIndexById);
+    expectBuilt(next.outline, tasks, collapsed);
+    expect(next.table.generation).toBe(generation);
     expect(next.outline.rows[0]).toBe(folded.outline.rows[0]);
   });
 
   it('keeps the table from numbers to tasks already built, which still holds since no number changed', () => {
+    const basis = fresh();
     expect(taskIdOfNumber(basis.outline, '1.2')).toBe(second.id);
     const next = nextPlanOutline(
       basis,
@@ -62,7 +77,7 @@ describe('nextPlanOutline', () => {
     expect(taskIdOfNumber(next.outline, '2')).toBe(alone.id);
   });
 
-  it('builds the outline again when a task moves, arrives or leaves, or when a summary is opened or closed', () => {
+  it('numbers again when a task moves, arrives or leaves, or when a summary is opened or closed, an older outline then giving no number at all', () => {
     const moved = replacing(TASKS, { ...first, sortKey: 'k2' });
     const reparented = replacing(TASKS, { ...alone, parentId: testId('p') });
     const added = [...TASKS, workTask('r', { sortKey: 'k0' })];
@@ -76,31 +91,127 @@ describe('nextPlanOutline', () => {
       [TASKS, collapsed],
     ];
     for (const [tasks, folded] of cases) {
+      const basis = fresh();
+      const generation = basis.table.generation;
       const next = nextPlanOutline(basis, tasks, folded);
-      expect(next.outline).toEqual(buildPlanOutline(tasks, folded));
-      expect(next.outline.wbsById).not.toBe(basis.outline.wbsById);
+      expectBuilt(next.outline, tasks, folded);
+      expect(next.table.generation).toBe(generation + 1);
+      expect([
+        basis.outline.wbsById.has(first.id),
+        basis.outline.rowIndexById.get(first.id),
+      ]).toEqual([false, undefined]);
     }
   });
 
-  it('sorts again only the sibling groups a task joins or leaves, and none when only a summary is opened or closed', () => {
-    const added = [...TASKS, workTask('r', { sortKey: 'k0' })];
-    const grown = nextPlanOutline(basis, added, NOTHING_COLLAPSED);
-    expect(grown.outline.childrenById.get(parent.id)).toBe(
-      basis.outline.childrenById.get(parent.id),
+  it('leaves alone the groups no task joins or leaves, and every group when only a summary is opened or closed', () => {
+    const basis = fresh();
+    const underParent = basis.table.groups.get(parent.id);
+    const children = [...(underParent ?? [])];
+    const grown = nextPlanOutline(
+      basis,
+      [...TASKS, workTask('r', { sortKey: 'k0' })],
+      NOTHING_COLLAPSED,
     );
-    expect(grown.outline.childrenById.get(null)).not.toBe(basis.outline.childrenById.get(null));
-    const folded = nextPlanOutline(basis, TASKS, new Set([parent.id]));
-    expect(folded.outline.childrenById).toBe(basis.outline.childrenById);
+    expect(grown.table.groups.get(parent.id)).toBe(underParent);
+    expect(grown.table.groups.get(parent.id)).toEqual(children);
+    const groups = [...grown.table.groups.values()];
+    const folded = nextPlanOutline(grown, grown.tasks, new Set([parent.id]));
+    expect(
+      [...folded.table.groups.values()].map((group, index) => group === groups[index]),
+    ).toEqual(groups.map(() => true));
   });
 
-  it('fails loudly when the earlier outline does not hold a replaced task among the children of its parent', () => {
-    const wrong = {
-      tasks: TASKS,
-      collapsed: NOTHING_COLLAPSED,
-      outline: buildPlanOutline([], NOTHING_COLLAPSED),
-    };
+  it('gives the outline a full build gives when a list becomes another at once, few or many tasks changing', () => {
+    const ids = Array.from(
+      { length: 90 },
+      (_unused, index) => `t${String(index).padStart(2, '0')}`,
+    );
+    const shape = fc.record({
+      present: fc.boolean(),
+      parent: fc.constantFrom(null, 't00', 't01', 't02'),
+      sortKey: fc.constantFrom(...SORT_KEYS),
+    });
+    /** Makes the task of an identifier in a shape, or nothing when the shape leaves it out. */
+    const taskOf = (id: string, { present, parent: parentId, sortKey }: Shape) =>
+      present
+        ? [workTask(id, { parentId: parentId === null ? null : testId(parentId), sortKey })]
+        : [];
+    fc.assert(
+      fc.property(
+        fc.array(fc.tuple(shape, shape), { minLength: ids.length, maxLength: ids.length }),
+        fc.nat({ max: ids.length }),
+        fc.subarray(ids.slice(0, 3).map((id) => testId(id))),
+        (shapes, changing, folded) => {
+          const pairs = ids.map((id, index) => {
+            const [before, after] = valueAt(shapes, index);
+            const old = taskOf(id, before);
+            return [old, index < changing ? taskOf(id, after) : old] as const;
+          });
+          const collapsed = new Set(folded);
+          const after = pairs.flatMap(([, next]) => next);
+          const basis = nextPlanOutline(
+            null,
+            pairs.flatMap(([old]) => old),
+            collapsed,
+          );
+          expectBuilt(nextPlanOutline(basis, after, collapsed).outline, after, collapsed);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it('takes the tasks out of the group they leave when many tasks change at once, even if nothing else touches that group, forgetting it once empty', () => {
+    const roots = Array.from({ length: 70 }, (_unused, index) =>
+      workTask(`r${String(index).padStart(2, '0')}`, { sortKey: 'k1' }),
+    );
+    const before = [parent, first, second, ...roots];
+    const after = [
+      parent,
+      { ...first, parentId: null },
+      { ...second, parentId: null },
+      ...roots.map((task) => ({ ...task, sortKey: 'k2' })),
+    ].sort((left, right) => (left.id < right.id ? -1 : 1));
+    const next = nextPlanOutline(
+      nextPlanOutline(null, before, NOTHING_COLLAPSED),
+      after,
+      NOTHING_COLLAPSED,
+    );
+    expectBuilt(next.outline, after, NOTHING_COLLAPSED);
+    expect(next.outline.childrenById.get(parent.id)).toBeUndefined();
+  });
+
+  it('refuses an older outline once a newer one changed the records they share, even for the same tasks', () => {
+    const basis = fresh();
+    nextPlanOutline(basis, replacing(TASKS, { ...second, name: 'Renamed' }), NOTHING_COLLAPSED);
+    for (const [tasks, collapsed] of [
+      [TASKS, NOTHING_COLLAPSED],
+      [TASKS, new Set([parent.id])],
+    ] as const) {
+      expect(() => nextPlanOutline(basis, tasks, collapsed)).toThrow(
+        'An outline was given after a newer one had changed the records they share.',
+      );
+    }
+  });
+
+  it('fails loudly when the records do not hold a replaced task', () => {
+    const empty = nextPlanOutline(null, [], NOTHING_COLLAPSED);
+    empty.table.reflects = TASKS;
     expect(() =>
-      nextPlanOutline(wrong, replacing(TASKS, { ...second, name: 'Renamed' }), NOTHING_COLLAPSED),
+      nextPlanOutline(
+        { ...empty, tasks: TASKS },
+        replacing(TASKS, { ...second, name: 'Renamed' }),
+        NOTHING_COLLAPSED,
+      ),
+    ).toThrow(`The outline holds no record of the task ${second.id}.`);
+    const blank = nextPlanOutline(null, [], NOTHING_COLLAPSED);
+    blank.table.reflects = TASKS;
+    expect(() =>
+      nextPlanOutline(
+        { ...blank, tasks: TASKS },
+        replacing(TASKS, { ...second, sortKey: 'k2' }),
+        NOTHING_COLLAPSED,
+      ),
     ).toThrow(`The task ${second.id} is not among the children of its parent.`);
   });
 
@@ -134,7 +245,7 @@ describe('nextPlanOutline', () => {
             );
           }
           current = nextPlanOutline(current, tasks, collapsed);
-          expect(current.outline).toEqual(buildPlanOutline(tasks, collapsed));
+          expectBuilt(current.outline, tasks, collapsed);
         }
       }),
     );
