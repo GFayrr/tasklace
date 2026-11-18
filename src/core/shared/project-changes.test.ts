@@ -1,13 +1,13 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { Task } from '../model/project';
-import { link, project, testId, workTask } from '../testing/project-builder';
+import { link, project, workTask } from '../testing/project-builder';
 import { projectChanges } from './project-changes';
 
-const NOTHING = { put: [], removed: [] };
+const NOTHING = { added: [], replaced: [], removed: [] };
 
 describe('projectChanges', () => {
-  const tasks: readonly [Task, ...Task[]] = [workTask('b'), workTask('d'), workTask('f')];
+  const tasks: readonly [Task, Task, Task] = [workTask('b'), workTask('d'), workTask('f')];
   const start = project(tasks, [link('b', 'd')]);
 
   it('finds nothing between a project and itself, nor between two projects sharing their lists and header values', () => {
@@ -25,8 +25,8 @@ describe('projectChanges', () => {
     });
   });
 
-  it('gives the items added or replaced and the identifiers removed, at the start, in the middle and at the end', () => {
-    const [first] = tasks;
+  it('gives the items added, replaced and removed, at the start, in the middle and at the end', () => {
+    const [first, second, third] = tasks;
     const renamed = workTask('d', { name: 'Renamed' });
     const a = workTask('a');
     const c = workTask('c');
@@ -34,8 +34,12 @@ describe('projectChanges', () => {
     const next = { ...start, tasks: [a, first, c, renamed, g], dependencies: [] };
     expect(projectChanges(start, next)).toEqual({
       header: false,
-      tasks: { put: [a, c, renamed, g], removed: [testId('f')] },
-      dependencies: { put: [], removed: [testId('b-d')] },
+      tasks: {
+        added: [a, c, g],
+        replaced: [{ previous: second, next: renamed }],
+        removed: [third],
+      },
+      dependencies: { added: [], replaced: [], removed: start.dependencies },
       tags: NOTHING,
     });
   });
@@ -59,8 +63,12 @@ describe('projectChanges', () => {
         const previous = new Map(before.map((task) => [task.id, task]));
         const next = new Set(after.map((task) => task.id));
         expect(changes.tasks).toEqual({
-          put: after.filter((task) => previous.get(task.id) !== task),
-          removed: before.filter((task) => !next.has(task.id)).map((task) => task.id),
+          added: after.filter((task) => !previous.has(task.id)),
+          replaced: after.flatMap((task) => {
+            const old = previous.get(task.id);
+            return old === undefined || old === task ? [] : [{ previous: old, next: task }];
+          }),
+          removed: before.filter((task) => !next.has(task.id)),
         });
       }),
     );

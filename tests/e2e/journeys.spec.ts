@@ -80,6 +80,12 @@ function projectName() {
   return page.getByRole('textbox', { name: 'Project name' });
 }
 
+/** Waits until the table shows the dates of the schedule down to the given task, then returns the texts of its rows. */
+async function scheduledTableTexts(lastTask: string): Promise<string[][]> {
+  await expect(taskRow(page, lastTask).getByRole('gridcell').nth(END_COLUMN)).not.toHaveText('');
+  return tableTexts(page);
+}
+
 test('keeps a whole project, milestone included, across a restart of the application', async () => {
   const path = join(folder, 'Thesis.tasklace');
   await page.getByRole('button', { name: /New project/ }).click();
@@ -98,7 +104,7 @@ test('keeps a whole project, milestone included, across a restart of the applica
     '0 h',
   );
   await save(path);
-  const shown = await tableTexts(page);
+  const shown = await scheduledTableTexts('Defense');
   const saved = await projectIn(path);
   expect(saved.name).toBe('Thesis');
   expect(
@@ -119,7 +125,7 @@ test('keeps a whole project, milestone included, across a restart of the applica
   await recent.click();
   await expect(projectName()).toHaveValue('Thesis');
   await expectAllSaved(page);
-  expect(await tableTexts(page)).toEqual(shown);
+  await expect.poll(() => tableTexts(page)).toEqual(shown);
   expect(await projectIn(path)).toEqual(saved);
 });
 
@@ -176,7 +182,7 @@ test('exports a CSV table through the menu and imports it back into the same pla
   await typeInCell(page, 'Écrire', DURATION_COLUMN, '14');
   await typeInCell(page, 'Relire', PREDECESSORS_COLUMN, '1');
   await save(path);
-  const shown = await tableTexts(page);
+  const shown = await scheduledTableTexts('Relire');
 
   await answerDialogs(application, { save: table });
   await page.getByRole('button', { name: 'Export', exact: true }).click();
@@ -196,7 +202,7 @@ test('exports a CSV table through the menu and imports it back into the same pla
   await page.getByRole('menuitem', { name: 'CSV table…' }).click();
   await expect(page.getByText('Imported Plan.csv: 2 tasks.')).toBeVisible();
   await expect(page.getByText('Kept on this computer only')).toBeVisible();
-  expect(await tableTexts(page)).toEqual(shown);
+  await expect.poll(() => tableTexts(page)).toEqual(shown);
 });
 
 test('moves the project start and adds a day off from the settings, then undoes both', async () => {
