@@ -20,6 +20,7 @@ import {
   withAncestorsOpen,
 } from './plan-outline';
 import type { TaskId } from '../../core/model/project';
+import { outlineShape } from './testing/outline-shape';
 
 const TASKS = [
   summary('s', { sortKey: 'a' }),
@@ -76,8 +77,9 @@ describe('buildPlanOutline', () => {
           shuffled.forEach((task) => {
             grouped.set(task.parentId, [...(grouped.get(task.parentId) ?? []), task]);
           });
-          expect(outline.wbsById).toEqual(computeWbsNumbers(grouped));
-          for (const [id, wbs] of outline.wbsById) {
+          const { wbsById } = outlineShape(outline, shuffled);
+          expect(wbsById).toEqual(computeWbsNumbers(grouped));
+          for (const [id, wbs] of wbsById) {
             expect(taskIdOfNumber(outline, wbs)).toBe(id);
           }
           expect(taskIdOfNumber(outline, '99')).toBeUndefined();

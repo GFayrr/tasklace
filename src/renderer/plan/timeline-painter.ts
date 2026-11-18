@@ -16,7 +16,7 @@ import {
   type ProjectHour,
 } from '../../core/time';
 import type { Theme } from '../theme/theme';
-import type { PlanRow } from './plan-outline';
+import type { PlanRow, TaskLookup } from './plan-outline';
 import { paleColor, type TagStyle } from './tag-styles';
 import type { ScaleTicks, ZoomLevel } from './time-scale';
 import {
@@ -75,7 +75,7 @@ export interface TimelineScene {
   readonly frame: TimelineFrame;
   readonly zoom: ZoomLevel;
   readonly rows: readonly PlanRow[];
-  readonly rowIndexById: ReadonlyMap<TaskId, number>;
+  readonly rowIndexById: TaskLookup<number>;
   readonly schedule: Schedule | null;
   readonly dependencies: readonly Dependency[];
   readonly calendar: CompiledCalendar | null;

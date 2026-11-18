@@ -14,17 +14,42 @@ export interface PlanRow {
   readonly collapsed: boolean;
 }
 
+export interface TaskLookup<Value> {
+  get(taskId: TaskId): Value | undefined;
+  has(taskId: TaskId): boolean;
+}
+
+export interface ChildrenLookup {
+  get(parentId: TaskId | null): readonly Task[] | undefined;
+}
+
 export interface PlanOutline {
   readonly rows: readonly PlanRow[];
-  readonly wbsById: ReadonlyMap<TaskId, string>;
-  readonly rowIndexById: ReadonlyMap<TaskId, number>;
-  readonly childrenById: ReadonlyMap<TaskId | null, readonly Task[]>;
+  readonly wbsById: TaskLookup<string>;
+  readonly rowIndexById: TaskLookup<number>;
+  readonly childrenById: ChildrenLookup;
+}
+
+interface Slot {
+  task: Task;
+  wbs: string;
+  row: number;
+  generation: number;
+}
+
+interface OutlineTable {
+  readonly slots: Map<TaskId, Slot>;
+  readonly groups: Map<TaskId | null, Slot[]>;
+  generation: number;
+  reflects: readonly Task[];
+  folded: ReadonlySet<TaskId>;
 }
 
 export interface OutlineBasis {
   readonly tasks: readonly Task[];
   readonly collapsed: ReadonlySet<TaskId>;
   readonly outline: PlanOutline;
+  readonly table: OutlineTable;
 }
 
 export interface IncomingLookup {
@@ -43,9 +68,12 @@ export interface IncomingBasis {
 }
 
 const idsByNumber = new WeakMap<PlanOutline, ReadonlyMap<string, TaskId>>();
+const numberedSlots = new WeakMap<PlanOutline, () => readonly Slot[]>();
+const HIDDEN_ROW = -1;
+const MAX_CHANGES_PLACED_ONE_BY_ONE = 64;
 
 interface Level {
-  readonly children: readonly Task[];
+  readonly children: readonly Slot[];
   readonly depth: number;
   readonly prefix: string;
   readonly hidden: boolean;
@@ -56,7 +84,8 @@ interface Level {
 export function taskIdOfNumber(outline: PlanOutline, wbs: string): TaskId | undefined {
   let table = idsByNumber.get(outline);
   if (table === undefined) {
-    table = new Map([...outline.wbsById].map(([id, number]) => [number, id]));
+    const numbered = numberedSlots.get(outline)?.() ?? [];
+    table = new Map(numbered.map((slot) => [slot.wbs, slot.task.id]));
     idsByNumber.set(outline, table);
   }
   return table.get(wbs);
@@ -67,33 +96,189 @@ export function buildPlanOutline(
   tasks: readonly Task[],
   collapsed: ReadonlySet<TaskId>,
 ): PlanOutline {
-  return outlineOf(groupChildren(tasks), collapsed);
+  return nextPlanOutline(null, tasks, collapsed).outline;
 }
 
-/** Walks sorted sibling groups from the root down, numbering every task and listing the rows of the tasks no collapsed summary hides. */
-function outlineOf(
-  childrenById: ReadonlyMap<TaskId | null, readonly Task[]>,
+/** Gives the outline of the tasks from the one of an earlier list, keeping one record per task: the same if nothing changed, the replaced tasks swapped in if the tree and folds stay, else numbered again after placing the moved records. */
+export function nextPlanOutline(
+  basis: OutlineBasis | null,
+  tasks: readonly Task[],
   collapsed: ReadonlySet<TaskId>,
-): PlanOutline {
+): OutlineBasis {
+  if (
+    basis !== null &&
+    (basis.table.reflects !== basis.tasks || basis.table.folded !== basis.collapsed)
+  ) {
+    throw new Error('An outline was given after a newer one had changed the records they share.');
+  }
+  if (basis?.tasks === tasks && basis.collapsed === collapsed) {
+    return basis;
+  }
+  if (basis === null) {
+    const table = tableOf(tasks, collapsed);
+    return { tasks, collapsed, table, outline: walkedOutline(table) };
+  }
+  const { table } = basis;
+  const changes = listChanges(basis.tasks, tasks);
+  const keepsTree =
+    basis.collapsed === collapsed &&
+    changes.added.length === 0 &&
+    changes.removed.length === 0 &&
+    changes.replaced.every(keepsPlace);
+  const placedOneByOne = !keepsTree && changeCount(changes) <= MAX_CHANGES_PLACED_ONE_BY_ONE;
+  if (placedOneByOne) {
+    takeOutLeavingSlots(table, changes);
+  }
+  updateSlots(table, changes);
+  table.reflects = tasks;
+  table.folded = collapsed;
+  if (placedOneByOne) {
+    placeArrivingSlots(table, changes);
+  }
+  const outline = keepsTree
+    ? withReplacedTasks(basis.outline, table, changes.replaced)
+    : walkedOutline(placedOneByOne ? table : regroupSlots(table, changes));
+  return { tasks, collapsed, table, outline };
+}
+
+/** Makes one record per task and groups the records under their parent, each group sorted by sort key then identifier. */
+function tableOf(tasks: readonly Task[], collapsed: ReadonlySet<TaskId>): OutlineTable {
+  const slots = new Map<TaskId, Slot>();
+  const groups = new Map<TaskId | null, Slot[]>();
+  for (const task of tasks) {
+    const slot = { task, wbs: '', row: HIDDEN_ROW, generation: 0 };
+    slots.set(task.id, slot);
+    const siblings = groups.get(task.parentId) ?? [];
+    siblings.push(slot);
+    groups.set(task.parentId, siblings);
+  }
+  groups.forEach((siblings) => {
+    siblings.sort(compareSlots);
+  });
+  return { slots, groups, generation: 0, reflects: tasks, folded: collapsed };
+}
+
+/** Forgets the records of removed tasks, makes records for added ones and puts each replaced task in its record. */
+function updateSlots(table: OutlineTable, { added, replaced, removed }: ListChanges<Task>): void {
+  for (const task of removed) {
+    table.slots.delete(task.id);
+  }
+  for (const task of added) {
+    table.slots.set(task.id, { task, wbs: '', row: HIDDEN_ROW, generation: 0 });
+  }
+  for (const { next } of replaced) {
+    slotOf(table, next.id).task = next;
+  }
+}
+
+/** Returns the record of a task the table must hold. */
+function slotOf(table: OutlineTable, id: TaskId): Slot {
+  const slot = table.slots.get(id);
+  if (slot === undefined) {
+    throw new Error(`The outline holds no record of the task ${id}.`);
+  }
+  return slot;
+}
+
+/** Counts the tasks a change of the list adds, replaces or removes. */
+function changeCount({ added, replaced, removed }: ListChanges<Task>): number {
+  return added.length + replaced.length + removed.length;
+}
+
+/** Takes the records of removed and replaced tasks out of their groups, found by halving while every record still holds the task the groups were sorted by. */
+function takeOutLeavingSlots(table: OutlineTable, { replaced, removed }: ListChanges<Task>): void {
+  for (const task of [...removed, ...replaced.map(({ previous }) => previous)]) {
+    const siblings = table.groups.get(task.parentId) ?? [];
+    const index = slotPosition(siblings, task);
+    if (siblings[index]?.task !== task) {
+      throw new Error(`The task ${task.id} is not among the children of its parent.`);
+    }
+    siblings.splice(index, 1);
+    if (siblings.length === 0) {
+      table.groups.delete(task.parentId);
+    }
+  }
+}
+
+/** Puts the records of added and replaced tasks in the groups of their parents, where halving finds their place. */
+function placeArrivingSlots(table: OutlineTable, { added, replaced }: ListChanges<Task>): void {
+  for (const task of [...added, ...replaced.map(({ next }) => next)]) {
+    const siblings = table.groups.get(task.parentId) ?? [];
+    siblings.splice(slotPosition(siblings, task), 0, slotOf(table, task.id));
+    table.groups.set(task.parentId, siblings);
+  }
+}
+
+/** Finds by halving the first position of a sorted group whose task does not sort before a task. */
+function slotPosition(siblings: readonly Slot[], task: Task): number {
+  let low = 0;
+  let high = siblings.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (compareTasks(valueAt(siblings, middle).task, task) < 0) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
+/** Sorts again only the groups of records a task joins or leaves, removing a group left empty. */
+function regroupSlots(
+  table: OutlineTable,
+  { added, replaced, removed }: ListChanges<Task>,
+): OutlineTable {
+  const leaving = new Set<TaskId>(
+    [...removed, ...replaced.map(({ next }) => next)].map((task) => task.id),
+  );
+  const arriving = [...added, ...replaced.map(({ next }) => next)];
+  const parents = new Set([
+    ...removed.map((task) => task.parentId),
+    ...replaced.flatMap(({ previous, next }) => [previous.parentId, next.parentId]),
+    ...added.map((task) => task.parentId),
+  ]);
+  for (const parentId of parents) {
+    const siblings = (table.groups.get(parentId) ?? [])
+      .filter((slot) => !leaving.has(slot.task.id))
+      .concat(
+        arriving.filter((task) => task.parentId === parentId).map((task) => slotOf(table, task.id)),
+      );
+    siblings.sort(compareSlots);
+    if (siblings.length === 0) {
+      table.groups.delete(parentId);
+    } else {
+      table.groups.set(parentId, siblings);
+    }
+  }
+  return table;
+}
+
+/** Walks the groups of records from the root down under a new generation, writing in each reached record its number and row, and listing the rows of the tasks no collapsed summary hides. */
+function walkedOutline(table: OutlineTable): PlanOutline {
+  table.generation += 1;
+  const { groups, generation, folded } = table;
   const rows: PlanRow[] = [];
-  const wbsById = new Map<TaskId, string>();
-  const rowIndexById = new Map<TaskId, number>();
+  const numbered: Slot[] = [];
   const levels: Level[] = [
-    { children: childrenById.get(null) ?? [], depth: 0, prefix: '', hidden: false, next: 0 },
+    { children: groups.get(null) ?? [], depth: 0, prefix: '', hidden: false, next: 0 },
   ];
   for (let level = levels.at(-1); level !== undefined; level = levels.at(-1)) {
-    const task = level.children[level.next];
-    if (task === undefined) {
+    const slot = level.children[level.next];
+    if (slot === undefined) {
       levels.pop();
       continue;
     }
     level.next += 1;
+    const { task } = slot;
     const wbs = `${level.prefix}${String(level.next)}`;
-    const children = childrenById.get(task.id) ?? [];
-    const isCollapsed = children.length > 0 && collapsed.has(task.id);
-    wbsById.set(task.id, wbs);
+    const children = groups.get(task.id) ?? [];
+    const isCollapsed = children.length > 0 && folded.has(task.id);
+    slot.wbs = wbs;
+    slot.generation = generation;
+    slot.row = level.hidden ? HIDDEN_ROW : rows.length;
+    numbered.push(slot);
     if (!level.hidden) {
-      rowIndexById.set(task.id, rows.length);
       rows.push({
         task,
         depth: level.depth,
@@ -107,63 +292,40 @@ function outlineOf(
       levels.push({ children, depth: level.depth + 1, prefix: `${wbs}.`, hidden, next: 0 });
     }
   }
-  return { rows, wbsById, rowIndexById, childrenById };
+  return outlineOver(table, rows, generation, () => numbered);
 }
 
-/** Gives the outline of the tasks from the one of an earlier list: the same if nothing changed, the replaced tasks swapped in if the tree and folds stay, else numbered again with only the groups a task joined or left sorted again. */
-export function nextPlanOutline(
-  basis: OutlineBasis | null,
-  tasks: readonly Task[],
-  collapsed: ReadonlySet<TaskId>,
-): OutlineBasis {
-  if (basis?.tasks === tasks && basis.collapsed === collapsed) {
-    return basis;
-  }
-  if (basis === null) {
-    return { tasks, collapsed, outline: buildPlanOutline(tasks, collapsed) };
-  }
-  const changes = listChanges(basis.tasks, tasks);
-  const keepsTree =
-    basis.collapsed === collapsed &&
-    changes.added.length === 0 &&
-    changes.removed.length === 0 &&
-    changes.replaced.every(keepsPlace);
-  const outline = keepsTree
-    ? withReplacedTasks(basis.outline, changes.replaced)
-    : outlineOf(regroupedChildren(basis.outline.childrenById, changes), collapsed);
-  return { tasks, collapsed, outline };
+/** Makes an outline that reads the numbers, rows and children of the records stamped with a generation. */
+function outlineOver(
+  table: OutlineTable,
+  rows: readonly PlanRow[],
+  generation: number,
+  numbered: () => readonly Slot[],
+): PlanOutline {
+  /** Returns the record of a task the walk of this generation reached. */
+  const reached = (taskId: TaskId): Slot | undefined => {
+    const slot = table.slots.get(taskId);
+    return slot?.generation === generation ? slot : undefined;
+  };
+  const outline: PlanOutline = {
+    rows,
+    wbsById: {
+      get: (taskId) => reached(taskId)?.wbs,
+      has: (taskId) => reached(taskId) !== undefined,
+    },
+    rowIndexById: {
+      get: (taskId) => shownRow(reached(taskId)),
+      has: (taskId) => shownRow(reached(taskId)) !== undefined,
+    },
+    childrenById: { get: (parentId) => table.groups.get(parentId)?.map((slot) => slot.task) },
+  };
+  numberedSlots.set(outline, numbered);
+  return outline;
 }
 
-/** Sorts again only the sibling groups a task joins or leaves, reusing the other groups as they are. */
-function regroupedChildren(
-  childrenById: ReadonlyMap<TaskId | null, readonly Task[]>,
-  { added, replaced, removed }: ListChanges<Task>,
-): ReadonlyMap<TaskId | null, readonly Task[]> {
-  const leaving = new Set<TaskId>(
-    [...removed, ...replaced.map(({ previous }) => previous)].map((task) => task.id),
-  );
-  const arriving = [...added, ...replaced.map(({ next }) => next)];
-  const parents = new Set([
-    ...removed.map((task) => task.parentId),
-    ...replaced.flatMap(({ previous, next }) => [previous.parentId, next.parentId]),
-    ...added.map((task) => task.parentId),
-  ]);
-  if (parents.size === 0) {
-    return childrenById;
-  }
-  const regrouped = new Map(childrenById);
-  for (const parentId of parents) {
-    const siblings = (childrenById.get(parentId) ?? [])
-      .filter((task) => !leaving.has(task.id))
-      .concat(arriving.filter((task) => task.parentId === parentId));
-    siblings.sort(compareSiblings);
-    if (siblings.length === 0) {
-      regrouped.delete(parentId);
-    } else {
-      regrouped.set(parentId, siblings);
-    }
-  }
-  return regrouped;
+/** Returns the row of a reached record, or nothing for a record a collapsed summary hides. */
+function shownRow(slot: Slot | undefined): number | undefined {
+  return slot === undefined || slot.row === HIDDEN_ROW ? undefined : slot.row;
 }
 
 /** Tells whether a replaced task keeps its parent and its place among its siblings. */
@@ -171,46 +333,26 @@ function keepsPlace({ previous, next }: Replacement<Task>): boolean {
   return previous.parentId === next.parentId && previous.sortKey === next.sortKey;
 }
 
-/** Puts replaced tasks in the rows and sibling groups of an outline whose tree they keep, its numbers and row indices staying the same. */
+/** Puts replaced tasks, already in their records, in the rows of an outline whose tree they keep, its numbers and rows staying the same. */
 function withReplacedTasks(
   outline: PlanOutline,
+  table: OutlineTable,
   replaced: readonly Replacement<Task>[],
 ): PlanOutline {
   const rows = outline.rows.slice();
-  const copies = new Map<TaskId | null, Task[]>();
   for (const { next } of replaced) {
     const index = outline.rowIndexById.get(next.id);
     if (index !== undefined) {
       rows[index] = { ...valueAt(rows, index), task: next };
     }
-    const siblings =
-      copies.get(next.parentId) ?? (outline.childrenById.get(next.parentId) ?? []).slice();
-    copies.set(next.parentId, siblings);
-    siblings[siblingIndex(siblings, next)] = next;
   }
-  const childrenById = new Map([...outline.childrenById, ...copies]);
-  const updated = { ...outline, rows, childrenById };
+  const numbered = numberedSlots.get(outline) ?? (() => []);
+  const updated = outlineOver(table, rows, table.generation, numbered);
   const numbers = idsByNumber.get(outline);
   if (numbers !== undefined) {
     idsByNumber.set(updated, numbers);
   }
   return updated;
-}
-
-/** Finds by halving where a task with the same identifier, parent and sort key sits among siblings sorted by sort key then identifier. */
-function siblingIndex(siblings: readonly Task[], task: Task): number {
-  let low = 0;
-  let high = siblings.length - 1;
-  while (low <= high) {
-    const middle = (low + high) >> 1;
-    const order = compareSiblings(valueAt(siblings, middle), task);
-    if (order === 0) {
-      return middle;
-    }
-    low = order < 0 ? middle + 1 : low;
-    high = order < 0 ? high : middle - 1;
-  }
-  throw new Error(`The task ${task.id} is not among the children of its parent.`);
 }
 
 /** Gives the dependencies grouped by the task they lead to, updating in place the one table kept since the first grouping, only for the tasks a changed dependency leads to, and refusing an older basis whose table moved on. */
@@ -279,7 +421,7 @@ function groupedIncoming(dependencies: readonly Dependency[]): Map<TaskId, reado
 /** Writes the predecessors of a task, or of one of its blocks, in the notation of the task table, by WBS number in WBS order. */
 export function predecessorText(
   incoming: readonly Dependency[] | undefined,
-  wbsById: ReadonlyMap<TaskId, string>,
+  wbsById: TaskLookup<string>,
   block: number | null = null,
 ): string {
   if (incoming === undefined) {
@@ -300,22 +442,13 @@ export function predecessorText(
   return formatPredecessors(references);
 }
 
-/** Groups tasks under their parent, each group sorted by sort key then identifier. */
-function groupChildren(tasks: readonly Task[]): Map<TaskId | null, Task[]> {
-  const groups = new Map<TaskId | null, Task[]>();
-  for (const task of tasks) {
-    const siblings = groups.get(task.parentId) ?? [];
-    siblings.push(task);
-    groups.set(task.parentId, siblings);
-  }
-  groups.forEach((siblings) => {
-    siblings.sort(compareSiblings);
-  });
-  return groups;
+/** Orders two records of siblings by the sort key of their tasks, then by identifier. */
+function compareSlots(left: Slot, right: Slot): number {
+  return compareTasks(left.task, right.task);
 }
 
-/** Orders two siblings by sort key, then by identifier. */
-function compareSiblings(left: Task, right: Task): number {
+/** Orders two sibling tasks by sort key, then by identifier. */
+function compareTasks(left: Task, right: Task): number {
   return compareStrings(left.sortKey, right.sortKey) || compareStrings(left.id, right.id);
 }
 
