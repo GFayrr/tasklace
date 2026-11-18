@@ -81,6 +81,17 @@ describe('nextPlanOutline', () => {
     }
   });
 
+  it('sorts again only the sibling groups a task joins or leaves, and none when only a summary is opened or closed', () => {
+    const added = [...TASKS, workTask('r', { sortKey: 'k0' })];
+    const grown = nextPlanOutline(basis, added, NOTHING_COLLAPSED);
+    expect(grown.outline.childrenById.get(parent.id)).toBe(
+      basis.outline.childrenById.get(parent.id),
+    );
+    expect(grown.outline.childrenById.get(null)).not.toBe(basis.outline.childrenById.get(null));
+    const folded = nextPlanOutline(basis, TASKS, new Set([parent.id]));
+    expect(folded.outline.childrenById).toBe(basis.outline.childrenById);
+  });
+
   it('fails loudly when the earlier outline does not hold a replaced task among the children of its parent', () => {
     const wrong = {
       tasks: TASKS,

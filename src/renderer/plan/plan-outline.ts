@@ -2,7 +2,7 @@ import { compareStrings } from '../../core/compare-strings';
 import { valueAt } from '../../core/table-value';
 import { compareWbsNumbers, formatPredecessors } from '../../core/exchange/csv/task-notations';
 import type { Dependency, Task, TaskId } from '../../core/model/project';
-import { listChanges, type Replacement } from '../../core/shared/project-changes';
+import { listChanges, type ListChanges, type Replacement } from '../../core/shared/project-changes';
 
 export const NOTHING_COLLAPSED: ReadonlySet<TaskId> = new Set();
 
@@ -57,7 +57,14 @@ export function buildPlanOutline(
   tasks: readonly Task[],
   collapsed: ReadonlySet<TaskId>,
 ): PlanOutline {
-  const childrenById = groupChildren(tasks);
+  return outlineOf(groupChildren(tasks), collapsed);
+}
+
+/** Walks sorted sibling groups from the root down, numbering every task and listing the rows of the tasks no collapsed summary hides. */
+function outlineOf(
+  childrenById: ReadonlyMap<TaskId | null, readonly Task[]>,
+  collapsed: ReadonlySet<TaskId>,
+): PlanOutline {
   const rows: PlanRow[] = [];
   const wbsById = new Map<TaskId, string>();
   const rowIndexById = new Map<TaskId, number>();
@@ -93,7 +100,7 @@ export function buildPlanOutline(
   return { rows, wbsById, rowIndexById, childrenById };
 }
 
-/** Gives the outline of the tasks from the outline of an earlier list, reusing it as it is when nothing changed, swapping in the replaced tasks when the tree and the collapsed summaries stay the same, and building it again otherwise. */
+/** Gives the outline of the tasks from the one of an earlier list: the same if nothing changed, the replaced tasks swapped in if the tree and folds stay, else numbered again with only the groups a task joined or left sorted again. */
 export function nextPlanOutline(
   basis: OutlineBasis | null,
   tasks: readonly Task[],
@@ -102,18 +109,51 @@ export function nextPlanOutline(
   if (basis?.tasks === tasks && basis.collapsed === collapsed) {
     return basis;
   }
-  const changes = basis === null ? null : listChanges(basis.tasks, tasks);
+  if (basis === null) {
+    return { tasks, collapsed, outline: buildPlanOutline(tasks, collapsed) };
+  }
+  const changes = listChanges(basis.tasks, tasks);
   const keepsTree =
-    basis !== null &&
-    changes !== null &&
     basis.collapsed === collapsed &&
     changes.added.length === 0 &&
     changes.removed.length === 0 &&
     changes.replaced.every(keepsPlace);
   const outline = keepsTree
     ? withReplacedTasks(basis.outline, changes.replaced)
-    : buildPlanOutline(tasks, collapsed);
+    : outlineOf(regroupedChildren(basis.outline.childrenById, changes), collapsed);
   return { tasks, collapsed, outline };
+}
+
+/** Sorts again only the sibling groups a task joins or leaves, reusing the other groups as they are. */
+function regroupedChildren(
+  childrenById: ReadonlyMap<TaskId | null, readonly Task[]>,
+  { added, replaced, removed }: ListChanges<Task>,
+): ReadonlyMap<TaskId | null, readonly Task[]> {
+  const leaving = new Set<TaskId>(
+    [...removed, ...replaced.map(({ previous }) => previous)].map((task) => task.id),
+  );
+  const arriving = [...added, ...replaced.map(({ next }) => next)];
+  const parents = new Set([
+    ...removed.map((task) => task.parentId),
+    ...replaced.flatMap(({ previous, next }) => [previous.parentId, next.parentId]),
+    ...added.map((task) => task.parentId),
+  ]);
+  if (parents.size === 0) {
+    return childrenById;
+  }
+  const regrouped = new Map(childrenById);
+  for (const parentId of parents) {
+    const siblings = (childrenById.get(parentId) ?? [])
+      .filter((task) => !leaving.has(task.id))
+      .concat(arriving.filter((task) => task.parentId === parentId));
+    siblings.sort(compareSiblings);
+    if (siblings.length === 0) {
+      regrouped.delete(parentId);
+    } else {
+      regrouped.set(parentId, siblings);
+    }
+  }
+  return regrouped;
 }
 
 /** Tells whether a replaced task keeps its parent and its place among its siblings. */
