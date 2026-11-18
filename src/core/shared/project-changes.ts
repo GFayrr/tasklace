@@ -56,6 +56,11 @@ export function listChanges<Item extends { readonly id: string }>(
   while (before < previous.length && after < next.length) {
     const old = valueAt(previous, before);
     const current = valueAt(next, after);
+    if (old === current) {
+      before += 1;
+      after += 1;
+      continue;
+    }
     const order = compareStrings(old.id, current.id);
     before += order <= 0 ? 1 : 0;
     after += order >= 0 ? 1 : 0;

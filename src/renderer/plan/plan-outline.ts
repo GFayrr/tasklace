@@ -27,9 +27,19 @@ export interface OutlineBasis {
   readonly outline: PlanOutline;
 }
 
+export interface IncomingLookup {
+  get(taskId: TaskId): readonly Dependency[] | undefined;
+}
+
+interface IncomingTable {
+  readonly groups: Map<TaskId, readonly Dependency[]>;
+  reflects: readonly Dependency[];
+}
+
 export interface IncomingBasis {
   readonly dependencies: readonly Dependency[];
-  readonly incoming: ReadonlyMap<TaskId, readonly Dependency[]>;
+  readonly incoming: IncomingLookup;
+  readonly table: IncomingTable;
 }
 
 const idsByNumber = new WeakMap<PlanOutline, ReadonlyMap<string, TaskId>>();
@@ -203,39 +213,57 @@ function siblingIndex(siblings: readonly Task[], task: Task): number {
   throw new Error(`The task ${task.id} is not among the children of its parent.`);
 }
 
-/** Gives the dependencies grouped by the task they lead to from the grouping of an earlier list, reusing it when the list is the same and grouping again only the tasks a changed dependency leads to. */
+/** Gives the dependencies grouped by the task they lead to, updating in place the one table kept since the first grouping, only for the tasks a changed dependency leads to, and refusing an older basis whose table moved on. */
 export function nextIncoming(
   basis: IncomingBasis | null,
   dependencies: readonly Dependency[],
 ): IncomingBasis {
+  if (basis !== null && basis.table.reflects !== basis.dependencies) {
+    throw new Error(
+      'A grouping of the dependencies was given after a newer one had changed its table.',
+    );
+  }
   if (basis?.dependencies === dependencies) {
     return basis;
   }
-  if (basis === null) {
-    return { dependencies, incoming: groupIncoming(dependencies) };
+  const table = basis?.table ?? { groups: groupedIncoming(dependencies), reflects: dependencies };
+  if (basis !== null) {
+    regroupIncoming(table.groups, listChanges(basis.dependencies, dependencies));
   }
-  const { added, replaced, removed } = listChanges(basis.dependencies, dependencies);
+  table.reflects = dependencies;
+  const { groups } = table;
+  return { dependencies, table, incoming: { get: (taskId) => groups.get(taskId) } };
+}
+
+/** Groups again, in a table of dependencies by the task they lead to, the lists of the tasks a changed dependency leads to or used to lead to. */
+function regroupIncoming(
+  table: Map<TaskId, readonly Dependency[]>,
+  { added, replaced, removed }: ListChanges<Dependency>,
+): void {
   const gone = new Set([...removed, ...replaced.map(({ previous }) => previous)]);
   const arriving = [...added, ...replaced.map(({ next }) => next)];
   const successors = new Set([...gone, ...arriving].map((dependency) => dependency.successorId));
-  const incoming = new Map(basis.incoming);
   for (const successor of successors) {
-    const kept = (incoming.get(successor) ?? []).filter((dependency) => !gone.has(dependency));
+    const kept = (table.get(successor) ?? []).filter((dependency) => !gone.has(dependency));
     const list = kept.concat(arriving.filter((dependency) => dependency.successorId === successor));
     list.sort((left, right) => compareStrings(left.id, right.id));
     if (list.length === 0) {
-      incoming.delete(successor);
+      table.delete(successor);
     } else {
-      incoming.set(successor, list);
+      table.set(successor, list);
     }
   }
-  return { dependencies, incoming };
 }
 
 /** Groups the dependencies by the task they lead to, so that the predecessors of a row are found at once. */
 export function groupIncoming(
   dependencies: readonly Dependency[],
 ): ReadonlyMap<TaskId, readonly Dependency[]> {
+  return groupedIncoming(dependencies);
+}
+
+/** Groups the dependencies by the task they lead to in a table that can later be changed in place. */
+function groupedIncoming(dependencies: readonly Dependency[]): Map<TaskId, readonly Dependency[]> {
   const grouped = new Map<TaskId, Dependency[]>();
   for (const dependency of dependencies) {
     const list = grouped.get(dependency.successorId);

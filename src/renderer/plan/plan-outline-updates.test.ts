@@ -7,6 +7,7 @@ import {
   groupIncoming,
   NOTHING_COLLAPSED,
   nextIncoming,
+  type IncomingBasis,
   nextPlanOutline,
   taskIdOfNumber,
   toggledSummary,
@@ -140,6 +141,15 @@ describe('nextPlanOutline', () => {
   });
 });
 
+/** Checks that a grouping holds and gives for every task what a full grouping of the dependencies gives. */
+function expectGrouped(basis: IncomingBasis, dependencies: readonly Dependency[]): void {
+  const full = groupIncoming(dependencies);
+  expect(basis.table.groups).toEqual(full);
+  for (const id of [...IDS, 'none']) {
+    expect(basis.incoming.get(testId(id))).toEqual(full.get(testId(id)));
+  }
+}
+
 describe('nextIncoming', () => {
   const DEPENDENCIES: readonly [Dependency, Dependency, Dependency] = [
     link('a', 'c'),
@@ -149,7 +159,7 @@ describe('nextIncoming', () => {
   const basis = nextIncoming(null, DEPENDENCIES);
 
   it('groups the dependencies the first time and gives the same grouping back for the same list', () => {
-    expect(basis.incoming).toEqual(groupIncoming(DEPENDENCIES));
+    expectGrouped(basis, DEPENDENCIES);
     expect(nextIncoming(basis, DEPENDENCIES)).toBe(basis);
   });
 
@@ -162,11 +172,23 @@ describe('nextIncoming', () => {
       [link('a', 'b'), toC, otherToC, toD],
     ];
     for (const dependencies of cases) {
-      const next = nextIncoming(basis, dependencies);
-      expect(next.incoming).toEqual(groupIncoming(dependencies));
+      expectGrouped(nextIncoming(nextIncoming(null, DEPENDENCIES), dependencies), dependencies);
     }
-    const kept = nextIncoming(basis, [toC, otherToC, { ...toD, lagHours: 2 }]);
-    expect(kept.incoming.get(testId('c'))).toBe(basis.incoming.get(testId('c')));
+    const before = nextIncoming(null, DEPENDENCIES);
+    const listOfC = before.incoming.get(testId('c'));
+    const kept = nextIncoming(before, [toC, otherToC, { ...toD, lagHours: 2 }]);
+    expect(kept.incoming.get(testId('c'))).toBe(listOfC);
+    expect(kept.table).toBe(before.table);
+  });
+
+  it('refuses an older grouping once a newer one changed the table they share', () => {
+    const first = nextIncoming(null, DEPENDENCIES);
+    nextIncoming(first, DEPENDENCIES.slice(1));
+    for (const dependencies of [DEPENDENCIES.slice(2), DEPENDENCIES]) {
+      expect(() => nextIncoming(first, dependencies)).toThrow(
+        'A grouping of the dependencies was given after a newer one had changed its table.',
+      );
+    }
   });
 
   it('gives after any sequence of changes the grouping a full grouping gives', () => {
@@ -195,7 +217,7 @@ describe('nextIncoming', () => {
                   );
           }
           current = nextIncoming(current, dependencies);
-          expect(current.incoming).toEqual(groupIncoming(dependencies));
+          expectGrouped(current, dependencies);
         }
       }),
     );

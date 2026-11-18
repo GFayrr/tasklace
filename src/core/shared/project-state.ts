@@ -1,5 +1,6 @@
 import { compareStrings } from '../compare-strings';
 import { MAX_HIERARCHY_DEPTH } from '../limits';
+import { valueAt } from '../table-value';
 import type { Dependency, DependencyId, Project, Tag, TagId, Task, TaskId } from '../model/project';
 import {
   blockKey,
@@ -126,16 +127,30 @@ function copyItemsBefore<Item extends { readonly id: string }>(
   id: string | null,
   list: Item[],
 ): number {
-  let next = start;
-  for (
-    let item = previous[next];
-    item !== undefined && (id === null || compareStrings(item.id, id) < 0);
-    item = previous[next]
-  ) {
-    list.push(item);
-    next += 1;
+  const end = id === null ? previous.length : firstNotBefore(previous, start, id);
+  for (let index = start; index < end; index += 1) {
+    list.push(valueAt(previous, index));
   }
-  return previous[next]?.id === id ? next + 1 : next;
+  return previous[end]?.id === id ? end + 1 : end;
+}
+
+/** Finds by halving the first position from a start whose item does not sort before an identifier, in a list sorted by identifier. */
+function firstNotBefore(
+  previous: readonly { readonly id: string }[],
+  start: number,
+  id: string,
+): number {
+  let low = start;
+  let high = previous.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (compareStrings(valueAt(previous, middle).id, id) < 0) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
 }
 
 /** Adds or replaces a task, noting it as touched, and updates the indexes. */
