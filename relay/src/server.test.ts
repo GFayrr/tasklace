@@ -22,6 +22,9 @@ const CLOSE_REFUSED = 1008;
 const CLOSE_NORMAL = 1000;
 const CLOSE_ABNORMAL = 1006;
 const TWO_BARE_FRAMES = 128;
+const LARGEST_PING_BYTES = 125;
+const PINGS_PER_BURST = 1_000;
+const MAX_FLOOD_PINGS = 200_000;
 const FAST: RelayTimings = {
   helloMilliseconds: 8_192,
   heartbeatMilliseconds: 16_384,
@@ -55,6 +58,25 @@ async function relayWith(
   });
   running.push(relay);
   return relay;
+}
+
+/** Sends the largest pings as fast as it can while reading nothing, as an attacker would, until the connection closes or enough were sent. */
+function floodWithPings(socket: TestClient['socket']): void {
+  socket.pause();
+  const payload = new Uint8Array(LARGEST_PING_BYTES);
+  let sent = 0;
+  /** Sends a burst of pings, then the next one once the event loop turned. */
+  const burst = (): void => {
+    if (socket.readyState !== socket.OPEN || sent >= MAX_FLOOD_PINGS) {
+      return;
+    }
+    for (let index = 0; index < PINGS_PER_BURST; index += 1) {
+      socket.ping(payload);
+    }
+    sent += PINGS_PER_BURST;
+    setImmediate(burst);
+  };
+  burst();
 }
 
 /** Connects a member that creates the room of the test keys, past its welcome and catching up. */
@@ -262,6 +284,18 @@ describe('a relay', () => {
     expect([await mute.closed, answering.socket.readyState]).toEqual([
       CLOSE_ABNORMAL,
       answering.socket.OPEN,
+    ]);
+  });
+
+  it('cuts a member that floods it with pings while reading none of the answers, so that it never runs out of memory', async () => {
+    const relay = await relayWith();
+    const flooder = await creator(relay);
+    const other = await opener(relay);
+    await other.next();
+    floodWithPings(flooder.socket);
+    expect([await flooder.closed, other.socket.readyState]).toEqual([
+      CLOSE_ABNORMAL,
+      other.socket.OPEN,
     ]);
   });
 
