@@ -1,7 +1,22 @@
 import type { Project } from '../../core/model/project';
-import type { Result } from '../../core/result';
+import { success, type Result } from '../../core/result';
 import type { Schedule, SchedulingFailure } from '../../core/scheduling/schedule-project';
-import { isScheduleResponse, SCHEDULE_PROTOCOL_VERSION } from './schedule-protocol';
+import type { ConflictDescription } from '../plan/conflict-lines';
+import {
+  applyScheduleDelta,
+  descriptionAfter,
+  projectDeltaOf,
+  scheduleOfTable,
+  scheduleTableOf,
+  type ScheduleTable,
+} from './schedule-changes';
+import {
+  isScheduleResponse,
+  SCHEDULE_PROTOCOL_VERSION,
+  type ScheduleAnswer,
+  type ScheduleRequest,
+  type ScheduleResponse,
+} from './schedule-protocol';
 
 export interface SchedulePort {
   readonly postMessage: (message: unknown) => void;
@@ -17,8 +32,17 @@ export interface Scheduler {
 }
 
 export interface ScheduleListener {
-  readonly scheduled: (result: Result<Schedule, SchedulingFailure>, project: Project) => void;
+  readonly scheduled: (
+    result: Result<Schedule, SchedulingFailure>,
+    project: Project,
+    description: ConflictDescription,
+  ) => void;
   readonly failed: (error: unknown) => void;
+}
+
+interface Shown {
+  readonly result: Result<Schedule, SchedulingFailure>;
+  readonly description: ConflictDescription;
 }
 
 interface InFlight {
@@ -38,12 +62,51 @@ export function createScheduler(
   let pending: Project | null = null;
   let failures = 0;
   let port: SchedulePort | null = null;
-  /** Stops the worker in use, if any. */
+  let held: InFlight | null = null;
+  let table: ScheduleTable | null = null;
+  let unshown: ScheduleResponse[] = [];
+  let description: ConflictDescription | null = null;
+  /** Stops the worker in use, if any, forgetting what it held since the next one starts with nothing. */
   const closePort = (): void => {
+    held = null;
+    table = null;
+    unshown = [];
+    description = null;
     if (port !== null) {
       stop(port);
       port = null;
     }
+  };
+  /** Writes the request for a project: the whole project to a worker holding none, else what changed since the project it holds. */
+  const requestFor = (project: Project): ScheduleRequest => {
+    const numbered = { version: SCHEDULE_PROTOCOL_VERSION, generation } as const;
+    return held === null
+      ? { ...numbered, kind: 'whole', project }
+      : {
+          ...numbered,
+          kind: 'changes',
+          basis: held.generation,
+          changes: projectDeltaOf(held.project, project),
+        };
+  };
+  /** Applies an answer to the schedule table and the description of the conflicts, giving what it shows, or throwing on changes that arrive without a schedule or a description to change. */
+  const applyAnswer = ({ result, description: delta }: ScheduleResponse): Shown => {
+    const described = descriptionAfter(description, delta);
+    description = described;
+    if (!result.ok) {
+      table = null;
+      return { result, description: described };
+    }
+    const changed = tableAfter(table, result.value);
+    table = changed;
+    return { result: success(scheduleOfTable(changed)), description: described };
+  };
+  /** Applies in order the answers held back while newer projects were asked, then the latest one, giving what the latest shows. */
+  const showLatest = (latest: ScheduleResponse): Shown => {
+    const earlier = unshown;
+    unshown = [];
+    earlier.forEach(applyAnswer);
+    return applyAnswer(latest);
   };
   /** Stops computing after too many failures and tells the listener why. */
   const giveUp = (error: unknown): void => {
@@ -59,7 +122,8 @@ export function createScheduler(
     inFlight = { generation, project };
     try {
       port ??= connect(createPort());
-      port.postMessage({ version: SCHEDULE_PROTOCOL_VERSION, generation, project });
+      port.postMessage(requestFor(project));
+      held = { generation, project };
     } catch (error) {
       giveUp(error);
     }
@@ -107,9 +171,19 @@ export function createScheduler(
       const answered = inFlight.project;
       inFlight = null;
       failures = 0;
-      if (!sendPending()) {
-        listener.scheduled(response.result, answered);
+      if (sendPending()) {
+        unshown.push(response);
+        return;
       }
+      let shown: Shown;
+      try {
+        shown = showLatest(response);
+      } catch (error) {
+        pending = answered;
+        fail(error);
+        return;
+      }
+      listener.scheduled(shown.result, answered, shown.description);
     };
     created.onmessageerror = () => {
       fail(new Error('The answer of the schedule worker could not be received.'));
@@ -130,6 +204,18 @@ export function createScheduler(
     },
     dispose: closePort,
   };
+}
+
+/** Gives the schedule table an answer leaves: a new one for a whole schedule, the same one changed in place for changes, throwing on changes that arrive without a table. */
+function tableAfter(table: ScheduleTable | null, answer: ScheduleAnswer): ScheduleTable {
+  if (answer.kind === 'whole') {
+    return scheduleTableOf(answer.schedule);
+  }
+  if (table === null) {
+    throw new Error('The schedule worker sent changes to a schedule the page does not hold.');
+  }
+  applyScheduleDelta(table, answer.changes);
+  return table;
 }
 
 /** Stops a worker and stops listening to it. */

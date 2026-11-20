@@ -11,12 +11,7 @@ import type { DailyWindowErrorCode } from '../../core/calendar/task-slots';
 import { taskOfCalendarIssue } from '../../core/shared/shared-operations';
 import { issueText, repairText, type ReportedIssue } from '../i18n/issue-text';
 import { scheduleFailureText } from '../i18n/schedule-failure-text';
-import {
-  conflictLines,
-  dateConflictLines,
-  type ConflictLine,
-  type DateConflictLine,
-} from '../plan/conflict-lines';
+import type { ConflictDescription, ConflictLine, DateConflictLine } from '../plan/conflict-lines';
 import { formatDuration, parseDuration } from '../plan/durations';
 import {
   clearBaseline,
@@ -135,8 +130,13 @@ interface ComputedSchedule {
 }
 
 interface StartMove {
-  readonly base: Schedule;
+  readonly base: ReadonlyMap<TaskId, ProjectHour>;
   readonly project: Project | null;
+}
+
+/** Copies the start of each task of a schedule, which the page keeps while the schedule changes in place. */
+function startsOf(schedule: Schedule): ReadonlyMap<TaskId, ProjectHour> {
+  return new Map([...schedule.placements].map(([id, placement]) => [id, placement.start]));
 }
 
 const LOCAL_CHANGES_CHOICES: Readonly<Record<CloseChoice, LocalChangesChoice>> = {
@@ -352,8 +352,8 @@ export class AppState {
       selectedTaskId: () => this.#selectedTaskId,
     });
     this.#scheduler = context.createScheduler({
-      scheduled: (result, project) => {
-        this.#showSchedule(result, project);
+      scheduled: (result, project, description) => {
+        this.#showSchedule(result, project, description);
       },
       failed: (error) => {
         console.error('The schedule could not be computed:', error);
@@ -1219,7 +1219,8 @@ export class AppState {
   moveProjectStart(text: string): string | null {
     const previous = this.#startMove;
     const before = this.currentSchedule;
-    const base = previous?.base ?? (before.ok ? before.value : null);
+    const base =
+      previous?.base ?? (before.ok && before.value !== null ? startsOf(before.value) : null);
     this.settings.tell(null);
     this.#startMove = base === null ? null : { base, project: null };
     const refusal = this.editSettings(() => setProjectStart(text));
@@ -1580,36 +1581,41 @@ export class AppState {
     }
   }
 
-  /** Describes the person or team conflicts a computed schedule finds, or tells the user and logs why they cannot be described, listing none. */
-  #describePeople(computed: ComputedSchedule): readonly ConflictLine[] {
-    try {
-      return conflictLines(computed.schedule, computed.project);
-    } catch (error) {
-      console.error('The conflicts of people and teams could not be described:', error);
-      this.#notify('error', this.messages.notices.peopleConflictsUnavailable);
-      return [];
+  /** Gives the person or team conflicts the schedule worker described, or tells the user and logs why they could not be, listing none. */
+  #describedPeople(description: ConflictDescription): readonly ConflictLine[] {
+    if (description.people.ok) {
+      return description.people.value;
     }
+    console.error(
+      'The conflicts of people and teams could not be described:',
+      description.people.error,
+    );
+    this.#notify('error', this.messages.notices.peopleConflictsUnavailable);
+    return [];
   }
 
-  /** Describes the dates a computed schedule finds not met, or tells the user and logs why they cannot be described, marking no task. */
-  #describeDates(computed: ComputedSchedule): readonly DateConflictLine[] {
-    try {
-      return dateConflictLines(computed.schedule, computed.project);
-    } catch (error) {
-      console.error('The dates not met could not be described:', error);
-      this.#notify('error', this.messages.notices.dateConflictsUnavailable);
-      return [];
+  /** Gives the dates not met the schedule worker described, or tells the user and logs why they could not be, marking no task. */
+  #describedDates(description: ConflictDescription): readonly DateConflictLine[] {
+    if (description.dates.ok) {
+      return description.dates.value;
     }
+    console.error('The dates not met could not be described:', description.dates.error);
+    this.#notify('error', this.messages.notices.dateConflictsUnavailable);
+    return [];
   }
 
   /** Shows a computed schedule if it still belongs to the open project, with its conflicts, its unknown floats and the tasks a move of the project start moved, or explains why it failed. */
-  #showSchedule(result: Result<Schedule, SchedulingFailure>, project: Project): void {
+  #showSchedule(
+    result: Result<Schedule, SchedulingFailure>,
+    project: Project,
+    description: ConflictDescription,
+  ): void {
     if (project !== this.project) {
       return;
     }
     this.#computed = { project, schedule: result.ok ? result.value : null };
-    this.#peopleLines = this.#describePeople(this.#computed);
-    this.#dateLines = this.#describeDates(this.#computed);
+    this.#peopleLines = this.#describedPeople(description);
+    this.#dateLines = this.#describedDates(description);
     if (this.conflictCount === 0) {
       this.#conflictsOpen = false;
     }
@@ -1657,11 +1663,11 @@ export class AppState {
     }
   }
 
-  /** Tells in the settings how many tasks a move of the project start moved, comparing their starts in the schedule before the move and in the schedule of the moved project. */
-  #tellMovedTasks(base: Schedule, schedule: Schedule): void {
+  /** Tells in the settings how many tasks a move of the project start moved, comparing their starts kept from the schedule before the move with the schedule of the moved project. */
+  #tellMovedTasks(base: ReadonlyMap<TaskId, ProjectHour>, schedule: Schedule): void {
     let moved = 0;
     for (const [id, placement] of schedule.placements) {
-      if (base.placements.get(id)?.start !== placement.start) {
+      if (base.get(id) !== placement.start) {
         moved += 1;
       }
     }

@@ -1,4 +1,4 @@
-import { answerScheduleRequest } from './schedule-protocol';
+import { createScheduleHost } from './schedule-host';
 
 interface WorkerScope {
   onmessage: ((event: MessageEvent<unknown>) => void) | null;
@@ -6,7 +6,8 @@ interface WorkerScope {
 }
 
 const scope = self as unknown as WorkerScope;
+const host = createScheduleHost();
 
 scope.onmessage = (event) => {
-  scope.postMessage(answerScheduleRequest(event.data));
+  scope.postMessage(host.answer(event.data));
 };

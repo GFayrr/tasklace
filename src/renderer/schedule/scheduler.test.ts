@@ -1,12 +1,30 @@
 import { describe, expect, it, vi } from 'vitest';
+import fc from 'fast-check';
+import { compareStrings } from '../../core/compare-strings';
+import type { Result } from '../../core/result';
+import {
+  scheduleProject,
+  type Schedule,
+  type SchedulingFailure,
+} from '../../core/scheduling/schedule-project';
+import { PROPERTY_TEST_TIMEOUT_MS } from '../../core/testing/arbitraries';
+import { richProjectArbitrary } from '../../core/testing/project-arbitrary';
+import { describeConflicts, type ConflictDescription } from '../plan/conflict-lines';
 import type { Project } from '../../core/model/project';
 import { project, workTask } from '../../core/testing/project-builder';
-import { answerScheduleRequest, SCHEDULE_PROTOCOL_VERSION } from './schedule-protocol';
+import { createScheduleHost } from './schedule-host';
+import { SCHEDULE_PROTOCOL_VERSION } from './schedule-protocol';
 import { createScheduler, MAX_SCHEDULE_RETRIES, type SchedulePort } from './scheduler';
 
-/** A worker that answers only when told to, through the real request handler. */
+/** Builds the error event a failing worker sends, which this test environment has no constructor for. */
+function workerError(message: string, error: unknown): ErrorEvent {
+  return Object.assign(new Event('error', { cancelable: true }), { message, error }) as ErrorEvent;
+}
+
+/** A worker that answers only when told to, through the real host, copying each message both ways as the browser does. */
 function manualWorker() {
   const received: unknown[] = [];
+  const host = createScheduleHost();
   let terminated = false;
   const port: SchedulePort = {
     postMessage: (message) => received.push(message),
@@ -19,7 +37,13 @@ function manualWorker() {
   };
   /** Answers the oldest request the worker received. */
   const answerNext = () => {
-    const response = answerScheduleRequest(received.shift());
+    let response: unknown;
+    try {
+      response = structuredClone(host.answer(structuredClone(received.shift())));
+    } catch (error) {
+      port.onerror?.(workerError(String(error), error));
+      return;
+    }
     port.onmessage?.(new MessageEvent('message', { data: response }));
   };
   return { port, received, answerNext, isTerminated: () => terminated };
@@ -56,11 +80,6 @@ function quietly(step: () => void): unknown[][] {
   }
 }
 
-/** Builds the error event a failing worker sends, which this test environment has no constructor for. */
-function workerError(message: string, error: unknown): ErrorEvent {
-  return Object.assign(new Event('error', { cancelable: true }), { message, error }) as ErrorEvent;
-}
-
 /** Returns a listener recording the projects it is given a schedule for. */
 function recorder() {
   const scheduled: Project[] = [];
@@ -78,6 +97,43 @@ function recorder() {
 const FIRST = project([workTask('a')]);
 const SECOND = project([workTask('a'), workTask('b')]);
 const THIRD = project([workTask('c')]);
+
+const NO_LINES = { kind: 'whole', lines: { ok: true, value: [] } };
+const DESCRIBED = { people: NO_LINES, dates: NO_LINES };
+const EMPTY_MAP_DELTA = { put: [], removed: [] };
+
+/** Writes a response of the current version to the first request, with a result and conflicts described without any line. */
+function responseWith(result: unknown, generation = 1) {
+  return { version: SCHEDULE_PROTOCOL_VERSION, generation, result, description: DESCRIBED };
+}
+
+/** Writes a response giving a whole schedule, with some fields of an empty schedule replaced. */
+function whole(fields: object) {
+  const schedule = {
+    placements: new Map(),
+    summaries: new Map(),
+    wbsNumbers: new Map(),
+    floats: null,
+    conflicts: [],
+    tagConflicts: { conflicts: [], tasksWithUnknownTag: [] },
+    ...fields,
+  };
+  return responseWith({ ok: true, value: { kind: 'whole', schedule } });
+}
+
+/** Writes a response giving the changes of a schedule, with some fields of changes that change nothing replaced. */
+function changes(fields: object, generation = 1) {
+  const delta = {
+    placements: EMPTY_MAP_DELTA,
+    summaries: EMPTY_MAP_DELTA,
+    wbsNumbers: EMPTY_MAP_DELTA,
+    floats: { kind: 'same' },
+    conflicts: null,
+    tagConflicts: null,
+    ...fields,
+  };
+  return responseWith({ ok: true, value: { kind: 'changes', changes: delta } }, generation);
+}
 
 describe('createScheduler', () => {
   it('schedules a project in the worker and gives the result with the project it belongs to', () => {
@@ -109,11 +165,7 @@ describe('createScheduler', () => {
     const pool = workerPool();
     const record = recorder();
     createScheduler(pool.create, record.listener).request(FIRST);
-    const stale = {
-      version: SCHEDULE_PROTOCOL_VERSION,
-      generation: 99,
-      result: { ok: false, error: { kind: 'startDate' } },
-    };
+    const stale = responseWith({ ok: false, error: { kind: 'startDate' } }, 99);
     const worker = pool.latest();
     worker.port.onmessage?.(new MessageEvent('message', { data: stale }));
     expect(record.scheduled).toEqual([]);
@@ -125,69 +177,50 @@ describe('createScheduler', () => {
   it.each([
     ['noise'],
     [null],
-    [{ version: SCHEDULE_PROTOCOL_VERSION, generation: 1, result: null }],
-    [{ version: SCHEDULE_PROTOCOL_VERSION, generation: 1, result: { ok: 'yes' } }],
-    [{ version: SCHEDULE_PROTOCOL_VERSION + 1, generation: 1, result: { ok: true } }],
-    [{ version: SCHEDULE_PROTOCOL_VERSION, generation: 1, result: { ok: true, value: {} } }],
+    [responseWith(null)],
+    [responseWith({ ok: 'yes' })],
+    [{ ...responseWith({ ok: true }), version: SCHEDULE_PROTOCOL_VERSION + 1 }],
+    [responseWith({ ok: true, value: {} })],
+    [responseWith({ ok: true, value: { kind: 'whole', schedule: {} } })],
+    [whole({ wbsNumbers: {} })],
+    [whole({ floats: {} })],
+    [whole({ tagConflicts: { conflicts: [] } })],
+    [responseWith({ ok: false, error: { code: 'EMPTY_CALENDAR' } })],
+    [changes({ placements: { put: [] } })],
+    [changes({ floats: { kind: 'whole', floats: {} } })],
+    [changes({ floats: { kind: 'changes', changes: {} } })],
+    [changes({ floats: { kind: 'other' } })],
+    [changes({ conflicts: {} })],
+    [changes({ tagConflicts: { conflicts: [] } })],
+    [{ ...responseWith({ ok: false, error: { kind: 'startDate' } }), description: null }],
     [
       {
-        version: SCHEDULE_PROTOCOL_VERSION,
-        generation: 1,
-        result: {
-          ok: true,
-          value: { placements: new Map(), summaries: new Map(), wbsNumbers: {} },
-        },
+        ...responseWith({ ok: false, error: { kind: 'startDate' } }),
+        description: { ...DESCRIBED, people: { kind: 'changes', length: 1.5, put: [] } },
       },
     ],
     [
       {
-        version: SCHEDULE_PROTOCOL_VERSION,
-        generation: 1,
-        result: {
-          ok: true,
-          value: { placements: new Map(), summaries: new Map(), wbsNumbers: new Map() },
-        },
+        ...responseWith({ ok: false, error: { kind: 'startDate' } }),
+        description: { ...DESCRIBED, dates: { kind: 'changes', length: 0, put: {} } },
       },
     ],
     [
       {
-        version: SCHEDULE_PROTOCOL_VERSION,
-        generation: 1,
-        result: {
-          ok: true,
-          value: {
-            placements: new Map(),
-            summaries: new Map(),
-            wbsNumbers: new Map(),
-            floats: {},
-            conflicts: [],
-            tagConflicts: { conflicts: [], tasksWithUnknownTag: [] },
-          },
-        },
+        ...responseWith({ ok: false, error: { kind: 'startDate' } }),
+        description: { ...DESCRIBED, dates: { kind: 'other' } },
       },
     ],
     [
       {
-        version: SCHEDULE_PROTOCOL_VERSION,
-        generation: 1,
-        result: {
-          ok: true,
-          value: {
-            placements: new Map(),
-            summaries: new Map(),
-            wbsNumbers: new Map(),
-            floats: null,
-            conflicts: [],
-            tagConflicts: { conflicts: [] },
-          },
-        },
+        ...responseWith({ ok: false, error: { kind: 'startDate' } }),
+        description: { ...DESCRIBED, people: { kind: 'whole', lines: { ok: true, value: {} } } },
       },
     ],
     [
       {
-        version: SCHEDULE_PROTOCOL_VERSION,
-        generation: 1,
-        result: { ok: false, error: { code: 'EMPTY_CALENDAR' } },
+        ...responseWith({ ok: false, error: { kind: 'startDate' } }),
+        description: { ...DESCRIBED, dates: { kind: 'whole', lines: { ok: false } } },
       },
     ],
   ])(
@@ -356,18 +389,164 @@ describe('createScheduler', () => {
   });
 });
 
-describe('answerScheduleRequest', () => {
-  it('answers only requests of the current version, failing on any other message', () => {
-    const refusal = 'The schedule worker received a message that is not a schedule request.';
-    expect(() => answerScheduleRequest({ version: 2, generation: 1, project: FIRST })).toThrow(
-      refusal,
+/** Returns a project whose lists are sorted by identifier, as a session gives them. */
+function sorted(input: Project): Project {
+  /** Sorts items by identifier. */
+  const byId = <Item extends { readonly id: string }>(items: readonly Item[]) =>
+    [...items].sort((left, right) => compareStrings(left.id, right.id));
+  return {
+    ...input,
+    tasks: byId(input.tasks),
+    dependencies: byId(input.dependencies),
+    tags: byId(input.tags),
+  };
+}
+
+/** Changes a project as one step of a test may: another project, a renamed first task, or the critical path turned on or off. */
+function changed(
+  previous: Project,
+  step: { readonly kind: string; readonly other: Project },
+): Project {
+  const [first, ...rest] = previous.tasks;
+  if (step.kind === 'rename' && first !== undefined) {
+    return { ...previous, tasks: [{ ...first, name: `${first.name}!` }, ...rest] };
+  }
+  if (step.kind === 'option') {
+    const options = previous.options;
+    return {
+      ...previous,
+      options: { ...options, criticalPathEnabled: !options.criticalPathEnabled },
+    };
+  }
+  return step.kind === 'other' ? sorted(step.other) : previous;
+}
+
+/** Checks that a schedule shown, at the moment it is shown, and its conflicts are those a full computation gives for its project. */
+function expectComputed(
+  result: Result<Schedule, SchedulingFailure>,
+  answered: Project,
+  description: ConflictDescription,
+): void {
+  const expected = scheduleProject(answered);
+  expect(result).toEqual(expected);
+  expect(description).toEqual(describeConflicts(expected.ok ? expected.value : null, answered));
+}
+
+describe('createScheduler with the real host', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
+  it('gives for each shown project the schedule and conflicts a full computation gives, whatever the answers held back and the workers lost', () => {
+    const step = fc.record({
+      kind: fc.constantFrom('rename', 'option', 'other'),
+      other: richProjectArbitrary.map((generated) => generated.project),
+      then: fc.constantFrom('answer', 'wait', 'lose'),
+    });
+    fc.assert(
+      fc.property(richProjectArbitrary, fc.array(step, { maxLength: 8 }), (start, steps) => {
+        const pool = workerPool();
+        const seen: { last: Project | null; stopped: boolean } = { last: null, stopped: false };
+        const scheduler = createScheduler(pool.create, {
+          scheduled: (result, answered, description) => {
+            expectComputed(result, answered, description);
+            seen.last = answered;
+            seen.stopped = false;
+          },
+          failed: () => {
+            seen.stopped = true;
+          },
+        });
+        /** Answers everything the latest worker received. */
+        const answerAll = () => {
+          while (pool.created.length > 0 && pool.latest().received.length > 0) {
+            pool.latest().answerNext();
+          }
+        };
+        let current = sorted(start.project);
+        quietly(() => {
+          scheduler.request(current);
+          for (const { kind, other, then } of steps) {
+            current = changed(current, { kind, other });
+            scheduler.request(current);
+            if (then === 'answer') {
+              answerAll();
+            } else if (then === 'lose') {
+              pool.latest().port.onmessageerror?.(new MessageEvent('messageerror'));
+            }
+          }
+          answerAll();
+        });
+        expect(seen.stopped ? current : seen.last).toBe(current);
+      }),
+      { numRuns: 40 },
     );
-    expect(() => answerScheduleRequest({ version: 1, generation: 1.5, project: FIRST })).toThrow(
-      refusal,
-    );
-    expect(() => answerScheduleRequest(null)).toThrow(refusal);
-    const answer = answerScheduleRequest({ version: 1, generation: 3, project: FIRST });
-    expect(answer.generation).toBe(3);
-    expect(answer.result.ok).toBe(true);
+  });
+
+  it('asks a new worker for the whole project when changes arrive for a schedule the page does not hold', () => {
+    const pool = workerPool();
+    const record = recorder();
+    createScheduler(pool.create, record.listener).request(FIRST);
+    const first = pool.latest();
+    first.received.shift();
+    const logged = quietly(() => {
+      first.port.onmessage?.(new MessageEvent('message', { data: changes({}) }));
+    });
+    expect(logged).toEqual([
+      [
+        'The schedule worker failed and was restarted:',
+        new Error('The schedule worker sent changes to a schedule the page does not hold.'),
+      ],
+    ]);
+    const second = pool.latest();
+    expect(second).not.toBe(first);
+    expect(second.received).toEqual([
+      { version: SCHEDULE_PROTOCOL_VERSION, generation: 2, kind: 'whole', project: FIRST },
+    ]);
+    second.answerNext();
+    expect(record.scheduled).toEqual([FIRST]);
+  });
+
+  it('sends a new worker the whole project, and changes only to a worker that holds a project', () => {
+    const pool = workerPool();
+    const scheduler = createScheduler(pool.create, recorder().listener);
+    scheduler.request(FIRST);
+    const first = pool.latest();
+    first.answerNext();
+    scheduler.request(SECOND);
+    expect(first.received).toEqual([
+      expect.objectContaining({ kind: 'changes', generation: 2, basis: 1 }),
+    ]);
+    quietly(() => {
+      first.port.onmessageerror?.(new MessageEvent('messageerror'));
+    });
+    expect(pool.latest().received).toEqual([
+      { version: SCHEDULE_PROTOCOL_VERSION, generation: 3, kind: 'whole', project: SECOND },
+    ]);
+  });
+
+  it('replaces a worker that sends changes after a schedule that failed, asking the new one for the whole project', () => {
+    const pool = workerPool();
+    const record = recorder();
+    const scheduler = createScheduler(pool.create, record.listener);
+    scheduler.request(FIRST);
+    const first = pool.latest();
+    first.answerNext();
+    scheduler.request(SECOND);
+    scheduler.request(THIRD);
+    first.received.shift();
+    const failed = responseWith({ ok: false, error: { kind: 'startDate' } }, 2);
+    first.port.onmessage?.(new MessageEvent('message', { data: failed }));
+    first.received.shift();
+    const logged = quietly(() => {
+      first.port.onmessage?.(new MessageEvent('message', { data: changes({}, 3) }));
+    });
+    expect(logged).toEqual([
+      [
+        'The schedule worker failed and was restarted:',
+        new Error('The schedule worker sent changes to a schedule the page does not hold.'),
+      ],
+    ]);
+    expect(pool.latest().received).toEqual([
+      { version: SCHEDULE_PROTOCOL_VERSION, generation: 4, kind: 'whole', project: THIRD },
+    ]);
+    pool.latest().answerNext();
+    expect(record.scheduled).toEqual([FIRST, THIRD]);
   });
 });
