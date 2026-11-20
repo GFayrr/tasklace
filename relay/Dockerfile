@@ -3,12 +3,12 @@
 # The relay runs its TypeScript sources with Node itself, as a user without rights,
 # and keeps its rooms in the volume /data only.
 
-FROM node:24.22.2-alpine3.24@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS install
+FROM node:24.22.3-alpine3.24@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS install
 WORKDIR /app/relay
 COPY relay/package.json relay/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 
-FROM node:24.22.2-alpine3.24@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8
+FROM node:24.22.3-alpine3.24@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5
 # The relay needs Node alone: npm, npx, corepack and yarn are removed so that nothing else can install code.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
       /usr/local/bin/corepack /usr/local/lib/node_modules/corepack /opt/yarn-* \

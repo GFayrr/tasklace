@@ -34,6 +34,10 @@ const LEA: Introduction = {
 };
 const PLAN_KEY = testPlanKey(new Uint8Array(32).fill(7));
 const MANY_CONNECTIONS_TIMEOUT_MS = 60_000;
+const CLOSE_ABNORMAL = 1006;
+const LARGEST_PING_BYTES = 125;
+const PINGS_PER_BURST = 1_000;
+const MAX_FLOOD_PINGS = 200_000;
 /** Starts no timer, the tests waiting for events instead. */
 const noTimer: StartTimer = () => () => undefined;
 const servers: HostServer[] = [];
@@ -100,6 +104,25 @@ async function host(
   }
   servers.push(started.value);
   return { server: started.value, joined, messages, left, codes };
+}
+
+/** Sends the largest pings as fast as it can while reading nothing, as an attacker would, until the connection closes or enough were sent. */
+function floodWithPings(socket: WebSocket): void {
+  socket.pause();
+  const payload = new Uint8Array(LARGEST_PING_BYTES);
+  let sent = 0;
+  /** Sends a burst of pings, then the next one once the event loop turned. */
+  const burst = (): void => {
+    if (socket.readyState !== socket.OPEN || sent >= MAX_FLOOD_PINGS) {
+      return;
+    }
+    for (let index = 0; index < PINGS_PER_BURST; index += 1) {
+      socket.ping(payload);
+    }
+    sent += PINGS_PER_BURST;
+    setImmediate(burst);
+  };
+  burst();
 }
 
 /** Joins a host on the loopback address with a code or another secret, recording what the guest is told. */
@@ -387,6 +410,17 @@ describe('a shared plan over the network', () => {
       }).end();
     });
     expect(status).toBe(426);
+  });
+
+  it('cuts a connection that floods it with pings while reading none of the answers, so that the main process never runs out of memory', async () => {
+    const shared = await host();
+    const kept = guest(shared.server.port, shared.server.code());
+    await until(() => kept.isOpen());
+    const flooder = new WebSocket(socketUrlOf(LOOPBACK, shared.server.port));
+    const closed = new Promise<number>((resolve) => flooder.on('close', resolve));
+    await new Promise((resolve) => flooder.once('open', resolve));
+    floodWithPings(flooder);
+    expect([await closed, kept.isOpen(), kept.ends]).toEqual([CLOSE_ABNORMAL, true, []]);
   });
 
   it('closes a guest that sends text instead of bytes', async () => {
