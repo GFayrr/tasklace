@@ -154,19 +154,7 @@ jobs:
               sh -c 'dnf5 install --assumeno /package/Tasklace-*-x86_64.rpm > /tmp/answer 2>&1; cat /tmp/answer; grep --quiet "^Transaction Summary:" /tmp/answer'
           done
       - name: Install the RPM package on openSUSE and uninstall it, with no file or link left
-        run: |
-          for image in leap:16.0 tumbleweed:latest; do
-            docker run --rm --ulimit core=0 --volume "$PWD/dist:/package:ro" "registry.opensuse.org/opensuse/$image" \
-              bash -c '
-                set -euo pipefail
-                zypper --non-interactive install --allow-unsigned-rpm /package/Tasklace-*-x86_64.rpm
-                test -L /usr/bin/tasklace
-                if ldd /opt/Tasklace/tasklace | grep "not found"; then exit 1; fi
-                zypper --non-interactive remove tasklace
-                test ! -e /opt/Tasklace
-                test ! -e /usr/bin/tasklace
-                test ! -L /usr/bin/tasklace'
-          done
+        run: scripts/test-opensuse-package.sh
       - name: Install the RPM package on Fedora, test it as a person, upgrade it and uninstall it
         run: scripts/test-rpm-package.sh
       - name: Install the .deb package as a person would
