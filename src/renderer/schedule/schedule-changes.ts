@@ -17,7 +17,17 @@ import type { SummarySchedule } from '../../core/scheduling/summaries';
 import type { Placement } from '../../core/scheduling/task-placement';
 import { projectChanges, type ListChanges } from '../../core/shared/project-changes';
 import { valueAt } from '../../core/table-value';
-import type { TagConflictReport } from '../../core/tags/tag-conflicts';
+import type { TagConflict, TagConflictReport } from '../../core/tags/tag-conflicts';
+import {
+  differOnlyByTimes,
+  packFloats,
+  packPlacements,
+  packTimes,
+  unpackFloats,
+  unpackPlacements,
+  withTimes,
+  type PackedEntries,
+} from './packed-schedule';
 
 export interface ListDelta<Item, Id> {
   readonly put: readonly Item[];
@@ -39,15 +49,20 @@ export interface MapDelta<Value> {
 export type FloatsDelta =
   | { readonly kind: 'same' }
   | { readonly kind: 'whole'; readonly floats: ReadonlyMap<TaskId, TaskFloat> | null }
-  | { readonly kind: 'changes'; readonly changes: MapDelta<TaskFloat> };
+  | { readonly kind: 'changes'; readonly changes: PackedEntries };
+
+export type TagConflictsDelta =
+  | { readonly kind: 'same' }
+  | { readonly kind: 'whole'; readonly report: TagConflictReport }
+  | { readonly kind: 'times'; readonly times: Float64Array };
 
 export interface ScheduleDelta {
-  readonly placements: MapDelta<Placement>;
+  readonly placements: PackedEntries;
   readonly summaries: MapDelta<SummarySchedule>;
   readonly wbsNumbers: MapDelta<string>;
   readonly floats: FloatsDelta;
   readonly conflicts: readonly SchedulingConflict[] | null;
-  readonly tagConflicts: TagConflictReport | null;
+  readonly tagConflicts: TagConflictsDelta;
 }
 
 export interface ScheduleTable {
@@ -123,16 +138,42 @@ function listAfterDelta<Item extends { readonly id: Id }, Id extends string>(
   return list.concat(arriving.slice(next));
 }
 
-/** Writes what changed from one schedule to the next, comparing values rather than objects since each computation makes new ones. */
+/** Writes what changed from one schedule to the next, comparing values rather than objects since each computation makes new ones, placements and floats packed into lists of numbers. */
 export function scheduleDeltaOf(previous: Schedule, next: Schedule): ScheduleDelta {
+  const placements = mapDeltaOf(previous.placements, next.placements);
   return {
-    placements: mapDeltaOf(previous.placements, next.placements),
+    placements: packPlacements(placements.put, placements.removed),
     summaries: mapDeltaOf(previous.summaries, next.summaries),
     wbsNumbers: mapDeltaOf(previous.wbsNumbers, next.wbsNumbers),
     floats: floatsDeltaOf(previous.floats, next.floats),
     conflicts: sameData(previous.conflicts, next.conflicts) ? null : next.conflicts,
-    tagConflicts: sameData(previous.tagConflicts, next.tagConflicts) ? null : next.tagConflicts,
+    tagConflicts: tagConflictsDeltaOf(previous.tagConflicts, next.tagConflicts),
   };
+}
+
+/** Writes what changed in the report on tags: nothing, only the start and end of each conflict when nothing else changed, or the whole report. */
+function tagConflictsDeltaOf(
+  previous: TagConflictReport,
+  next: TagConflictReport,
+): TagConflictsDelta {
+  if (sameData(previous, next)) {
+    return { kind: 'same' };
+  }
+  return sameData(previous.tasksWithUnknownTag, next.tasksWithUnknownTag) &&
+    sameConflictsButTimes(previous.conflicts, next.conflicts)
+    ? { kind: 'times', times: packTimes(next.conflicts) }
+    : { kind: 'whole', report: next };
+}
+
+/** Tells whether two lists of conflicts pair up, in order, as conflicts that differ at most by their start and end. */
+function sameConflictsButTimes(
+  previous: readonly TagConflict[],
+  next: readonly TagConflict[],
+): boolean {
+  return (
+    previous.length === next.length &&
+    previous.every((conflict, index) => differOnlyByTimes(conflict, valueAt(next, index)))
+  );
 }
 
 /** Writes what changed in the floats, which are either both absent, newly present or absent, or both present and compared entry by entry. */
@@ -146,7 +187,8 @@ function floatsDeltaOf(
   if (previous === null || next === null) {
     return { kind: 'whole', floats: next };
   }
-  return { kind: 'changes', changes: mapDeltaOf(previous, next) };
+  const changes = mapDeltaOf(previous, next);
+  return { kind: 'changes', changes: packFloats(changes.put, changes.removed) };
 }
 
 /** Lists the entries of the second table that are new or hold another value, and the keys it no longer has. */
@@ -199,12 +241,22 @@ export function scheduleTableOf(schedule: Schedule): ScheduleTable {
 
 /** Changes a schedule table in place by a delta. */
 export function applyScheduleDelta(table: ScheduleTable, delta: ScheduleDelta): void {
-  applyMapDelta(table.placements, delta.placements);
+  unpackPlacements(delta.placements, table.placements);
   applyMapDelta(table.summaries, delta.summaries);
   applyMapDelta(table.wbsNumbers, delta.wbsNumbers);
   table.floats = floatsAfter(table.floats, delta.floats);
   table.conflicts = delta.conflicts ?? table.conflicts;
-  table.tagConflicts = delta.tagConflicts ?? table.tagConflicts;
+  table.tagConflicts = tagConflictsAfter(table.tagConflicts, delta.tagConflicts);
+}
+
+/** Gives the report on tags a delta leaves, a new report when only the times of its conflicts changed. */
+function tagConflictsAfter(report: TagConflictReport, delta: TagConflictsDelta): TagConflictReport {
+  if (delta.kind === 'same') {
+    return report;
+  }
+  return delta.kind === 'whole'
+    ? delta.report
+    : { ...report, conflicts: withTimes(report.conflicts, delta.times) };
 }
 
 /** Gives the floats a delta leaves, changing the table of floats in place when both sides have one. */
@@ -221,7 +273,7 @@ function floatsAfter(
   if (floats === null) {
     throw new Error('Changes to the floats arrived for a schedule without floats.');
   }
-  applyMapDelta(floats, delta.changes);
+  unpackFloats(delta.changes, floats);
   return floats;
 }
 
@@ -255,8 +307,11 @@ export type LinesDelta<Line> =
       readonly put: readonly (readonly [number, Line])[];
     };
 
+export type PeopleDelta =
+  LinesDelta<ConflictLine> | { readonly kind: 'times'; readonly times: Float64Array };
+
 export interface DescriptionDelta {
-  readonly people: LinesDelta<ConflictLine>;
+  readonly people: PeopleDelta;
   readonly dates: LinesDelta<DateConflictLine>;
 }
 
@@ -266,9 +321,39 @@ export function descriptionDeltaOf(
   next: ConflictDescription,
 ): DescriptionDelta {
   return {
-    people: linesDeltaOf(previous?.people ?? null, next.people),
+    people: peopleDeltaOf(previous?.people ?? null, next.people),
     dates: linesDeltaOf(previous?.dates ?? null, next.dates),
   };
+}
+
+/** Writes what changed in the lines of the person or team conflicts: only the start and end of each conflict when every line kept everything else, else as any part. */
+function peopleDeltaOf(
+  previous: Result<readonly ConflictLine[], unknown> | null,
+  next: Result<readonly ConflictLine[], unknown>,
+): PeopleDelta {
+  const delta = linesDeltaOf(previous, next);
+  if (
+    delta.kind === 'whole' ||
+    delta.put.length === 0 ||
+    previous?.ok !== true ||
+    !next.ok ||
+    previous.value.length !== next.value.length ||
+    !previous.value.every((line, index) => sameLineButTimes(line, valueAt(next.value, index)))
+  ) {
+    return delta;
+  }
+  return { kind: 'times', times: packTimes(next.value.map((line) => line.conflict)) };
+}
+
+/** Tells whether two lines describe a conflict the same way except for its start and end. */
+function sameLineButTimes(previous: ConflictLine, next: ConflictLine): boolean {
+  return (
+    previous.tagName === next.tagName &&
+    previous.color === next.color &&
+    previous.pattern === next.pattern &&
+    sameData(previous.taskNames, next.taskNames) &&
+    differOnlyByTimes(previous.conflict, next.conflict)
+  );
 }
 
 /** Writes what changed in one part of a description. */
@@ -294,9 +379,28 @@ export function descriptionAfter(
   delta: DescriptionDelta,
 ): ConflictDescription {
   return {
-    people: linesAfter(current?.people ?? null, delta.people),
+    people: peopleAfter(current?.people ?? null, delta.people),
     dates: linesAfter(current?.dates ?? null, delta.dates),
   };
+}
+
+/** Gives the lines of the person or team conflicts after their delta, giving each line the new start and end of its conflict when only these changed. */
+function peopleAfter(
+  current: Result<readonly ConflictLine[], unknown> | null,
+  delta: PeopleDelta,
+): Result<readonly ConflictLine[], unknown> {
+  if (delta.kind !== 'times') {
+    return linesAfter(current, delta);
+  }
+  if (!current?.ok) {
+    throw new Error('The schedule worker sent changes to conflicts the page does not hold.');
+  }
+  const lines = current.value;
+  const conflicts = withTimes(
+    lines.map((line) => line.conflict),
+    delta.times,
+  );
+  return success(lines.map((line, index) => ({ ...line, conflict: valueAt(conflicts, index) })));
 }
 
 /** Gives one part of a description after its delta, copying the lines kept and replacing the ones changed. */

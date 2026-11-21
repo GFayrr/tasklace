@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { compareStrings } from '../../src/core/compare-strings';
 import type { Project } from '../../src/core/model/project';
 import { valueAt } from '../../src/core/table-value';
+import { HOURS_PER_DAY } from '../../src/core/time';
 import {
   applyScheduleDelta,
   projectDeltaOf,
@@ -93,6 +94,37 @@ function pageSide(prepared: ReturnType<typeof renamesOf>) {
   };
 }
 
+/** Prepares, for a project, the page side of a move of its start a day later, every task moving: the answer of the worker, read as the page reads it, and applied to the schedule table the page keeps. */
+function shiftOf(generated: Project) {
+  const project = sortedLike(generated);
+  const host = createScheduleHost();
+  const first = host.answer({
+    version: SCHEDULE_PROTOCOL_VERSION,
+    generation: 1,
+    kind: 'whole',
+    project,
+  });
+  const moved = { ...project, startDate: project.startDate + HOURS_PER_DAY };
+  const response = host.answer({
+    version: SCHEDULE_PROTOCOL_VERSION,
+    generation: 2,
+    kind: 'changes',
+    basis: 1,
+    changes: projectDeltaOf(project, moved),
+  });
+  if (!first.result.ok || first.result.value.kind !== 'whole') {
+    throw new Error('The first schedule was not whole.');
+  }
+  const table = scheduleTableOf(first.result.value.schedule);
+  return () => {
+    const received: ScheduleResponse = structuredClone(response);
+    if (!received.result.ok || received.result.value.kind !== 'changes') {
+      throw new Error('The move was not answered with changes.');
+    }
+    applyScheduleDelta(table, received.result.value.changes);
+  };
+}
+
 describe('growth of the schedule worker round trip', () => {
   const small = buildLargeProject(LARGE_PROJECT_SEED, SMALL_TASK_COUNT);
   const large = buildLargeProject(LARGE_PROJECT_SEED, LARGE_TASK_COUNT);
@@ -110,5 +142,11 @@ describe('growth of the schedule worker round trip', () => {
     );
     console.info(`Page side of a rename: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(CONSTANT_MAX_RATIO);
+  });
+
+  it('reads and applies a move of the project start, which moves every task, in linear time', () => {
+    const ratio = growthRatio(shiftOf(small), shiftOf(large));
+    console.info(`Page side of a move of the start: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
   });
 });

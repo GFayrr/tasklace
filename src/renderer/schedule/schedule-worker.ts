@@ -1,13 +1,14 @@
-import { createScheduleHost } from './schedule-host';
+import { createScheduleHost, transferablesOf } from './schedule-host';
 
 interface WorkerScope {
   onmessage: ((event: MessageEvent<unknown>) => void) | null;
-  postMessage: (message: unknown) => void;
+  postMessage: (message: unknown, transfer: Transferable[]) => void;
 }
 
 const scope = self as unknown as WorkerScope;
 const host = createScheduleHost();
 
 scope.onmessage = (event) => {
-  scope.postMessage(host.answer(event.data));
+  const response = host.answer(event.data);
+  scope.postMessage(response, transferablesOf(response));
 };

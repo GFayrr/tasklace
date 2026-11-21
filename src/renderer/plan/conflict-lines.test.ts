@@ -9,7 +9,7 @@ import {
   workTask,
   testId,
 } from '../../core/testing/project-builder';
-import { conflictLines, dateConflictLines } from './conflict-lines';
+import { conflictLines, dateConflictLines, tasksInConflict } from './conflict-lines';
 
 const ALICE: Tag = {
   id: testId('alice'),
@@ -141,5 +141,25 @@ describe('dateConflictLines', () => {
         ],
       }),
     ).toThrow('The task m has no date for its conflict MUST_FINISH_ON_NOT_MET.');
+  });
+});
+
+describe('tasksInConflict', () => {
+  it('gives the tasks of the person or team conflicts and of the dates missed, listing those of a report once while it is kept', () => {
+    const report = scheduleOrThrow(PLAN).tagConflicts;
+    const first = tasksInConflict(report, []);
+    expect(first).toEqual(new Set([testId('a'), testId('b')]));
+    expect(tasksInConflict(report, [])).toBe(first);
+    expect(tasksInConflict({ ...report }, [])).not.toBe(first);
+    const late = {
+      conflict: { code: 'DEADLINE_MISSED', taskId: testId('c') },
+      taskName: 'Writing',
+      end: 1,
+      date: 0,
+    } as const;
+    expect(tasksInConflict(report, [late])).toEqual(
+      new Set([testId('a'), testId('b'), testId('c')]),
+    );
+    expect(tasksInConflict(null, [])).toEqual(new Set());
   });
 });

@@ -1,4 +1,4 @@
-import { setFlagsFromString } from 'node:v8';
+import { deserialize, serialize, setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
@@ -21,7 +21,10 @@ import {
   scheduleTableOf,
 } from '../../src/renderer/schedule/schedule-changes';
 import { createScheduleHost } from '../../src/renderer/schedule/schedule-host';
-import { SCHEDULE_PROTOCOL_VERSION } from '../../src/renderer/schedule/schedule-protocol';
+import {
+  isScheduleResponse,
+  SCHEDULE_PROTOCOL_VERSION,
+} from '../../src/renderer/schedule/schedule-protocol';
 import { valueAt } from '../../src/core/table-value';
 import { HOURS_PER_DAY } from '../../src/core/time';
 import {
@@ -166,45 +169,56 @@ describe.each(TASK_COUNTS)('where the time goes in a plan of %i tasks', (taskCou
       report('structuredClone(schedule) (from the worker)', () => structuredClone(schedule));
       report('conflictLines', () => conflictLines(schedule, project));
       report('dateConflictLines', () => dateConflictLines(schedule, project));
-      /** Prepares the page side of the schedule for an edit: the changes sent, the answer copied back and applied to a copy of the whole schedule, with the conflicts. */
-      const pageSide = (next: Project) => {
+      /** Prepares the page side of the schedule for an edit: the changes sent, the answer read back as the page reads a message whose packed lists the worker hands over, and applied to the schedule table the page keeps, with the conflicts. */
+      const pageSide = (before: Project, next: Project) => {
         const host = createScheduleHost();
         const first = host.answer({
           version: SCHEDULE_PROTOCOL_VERSION,
           generation: 1,
           kind: 'whole',
-          project,
+          project: before,
         });
         const request = {
           version: SCHEDULE_PROTOCOL_VERSION,
           generation: 2,
           kind: 'changes',
           basis: 1,
-          changes: projectDeltaOf(project, next),
+          changes: projectDeltaOf(before, next),
         } as const;
-        const response = host.answer(structuredClone(request));
+        const message = serialize(host.answer(structuredClone(request)));
         if (!first.result.ok || first.result.value.kind !== 'whole') {
           throw new Error('The first schedule was not whole.');
         }
-        const whole = first.result.value.schedule;
+        const table = scheduleTableOf(first.result.value.schedule);
         const described = descriptionAfter(null, first.description);
         return () => {
-          structuredClone(projectDeltaOf(project, next));
-          const received = structuredClone(response);
+          structuredClone(projectDeltaOf(before, next));
+          const received: unknown = deserialize(message);
+          if (!isScheduleResponse(received)) {
+            throw new Error('The answer of the worker cannot be read.');
+          }
           if (received.result.ok && received.result.value.kind === 'changes') {
-            applyScheduleDelta(scheduleTableOf(whole), received.result.value.changes);
+            applyScheduleDelta(table, received.result.value.changes);
           }
           descriptionAfter(described, received.description);
         };
       };
       const firstTask = valueAt(project.tasks, 0);
+      const critical = { ...project, options: { ...project.options, criticalPathEnabled: true } };
       report(
-        'schedule, page side of a rename (with table copy)',
-        pageSide({ ...project, tasks: project.tasks.with(0, { ...firstTask, name: 'Renamed' }) }),
+        'schedule, page side of a rename',
+        pageSide(project, {
+          ...project,
+          tasks: project.tasks.with(0, { ...firstTask, name: 'Renamed' }),
+        }),
       );
       report(
         'schedule, page side of a start moved a day later',
-        pageSide({ ...project, startDate: project.startDate + HOURS_PER_DAY }),
+        pageSide(project, { ...project, startDate: project.startDate + HOURS_PER_DAY }),
+      );
+      report(
+        'same, with the critical path',
+        pageSide(critical, { ...critical, startDate: critical.startDate + HOURS_PER_DAY }),
       );
       report('scheduleTableOf (copy, measured apart)', () => scheduleTableOf(schedule));
 

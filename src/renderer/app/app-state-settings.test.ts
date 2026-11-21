@@ -266,6 +266,16 @@ describe('moving the project start', () => {
     expect(app.settings.notice).toBe(MOVED.other.replace('{count}', '2'));
   });
 
+  it('counts as moved a task added between two moves of a series', async () => {
+    const { app, scheduler } = await openedApp();
+    scheduler.automatic = false;
+    expect(app.moveProjectStart('2026-10-12T09:00')).toBeNull();
+    app.addTask();
+    expect(app.moveProjectStart('2026-10-19T09:00')).toBeNull();
+    deliverSchedule(app, scheduler);
+    expect(app.settings.notice).toBe(MOVED.other.replace('{count}', '3'));
+  });
+
   it('tells nothing when another change comes before the new schedule', async () => {
     const { app, scheduler } = await openedApp();
     scheduler.automatic = false;

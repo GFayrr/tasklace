@@ -3,7 +3,7 @@ import type { Result } from '../../core/result';
 import type { Schedule, SchedulingFailure } from '../../core/scheduling/schedule-project';
 import type { DescriptionDelta, ProjectDelta, ScheduleDelta } from './schedule-changes';
 
-export const SCHEDULE_PROTOCOL_VERSION = 2;
+export const SCHEDULE_PROTOCOL_VERSION = 3;
 
 interface Numbered {
   readonly version: typeof SCHEDULE_PROTOCOL_VERSION;
@@ -72,10 +72,30 @@ function holdsScheduleDelta(value: unknown): boolean {
   const conflicts: unknown = Reflect.get(Object(value), 'conflicts');
   const tagConflicts: unknown = Reflect.get(Object(value), 'tagConflicts');
   return (
-    SCHEDULE_TABLES.every((table) => holdsMapDelta(Reflect.get(Object(value), table))) &&
+    holdsPacked(Reflect.get(Object(value), 'placements')) &&
+    NUMBERED_TABLES.every((table) => holdsMapDelta(Reflect.get(Object(value), table))) &&
     holdsFloatsDelta(floats) &&
     (conflicts === null || Array.isArray(conflicts)) &&
-    (tagConflicts === null || holdsTagReport(tagConflicts))
+    holdsTagConflictsDelta(tagConflicts)
+  );
+}
+
+/** Tells whether a value holds the changes of the report on tags: none, the whole report, or the times of its conflicts. */
+function holdsTagConflictsDelta(value: unknown): boolean {
+  const kind: unknown = Reflect.get(Object(value), 'kind');
+  return (
+    kind === 'same' ||
+    (kind === 'whole' && holdsTagReport(Reflect.get(Object(value), 'report'))) ||
+    (kind === 'times' && Reflect.get(Object(value), 'times') instanceof Float64Array)
+  );
+}
+
+/** Tells whether a value holds packed entries: their identifiers, their numbers and the identifiers removed, the numbers being read and checked as they are applied. */
+function holdsPacked(value: unknown): boolean {
+  return (
+    Array.isArray(Reflect.get(Object(value), 'ids')) &&
+    Reflect.get(Object(value), 'numbers') instanceof Float64Array &&
+    Array.isArray(Reflect.get(Object(value), 'removed'))
   );
 }
 
@@ -86,7 +106,7 @@ function holdsFloatsDelta(value: unknown): boolean {
   return (
     kind === 'same' ||
     (kind === 'whole' && (floats === null || floats instanceof Map)) ||
-    (kind === 'changes' && holdsMapDelta(Reflect.get(Object(value), 'changes')))
+    (kind === 'changes' && holdsPacked(Reflect.get(Object(value), 'changes')))
   );
 }
 
@@ -98,11 +118,14 @@ function holdsMapDelta(value: unknown): boolean {
   );
 }
 
-/** Tells whether a value holds what changed in the description of the conflicts: for people and for dates, all the lines or the error that kept them from being described, or the lines changed by position with the new length. */
+/** Tells whether a value holds what changed in each part of the description of the conflicts: all its lines or the error that kept them from being described, its lines changed by position, or for people the times of their conflicts alone. */
 function holdsDescription(value: unknown): boolean {
   return (['people', 'dates'] as const).every((part) => {
     const delta: unknown = Reflect.get(Object(value), part);
     const kind: unknown = Reflect.get(Object(delta), 'kind');
+    if (kind === 'times') {
+      return part === 'people' && Reflect.get(Object(delta), 'times') instanceof Float64Array;
+    }
     if (kind === 'changes') {
       return (
         Number.isSafeInteger(Reflect.get(Object(delta), 'length')) &&
@@ -141,6 +164,7 @@ function holdsTagReport(value: unknown): boolean {
 }
 
 const SCHEDULE_TABLES = ['placements', 'summaries', 'wbsNumbers'] as const;
+const NUMBERED_TABLES = ['summaries', 'wbsNumbers'] as const;
 const FAILURE_KINDS = {
   calendar: true,
   startDate: true,
