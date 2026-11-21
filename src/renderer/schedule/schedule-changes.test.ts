@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { compareStrings } from '../../core/compare-strings';
-import type { Project, Task } from '../../core/model/project';
+import type { Project, Tag, Task } from '../../core/model/project';
 import { failure, success, type Result } from '../../core/result';
 import { scheduleProject, type Schedule } from '../../core/scheduling/schedule-project';
 import { PROPERTY_TEST_TIMEOUT_MS } from '../../core/testing/arbitraries';
 import { richProjectArbitrary } from '../../core/testing/project-arbitrary';
 import { link, project, testId, workTask } from '../../core/testing/project-builder';
-import type { ConflictLine, DateConflictLine } from '../plan/conflict-lines';
+import {
+  describeConflicts,
+  type ConflictLine,
+  type DateConflictLine,
+} from '../plan/conflict-lines';
+import { HOURS_PER_DAY } from '../../core/time';
 import {
   applyScheduleDelta,
   descriptionAfter,
@@ -113,12 +118,12 @@ describe('scheduleDeltaOf and applyScheduleDelta', { timeout: PROPERTY_TEST_TIME
     const first = scheduleOf(START);
     const delta = scheduleDeltaOf(first, scheduleOf(START));
     expect(delta).toEqual({
-      placements: { put: [], removed: [] },
+      placements: { ids: [], numbers: new Float64Array(0), removed: [] },
       summaries: { put: [], removed: [] },
       wbsNumbers: { put: [], removed: [] },
       floats: { kind: 'same' },
       conflicts: null,
-      tagConflicts: null,
+      tagConflicts: { kind: 'same' },
     });
     const without = scheduleOf(project([workTask('a'), workTask('b')], [link('a', 'b')]));
     expect(scheduleDeltaOf(first, without).placements.removed).toEqual([testId('c')]);
@@ -129,7 +134,10 @@ describe('scheduleDeltaOf and applyScheduleDelta', { timeout: PROPERTY_TEST_TIME
     expect(() => {
       applyScheduleDelta(table, {
         ...scheduleDeltaOf(scheduleOf(START), scheduleOf(START)),
-        floats: { kind: 'changes', changes: { put: [], removed: [] } },
+        floats: {
+          kind: 'changes',
+          changes: { ids: [], numbers: new Float64Array(0), removed: [] },
+        },
       });
     }).toThrow('Changes to the floats arrived for a schedule without floats.');
   });
@@ -218,6 +226,87 @@ describe('descriptionDeltaOf and descriptionAfter', () => {
   it('refuses changes to a part the page does not hold or could not describe', () => {
     const delta = descriptionDeltaOf({ people, dates: lines() }, { people, dates: lines() });
     for (const current of [null, { people: failed, dates: lines() }]) {
+      expect(() => descriptionAfter(current, delta)).toThrow(
+        'The schedule worker sent changes to conflicts the page does not hold.',
+      );
+    }
+  });
+});
+
+describe('conflicts whose times alone change', () => {
+  const ALICE: Tag = {
+    id: testId('alice'),
+    name: 'Alice',
+    color: '#4a3aa7',
+    representsPersonOrTeam: true,
+  };
+  const PLAN = project(
+    [
+      workTask('a', { name: 'Interviews', tagId: 'alice' }),
+      workTask('b', { name: 'Analysis', tagId: 'alice' }),
+      workTask('c', { tagId: 'alice' }),
+    ],
+    [],
+    { tags: [ALICE] },
+  );
+  const LATER = { ...PLAN, startDate: PLAN.startDate + HOURS_PER_DAY };
+
+  /** Gives the schedule and the description of the conflicts of a project. */
+  const computed = (input: Project) => {
+    const schedule = scheduleOf(input);
+    return { schedule, description: describeConflicts(schedule, input) };
+  };
+
+  it('sends only the times of the conflicts and of their lines when the project start moves, which give the page the full computation', () => {
+    const before = computed(PLAN);
+    const after = computed(LATER);
+    expect(after.schedule.tagConflicts.conflicts).toHaveLength(1);
+    const delta = scheduleDeltaOf(before.schedule, after.schedule);
+    const described = descriptionDeltaOf(before.description, after.description);
+    const times = Float64Array.from(
+      after.schedule.tagConflicts.conflicts.flatMap((conflict) => [conflict.start, conflict.end]),
+    );
+    expect([delta.tagConflicts, described.people]).toEqual([
+      { kind: 'times', times },
+      { kind: 'times', times },
+    ]);
+    const table = scheduleTableOf(before.schedule);
+    applyScheduleDelta(table, structuredClone(delta));
+    expect(scheduleOfTable(table)).toEqual(after.schedule);
+    expect(descriptionAfter(before.description, structuredClone(described))).toEqual(
+      after.description,
+    );
+  });
+
+  it('sends the whole report and the lines changed once the tasks of a conflict change, and the lines alone once a name changes', () => {
+    const before = computed(PLAN);
+    const fewer = { ...LATER, tasks: LATER.tasks.filter((task) => task.id !== testId('c')) };
+    const renamed = {
+      ...PLAN,
+      tasks: PLAN.tasks.map((task) =>
+        task.id === testId('a') ? { ...task, name: 'Talks' } : task,
+      ),
+    };
+    const otherTasks = computed(fewer);
+    const otherName = computed(renamed);
+    expect(scheduleDeltaOf(before.schedule, otherTasks.schedule).tagConflicts).toEqual({
+      kind: 'whole',
+      report: otherTasks.schedule.tagConflicts,
+    });
+    expect(descriptionDeltaOf(before.description, otherTasks.description).people.kind).toBe(
+      'changes',
+    );
+    expect(scheduleDeltaOf(before.schedule, otherName.schedule).tagConflicts).toEqual({
+      kind: 'same',
+    });
+    expect(descriptionDeltaOf(before.description, otherName.description).people.kind).toBe(
+      'changes',
+    );
+  });
+
+  it('refuses new times for lines the page does not hold or could not describe', () => {
+    const delta = descriptionDeltaOf(computed(PLAN).description, computed(LATER).description);
+    for (const current of [null, { people: failure(new Error('cannot')), dates: success([]) }]) {
       expect(() => descriptionAfter(current, delta)).toThrow(
         'The schedule worker sent changes to conflicts the page does not hold.',
       );

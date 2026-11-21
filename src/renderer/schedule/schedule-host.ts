@@ -3,6 +3,7 @@ import { success } from '../../core/result';
 import { scheduleProject, type Schedule } from '../../core/scheduling/schedule-project';
 import { describeConflicts, type ConflictDescription } from '../plan/conflict-lines';
 import { descriptionDeltaOf, projectAfterDelta, scheduleDeltaOf } from './schedule-changes';
+import { packedBuffers } from './packed-schedule';
 import {
   isScheduleRequest,
   SCHEDULE_PROTOCOL_VERSION,
@@ -66,4 +67,17 @@ function answerOf(before: Schedule | null, schedule: Schedule): ScheduleAnswer {
   return before === null
     ? { kind: 'whole', schedule }
     : { kind: 'changes', changes: scheduleDeltaOf(before, schedule) };
+}
+
+/** Lists the buffers of the packed lists of numbers of a response, handed over to the page instead of copied, the worker keeping none of them. */
+export function transferablesOf(response: ScheduleResponse): ArrayBuffer[] {
+  const people = response.description.people;
+  const answer = response.result.ok ? response.result.value : null;
+  const changes = answer?.kind === 'changes' ? answer.changes : null;
+  return packedBuffers([
+    changes?.placements.numbers ?? null,
+    changes?.floats.kind === 'changes' ? changes.floats.changes.numbers : null,
+    changes?.tagConflicts.kind === 'times' ? changes.tagConflicts.times : null,
+    people.kind === 'times' ? people.times : null,
+  ]);
 }

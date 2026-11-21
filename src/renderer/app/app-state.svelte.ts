@@ -129,14 +129,36 @@ interface ComputedSchedule {
   readonly schedule: Schedule | null;
 }
 
+interface Starts {
+  readonly ids: readonly TaskId[];
+  readonly hours: Float64Array;
+}
+
 interface StartMove {
-  readonly base: ReadonlyMap<TaskId, ProjectHour>;
+  readonly base: Starts;
   readonly project: Project | null;
 }
 
-/** Copies the start of each task of a schedule, which the page keeps while the schedule changes in place. */
-function startsOf(schedule: Schedule): ReadonlyMap<TaskId, ProjectHour> {
-  return new Map([...schedule.placements].map(([id, placement]) => [id, placement.start]));
+/** Copies the start of each task of a schedule, which the page keeps while the schedule changes in place, as a list of identifiers and a list of hours in the same order. */
+function startsOf(schedule: Schedule): Starts {
+  const ids: TaskId[] = [];
+  const hours = new Float64Array(schedule.placements.size);
+  for (const [id, placement] of schedule.placements) {
+    hours[ids.length] = placement.start;
+    ids.push(id);
+  }
+  return { ids, hours };
+}
+
+/** Counts the tasks of a schedule whose start is not one of the starts kept, a new task counting as moved. */
+function movedTaskCount(base: Starts, schedule: Schedule): number {
+  let kept = 0;
+  base.ids.forEach((id, index) => {
+    if (schedule.placements.get(id)?.start === base.hours[index]) {
+      kept += 1;
+    }
+  });
+  return schedule.placements.size - kept;
 }
 
 const LOCAL_CHANGES_CHOICES: Readonly<Record<CloseChoice, LocalChangesChoice>> = {
@@ -1664,13 +1686,8 @@ export class AppState {
   }
 
   /** Tells in the settings how many tasks a move of the project start moved, comparing their starts kept from the schedule before the move with the schedule of the moved project. */
-  #tellMovedTasks(base: ReadonlyMap<TaskId, ProjectHour>, schedule: Schedule): void {
-    let moved = 0;
-    for (const [id, placement] of schedule.placements) {
-      if (base.get(id) !== placement.start) {
-        moved += 1;
-      }
-    }
+  #tellMovedTasks(base: Starts, schedule: Schedule): void {
+    const moved = movedTaskCount(base, schedule);
     this.settings.tell(countMessage(this.messages.settings.tasksMoved, moved, this.locale));
   }
 

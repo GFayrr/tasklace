@@ -4,6 +4,7 @@
   import { valueAt } from '../../core/table-value';
   import type { Project, TaskId } from '../../core/model/project';
   import type { AppState, DrawingPart } from '../app/app-state.svelte';
+  import { tasksInConflict } from '../plan/conflict-lines';
   import { createTableFormatters } from '../plan/table-format';
   import {
     clampTableWidth,
@@ -64,10 +65,7 @@
   const calendar = $derived(app.calendar);
   const tagStyles = $derived(tagStylesOf(project));
   const conflictTaskIds = $derived(
-    new Set([
-      ...(app.schedule?.tagConflicts.conflicts.flatMap((conflict) => conflict.taskIds) ?? []),
-      ...app.dateConflictLines.map((line) => line.conflict.taskId),
-    ]),
+    tasksInConflict(app.schedule?.tagConflicts ?? null, app.dateConflictLines),
   );
   const baseline = $derived(app.shownBaseline);
   const deadlines = $derived(

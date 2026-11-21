@@ -12,7 +12,8 @@ import { richProjectArbitrary } from '../../core/testing/project-arbitrary';
 import { describeConflicts, type ConflictDescription } from '../plan/conflict-lines';
 import type { Project } from '../../core/model/project';
 import { project, workTask } from '../../core/testing/project-builder';
-import { createScheduleHost } from './schedule-host';
+import { HOURS_PER_DAY, isProjectHour } from '../../core/time';
+import { createScheduleHost, transferablesOf } from './schedule-host';
 import { SCHEDULE_PROTOCOL_VERSION } from './schedule-protocol';
 import { createScheduler, MAX_SCHEDULE_RETRIES, type SchedulePort } from './scheduler';
 
@@ -21,7 +22,7 @@ function workerError(message: string, error: unknown): ErrorEvent {
   return Object.assign(new Event('error', { cancelable: true }), { message, error }) as ErrorEvent;
 }
 
-/** A worker that answers only when told to, through the real host, copying each message both ways as the browser does. */
+/** A worker that answers only when told to, through the real host, copying each message both ways and handing over its packed lists as the browser does. */
 function manualWorker() {
   const received: unknown[] = [];
   const host = createScheduleHost();
@@ -39,7 +40,8 @@ function manualWorker() {
   const answerNext = () => {
     let response: unknown;
     try {
-      response = structuredClone(host.answer(structuredClone(received.shift())));
+      const answer = host.answer(structuredClone(received.shift()));
+      response = structuredClone(answer, { transfer: transferablesOf(answer) });
     } catch (error) {
       port.onerror?.(workerError(String(error), error));
       return;
@@ -101,6 +103,7 @@ const THIRD = project([workTask('c')]);
 const NO_LINES = { kind: 'whole', lines: { ok: true, value: [] } };
 const DESCRIBED = { people: NO_LINES, dates: NO_LINES };
 const EMPTY_MAP_DELTA = { put: [], removed: [] };
+const EMPTY_PACKED = { ids: [], numbers: new Float64Array(0), removed: [] };
 
 /** Writes a response of the current version to the first request, with a result and conflicts described without any line. */
 function responseWith(result: unknown, generation = 1) {
@@ -124,12 +127,12 @@ function whole(fields: object) {
 /** Writes a response giving the changes of a schedule, with some fields of changes that change nothing replaced. */
 function changes(fields: object, generation = 1) {
   const delta = {
-    placements: EMPTY_MAP_DELTA,
+    placements: EMPTY_PACKED,
     summaries: EMPTY_MAP_DELTA,
     wbsNumbers: EMPTY_MAP_DELTA,
     floats: { kind: 'same' },
     conflicts: null,
-    tagConflicts: null,
+    tagConflicts: { kind: 'same' },
     ...fields,
   };
   return responseWith({ ok: true, value: { kind: 'changes', changes: delta } }, generation);
@@ -187,6 +190,26 @@ describe('createScheduler', () => {
     [whole({ tagConflicts: { conflicts: [] } })],
     [responseWith({ ok: false, error: { code: 'EMPTY_CALENDAR' } })],
     [changes({ placements: { put: [] } })],
+    [changes({ placements: { ...EMPTY_PACKED, numbers: [] } })],
+    [changes({ placements: { ...EMPTY_PACKED, ids: null } })],
+    [changes({ placements: { ...EMPTY_PACKED, removed: null } })],
+    [changes({ summaries: EMPTY_PACKED })],
+    [changes({ floats: { kind: 'changes', changes: EMPTY_MAP_DELTA } })],
+    [changes({ tagConflicts: null })],
+    [changes({ tagConflicts: { kind: 'whole', report: { conflicts: [] } } })],
+    [changes({ tagConflicts: { kind: 'times', times: [] } })],
+    [
+      {
+        ...responseWith({ ok: false, error: { kind: 'startDate' } }),
+        description: { ...DESCRIBED, people: { kind: 'times', times: [] } },
+      },
+    ],
+    [
+      {
+        ...responseWith({ ok: false, error: { kind: 'startDate' } }),
+        description: { ...DESCRIBED, dates: { kind: 'times', times: new Float64Array(0) } },
+      },
+    ],
     [changes({ floats: { kind: 'whole', floats: {} } })],
     [changes({ floats: { kind: 'changes', changes: {} } })],
     [changes({ floats: { kind: 'other' } })],
@@ -402,7 +425,7 @@ function sorted(input: Project): Project {
   };
 }
 
-/** Changes a project as one step of a test may: another project, a renamed first task, or the critical path turned on or off. */
+/** Changes a project as one step of a test may: another project, a renamed first task, the critical path turned on or off, or the project start moved a day later or earlier within the years handled. */
 function changed(
   previous: Project,
   step: { readonly kind: string; readonly other: Project },
@@ -417,6 +440,11 @@ function changed(
       ...previous,
       options: { ...options, criticalPathEnabled: !options.criticalPathEnabled },
     };
+  }
+  if (step.kind === 'later' || step.kind === 'earlier') {
+    const shift = step.kind === 'later' ? HOURS_PER_DAY : -HOURS_PER_DAY;
+    const startDate = previous.startDate + shift;
+    return isProjectHour(startDate) ? { ...previous, startDate } : previous;
   }
   return step.kind === 'other' ? sorted(step.other) : previous;
 }
@@ -435,7 +463,7 @@ function expectComputed(
 describe('createScheduler with the real host', { timeout: PROPERTY_TEST_TIMEOUT_MS }, () => {
   it('gives for each shown project the schedule and conflicts a full computation gives, whatever the answers held back and the workers lost', () => {
     const step = fc.record({
-      kind: fc.constantFrom('rename', 'option', 'other'),
+      kind: fc.constantFrom('rename', 'option', 'later', 'earlier', 'other'),
       other: richProjectArbitrary.map((generated) => generated.project),
       then: fc.constantFrom('answer', 'wait', 'lose'),
     });
@@ -519,6 +547,35 @@ describe('createScheduler with the real host', { timeout: PROPERTY_TEST_TIMEOUT_
     expect(pool.latest().received).toEqual([
       { version: SCHEDULE_PROTOCOL_VERSION, generation: 3, kind: 'whole', project: SECOND },
     ]);
+  });
+
+  it('replaces a worker whose packed placements cannot be read, asking the new one for the whole project', () => {
+    const pool = workerPool();
+    const record = recorder();
+    const scheduler = createScheduler(pool.create, record.listener);
+    scheduler.request(FIRST);
+    const first = pool.latest();
+    first.answerNext();
+    scheduler.request(SECOND);
+    first.received.shift();
+    const unreadable = changes(
+      { placements: { ids: ['a'], numbers: Float64Array.from([1, 1, 0]), removed: [] } },
+      2,
+    );
+    const logged = quietly(() => {
+      first.port.onmessage?.(new MessageEvent('message', { data: unreadable }));
+    });
+    expect(logged).toEqual([
+      [
+        'The schedule worker failed and was restarted:',
+        new Error('The schedule worker sent the hour 1, outside the years handled.'),
+      ],
+    ]);
+    expect(pool.latest().received).toEqual([
+      { version: SCHEDULE_PROTOCOL_VERSION, generation: 3, kind: 'whole', project: SECOND },
+    ]);
+    pool.latest().answerNext();
+    expect(record.scheduled).toEqual([FIRST, SECOND]);
   });
 
   it('replaces a worker that sends changes after a schedule that failed, asking the new one for the whole project', () => {

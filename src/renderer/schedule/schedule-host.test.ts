@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { Project } from '../../core/model/project';
+import type { Project, Tag } from '../../core/model/project';
 import { scheduleProject } from '../../core/scheduling/schedule-project';
 import { unwrap } from '../../core/testing/arbitraries';
-import { project, workTask } from '../../core/testing/project-builder';
+import { project, testId, workTask } from '../../core/testing/project-builder';
+import { HOURS_PER_DAY } from '../../core/time';
 import { describeConflicts } from '../plan/conflict-lines';
 import { descriptionDeltaOf, projectDeltaOf } from './schedule-changes';
-import { createScheduleHost } from './schedule-host';
+import { createScheduleHost, transferablesOf } from './schedule-host';
 import { SCHEDULE_PROTOCOL_VERSION } from './schedule-protocol';
 
 const FIRST = project([workTask('a'), workTask('b')]);
@@ -48,12 +49,12 @@ describe('createScheduleHost', () => {
       value: {
         kind: 'changes',
         changes: {
-          placements: { put: [], removed: [] },
+          placements: { ids: [], numbers: new Float64Array(0), removed: [] },
           summaries: { put: [], removed: [] },
           wbsNumbers: { put: [], removed: [] },
           floats: { kind: 'same' },
           conflicts: null,
-          tagConflicts: null,
+          tagConflicts: { kind: 'same' },
         },
       },
     });
@@ -101,5 +102,37 @@ describe('createScheduleHost', () => {
       expect(() => host.answer(message)).toThrow(refusal);
     }
     expect(host.answer(changes(3, 1, FIRST, SECOND)).generation).toBe(3);
+  });
+
+  it('hands over the buffer of each packed list of an answer, and none for a whole schedule or a failure', () => {
+    const alice: Tag = {
+      id: testId('alice'),
+      name: 'Alice',
+      color: '#4a3aa7',
+      representsPersonOrTeam: true,
+    };
+    const plan = project(
+      [workTask('a', { tagId: 'alice' }), workTask('b', { tagId: 'alice' })],
+      [],
+      { tags: [alice], options: { ...FIRST.options, criticalPathEnabled: true } },
+    );
+    const later = { ...plan, startDate: plan.startDate + HOURS_PER_DAY };
+    const host = createScheduleHost();
+    const first = host.answer(whole(1, plan));
+    const moved = host.answer(changes(2, 1, plan, later));
+    const failed = host.answer(changes(3, 2, later, { ...later, startDate: Number.NaN }));
+    if (!moved.result.ok || moved.result.value.kind !== 'changes') {
+      throw new Error('The move was not answered with changes.');
+    }
+    const { placements, floats, tagConflicts } = moved.result.value.changes;
+    const people = moved.description.people;
+    expect([floats.kind, tagConflicts.kind, people.kind]).toEqual(['changes', 'times', 'times']);
+    expect(transferablesOf(moved)).toEqual([
+      placements.numbers.buffer,
+      floats.kind === 'changes' ? floats.changes.numbers.buffer : null,
+      tagConflicts.kind === 'times' ? tagConflicts.times.buffer : null,
+      people.kind === 'times' ? people.times.buffer : null,
+    ]);
+    expect([transferablesOf(first), transferablesOf(failed)]).toEqual([[], []]);
   });
 });
