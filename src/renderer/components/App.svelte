@@ -9,6 +9,7 @@
   import TasklaceSettings from './TasklaceSettings.svelte';
   import WelcomeWindow from './WelcomeWindow.svelte';
   import Notices from './Notices.svelte';
+  import WaitingNote from './WaitingNote.svelte';
   import StatusBar from './StatusBar.svelte';
   import PdfExport from './PdfExport.svelte';
   import ProjectSettings from './ProjectSettings.svelte';
@@ -94,6 +95,7 @@
   }}
 />
 <Notices {app} />
+<WaitingNote {app} />
 <ClosePrompt {app} />
 <ReportDialog {app} />
 <TasklaceSettings {app} />

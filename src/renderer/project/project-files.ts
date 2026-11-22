@@ -87,6 +87,8 @@ export interface ProjectFilesListener {
   readonly localCopyFailed: () => void;
   readonly fileActionRunning: (running: boolean) => void;
   readonly chooseLocalChanges: (fileName: string) => Promise<LocalChangesChoice>;
+  readonly opening: () => Promise<void>;
+  readonly openingDone: () => void;
 }
 
 export interface ProjectFiles {
@@ -252,7 +254,13 @@ export function createProjectFiles(
     if (!opened.ok) {
       return opened;
     }
-    const read = openedSession(opened.value);
+    await listener.opening();
+    let read: ActionResult<SharedSession>;
+    try {
+      read = openedSession(opened.value);
+    } finally {
+      listener.openingDone();
+    }
     if (!read.ok) {
       return read;
     }

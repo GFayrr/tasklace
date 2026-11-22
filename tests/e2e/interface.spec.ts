@@ -107,12 +107,31 @@ test('opens a project from the Open menu and shows its schedule', async () => {
   );
   await answerDialogs(application, { open: path });
   await page.getByRole('button', { name: /New project/ }).click();
+  await page.evaluate(() => {
+    const note = document.querySelector('.waiting');
+    const seen: string[] = [];
+    Reflect.set(globalThis, 'waitingSeen', seen);
+    if (note === null) {
+      return;
+    }
+    new MutationObserver(() => {
+      const shown = note.textContent.trim();
+      if (shown !== '' && seen.at(-1) !== shown) {
+        seen.push(shown);
+      }
+    }).observe(note, { subtree: true, childList: true, characterData: true });
+  });
   await page.getByRole('button', { name: 'Open' }).click();
   await page.getByRole('menuitem', { name: 'Open a file…' }).click();
   await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('Launch plan');
   await expect(page.getByText('2 tasks')).toBeVisible();
   await expect(page.getByText(/ – /)).toBeVisible();
   await expect(page.getByText('All changes saved')).toBeVisible();
+  await expect(page.locator('.waiting')).toHaveText('');
+  expect(await page.evaluate(() => Reflect.get(globalThis, 'waitingSeen') as unknown)).toEqual([
+    'Opening the plan…',
+    'Getting the plan ready…',
+  ]);
 });
 
 test('keeps the project from changing while another one is being opened', async () => {

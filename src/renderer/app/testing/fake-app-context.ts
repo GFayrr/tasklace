@@ -474,6 +474,7 @@ export function fakeAppContext() {
     },
     now: () => FIXED_NOW,
     theme: SAND_GRAPHITE,
+    waitForPaint: () => Promise.resolve(),
   };
   return { context, control, scheduler };
 }
