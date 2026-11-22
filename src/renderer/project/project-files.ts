@@ -254,9 +254,9 @@ export function createProjectFiles(
     if (!opened.ok) {
       return opened;
     }
-    await listener.opening();
     let read: ActionResult<SharedSession>;
     try {
+      await listener.opening();
       read = openedSession(opened.value);
     } finally {
       listener.openingDone();

@@ -2,10 +2,19 @@ import { tick } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { Project, TaskId, TagId } from '../../core/model/project';
 import { at } from '../../core/testing/civil-time';
-import { milestone, project, summary, workTask, testId } from '../../core/testing/project-builder';
+import {
+  link,
+  milestone,
+  project,
+  summary,
+  workTask,
+  testId,
+} from '../../core/testing/project-builder';
 import { AppState } from '../app/app-state.svelte';
 import { fakeAppContext, openedProjectOf, settle } from '../app/testing/fake-app-context';
+import { workerScheduler } from '../app/testing/worker-scheduler';
 import english from '../locales/en.json';
+import { setDuration } from '../plan/task-commands';
 import { createTableFormatters } from '../plan/table-format';
 import TaskTable from './TaskTable.svelte';
 import { button, click, press, render, single, update } from './testing/render';
@@ -478,5 +487,37 @@ describe('TaskTable edge cases', () => {
     press(single(root, '[role="listbox"]'), 'Enter');
     await settle();
     expect(app.project?.tasks.find((task) => task.id === 'b')).toMatchObject({ tagId: null });
+  });
+  it('shows the floats the schedule worker changed in place, as soon as they change', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState({ ...fake.context, createScheduler: workerScheduler });
+    fake.control.openResult = openedProjectOf(
+      project(
+        [
+          workTask('a', { sortKey: 'a' }),
+          workTask('b', { sortKey: 'b' }),
+          workTask('c', { sortKey: 'c' }),
+        ],
+        [link('a', 'b')],
+        { options: { ...PLAN.options, criticalPathEnabled: true } },
+      ),
+    );
+    await app.open();
+    await settle();
+    const root = render(TaskTable, {
+      app,
+      formatters: createTableFormatters('en-US'),
+      scrollTop: 0,
+      viewportHeight: 400,
+      scrollBy: vi.fn(),
+      reveal: vi.fn(),
+    });
+    /** Returns the total and free floats shown on the row of the task c. */
+    const floatsOfC = () => rowTexts(root, testId('c')).slice(5, 7);
+    expect(floatsOfC()).toEqual(['7 h', '7 h']);
+    expect(app.edit((context) => setDuration(context, testId('c'), '3'))).toBe(true);
+    await settle();
+    update();
+    expect(floatsOfC()).toEqual(['11 h', '11 h']);
   });
 });

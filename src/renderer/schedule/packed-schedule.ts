@@ -222,8 +222,8 @@ function requireLength(numbers: Float64Array, read: number): void {
   }
 }
 
-/** Gives a value as a task identifier, throwing when it cannot be one. */
-function readId(value: unknown): TaskId {
+/** Gives a value the schedule worker sent as a task identifier, throwing when it cannot be one. */
+export function readId(value: unknown): TaskId {
   if (!isTaskId(value)) {
     throw new Error('The schedule worker sent a value that is not a task identifier.');
   }
@@ -231,7 +231,7 @@ function readId(value: unknown): TaskId {
 }
 
 /** Removes the entries of identifiers from a table, throwing on a value that cannot be an identifier. */
-function removeAll<Value>(table: Map<TaskId, Value>, removed: readonly TaskId[]): void {
+export function removeAll<Value>(table: Map<TaskId, Value>, removed: readonly TaskId[]): void {
   for (const id of removed) {
     table.delete(readId(id));
   }

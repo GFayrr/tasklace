@@ -660,6 +660,24 @@ describe('createProjectFiles', () => {
     expect(steps).toEqual(['opening', 'opened']);
   });
 
+  it('tells that the opening is done even when telling that it opens throws', async () => {
+    const steps: string[] = [];
+    const { bridge } = fakeBridge(openedOf(TEST_DOCUMENT_ID));
+    const listener = listening({
+      opening: () => {
+        steps.push('opening');
+        return Promise.reject(new Error('Broken page'));
+      },
+      openingDone: () => {
+        steps.push('opened');
+      },
+    });
+    await expect(createProjectFiles(bridge, listener, manualTimer()).open()).rejects.toThrow(
+      'Broken page',
+    );
+    expect(steps).toEqual(['opening', 'opened']);
+  });
+
   it('refuses an opened state that cannot be decoded, logging why, without asking to adopt it', async () => {
     const { bridge, adopted } = fakeBridge({
       ok: true,

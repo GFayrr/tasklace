@@ -23,6 +23,8 @@ import {
   packFloats,
   packPlacements,
   packTimes,
+  readId,
+  removeAll,
   unpackFloats,
   unpackPlacements,
   withTimes,
@@ -277,13 +279,11 @@ function floatsAfter(
   return floats;
 }
 
-/** Puts and removes the entries of a delta in a table. */
+/** Puts and removes the entries of a delta in a table, throwing on a key that cannot be a task identifier. */
 function applyMapDelta<Value>(table: Map<TaskId, Value>, { put, removed }: MapDelta<Value>): void {
-  for (const id of removed) {
-    table.delete(id);
-  }
+  removeAll(table, removed);
   for (const [id, value] of put) {
-    table.set(id, value);
+    table.set(readId(id), value);
   }
 }
 
@@ -414,9 +414,35 @@ function linesAfter<Line>(
   if (!current?.ok) {
     throw new Error('The schedule worker sent changes to conflicts the page does not hold.');
   }
+  const kept = Math.min(current.value.length, delta.length);
+  if (delta.length < 0 || delta.length - kept > delta.put.length) {
+    throw new Error('The schedule worker sent changed conflicts that leave lines without a value.');
+  }
   const lines = current.value.slice(0, delta.length);
   for (const [index, line] of delta.put) {
-    lines[index] = line;
+    lines[lineIndexIn(delta.length, index)] = line;
   }
+  requireEveryLine(lines, kept, delta.length);
   return success(lines);
+}
+
+/** Gives the place of a changed line, throwing when it is not a place among the lines of the conflicts. */
+function lineIndexIn(length: number, index: number): number {
+  if (!Number.isSafeInteger(index) || index < 0 || index >= length) {
+    throw new Error(
+      `The schedule worker changed the line ${String(index)} of ${String(length)} lines of conflicts.`,
+    );
+  }
+  return index;
+}
+
+/** Throws when a line past the ones kept, up to the length the lines now have, was given no value. */
+function requireEveryLine(lines: readonly unknown[], kept: number, length: number): void {
+  for (let index = kept; index < length; index += 1) {
+    if (!Object.hasOwn(lines, index)) {
+      throw new Error(
+        'The schedule worker sent changed conflicts that leave lines without a value.',
+      );
+    }
+  }
 }

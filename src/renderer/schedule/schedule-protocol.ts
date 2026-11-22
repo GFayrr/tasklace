@@ -42,7 +42,7 @@ export function isScheduleRequest(message: unknown): message is ScheduleRequest 
   );
 }
 
-/** Tells whether a message is a schedule response of the current protocol version: a known failure, a whole schedule or its changes, and the changes of its conflicts, the contents of the tables being trusted as code of this application. */
+/** Tells whether a message is a schedule response of the current protocol version: a known failure, a whole schedule or its changes, and the changes of its conflicts, numbers, identifiers and line places being checked as they are applied. */
 export function isScheduleResponse(message: unknown): message is ScheduleResponse {
   if (!hasVersionAndGeneration(message) || !holdsDescription(Reflect.get(message, 'description'))) {
     return false;

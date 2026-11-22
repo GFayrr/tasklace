@@ -34,6 +34,21 @@ function openedApp() {
 }
 
 describe('the list of conflicts', () => {
+  it('stops showing a schedule and its conflicts once the scheduler drops them, until the next schedule', async () => {
+    const { app, scheduler } = await openedApp();
+    expect([app.schedule === null, app.conflictLines.length]).toEqual([false, 1]);
+    scheduler.listener().dropped();
+    expect([app.schedule, app.currentSchedule, app.conflictLines, app.dateConflictLines]).toEqual([
+      null,
+      { ok: false, error: 'SCHEDULE_PENDING' },
+      [],
+      [],
+    ]);
+    expect(app.edit(() => ({ ok: true, value: [] }))).toBe(true);
+    await settle();
+    expect([app.schedule === null, app.conflictLines.length]).toEqual([false, 1]);
+  });
+
   it('opens and closes, and never shows without any conflict', async () => {
     const { app } = await openedApp();
     expect(app.schedule?.tagConflicts.conflicts).toHaveLength(1);

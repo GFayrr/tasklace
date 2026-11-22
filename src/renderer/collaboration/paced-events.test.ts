@@ -101,6 +101,27 @@ describe('createPacedEvents', () => {
       vi.useRealTimers();
     }
   });
+  it('handles a large event and the ones behind it even when the page cannot wait to paint, logging why', async () => {
+    const handled: string[] = [];
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const deliver = createPacedEvents({
+        handle: (event) => handled.push(event.kind),
+        announce: () => undefined,
+        waitForPaint: () => Promise.reject(new Error('No frame')),
+      });
+      deliver(message(1, ANNOUNCED_EVENT_BYTES));
+      deliver({ kind: 'connected' });
+      await settle();
+      deliver({ kind: 'relayCaughtUp' });
+      expect(handled).toEqual(['peerMessage', 'connected', 'relayCaughtUp']);
+      expect(logged.mock.calls).toEqual([
+        ['The page could not paint before handling a large change:', new Error('No frame')],
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
 });
 
 describe('bytesOf', () => {

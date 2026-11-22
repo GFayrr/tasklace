@@ -86,12 +86,15 @@ function quietly(step: () => void): unknown[][] {
 function recorder() {
   const scheduled: Project[] = [];
   const failures: unknown[] = [];
+  const drops: Project[][] = [];
   return {
     scheduled,
     failures,
+    drops,
     listener: {
       scheduled: (_result: unknown, answered: Project) => scheduled.push(answered),
       failed: (error: unknown) => failures.push(error),
+      dropped: () => drops.push([...scheduled]),
     },
   };
 }
@@ -164,17 +167,50 @@ describe('createScheduler', () => {
     expect(record.scheduled).toEqual([THIRD]);
   });
 
-  it('ignores an answer to an older request', () => {
+  it('replaces a worker that answers a request it was not sent, asking the new one for the latest project', () => {
     const pool = workerPool();
     const record = recorder();
     createScheduler(pool.create, record.listener).request(FIRST);
     const stale = responseWith({ ok: false, error: { kind: 'startDate' } }, 99);
     const worker = pool.latest();
-    worker.port.onmessage?.(new MessageEvent('message', { data: stale }));
+    const logged = quietly(() => {
+      worker.port.onmessage?.(new MessageEvent('message', { data: stale }));
+    });
+    expect(logged).toEqual([
+      [
+        'The schedule worker failed and was restarted:',
+        new Error('The schedule worker answered a request it was not waiting on.'),
+      ],
+    ]);
+    expect(worker.isTerminated()).toBe(true);
     expect(record.scheduled).toEqual([]);
-    expect(record.failures).toEqual([]);
-    worker.answerNext();
+    pool.latest().answerNext();
     expect(record.scheduled).toEqual([FIRST]);
+  });
+
+  it('forgets an answer held back for a project it then could not send, so that the next worker starts clean', () => {
+    const pool = workerPool();
+    const record = recorder();
+    const scheduler = createScheduler(pool.create, record.listener);
+    scheduler.request(FIRST);
+    const first = pool.latest();
+    first.answerNext();
+    scheduler.request(SECOND);
+    scheduler.request(THIRD);
+    Object.assign(first.port, {
+      postMessage: () => {
+        throw new DOMException('Cannot clone', 'DataCloneError');
+      },
+    });
+    const logged = quietly(() => {
+      first.answerNext();
+    });
+    expect(record.failures).toEqual([new DOMException('Cannot clone', 'DataCloneError')]);
+    const later = quietly(() => {
+      scheduler.request(FIRST);
+      pool.latest().answerNext();
+    });
+    expect([logged, later, record.scheduled]).toEqual([[], [], [FIRST, FIRST]]);
   });
 
   it.each([
@@ -480,6 +516,9 @@ describe('createScheduler with the real host', { timeout: PROPERTY_TEST_TIMEOUT_
           failed: () => {
             seen.stopped = true;
           },
+          dropped: () => {
+            seen.last = null;
+          },
         });
         /** Answers everything the latest worker received. */
         const answerAll = () => {
@@ -571,6 +610,7 @@ describe('createScheduler with the real host', { timeout: PROPERTY_TEST_TIMEOUT_
         new Error('The schedule worker sent the hour 1, outside the years handled.'),
       ],
     ]);
+    expect(record.drops).toEqual([[FIRST]]);
     expect(pool.latest().received).toEqual([
       { version: SCHEDULE_PROTOCOL_VERSION, generation: 3, kind: 'whole', project: SECOND },
     ]);

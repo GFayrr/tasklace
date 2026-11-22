@@ -38,6 +38,7 @@ export interface ScheduleListener {
     description: ConflictDescription,
   ) => void;
   readonly failed: (error: unknown) => void;
+  readonly dropped: () => void;
 }
 
 interface Shown {
@@ -108,6 +109,12 @@ export function createScheduler(
     earlier.forEach(applyAnswer);
     return applyAnswer(latest);
   };
+  /** Holds back an answer until the one to the project sent meanwhile arrives, unless sending that project stopped the worker, which forgot all it held. */
+  const holdUnlessStopped = (response: ScheduleResponse): void => {
+    if (inFlight !== null) {
+      unshown.push(response);
+    }
+  };
   /** Stops computing after too many failures and tells the listener why. */
   const giveUp = (error: unknown): void => {
     inFlight = null;
@@ -166,13 +173,14 @@ export function createScheduler(
         return;
       }
       if (response.generation !== inFlight?.generation) {
+        fail(new Error('The schedule worker answered a request it was not waiting on.'));
         return;
       }
       const answered = inFlight.project;
       inFlight = null;
       failures = 0;
       if (sendPending()) {
-        unshown.push(response);
+        holdUnlessStopped(response);
         return;
       }
       let shown: Shown;
@@ -180,6 +188,7 @@ export function createScheduler(
         shown = showLatest(response);
       } catch (error) {
         pending = answered;
+        listener.dropped();
         fail(error);
         return;
       }

@@ -5,7 +5,7 @@ import { ANNOUNCED_EVENT_BYTES } from '../collaboration/paced-events';
 import { AppState } from './app-state.svelte';
 import { fakeAppContext, openedProjectOf, settle } from './testing/fake-app-context';
 
-const prepared = vi.hoisted(() => ({ names: [] as string[] }));
+const prepared = vi.hoisted(() => ({ names: [] as string[], failure: null as Error | null }));
 
 vi.mock('../../core/shared/shared-session', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../core/shared/shared-session')>();
@@ -20,6 +20,9 @@ vi.mock('../../core/shared/shared-session', async (importOriginal) => {
         ...opened.value,
         prepare: () => {
           prepared.names.push(opened.value.project().name);
+          if (prepared.failure !== null) {
+            throw prepared.failure;
+          }
           opened.value.prepare();
         },
       };
@@ -119,6 +122,50 @@ describe('waiting on a large plan', () => {
       expect(app.waiting).toBeNull();
     } finally {
       warned.mockRestore();
+    }
+  });
+
+  it('opens the plan even when the page cannot wait to paint, leaving the trial copy to its first use and logging why', async () => {
+    prepared.names = [];
+    const fake = fakeAppContext();
+    const app = new AppState({
+      ...fake.context,
+      waitForPaint: () => Promise.reject(new Error('No frame')),
+    });
+    fake.control.openResult = openedProjectOf(FIRST);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await app.open();
+      await settle();
+      expect([app.waiting, app.project?.name, prepared.names]).toEqual([null, 'First', []]);
+      expect(logged.mock.calls).toEqual([
+        ['The page could not paint before opening the plan:', new Error('No frame')],
+        ['The plan could not be got ready to take changes:', new Error('No frame')],
+      ]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it('stops telling that it gets the plan ready when getting it ready throws, logging why', async () => {
+    prepared.names = [];
+    prepared.failure = new Error('Out of memory');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { app, paint, control } = pacedApp();
+      control.openResult = openedProjectOf(FIRST);
+      const opening = app.open();
+      await settle();
+      await paint();
+      await opening;
+      await paint();
+      expect([app.waiting, prepared.names]).toEqual([null, ['First']]);
+      expect(logged.mock.calls).toEqual([
+        ['The plan could not be got ready to take changes:', new Error('Out of memory')],
+      ]);
+    } finally {
+      prepared.failure = null;
+      logged.mockRestore();
     }
   });
 });
