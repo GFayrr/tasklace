@@ -11,7 +11,10 @@ import {
   type ProjectHour,
 } from '../../core/time';
 
-export interface PackedEntries {
+export type PackedKind = 'placements' | 'floats';
+
+export interface PackedEntries<Kind extends PackedKind> {
+  readonly kind: Kind;
   readonly ids: readonly TaskId[];
   readonly numbers: Float64Array;
   readonly removed: readonly TaskId[];
@@ -37,7 +40,7 @@ const UNKNOWN_FLOAT: TaskFloat = {
 export function packPlacements(
   put: readonly (readonly [TaskId, Placement])[],
   removed: readonly TaskId[],
-): PackedEntries {
+): PackedEntries<'placements'> {
   let size = 0;
   for (const [, placement] of put) {
     size += NUMBERS_BEFORE_SEGMENTS + NUMBERS_PER_SEGMENT * placement.segments.length;
@@ -58,11 +61,14 @@ export function packPlacements(
       write(segment.end);
     }
   }
-  return { ids: put.map(([id]) => id), numbers, removed };
+  return { kind: 'placements', ids: put.map(([id]) => id), numbers, removed };
 }
 
 /** Reads packed placements into a table, throwing on any identifier, hour, block count or length a worker of this application cannot have written, after which the page drops the table. */
-export function unpackPlacements(packed: PackedEntries, table: Map<TaskId, Placement>): void {
+export function unpackPlacements(
+  packed: PackedEntries<'placements'>,
+  table: Map<TaskId, Placement>,
+): void {
   const { ids, numbers } = packed;
   removeAll(table, packed.removed);
   let at = 0;
@@ -83,7 +89,7 @@ export function unpackPlacements(packed: PackedEntries, table: Map<TaskId, Place
 export function packFloats(
   put: readonly (readonly [TaskId, TaskFloat])[],
   removed: readonly TaskId[],
-): PackedEntries {
+): PackedEntries<'floats'> {
   const numbers = new Float64Array(
     put.reduce(
       (size, [, float]) => size + (float.lateStart === null ? 1 : NUMBERS_PER_KNOWN_FLOAT),
@@ -110,11 +116,11 @@ export function packFloats(
       at += NUMBERS_PER_KNOWN_FLOAT;
     }
   }
-  return { ids: put.map(([id]) => id), numbers, removed };
+  return { kind: 'floats', ids: put.map(([id]) => id), numbers, removed };
 }
 
 /** Reads packed floats into a table, throwing on anything a worker of this application cannot have written, after which the page drops the table. */
-export function unpackFloats(packed: PackedEntries, table: Map<TaskId, TaskFloat>): void {
+export function unpackFloats(packed: PackedEntries<'floats'>, table: Map<TaskId, TaskFloat>): void {
   const { ids, numbers } = packed;
   removeAll(table, packed.removed);
   let at = 0;
@@ -222,8 +228,8 @@ function requireLength(numbers: Float64Array, read: number): void {
   }
 }
 
-/** Gives a value as a task identifier, throwing when it cannot be one. */
-function readId(value: unknown): TaskId {
+/** Gives a value the schedule worker sent as a task identifier, throwing when it cannot be one. */
+export function readId(value: unknown): TaskId {
   if (!isTaskId(value)) {
     throw new Error('The schedule worker sent a value that is not a task identifier.');
   }
@@ -231,7 +237,7 @@ function readId(value: unknown): TaskId {
 }
 
 /** Removes the entries of identifiers from a table, throwing on a value that cannot be an identifier. */
-function removeAll<Value>(table: Map<TaskId, Value>, removed: readonly TaskId[]): void {
+export function removeAll<Value>(table: Map<TaskId, Value>, removed: readonly TaskId[]): void {
   for (const id of removed) {
     table.delete(readId(id));
   }

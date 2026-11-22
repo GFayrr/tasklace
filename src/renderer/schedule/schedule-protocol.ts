@@ -1,6 +1,7 @@
 import type { Project } from '../../core/model/project';
 import type { Result } from '../../core/result';
 import type { Schedule, SchedulingFailure } from '../../core/scheduling/schedule-project';
+import type { PackedKind } from './packed-schedule';
 import type { DescriptionDelta, ProjectDelta, ScheduleDelta } from './schedule-changes';
 
 export const SCHEDULE_PROTOCOL_VERSION = 3;
@@ -42,7 +43,7 @@ export function isScheduleRequest(message: unknown): message is ScheduleRequest 
   );
 }
 
-/** Tells whether a message is a schedule response of the current protocol version: a known failure, a whole schedule or its changes, and the changes of its conflicts, the contents of the tables being trusted as code of this application. */
+/** Tells whether a message is a schedule response of the current protocol version: a known failure, a whole schedule or its changes, and the changes of its conflicts, numbers, identifiers and line places being checked as they are applied. */
 export function isScheduleResponse(message: unknown): message is ScheduleResponse {
   if (!hasVersionAndGeneration(message) || !holdsDescription(Reflect.get(message, 'description'))) {
     return false;
@@ -72,8 +73,8 @@ function holdsScheduleDelta(value: unknown): boolean {
   const conflicts: unknown = Reflect.get(Object(value), 'conflicts');
   const tagConflicts: unknown = Reflect.get(Object(value), 'tagConflicts');
   return (
-    holdsPacked(Reflect.get(Object(value), 'placements')) &&
-    NUMBERED_TABLES.every((table) => holdsMapDelta(Reflect.get(Object(value), table))) &&
+    holdsPacked(Reflect.get(Object(value), 'placements'), 'placements') &&
+    UNPACKED_TABLES.every((table) => holdsMapDelta(Reflect.get(Object(value), table))) &&
     holdsFloatsDelta(floats) &&
     (conflicts === null || Array.isArray(conflicts)) &&
     holdsTagConflictsDelta(tagConflicts)
@@ -90,9 +91,10 @@ function holdsTagConflictsDelta(value: unknown): boolean {
   );
 }
 
-/** Tells whether a value holds packed entries: their identifiers, their numbers and the identifiers removed, the numbers being read and checked as they are applied. */
-function holdsPacked(value: unknown): boolean {
+/** Tells whether a value holds packed entries of a kind: their identifiers, their numbers and the identifiers removed, the numbers being read and checked as they are applied. */
+function holdsPacked(value: unknown, kind: PackedKind): boolean {
   return (
+    Reflect.get(Object(value), 'kind') === kind &&
     Array.isArray(Reflect.get(Object(value), 'ids')) &&
     Reflect.get(Object(value), 'numbers') instanceof Float64Array &&
     Array.isArray(Reflect.get(Object(value), 'removed'))
@@ -106,7 +108,7 @@ function holdsFloatsDelta(value: unknown): boolean {
   return (
     kind === 'same' ||
     (kind === 'whole' && (floats === null || floats instanceof Map)) ||
-    (kind === 'changes' && holdsPacked(Reflect.get(Object(value), 'changes')))
+    (kind === 'changes' && holdsPacked(Reflect.get(Object(value), 'changes'), 'floats'))
   );
 }
 
@@ -164,7 +166,7 @@ function holdsTagReport(value: unknown): boolean {
 }
 
 const SCHEDULE_TABLES = ['placements', 'summaries', 'wbsNumbers'] as const;
-const NUMBERED_TABLES = ['summaries', 'wbsNumbers'] as const;
+const UNPACKED_TABLES = ['summaries', 'wbsNumbers'] as const;
 const FAILURE_KINDS = {
   calendar: true,
   startDate: true,

@@ -45,11 +45,19 @@ interface OutlineTable {
   folded: ReadonlySet<TaskId>;
 }
 
+export interface OutlineTableView {
+  readonly slots: ReadonlyMap<TaskId, Readonly<Slot>>;
+  readonly groups: ReadonlyMap<TaskId | null, readonly Readonly<Slot>[]>;
+  readonly generation: number;
+  readonly reflects: readonly Task[];
+  readonly folded: ReadonlySet<TaskId>;
+}
+
 export interface OutlineBasis {
   readonly tasks: readonly Task[];
   readonly collapsed: ReadonlySet<TaskId>;
   readonly outline: PlanOutline;
-  readonly table: OutlineTable;
+  readonly table: OutlineTableView;
 }
 
 export interface IncomingLookup {
@@ -61,12 +69,19 @@ interface IncomingTable {
   reflects: readonly Dependency[];
 }
 
+export interface IncomingTableView {
+  readonly groups: ReadonlyMap<TaskId, readonly Dependency[]>;
+  readonly reflects: readonly Dependency[];
+}
+
 export interface IncomingBasis {
   readonly dependencies: readonly Dependency[];
   readonly incoming: IncomingLookup;
-  readonly table: IncomingTable;
+  readonly table: IncomingTableView;
 }
 
+const outlineTables = new WeakMap<OutlineTableView, OutlineTable>();
+const incomingTables = new WeakMap<IncomingTableView, IncomingTable>();
 const idsByNumber = new WeakMap<PlanOutline, ReadonlyMap<string, TaskId>>();
 const numberedSlots = new WeakMap<PlanOutline, () => readonly Slot[]>();
 const HIDDEN_ROW = -1;
@@ -99,7 +114,7 @@ export function buildPlanOutline(
   return nextPlanOutline(null, tasks, collapsed).outline;
 }
 
-/** Gives the outline of the tasks from the one of an earlier list, keeping one record per task: the same if nothing changed, the replaced tasks swapped in if the tree and folds stay, else numbered again after placing the moved records. */
+/** Gives the outline of the tasks from the one of an earlier list, one record per task: the same if nothing changed, the replaced tasks swapped in if the tree and folds stay, else numbered again, an older basis being refused. */
 export function nextPlanOutline(
   basis: OutlineBasis | null,
   tasks: readonly Task[],
@@ -118,7 +133,7 @@ export function nextPlanOutline(
     const table = tableOf(tasks, collapsed);
     return { tasks, collapsed, table, outline: walkedOutline(table) };
   }
-  const { table } = basis;
+  const table = ownTable(outlineTables, basis.table);
   const changes = listChanges(basis.tasks, tasks);
   const keepsTree =
     basis.collapsed === collapsed &&
@@ -155,7 +170,18 @@ function tableOf(tasks: readonly Task[], collapsed: ReadonlySet<TaskId>): Outlin
   groups.forEach((siblings) => {
     siblings.sort(compareSlots);
   });
-  return { slots, groups, generation: 0, reflects: tasks, folded: collapsed };
+  const table = { slots, groups, generation: 0, reflects: tasks, folded: collapsed };
+  outlineTables.set(table, table);
+  return table;
+}
+
+/** Gives the table this module changes in place behind the view a basis shows, throwing on a table it did not make. */
+function ownTable<View extends object, Table>(tables: WeakMap<View, Table>, view: View): Table {
+  const table = tables.get(view);
+  if (table === undefined) {
+    throw new Error('This table was not made by the outline of the plan.');
+  }
+  return table;
 }
 
 /** Forgets the records of removed tasks, makes records for added ones and puts each replaced task in its record. */
@@ -295,7 +321,7 @@ function walkedOutline(table: OutlineTable): PlanOutline {
   return outlineOver(table, rows, generation, () => numbered);
 }
 
-/** Makes an outline that reads the numbers, rows and children of the records stamped with a generation. */
+/** Makes an outline whose numbers and rows are those of the records stamped with its generation, its children being read live from the groups the next outline changes. */
 function outlineOver(
   table: OutlineTable,
   rows: readonly PlanRow[],
@@ -355,7 +381,7 @@ function withReplacedTasks(
   return updated;
 }
 
-/** Gives the dependencies grouped by the task they lead to, updating in place the one table kept since the first grouping, only for the tasks a changed dependency leads to, and refusing an older basis whose table moved on. */
+/** Groups the dependencies by the task they lead to in the one table kept since the first grouping, changed in place for the tasks a changed link leads to, so that every lookup given reads it live, an older basis being refused. */
 export function nextIncoming(
   basis: IncomingBasis | null,
   dependencies: readonly Dependency[],
@@ -368,13 +394,21 @@ export function nextIncoming(
   if (basis?.dependencies === dependencies) {
     return basis;
   }
-  const table = basis?.table ?? { groups: groupedIncoming(dependencies), reflects: dependencies };
+  const table =
+    basis === null ? incomingTableOf(dependencies) : ownTable(incomingTables, basis.table);
   if (basis !== null) {
     regroupIncoming(table.groups, listChanges(basis.dependencies, dependencies));
   }
   table.reflects = dependencies;
   const { groups } = table;
   return { dependencies, table, incoming: { get: (taskId) => groups.get(taskId) } };
+}
+
+/** Makes the table of the dependencies grouped by the task they lead to, which later groupings change in place. */
+function incomingTableOf(dependencies: readonly Dependency[]): IncomingTable {
+  const table = { groups: groupedIncoming(dependencies), reflects: dependencies };
+  incomingTables.set(table, table);
+  return table;
 }
 
 /** Groups again, in a table of dependencies by the task they lead to, the lists of the tasks a changed dependency leads to or used to lead to. */

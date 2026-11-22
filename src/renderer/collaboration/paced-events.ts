@@ -19,8 +19,7 @@ export function createPacedEvents(
     draining = true;
     for (let event = queue.shift(); event !== undefined; event = queue.shift()) {
       if (bytesOf(event) >= ANNOUNCED_EVENT_BYTES) {
-        options.announce(true);
-        await options.waitForPaint();
+        await announceAndWait(options);
       }
       handleApart(options.handle, event);
     }
@@ -37,6 +36,16 @@ export function createPacedEvents(
       void drain();
     }
   };
+}
+
+/** Tells the page it waits and lets it paint, logging a wait that fails so that the event is still handled. */
+async function announceAndWait(options: PacedEventsOptions): Promise<void> {
+  try {
+    options.announce(true);
+    await options.waitForPaint();
+  } catch (error) {
+    console.error('The page could not paint before handling a large change:', error);
+  }
 }
 
 /** Handles an event, an exception being raised again on its own so that the page reports it while the events behind it are still handled. */

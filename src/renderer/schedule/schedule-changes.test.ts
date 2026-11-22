@@ -72,7 +72,13 @@ describe('projectDeltaOf and projectAfterDelta', { timeout: PROPERTY_TEST_TIMEOU
       dependencies: [],
     };
     const delta = projectDeltaOf(START, next);
-    expect(delta.header).toEqual({ ...next, tasks: [], dependencies: [], tags: [] });
+    expect(delta.header).toEqual({
+      name: 'Other',
+      startDate: START.startDate,
+      calendar: START.calendar,
+      options: START.options,
+      baseline: START.baseline,
+    });
     expect(gone?.id).toBe(testId('c'));
     expect(delta.tasks).toEqual({ put: [workTask('d'), renamed], removed: [testId('c')] });
     expect(delta.dependencies).toEqual({ put: [], removed: [testId('a-b')] });
@@ -118,7 +124,7 @@ describe('scheduleDeltaOf and applyScheduleDelta', { timeout: PROPERTY_TEST_TIME
     const first = scheduleOf(START);
     const delta = scheduleDeltaOf(first, scheduleOf(START));
     expect(delta).toEqual({
-      placements: { ids: [], numbers: new Float64Array(0), removed: [] },
+      placements: { kind: 'placements', ids: [], numbers: new Float64Array(0), removed: [] },
       summaries: { put: [], removed: [] },
       wbsNumbers: { put: [], removed: [] },
       floats: { kind: 'same' },
@@ -136,10 +142,29 @@ describe('scheduleDeltaOf and applyScheduleDelta', { timeout: PROPERTY_TEST_TIME
         ...scheduleDeltaOf(scheduleOf(START), scheduleOf(START)),
         floats: {
           kind: 'changes',
-          changes: { ids: [], numbers: new Float64Array(0), removed: [] },
+          changes: { kind: 'floats', ids: [], numbers: new Float64Array(0), removed: [] },
         },
       });
     }).toThrow('Changes to the floats arrived for a schedule without floats.');
+  });
+
+  it('refuses summaries and numbers whose keys cannot be task identifiers', () => {
+    const same = scheduleDeltaOf(scheduleOf(START), scheduleOf(START));
+    const notAnId = 'The schedule worker sent a value that is not a task identifier.';
+    for (const table of ['summaries', 'wbsNumbers'] as const) {
+      expect(() => {
+        applyScheduleDelta(scheduleTableOf(scheduleOf(START)), {
+          ...same,
+          [table]: { put: [[7, '1']], removed: [] },
+        });
+      }).toThrow(notAnId);
+      expect(() => {
+        applyScheduleDelta(scheduleTableOf(scheduleOf(START)), {
+          ...same,
+          [table]: { put: [], removed: [null] },
+        });
+      }).toThrow(notAnId);
+    }
   });
 
   it('turns the schedule of any project into the schedule of any other', () => {
@@ -231,6 +256,34 @@ describe('descriptionDeltaOf and descriptionAfter', () => {
       );
     }
   });
+  it('refuses changed lines that leave a line without a value or sit outside the lines', () => {
+    const before = { people, dates: lines('a', 'b') };
+    /** Applies changes of the lines of dates to the lines held before. */
+    const after = (length: number, put: readonly (readonly [number, DateConflictLine])[]) => () =>
+      descriptionAfter(before, {
+        people: { kind: 'changes', length: 0, put: [] },
+        dates: { kind: 'changes', length, put },
+      });
+    const holes = 'The schedule worker sent changed conflicts that leave lines without a value.';
+    expect(after(4, [[3, line('d')]])).toThrow(holes);
+    expect(
+      after(4, [
+        [2, line('c')],
+        [2, line('c')],
+      ]),
+    ).toThrow(holes);
+    expect(after(-1, [])).toThrow(holes);
+    expect(after(3, [[3, line('d')]])).toThrow(
+      'The schedule worker changed the line 3 of 3 lines of conflicts.',
+    );
+    expect(after(3, [[-1, line('d')]])).toThrow(
+      'The schedule worker changed the line -1 of 3 lines of conflicts.',
+    );
+    expect(after(3, [[0.5, line('d')]])).toThrow(
+      'The schedule worker changed the line 0.5 of 3 lines of conflicts.',
+    );
+    expect(after(3, [[2, line('c')]])().dates).toEqual(lines('a', 'b', 'c'));
+  });
 });
 
 describe('conflicts whose times alone change', () => {
@@ -257,7 +310,7 @@ describe('conflicts whose times alone change', () => {
     return { schedule, description: describeConflicts(schedule, input) };
   };
 
-  it('sends only the times of the conflicts and of their lines when the project start moves, which give the page the full computation', () => {
+  it('sends only the times of the conflicts and of their lines when the project start moves, the page then holding what a full computation gives', () => {
     const before = computed(PLAN);
     const after = computed(LATER);
     expect(after.schedule.tagConflicts.conflicts).toHaveLength(1);

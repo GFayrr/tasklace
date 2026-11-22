@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import type { Project } from '../../src/core/model/project';
+import { compareStrings } from '../../src/core/compare-strings';
 import {
   createProjectState,
   projectAfterChanges,
   putTask,
+  toProject,
 } from '../../src/core/shared/project-state';
 import { repairProject } from '../../src/core/shared/repair-project';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
@@ -156,14 +158,23 @@ describe('growth of shared session operations with the size of the project', () 
   });
 
   it('rebuilds the project after as many new tasks as it holds in quasi-linear time', () => {
-    /** Prepares an indexed state where a copy follows each task of a project, then rebuilds its project, the copies being noted as touched again before each rebuild. */
+    /** Prepares an indexed state where a copy follows each task of a project sorted as the session sorts it, checks the rebuilt project once, then rebuilds it, the copies being noted as touched again before each rebuild. */
     const doubling = (taskCount: number) => {
-      const before = buildLargeProject(LARGE_PROJECT_SEED, taskCount);
+      const built = buildLargeProject(LARGE_PROJECT_SEED, taskCount);
+      const before = {
+        ...built,
+        tasks: [...built.tasks].sort((left, right) => compareStrings(left.id, right.id)),
+        dependencies: [...built.dependencies].sort((left, right) =>
+          compareStrings(left.id, right.id),
+        ),
+        tags: [...built.tags].sort((left, right) => compareStrings(left.id, right.id)),
+      };
       const state = createProjectState(before);
       const copies = before.tasks.map((task) => ({ ...task, id: testId(`${task.id}-next`) }));
       copies.forEach((copy) => {
         putTask(state, copy);
       });
+      expect(projectAfterChanges(state, before)).toEqual(toProject(state));
       return batched(REBUILDS_PER_RUN, () => {
         copies.forEach((copy) => state.touched.tasks.add(copy.id));
         expect(projectAfterChanges(state, before).tasks).toHaveLength(taskCount * 2);

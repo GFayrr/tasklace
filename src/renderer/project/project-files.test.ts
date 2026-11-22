@@ -600,7 +600,7 @@ describe('createProjectFiles', () => {
     expect(files.hasFile()).toBe(false);
   });
 
-  it('tells that it opens and lets the page paint it before reading the plan, then that it is done', async () => {
+  it('tells that it opens and lets the page paint that before reading the plan, then tells that the opening is done', async () => {
     const { bridge, events } = fakeBridge(openedOf(TEST_DOCUMENT_ID));
     let painted: () => void = () => undefined;
     const files = createProjectFiles(
@@ -657,6 +657,24 @@ describe('createProjectFiles', () => {
       ok: false,
       error: { code: 'CANCELLED' },
     });
+    expect(steps).toEqual(['opening', 'opened']);
+  });
+
+  it('tells that the opening is done even when telling that it opens throws', async () => {
+    const steps: string[] = [];
+    const { bridge } = fakeBridge(openedOf(TEST_DOCUMENT_ID));
+    const listener = listening({
+      opening: () => {
+        steps.push('opening');
+        return Promise.reject(new Error('Broken page'));
+      },
+      openingDone: () => {
+        steps.push('opened');
+      },
+    });
+    await expect(createProjectFiles(bridge, listener, manualTimer()).open()).rejects.toThrow(
+      'Broken page',
+    );
     expect(steps).toEqual(['opening', 'opened']);
   });
 

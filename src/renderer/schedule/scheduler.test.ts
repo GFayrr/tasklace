@@ -86,12 +86,15 @@ function quietly(step: () => void): unknown[][] {
 function recorder() {
   const scheduled: Project[] = [];
   const failures: unknown[] = [];
+  const drops: Project[][] = [];
   return {
     scheduled,
     failures,
+    drops,
     listener: {
       scheduled: (_result: unknown, answered: Project) => scheduled.push(answered),
       failed: (error: unknown) => failures.push(error),
+      dropped: () => drops.push([...scheduled]),
     },
   };
 }
@@ -103,7 +106,7 @@ const THIRD = project([workTask('c')]);
 const NO_LINES = { kind: 'whole', lines: { ok: true, value: [] } };
 const DESCRIBED = { people: NO_LINES, dates: NO_LINES };
 const EMPTY_MAP_DELTA = { put: [], removed: [] };
-const EMPTY_PACKED = { ids: [], numbers: new Float64Array(0), removed: [] };
+const EMPTY_PACKED = { kind: 'placements', ids: [], numbers: new Float64Array(0), removed: [] };
 
 /** Writes a response of the current version to the first request, with a result and conflicts described without any line. */
 function responseWith(result: unknown, generation = 1) {
@@ -164,17 +167,50 @@ describe('createScheduler', () => {
     expect(record.scheduled).toEqual([THIRD]);
   });
 
-  it('ignores an answer to an older request', () => {
+  it('replaces a worker that answers a request it was not sent, asking the new one for the latest project', () => {
     const pool = workerPool();
     const record = recorder();
     createScheduler(pool.create, record.listener).request(FIRST);
     const stale = responseWith({ ok: false, error: { kind: 'startDate' } }, 99);
     const worker = pool.latest();
-    worker.port.onmessage?.(new MessageEvent('message', { data: stale }));
+    const logged = quietly(() => {
+      worker.port.onmessage?.(new MessageEvent('message', { data: stale }));
+    });
+    expect(logged).toEqual([
+      [
+        'The schedule worker failed and was restarted:',
+        new Error('The schedule worker answered a request it was not waiting on.'),
+      ],
+    ]);
+    expect(worker.isTerminated()).toBe(true);
     expect(record.scheduled).toEqual([]);
-    expect(record.failures).toEqual([]);
-    worker.answerNext();
+    pool.latest().answerNext();
     expect(record.scheduled).toEqual([FIRST]);
+  });
+
+  it('forgets an answer held back for a project it then could not send, so that the next worker starts clean', () => {
+    const pool = workerPool();
+    const record = recorder();
+    const scheduler = createScheduler(pool.create, record.listener);
+    scheduler.request(FIRST);
+    const first = pool.latest();
+    first.answerNext();
+    scheduler.request(SECOND);
+    scheduler.request(THIRD);
+    Object.assign(first.port, {
+      postMessage: () => {
+        throw new DOMException('Cannot clone', 'DataCloneError');
+      },
+    });
+    const logged = quietly(() => {
+      first.answerNext();
+    });
+    expect(record.failures).toEqual([new DOMException('Cannot clone', 'DataCloneError')]);
+    const later = quietly(() => {
+      scheduler.request(FIRST);
+      pool.latest().answerNext();
+    });
+    expect([logged, later, record.scheduled]).toEqual([[], [], [FIRST, FIRST]]);
   });
 
   it.each([
@@ -192,6 +228,8 @@ describe('createScheduler', () => {
     [changes({ placements: { put: [] } })],
     [changes({ placements: { ...EMPTY_PACKED, numbers: [] } })],
     [changes({ placements: { ...EMPTY_PACKED, ids: null } })],
+    [changes({ placements: { ...EMPTY_PACKED, kind: 'floats' } })],
+    [changes({ floats: { kind: 'changes', changes: EMPTY_PACKED } })],
     [changes({ placements: { ...EMPTY_PACKED, removed: null } })],
     [changes({ summaries: EMPTY_PACKED })],
     [changes({ floats: { kind: 'changes', changes: EMPTY_MAP_DELTA } })],
@@ -480,6 +518,9 @@ describe('createScheduler with the real host', { timeout: PROPERTY_TEST_TIMEOUT_
           failed: () => {
             seen.stopped = true;
           },
+          dropped: () => {
+            seen.last = null;
+          },
         });
         /** Answers everything the latest worker received. */
         const answerAll = () => {
@@ -501,7 +542,14 @@ describe('createScheduler with the real host', { timeout: PROPERTY_TEST_TIMEOUT_
           }
           answerAll();
         });
-        expect(seen.stopped ? current : seen.last).toBe(current);
+        if (seen.stopped) {
+          quietly(() => {
+            scheduler.request(current);
+            answerAll();
+          });
+        }
+        expect(seen.stopped).toBe(false);
+        expect(seen.last).toBe(current);
       }),
       { numRuns: 40 },
     );
@@ -559,7 +607,14 @@ describe('createScheduler with the real host', { timeout: PROPERTY_TEST_TIMEOUT_
     scheduler.request(SECOND);
     first.received.shift();
     const unreadable = changes(
-      { placements: { ids: ['a'], numbers: Float64Array.from([1, 1, 0]), removed: [] } },
+      {
+        placements: {
+          kind: 'placements',
+          ids: ['a'],
+          numbers: Float64Array.from([1, 1, 0]),
+          removed: [],
+        },
+      },
       2,
     );
     const logged = quietly(() => {
@@ -571,6 +626,7 @@ describe('createScheduler with the real host', { timeout: PROPERTY_TEST_TIMEOUT_
         new Error('The schedule worker sent the hour 1, outside the years handled.'),
       ],
     ]);
+    expect(record.drops).toEqual([[FIRST]]);
     expect(pool.latest().received).toEqual([
       { version: SCHEDULE_PROTOCOL_VERSION, generation: 3, kind: 'whole', project: SECOND },
     ]);

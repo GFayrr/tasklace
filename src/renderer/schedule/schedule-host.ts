@@ -1,5 +1,5 @@
 import type { Project } from '../../core/model/project';
-import { success } from '../../core/result';
+import { failure, success, type Result } from '../../core/result';
 import { scheduleProject, type Schedule } from '../../core/scheduling/schedule-project';
 import { describeConflicts, type ConflictDescription } from '../plan/conflict-lines';
 import { descriptionDeltaOf, projectAfterDelta, scheduleDeltaOf } from './schedule-changes';
@@ -36,7 +36,7 @@ export function createScheduleHost(): ScheduleHost {
       const result = scheduleProject(project);
       const before = message.kind === 'whole' ? null : previous;
       previous = result.ok ? result.value : null;
-      const description = describeConflicts(previous, project);
+      const description = sendable(describeConflicts(previous, project));
       const delta = descriptionDeltaOf(message.kind === 'whole' ? null : described, description);
       described = description;
       return {
@@ -60,6 +60,21 @@ function projectOf(request: ScheduleRequest, held: Held | null): Project {
     );
   }
   return projectAfterDelta(held.project, request.changes);
+}
+
+/** Gives a description whose errors the worker can always send to the page, each one an error with the message of the error thrown. */
+function sendable(description: ConflictDescription): ConflictDescription {
+  return { people: sendablePart(description.people), dates: sendablePart(description.dates) };
+}
+
+/** Gives a part of a description as it is, or the error it failed with as a plain error, since a value thrown may be one the page cannot be sent. */
+function sendablePart<Line>(
+  part: Result<readonly Line[], unknown>,
+): Result<readonly Line[], unknown> {
+  if (part.ok) {
+    return part;
+  }
+  return failure(new Error(part.error instanceof Error ? part.error.message : String(part.error)));
 }
 
 /** Gives a schedule whole when the page holds none, and otherwise only what changed since the one it holds. */

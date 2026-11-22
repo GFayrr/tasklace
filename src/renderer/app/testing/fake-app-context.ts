@@ -142,6 +142,7 @@ export interface TestScheduleListener {
     description?: ConflictDescription,
   ) => void;
   readonly failed: (error: unknown) => void;
+  readonly dropped: () => void;
 }
 
 export interface ManualScheduler {
@@ -436,6 +437,7 @@ export function manualScheduler(): {
           listener.scheduled(result, project, description ?? describedFor(result, project));
         },
         failed: listener.failed,
+        dropped: listener.dropped,
       };
     },
     requests: [],

@@ -2,7 +2,7 @@ import { compileCalendar } from '../../core/calendar/compile-calendar';
 import { MIN_PROJECT_YEAR } from '../../core/limits';
 import { exportProjectCsv } from '../../core/exchange/csv/project-csv-export';
 import { exportProjectJson } from '../../core/exchange/project-json';
-import type { BaselineEntry, Project, TaskId } from '../../core/model/project';
+import type { BaselineEntry, Dependency, Project, Task, TaskId } from '../../core/model/project';
 import { takeBaseline, type SkippedTask } from '../../core/baseline/take-baseline';
 import { failure, success, type Result } from '../../core/result';
 import type { MergeFailure, SharedRepair } from '../../core/shared/shared-project';
@@ -151,7 +151,7 @@ function startsOf(schedule: Schedule): Starts {
   return { ids, hours };
 }
 
-/** Counts the tasks of a schedule whose start is not one of the starts kept, a new task counting as moved. */
+/** Counts the tasks of a schedule whose start differs from the one kept for them, a new task counting as moved. */
 function movedTaskCount(base: Starts, schedule: Schedule): number {
   let kept = 0;
   base.ids.forEach((id, index) => {
@@ -286,15 +286,11 @@ export class AppState {
   #outlineBasis: OutlineBasis | null = null;
   #incomingBasis: IncomingBasis | null = null;
   readonly outline = $derived.by(() => {
-    this.#outlineBasis = nextPlanOutline(
-      this.#outlineBasis,
-      this.project?.tasks ?? [],
-      this.#collapsed,
-    );
+    this.#outlineBasis = this.#nextOutline(this.project?.tasks ?? [], this.#collapsed);
     return this.#outlineBasis.outline;
   });
   readonly incoming = $derived.by(() => {
-    this.#incomingBasis = nextIncoming(this.#incomingBasis, this.project?.dependencies ?? []);
+    this.#incomingBasis = this.#nextIncoming(this.project?.dependencies ?? []);
     return this.#incomingBasis.incoming;
   });
   readonly calendar = $derived.by(() => {
@@ -348,7 +344,11 @@ export class AppState {
         LOCAL_CHANGES_CHOICES[await this.#ask({ reason: 'localChanges', fileName })],
       opening: async () => {
         this.#opening = true;
-        await this.#waitForPaint();
+        try {
+          await this.#waitForPaint();
+        } catch (error) {
+          console.error('The page could not paint before opening the plan:', error);
+        }
       },
       openingDone: () => {
         this.#opening = false;
@@ -403,6 +403,11 @@ export class AppState {
         this.#startMove = null;
         this.settings.alertIfOpen(this.messages.notices.scheduleStopped);
         this.#notify('error', this.messages.notices.scheduleStopped, null, true);
+      },
+      dropped: () => {
+        this.#computed = null;
+        this.#peopleLines = [];
+        this.#dateLines = [];
       },
     });
   }
@@ -460,7 +465,7 @@ export class AppState {
     return request;
   }
 
-  /** Returns the schedule shown, the latest computed for the open project even when older than its latest change, or null when none is computed or the latest computation failed. */
+  /** Returns the schedule shown, the latest computed for the open project even when older than its latest change, its tables changed in place by the next one, or null when none is computed or the latest failed. */
   get schedule(): Schedule | null {
     return this.#computed?.schedule ?? null;
   }
@@ -558,7 +563,7 @@ export class AppState {
     return this.#collapsed;
   }
 
-  /** Returns what the page is busy with and tells meanwhile, the most pressing first, or null. */
+  /** Returns the wait the page tells the user about, opening before receiving before preparing, or null when it waits for nothing. */
   get waiting(): Waiting | null {
     if (this.#opening) {
       return 'opening';
@@ -1574,10 +1579,32 @@ export class AppState {
     };
   }
 
+  /** Gives the outline of the tasks from the one shown last, building it again from nothing, and logging why, when following the changes throws. */
+  #nextOutline(tasks: readonly Task[], collapsed: ReadonlySet<TaskId>): OutlineBasis {
+    try {
+      return nextPlanOutline(this.#outlineBasis, tasks, collapsed);
+    } catch (error) {
+      console.error('The outline of the plan is built again after an error:', error);
+      return nextPlanOutline(null, tasks, collapsed);
+    }
+  }
+
+  /** Gives the dependencies grouped by the task they lead to from the grouping shown last, grouping them again from nothing, and logging why, when following the changes throws. */
+  #nextIncoming(dependencies: readonly Dependency[]): IncomingBasis {
+    try {
+      return nextIncoming(this.#incomingBasis, dependencies);
+    } catch (error) {
+      console.error('The dependencies of the plan are grouped again after an error:', error);
+      return nextIncoming(null, dependencies);
+    }
+  }
+
   /** Follows the changes of a newly opened project. */
   #attach(session: SharedSession): void {
     this.#stopFollowing();
     this.#session = session;
+    this.#outlineBasis = null;
+    this.#incomingBasis = null;
     this.#computed = null;
     this.#peopleLines = [];
     this.#dateLines = [];
@@ -1605,8 +1632,10 @@ export class AppState {
     try {
       await this.#waitForPaint();
       if (this.#session === session) {
-        session.prepare();
+        session.prepareTrialCopy();
       }
+    } catch (error) {
+      console.error('The plan could not be got ready to take changes:', error);
     } finally {
       if (this.#preparingFor === session) {
         this.#preparingFor = null;

@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import type { Tag } from '../model/project';
+import type { Project, Tag } from '../model/project';
 import { link, project, testId, workTask } from '../testing/project-builder';
 import {
   closesCycle,
@@ -93,6 +93,32 @@ function runOn(state: ProjectState, operation: StateOperation): void {
   }
 }
 
+/** Names what an operation touches by its list and identifier, since a task, a dependency and a tag may share an identifier. */
+function touchedKey(operation: StateOperation): string {
+  switch (operation.kind) {
+    case 'putTask':
+    case 'removeTask':
+      return `task ${operation.id}`;
+    case 'putDependency':
+    case 'removeDependency':
+      return `dependency ${link(operation.from, operation.to).id}`;
+    case 'putTag':
+    case 'removeTag':
+      return `tag ${operation.id}`;
+  }
+}
+
+/** Lists the items of a project, each with its list and identifier. */
+function keyedItems(project: Project): (readonly [string, object])[] {
+  return [
+    ...project.tasks.map((task) => [`task ${task.id}`, task] as const),
+    ...project.dependencies.map(
+      (dependency) => [`dependency ${dependency.id}`, dependency] as const,
+    ),
+    ...project.tags.map((tag) => [`tag ${tag.id}`, tag] as const),
+  ];
+}
+
 describe('projectAfterChanges', () => {
   const start = project(
     [workTask('b'), workTask('d'), workTask('f')],
@@ -138,19 +164,16 @@ describe('projectAfterChanges', () => {
           const touched = new Set<string>();
           operations.forEach((operation) => {
             runOn(state, operation);
-            touched.add('id' in operation ? operation.id : `${operation.from}-${operation.to}`);
+            touched.add(touchedKey(operation));
           });
           const next = projectAfterChanges(state, previous);
           expect(next).toEqual(toProject(state));
-          const untouched = [...next.tasks, ...next.dependencies, ...next.tags].filter(
-            (item) => !touched.has(item.id),
-          );
-          const before = new Set<object>([
-            ...previous.tasks,
-            ...previous.dependencies,
-            ...previous.tags,
-          ]);
-          expect(untouched.every((item) => before.has(item))).toBe(true);
+          const before = new Map(keyedItems(previous));
+          expect(
+            keyedItems(next)
+              .filter(([key, item]) => !touched.has(key) && before.get(key) !== item)
+              .map(([key]) => key),
+          ).toEqual([]);
           previous = next;
         }
       }),

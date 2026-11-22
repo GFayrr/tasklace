@@ -16,6 +16,7 @@ import type { Schedule } from '../../core/scheduling/schedule-project';
 import type { SummarySchedule } from '../../core/scheduling/summaries';
 import type { Placement } from '../../core/scheduling/task-placement';
 import { projectChanges, type ListChanges } from '../../core/shared/project-changes';
+import type { ProjectHeader } from '../../core/shared/shared-document';
 import { valueAt } from '../../core/table-value';
 import type { TagConflict, TagConflictReport } from '../../core/tags/tag-conflicts';
 import {
@@ -23,6 +24,8 @@ import {
   packFloats,
   packPlacements,
   packTimes,
+  readId,
+  removeAll,
   unpackFloats,
   unpackPlacements,
   withTimes,
@@ -35,7 +38,7 @@ export interface ListDelta<Item, Id> {
 }
 
 export interface ProjectDelta {
-  readonly header: Project | null;
+  readonly header: ProjectHeader | null;
   readonly tasks: ListDelta<Task, TaskId>;
   readonly dependencies: ListDelta<Dependency, DependencyId>;
   readonly tags: ListDelta<Tag, TagId>;
@@ -49,7 +52,7 @@ export interface MapDelta<Value> {
 export type FloatsDelta =
   | { readonly kind: 'same' }
   | { readonly kind: 'whole'; readonly floats: ReadonlyMap<TaskId, TaskFloat> | null }
-  | { readonly kind: 'changes'; readonly changes: PackedEntries };
+  | { readonly kind: 'changes'; readonly changes: PackedEntries<'floats'> };
 
 export type TagConflictsDelta =
   | { readonly kind: 'same' }
@@ -57,7 +60,7 @@ export type TagConflictsDelta =
   | { readonly kind: 'times'; readonly times: Float64Array };
 
 export interface ScheduleDelta {
-  readonly placements: PackedEntries;
+  readonly placements: PackedEntries<'placements'>;
   readonly summaries: MapDelta<SummarySchedule>;
   readonly wbsNumbers: MapDelta<string>;
   readonly floats: FloatsDelta;
@@ -74,15 +77,20 @@ export interface ScheduleTable {
   tagConflicts: TagConflictReport;
 }
 
-/** Writes what changed from one project to the next as a message for the schedule worker: the project with empty lists when a field of its header changed, and for each list the items added or replaced and the identifiers removed. */
+/** Writes what changed from one project to the next as a message for the schedule worker: the fields other than the lists when one of them changed, and for each list the items added or replaced and the identifiers removed. */
 export function projectDeltaOf(previous: Project, next: Project): ProjectDelta {
   const changes = projectChanges(previous, next);
   return {
-    header: changes.header ? { ...next, tasks: [], dependencies: [], tags: [] } : null,
+    header: changes.header ? headerOf(next) : null,
     tasks: listDeltaOf(changes.tasks),
     dependencies: listDeltaOf(changes.dependencies),
     tags: listDeltaOf(changes.tags),
   };
+}
+
+/** Gives the fields of a project other than its lists, each named so that a new field cannot be forgotten. */
+function headerOf({ name, startDate, calendar, options, baseline }: Project): ProjectHeader {
+  return { name, startDate, calendar, options, baseline };
 }
 
 /** Writes the changes of one list as the items to put and the identifiers to remove. */
@@ -277,13 +285,11 @@ function floatsAfter(
   return floats;
 }
 
-/** Puts and removes the entries of a delta in a table. */
+/** Puts and removes the entries of a delta in a table, throwing on a key that cannot be a task identifier. */
 function applyMapDelta<Value>(table: Map<TaskId, Value>, { put, removed }: MapDelta<Value>): void {
-  for (const id of removed) {
-    table.delete(id);
-  }
+  removeAll(table, removed);
   for (const [id, value] of put) {
-    table.set(id, value);
+    table.set(readId(id), value);
   }
 }
 
@@ -414,9 +420,35 @@ function linesAfter<Line>(
   if (!current?.ok) {
     throw new Error('The schedule worker sent changes to conflicts the page does not hold.');
   }
+  const kept = Math.min(current.value.length, delta.length);
+  if (delta.length < 0 || delta.length - kept > delta.put.length) {
+    throw new Error('The schedule worker sent changed conflicts that leave lines without a value.');
+  }
   const lines = current.value.slice(0, delta.length);
   for (const [index, line] of delta.put) {
-    lines[index] = line;
+    lines[lineIndexIn(delta.length, index)] = line;
   }
+  requireEveryLine(lines, kept, delta.length);
   return success(lines);
+}
+
+/** Gives the place of a changed line, throwing when it is not a place among the lines of the conflicts. */
+function lineIndexIn(length: number, index: number): number {
+  if (!Number.isSafeInteger(index) || index < 0 || index >= length) {
+    throw new Error(
+      `The schedule worker changed the line ${String(index)} of ${String(length)} lines of conflicts.`,
+    );
+  }
+  return index;
+}
+
+/** Throws when a line past the ones kept, up to the length the lines now have, was given no value. */
+function requireEveryLine(lines: readonly unknown[], kept: number, length: number): void {
+  for (let index = kept; index < length; index += 1) {
+    if (!Object.hasOwn(lines, index)) {
+      throw new Error(
+        'The schedule worker sent changed conflicts that leave lines without a value.',
+      );
+    }
+  }
 }

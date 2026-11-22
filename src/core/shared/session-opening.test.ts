@@ -150,7 +150,7 @@ describe('opening a session from a state', () => {
     ]);
   });
 
-  it('takes the same decisions after the opening cleared a missing tag, the copy then encoding the cleared document', () => {
+  it('takes the same decisions after the opening cleared a missing tag, the trial copy then receiving the clearing on top of the state it was opened from', () => {
     const withMissingTag = project([workTask('a'), workTask('lost', { tagId: 'deleted' })]);
     const state = Y.encodeStateAsUpdate(createSharedDocument(withMissingTag, TEST_DOCUMENT_ID));
     expectSameDecisions(state, [[{ type: 'putDependency', dependency: link('a', 'lost') }]]);
@@ -197,12 +197,12 @@ describe('opening a session from a state', () => {
           ({ project: generated }, edits, steps, preparedAt) => {
             const state = livedState(generated, edits);
             const early = sessionFrom(state, true);
-            early.prepare();
+            early.prepareTrialCopy();
             const ahead = sessionFrom(state, true);
             const late = sessionFrom(state, true);
             steps.forEach((step, index) => {
               if (index === preparedAt) {
-                ahead.prepare();
+                ahead.prepareTrialCopy();
               }
               const answer = playTrialStep(early, step, index);
               expect(playTrialStep(ahead, step, index)).toEqual(answer);
@@ -234,17 +234,17 @@ describe('opening a session from a state', () => {
     expect(session.project().dependencies).toEqual([link('local', 'a')]);
   });
 
-  it('keeps its trial copy in step with local changes when the page asks for it again', () => {
+  it('keeps its trial copy in step with local changes when it is asked for again', () => {
     const state = Y.encodeStateAsUpdate(
       createSharedDocument(project([workTask('a')]), TEST_DOCUMENT_ID),
     );
     const session = sessionFrom(state, true);
-    session.prepare();
+    session.prepareTrialCopy();
     expect(session.apply({ type: 'putTask', task: workTask('b') })).toEqual({
       ok: true,
       value: undefined,
     });
-    session.prepare();
+    session.prepareTrialCopy();
     const update = peerUpdate(session, [{ type: 'putDependency', dependency: link('b', 'a') }]);
     expect(session.merge(update)).toEqual({ ok: true, value: [] });
     expect(session.history.undo()).toEqual({

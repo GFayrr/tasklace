@@ -11,7 +11,7 @@ function message(number: number, size: number): CollaborationEvent {
   return { kind: 'peerMessage', peer: 1, message: bytes };
 }
 
-/** Returns a delivery events record, the number of each handled event and what the page was told, with paints released by the test. */
+/** Returns a paced delivery with the number of each event handled and what the page was told, the test releasing the paints. */
 function pacedRecord() {
   const handled: number[] = [];
   const told: string[] = [];
@@ -99,6 +99,27 @@ describe('createPacedEvents', () => {
       expect(handled).toEqual(['peerMessage', 'relayCaughtUp', 'connected']);
     } finally {
       vi.useRealTimers();
+    }
+  });
+  it('handles a large event and the ones behind it even when the page cannot wait to paint, logging why', async () => {
+    const handled: string[] = [];
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const deliver = createPacedEvents({
+        handle: (event) => handled.push(event.kind),
+        announce: () => undefined,
+        waitForPaint: () => Promise.reject(new Error('No frame')),
+      });
+      deliver(message(1, ANNOUNCED_EVENT_BYTES));
+      deliver({ kind: 'connected' });
+      await settle();
+      deliver({ kind: 'relayCaughtUp' });
+      expect(handled).toEqual(['peerMessage', 'connected', 'relayCaughtUp']);
+      expect(logged.mock.calls).toEqual([
+        ['The page could not paint before handling a large change:', new Error('No frame')],
+      ]);
+    } finally {
+      logged.mockRestore();
     }
   });
 });
