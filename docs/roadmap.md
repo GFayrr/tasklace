@@ -1,6 +1,6 @@
 # Roadmap
 
-_Last updated: 2026-11-15_
+_Last updated: 2026-11-22_
 
 This roadmap shows where Tasklace is heading: what is done, what comes next and what may come later. It states intent, not commitments, and gives no dates: Tasklace is a non-commercial project built in the open, and each step is finished only when it is reviewed and fully tested.
 
@@ -27,7 +27,6 @@ Once a step is done, only its status is kept here; its pull requests tell the re
 
 - The relay guide also as a PDF, easier to hand to an IT department.
 - The `.tasklace` file format made final, so that every file written by version 1 opens in later versions.
-- Faster editing of very large plans, where one change currently rebuilds the whole plan.
 
 ## Later
 
