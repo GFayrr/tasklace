@@ -2,7 +2,7 @@ import { compileCalendar } from '../../core/calendar/compile-calendar';
 import { MIN_PROJECT_YEAR } from '../../core/limits';
 import { exportProjectCsv } from '../../core/exchange/csv/project-csv-export';
 import { exportProjectJson } from '../../core/exchange/project-json';
-import type { BaselineEntry, Project, TaskId } from '../../core/model/project';
+import type { BaselineEntry, Dependency, Project, Task, TaskId } from '../../core/model/project';
 import { takeBaseline, type SkippedTask } from '../../core/baseline/take-baseline';
 import { failure, success, type Result } from '../../core/result';
 import type { MergeFailure, SharedRepair } from '../../core/shared/shared-project';
@@ -11,12 +11,7 @@ import type { DailyWindowErrorCode } from '../../core/calendar/task-slots';
 import { taskOfCalendarIssue } from '../../core/shared/shared-operations';
 import { issueText, repairText, type ReportedIssue } from '../i18n/issue-text';
 import { scheduleFailureText } from '../i18n/schedule-failure-text';
-import {
-  conflictLines,
-  dateConflictLines,
-  type ConflictLine,
-  type DateConflictLine,
-} from '../plan/conflict-lines';
+import type { ConflictDescription, ConflictLine, DateConflictLine } from '../plan/conflict-lines';
 import { formatDuration, parseDuration } from '../plan/durations';
 import {
   clearBaseline,
@@ -55,9 +50,12 @@ import {
 } from '../i18n/messages';
 import type { CurrentSchedule, EditableColumn } from '../plan/cell-editing';
 import {
-  buildPlanOutline,
+  nextIncoming,
+  nextPlanOutline,
   NOTHING_COLLAPSED,
   predecessorText,
+  type IncomingBasis,
+  type OutlineBasis,
   toggledSummary,
   withAncestorsOpen,
 } from '../plan/plan-outline';
@@ -95,6 +93,7 @@ import type { ZoomLevel } from '../plan/time-scale';
 import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
 import type { Theme } from '../theme/theme';
 import { SettingsPanel } from './settings-panel.svelte';
+import { nextPaint } from './next-paint';
 import { relayEndText, relayFailureText } from '../collaboration/collaboration-text';
 import {
   CollaborationState,
@@ -131,9 +130,36 @@ interface ComputedSchedule {
   readonly schedule: Schedule | null;
 }
 
+interface Starts {
+  readonly ids: readonly TaskId[];
+  readonly hours: Float64Array;
+}
+
 interface StartMove {
-  readonly base: Schedule;
+  readonly base: Starts;
   readonly project: Project | null;
+}
+
+/** Copies the start of each task of a schedule, which the page keeps while the schedule changes in place, as a list of identifiers and a list of hours in the same order. */
+function startsOf(schedule: Schedule): Starts {
+  const ids: TaskId[] = [];
+  const hours = new Float64Array(schedule.placements.size);
+  for (const [id, placement] of schedule.placements) {
+    hours[ids.length] = placement.start;
+    ids.push(id);
+  }
+  return { ids, hours };
+}
+
+/** Counts the tasks of a schedule whose start differs from the one kept for them, a new task counting as moved. */
+function movedTaskCount(base: Starts, schedule: Schedule): number {
+  let kept = 0;
+  base.ids.forEach((id, index) => {
+    if (schedule.placements.get(id)?.start === base.hours[index]) {
+      kept += 1;
+    }
+  });
+  return schedule.placements.size - kept;
 }
 
 const LOCAL_CHANGES_CHOICES: Readonly<Record<CloseChoice, LocalChangesChoice>> = {
@@ -209,7 +235,10 @@ export interface AppContext {
   readonly createId: () => NewIdentifier;
   readonly now: () => Date;
   readonly theme: Theme;
+  readonly waitForPaint?: () => Promise<void>;
 }
+
+export type Waiting = 'opening' | 'receiving' | 'preparing';
 
 /** Holds what the interface shows: the open project, its schedule, whether it is saved, what can be undone and the messages for the user. */
 export class AppState {
@@ -247,11 +276,23 @@ export class AppState {
   #keptChanges = $state.raw<KeptChanges | null>(null);
   #shareFailure = $state.raw<CollaborationFailure | null>(null);
   #fileActionRunning = $state(false);
+  #opening = $state(false);
+  #receiving = $state(false);
+  #preparingFor = $state.raw<SharedSession | null>(null);
   #report = $state.raw<Report | null>(null);
   #lastQuestion: Promise<unknown> = Promise.resolve();
   #collapsed = $state.raw<ReadonlySet<TaskId>>(NOTHING_COLLAPSED);
   #openedCount = $state(0);
-  readonly outline = $derived(buildPlanOutline(this.project?.tasks ?? [], this.#collapsed));
+  #outlineBasis: OutlineBasis | null = null;
+  #incomingBasis: IncomingBasis | null = null;
+  readonly outline = $derived.by(() => {
+    this.#outlineBasis = this.#nextOutline(this.project?.tasks ?? [], this.#collapsed);
+    return this.#outlineBasis.outline;
+  });
+  readonly incoming = $derived.by(() => {
+    this.#incomingBasis = this.#nextIncoming(this.project?.dependencies ?? []);
+    return this.#incomingBasis.incoming;
+  });
   readonly calendar = $derived.by(() => {
     const compiled = this.project === null ? null : compileCalendar(this.project.calendar);
     return compiled?.ok === true ? compiled.value : null;
@@ -269,6 +310,7 @@ export class AppState {
   readonly locale: string;
   readonly theme: Theme;
   readonly #context: AppContext;
+  readonly #waitForPaint: () => Promise<void>;
   readonly #files: ProjectFiles;
   readonly #scheduler: Scheduler;
   #session: SharedSession | null = null;
@@ -284,6 +326,7 @@ export class AppState {
     this.messages = context.messages;
     this.locale = context.locale;
     this.theme = context.theme;
+    this.#waitForPaint = context.waitForPaint ?? nextPaint;
     this.#files = createProjectFiles(context.bridge, {
       failed: (error) => {
         this.#reportError(error);
@@ -299,6 +342,17 @@ export class AppState {
       },
       chooseLocalChanges: async (fileName) =>
         LOCAL_CHANGES_CHOICES[await this.#ask({ reason: 'localChanges', fileName })],
+      opening: async () => {
+        this.#opening = true;
+        try {
+          await this.#waitForPaint();
+        } catch (error) {
+          console.error('The page could not paint before opening the plan:', error);
+        }
+      },
+      openingDone: () => {
+        this.#opening = false;
+      },
     });
     this.updates = new UpdateState(context.bridge, context.now);
     this.setup = new SetupState(context.bridge);
@@ -334,10 +388,14 @@ export class AppState {
         this.#ownChangesKept(kept);
       },
       selectedTaskId: () => this.#selectedTaskId,
+      receiving: (waiting) => {
+        this.#receiving = waiting;
+      },
+      waitForPaint: this.#waitForPaint,
     });
     this.#scheduler = context.createScheduler({
-      scheduled: (result, project) => {
-        this.#showSchedule(result, project);
+      scheduled: (result, project, description) => {
+        this.#showSchedule(result, project, description);
       },
       failed: (error) => {
         console.error('The schedule could not be computed:', error);
@@ -345,6 +403,11 @@ export class AppState {
         this.#startMove = null;
         this.settings.alertIfOpen(this.messages.notices.scheduleStopped);
         this.#notify('error', this.messages.notices.scheduleStopped, null, true);
+      },
+      dropped: () => {
+        this.#computed = null;
+        this.#peopleLines = [];
+        this.#dateLines = [];
       },
     });
   }
@@ -402,7 +465,7 @@ export class AppState {
     return request;
   }
 
-  /** Returns the schedule shown, the latest computed for the open project even when older than its latest change, or null when none is computed or the latest computation failed. */
+  /** Returns the schedule shown, the latest computed for the open project even when older than its latest change, its tables changed in place by the next one, or null when none is computed or the latest failed. */
   get schedule(): Schedule | null {
     return this.#computed?.schedule ?? null;
   }
@@ -498,6 +561,17 @@ export class AppState {
   /** Returns the summary tasks folded in the table and on the timeline. */
   get collapsed(): ReadonlySet<TaskId> {
     return this.#collapsed;
+  }
+
+  /** Returns the wait the page tells the user about, opening before receiving before preparing, or null when it waits for nothing. */
+  get waiting(): Waiting | null {
+    if (this.#opening) {
+      return 'opening';
+    }
+    if (this.#receiving) {
+      return 'receiving';
+    }
+    return this.#preparingFor === null ? null : 'preparing';
   }
 
   /** Tells whether a file action started by the user runs, during which the project cannot be changed. */
@@ -1203,7 +1277,8 @@ export class AppState {
   moveProjectStart(text: string): string | null {
     const previous = this.#startMove;
     const before = this.currentSchedule;
-    const base = previous?.base ?? (before.ok ? before.value : null);
+    const base =
+      previous?.base ?? (before.ok && before.value !== null ? startsOf(before.value) : null);
     this.settings.tell(null);
     this.#startMove = base === null ? null : { base, project: null };
     const refusal = this.editSettings(() => setProjectStart(text));
@@ -1279,8 +1354,7 @@ export class AppState {
 
   /** Writes what a block of a task waits for, as in the task table. */
   blockWaitText(id: TaskId, block: number): string {
-    const incoming = this.project?.dependencies.filter((link) => link.successorId === id);
-    return predecessorText(incoming, this.outline.wbsById, block);
+    return predecessorText(this.incoming.get(id), this.outline.wbsById, block);
   }
 
   /** Describes a task and the links that touch it, so that the details panel can tell whether it changed while open. */
@@ -1505,10 +1579,32 @@ export class AppState {
     };
   }
 
+  /** Gives the outline of the tasks from the one shown last, building it again from nothing, and logging why, when following the changes throws. */
+  #nextOutline(tasks: readonly Task[], collapsed: ReadonlySet<TaskId>): OutlineBasis {
+    try {
+      return nextPlanOutline(this.#outlineBasis, tasks, collapsed);
+    } catch (error) {
+      console.error('The outline of the plan is built again after an error:', error);
+      return nextPlanOutline(null, tasks, collapsed);
+    }
+  }
+
+  /** Gives the dependencies grouped by the task they lead to from the grouping shown last, grouping them again from nothing, and logging why, when following the changes throws. */
+  #nextIncoming(dependencies: readonly Dependency[]): IncomingBasis {
+    try {
+      return nextIncoming(this.#incomingBasis, dependencies);
+    } catch (error) {
+      console.error('The dependencies of the plan are grouped again after an error:', error);
+      return nextIncoming(null, dependencies);
+    }
+  }
+
   /** Follows the changes of a newly opened project. */
   #attach(session: SharedSession): void {
     this.#stopFollowing();
     this.#session = session;
+    this.#outlineBasis = null;
+    this.#incomingBasis = null;
     this.#computed = null;
     this.#peopleLines = [];
     this.#dateLines = [];
@@ -1527,6 +1623,24 @@ export class AppState {
     this.collaboration.attached(session);
     this.closeCollaborationWindow();
     this.#refresh();
+    void this.#prepareTrialCopy(session);
+  }
+
+  /** Makes the trial copy of a newly opened session once the page has painted its plan, telling meanwhile that the plan is being got ready. */
+  async #prepareTrialCopy(session: SharedSession): Promise<void> {
+    this.#preparingFor = session;
+    try {
+      await this.#waitForPaint();
+      if (this.#session === session) {
+        session.prepareTrialCopy();
+      }
+    } catch (error) {
+      console.error('The plan could not be got ready to take changes:', error);
+    } finally {
+      if (this.#preparingFor === session) {
+        this.#preparingFor = null;
+      }
+    }
   }
 
   readonly #queueRefresh = (): void => {
@@ -1565,36 +1679,41 @@ export class AppState {
     }
   }
 
-  /** Describes the person or team conflicts a computed schedule finds, or tells the user and logs why they cannot be described, listing none. */
-  #describePeople(computed: ComputedSchedule): readonly ConflictLine[] {
-    try {
-      return conflictLines(computed.schedule, computed.project);
-    } catch (error) {
-      console.error('The conflicts of people and teams could not be described:', error);
-      this.#notify('error', this.messages.notices.peopleConflictsUnavailable);
-      return [];
+  /** Gives the person or team conflicts the schedule worker described, or tells the user and logs why they could not be, listing none. */
+  #describedPeople(description: ConflictDescription): readonly ConflictLine[] {
+    if (description.people.ok) {
+      return description.people.value;
     }
+    console.error(
+      'The conflicts of people and teams could not be described:',
+      description.people.error,
+    );
+    this.#notify('error', this.messages.notices.peopleConflictsUnavailable);
+    return [];
   }
 
-  /** Describes the dates a computed schedule finds not met, or tells the user and logs why they cannot be described, marking no task. */
-  #describeDates(computed: ComputedSchedule): readonly DateConflictLine[] {
-    try {
-      return dateConflictLines(computed.schedule, computed.project);
-    } catch (error) {
-      console.error('The dates not met could not be described:', error);
-      this.#notify('error', this.messages.notices.dateConflictsUnavailable);
-      return [];
+  /** Gives the dates not met the schedule worker described, or tells the user and logs why they could not be, marking no task. */
+  #describedDates(description: ConflictDescription): readonly DateConflictLine[] {
+    if (description.dates.ok) {
+      return description.dates.value;
     }
+    console.error('The dates not met could not be described:', description.dates.error);
+    this.#notify('error', this.messages.notices.dateConflictsUnavailable);
+    return [];
   }
 
   /** Shows a computed schedule if it still belongs to the open project, with its conflicts, its unknown floats and the tasks a move of the project start moved, or explains why it failed. */
-  #showSchedule(result: Result<Schedule, SchedulingFailure>, project: Project): void {
+  #showSchedule(
+    result: Result<Schedule, SchedulingFailure>,
+    project: Project,
+    description: ConflictDescription,
+  ): void {
     if (project !== this.project) {
       return;
     }
     this.#computed = { project, schedule: result.ok ? result.value : null };
-    this.#peopleLines = this.#describePeople(this.#computed);
-    this.#dateLines = this.#describeDates(this.#computed);
+    this.#peopleLines = this.#describedPeople(description);
+    this.#dateLines = this.#describedDates(description);
     if (this.conflictCount === 0) {
       this.#conflictsOpen = false;
     }
@@ -1642,14 +1761,9 @@ export class AppState {
     }
   }
 
-  /** Tells in the settings how many tasks a move of the project start moved, comparing their starts in the schedule before the move and in the schedule of the moved project. */
-  #tellMovedTasks(base: Schedule, schedule: Schedule): void {
-    let moved = 0;
-    for (const [id, placement] of schedule.placements) {
-      if (base.placements.get(id)?.start !== placement.start) {
-        moved += 1;
-      }
-    }
+  /** Tells in the settings how many tasks a move of the project start moved, comparing their starts kept from the schedule before the move with the schedule of the moved project. */
+  #tellMovedTasks(base: Starts, schedule: Schedule): void {
+    const moved = movedTaskCount(base, schedule);
     this.settings.tell(countMessage(this.messages.settings.tasksMoved, moved, this.locale));
   }
 

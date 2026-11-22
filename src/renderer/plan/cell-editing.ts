@@ -1,6 +1,6 @@
-import type { Dependency, Task, TaskId } from '../../core/model/project';
+import type { Task, TaskId } from '../../core/model/project';
 import type { Schedule } from '../../core/scheduling/schedule-project';
-import { predecessorText } from './plan-outline';
+import { predecessorText, type IncomingLookup, type TaskLookup } from './plan-outline';
 import type { CompiledCalendar } from '../../core/calendar/compile-calendar';
 import { formatDateTime, parseDateTime } from '../../core/civil-format';
 import { formatTableDateTime } from './table-dates';
@@ -41,8 +41,8 @@ export interface CellSource {
   readonly schedule: Schedule | null;
   readonly current: CurrentSchedule;
   readonly calendar: CompiledCalendar | null;
-  readonly incoming: ReadonlyMap<TaskId, readonly Dependency[]>;
-  readonly wbsById: ReadonlyMap<TaskId, string>;
+  readonly incoming: IncomingLookup;
+  readonly wbsById: TaskLookup<string>;
 }
 
 /** Tells whether a column of a task can be edited: every column of a work task or milestone, only the name of a summary. */

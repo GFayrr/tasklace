@@ -2,7 +2,13 @@ import { testDigest, testJoinCode } from '../../../core/testing/secrets';
 import * as Y from 'yjs';
 import type { Project } from '../../../core/model/project';
 import type { PrintDocument } from '../../../core/print/print-document';
-import { scheduleProject } from '../../../core/scheduling/schedule-project';
+import type { Result } from '../../../core/result';
+import {
+  scheduleProject,
+  type Schedule,
+  type SchedulingFailure,
+} from '../../../core/scheduling/schedule-project';
+import { describeConflicts, type ConflictDescription } from '../../plan/conflict-lines';
 import {
   createSharedDocument,
   requireDocumentId,
@@ -129,8 +135,18 @@ export interface FakeRelay {
   readonly sent: RelayOutgoing[];
 }
 
+export interface TestScheduleListener {
+  readonly scheduled: (
+    result: Result<Schedule, SchedulingFailure>,
+    project: Project,
+    description?: ConflictDescription,
+  ) => void;
+  readonly failed: (error: unknown) => void;
+  readonly dropped: () => void;
+}
+
 export interface ManualScheduler {
-  readonly listener: () => ScheduleListener;
+  readonly listener: () => TestScheduleListener;
   readonly requests: Project[];
   automatic: boolean;
 }
@@ -396,6 +412,14 @@ function projectNameIn(state: Uint8Array): string | null {
   return typeof name === 'string' ? name : null;
 }
 
+/** Describes the conflicts of a schedule as the schedule worker does. */
+function describedFor(
+  result: Result<Schedule, SchedulingFailure>,
+  project: Project,
+): ConflictDescription {
+  return describeConflicts(result.ok ? result.value : null, project);
+}
+
 /** Builds a scheduler that computes schedules at once, or only records requests when told to stop being automatic. */
 export function manualScheduler(): {
   readonly create: (listener: ScheduleListener) => Scheduler;
@@ -404,10 +428,17 @@ export function manualScheduler(): {
   let current: ScheduleListener | null = null;
   const scheduler: ManualScheduler = {
     listener: () => {
-      if (current === null) {
+      const listener = current;
+      if (listener === null) {
         throw new Error('No scheduler was created');
       }
-      return current;
+      return {
+        scheduled: (result, project, description) => {
+          listener.scheduled(result, project, description ?? describedFor(result, project));
+        },
+        failed: listener.failed,
+        dropped: listener.dropped,
+      };
     },
     requests: [],
     automatic: true,
@@ -419,7 +450,8 @@ export function manualScheduler(): {
       request: (project) => {
         scheduler.requests.push(project);
         if (scheduler.automatic) {
-          listener.scheduled(scheduleProject(project), project);
+          const result = scheduleProject(project);
+          listener.scheduled(result, project, describedFor(result, project));
         }
       },
       dispose: () => undefined,
@@ -444,6 +476,7 @@ export function fakeAppContext() {
     },
     now: () => FIXED_NOW,
     theme: SAND_GRAPHITE,
+    waitForPaint: () => Promise.resolve(),
   };
   return { context, control, scheduler };
 }

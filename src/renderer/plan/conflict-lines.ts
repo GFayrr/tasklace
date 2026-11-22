@@ -5,9 +5,10 @@ import type {
   SchedulingConflictCode,
 } from '../../core/scheduling/forward-pass';
 import type { Schedule } from '../../core/scheduling/schedule-project';
+import { failure, success, type Result } from '../../core/result';
 import type { ProjectHour } from '../../core/time';
 import type { TagPattern } from '../../core/tags/tag-appearance';
-import type { TagConflict } from '../../core/tags/tag-conflicts';
+import type { TagConflict, TagConflictReport } from '../../core/tags/tag-conflicts';
 import { tagStylesOf } from './tag-styles';
 
 export interface ConflictLine {
@@ -30,6 +31,31 @@ export interface DateConflictLine {
   readonly taskName: string;
   readonly end: ProjectHour;
   readonly date: ProjectHour;
+}
+
+export interface ConflictDescription {
+  readonly people: Result<readonly ConflictLine[], unknown>;
+  readonly dates: Result<readonly DateConflictLine[], unknown>;
+}
+
+/** Describes the person or team conflicts and the dates not met of a schedule, keeping for each the error that kept it from being described. */
+export function describeConflicts(
+  schedule: Schedule | null,
+  project: Project,
+): ConflictDescription {
+  return {
+    people: described(() => conflictLines(schedule, project)),
+    dates: described(() => dateConflictLines(schedule, project)),
+  };
+}
+
+/** Runs a description, giving its lines or the error it threw. */
+function described<Line>(describe: () => readonly Line[]): Result<readonly Line[], unknown> {
+  try {
+    return success(describe());
+  } catch (error) {
+    return failure(error);
+  }
 }
 
 /** Describes each person or team conflict of a schedule with the name, color and pattern of its tag and the names of its tasks, throwing on a conflict about a tag or a task the project does not have. */
@@ -107,4 +133,29 @@ function valueOf<Value>(table: ReadonlyMap<TaskId, Value>, taskId: TaskId): Valu
     throw new Error(`The schedule has nothing for the task ${taskId} of a conflict.`);
   }
   return value;
+}
+
+const TASKS_IN_TAG_CONFLICTS = new WeakMap<TagConflictReport, ReadonlySet<TaskId>>();
+const NO_TASKS: ReadonlySet<TaskId> = new Set();
+
+/** Gives the tasks in a person or team conflict or missing a date, listing those of a report on tags once for as long as the report is kept. */
+export function tasksInConflict(
+  report: TagConflictReport | null,
+  dateLines: readonly DateConflictLine[],
+): ReadonlySet<TaskId> {
+  const people = report === null ? NO_TASKS : tasksInTagConflicts(report);
+  return dateLines.length === 0
+    ? people
+    : new Set([...people, ...dateLines.map((line) => line.conflict.taskId)]);
+}
+
+/** Gives the tasks in the conflicts of a report on tags, listed at its first use. */
+function tasksInTagConflicts(report: TagConflictReport): ReadonlySet<TaskId> {
+  const known = TASKS_IN_TAG_CONFLICTS.get(report);
+  if (known !== undefined) {
+    return known;
+  }
+  const tasks = new Set(report.conflicts.flatMap((conflict) => conflict.taskIds));
+  TASKS_IN_TAG_CONFLICTS.set(report, tasks);
+  return tasks;
 }

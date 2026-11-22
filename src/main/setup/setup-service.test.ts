@@ -525,14 +525,14 @@ describe('the installed version', () => {
   it('answers whether a check may run only once the setup is prepared', async () => {
     const fake = fakeCopy('installed');
     fake.installerChoices = installerChoices(0, 1);
-    let release: () => void = () => undefined;
+    const { promise: held, resolve: release } = Promise.withResolvers<undefined>();
+    const { promise: reached, resolve: reach } = Promise.withResolvers<undefined>();
     const exported = fake.copy.registry.exportKey;
     const slow: Registry = {
       ...fake.copy.registry,
       exportKey: async (key) => {
-        await new Promise<void>((resolve) => {
-          release = resolve;
-        });
+        reach(undefined);
+        await held;
         return exported(key);
       },
     };
@@ -541,9 +541,10 @@ describe('the installed version', () => {
     const asking = setup.mayCheckAtLaunch().then((value) => {
       answer = value;
     });
+    await reached;
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(answer).toBeNull();
-    release();
+    release(undefined);
     await asking;
     expect(answer).toBe(true);
   });

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import type { Project } from '../../src/core/model/project';
+import { compareStrings } from '../../src/core/compare-strings';
+import {
+  createProjectState,
+  projectAfterChanges,
+  putTask,
+  toProject,
+} from '../../src/core/shared/project-state';
 import { repairProject } from '../../src/core/shared/repair-project';
 import { createSharedDocument } from '../../src/core/shared/shared-document';
 import {
@@ -26,6 +33,7 @@ import {
   TEST_DOCUMENT_ID,
   workTask,
   segmentsOrThrow,
+  testId,
 } from '../../src/core/testing/project-builder';
 
 const WARM_UP_RUNS = 1;
@@ -33,6 +41,7 @@ const EDITS_NEEDED = (MEASURED_RUNS + WARM_UP_RUNS) * BATCH_SIZE;
 const HUB_ID = 'hub';
 const HUB_BLOCK_HOURS = 2;
 const MIN_HUB_BLOCKS = 2;
+const REBUILDS_PER_RUN = 10;
 
 /** Opens a session on a copy of a shared document, failing the test when it cannot be opened. */
 function openCopy(document: Y.Doc): SharedSession {
@@ -105,6 +114,33 @@ describe('growth of shared session operations with the size of the project', () 
     expect(ratio).toBeLessThanOrEqual(CONSTANT_MAX_RATIO);
   });
 
+  it('changes the lag of a dependency in a time that does not depend on how much follows it', () => {
+    /** Changes the lag of the link from the hub to the first task of the chain, which every task follows. */
+    const lagChanger = (session: SharedSession) => {
+      const first = session
+        .project()
+        .dependencies.find((dependency) => dependency.id === testId(`${HUB_ID}-t0`));
+      if (first === undefined) {
+        throw new Error('The hub does not lead to the first task.');
+      }
+      return (index: number) => {
+        const changed = session.apply({
+          type: 'putDependency',
+          dependency: { ...first, lagHours: index % 2 },
+        });
+        expect(changed.ok).toBe(true);
+      };
+    };
+    const small = openCopy(hubProject(SMALL_TASK_COUNT));
+    const large = openCopy(hubProject(LARGE_TASK_COUNT));
+    const ratio = growthRatio(
+      batched(BATCH_SIZE, lagChanger(small)),
+      batched(BATCH_SIZE, lagChanger(large)),
+    );
+    console.info(`Lag of a dependency: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(CONSTANT_MAX_RATIO);
+  });
+
   it('merges a received edit in a time that does not depend on the size of the project', () => {
     const smallUpdates = recordRemoteEdits(smallDocument);
     const largeUpdates = recordRemoteEdits(largeDocument);
@@ -119,6 +155,34 @@ describe('growth of shared session operations with the size of the project', () 
     const ratio = growthRatio(merge(small, smallUpdates), merge(large, largeUpdates));
     console.info(`Received edit: ×${ratio.toFixed(2)}`);
     expect(ratio).toBeLessThanOrEqual(CONSTANT_MAX_RATIO);
+  });
+
+  it('rebuilds the project after as many new tasks as it holds in quasi-linear time', () => {
+    /** Prepares an indexed state where a copy follows each task of a project sorted as the session sorts it, checks the rebuilt project once, then rebuilds it, the copies being noted as touched again before each rebuild. */
+    const doubling = (taskCount: number) => {
+      const built = buildLargeProject(LARGE_PROJECT_SEED, taskCount);
+      const before = {
+        ...built,
+        tasks: [...built.tasks].sort((left, right) => compareStrings(left.id, right.id)),
+        dependencies: [...built.dependencies].sort((left, right) =>
+          compareStrings(left.id, right.id),
+        ),
+        tags: [...built.tags].sort((left, right) => compareStrings(left.id, right.id)),
+      };
+      const state = createProjectState(before);
+      const copies = before.tasks.map((task) => ({ ...task, id: testId(`${task.id}-next`) }));
+      copies.forEach((copy) => {
+        putTask(state, copy);
+      });
+      expect(projectAfterChanges(state, before)).toEqual(toProject(state));
+      return batched(REBUILDS_PER_RUN, () => {
+        copies.forEach((copy) => state.touched.tasks.add(copy.id));
+        expect(projectAfterChanges(state, before).tasks).toHaveLength(taskCount * 2);
+      });
+    };
+    const ratio = growthRatio(doubling(SMALL_TASK_COUNT), doubling(LARGE_TASK_COUNT));
+    console.info(`Project after doubling: ×${ratio.toFixed(2)}`);
+    expect(ratio).toBeLessThanOrEqual(LINEAR_MAX_RATIO);
   });
 
   it('changes the number of blocks of a task linked to every other task in linear time', () => {

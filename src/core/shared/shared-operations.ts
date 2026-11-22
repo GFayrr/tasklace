@@ -262,7 +262,7 @@ function putDependencyChecked(state: ProjectState, input: Dependency): Check {
     return refuse('dependencies', 'TOO_MANY_ITEMS');
   }
   removeDependency(state, dependency.id);
-  const problem = findDependencyProblem(state, dependency);
+  const problem = findDependencyProblem(state, dependency, previous);
   if (problem !== null) {
     if (previous !== undefined) {
       putDependency(state, previous);
@@ -273,10 +273,11 @@ function putDependencyChecked(state: ProjectState, input: Dependency): Check {
   return success(touched({ dependencies: [dependency.id] }));
 }
 
-/** Returns the problem a new dependency would cause among the other dependencies, or null. */
+/** Returns the problem a new dependency would cause among the other dependencies, or null, searching for a loop only when it links other blocks than the dependency it replaces, which was already part of a project without loops. */
 export function findDependencyProblem(
   state: ProjectState,
   dependency: Dependency,
+  replaced?: Dependency,
 ): ValidationIssueCode | null {
   const predecessor = state.tasks.get(dependency.predecessorId);
   const successor = state.tasks.get(dependency.successorId);
@@ -298,7 +299,15 @@ export function findDependencyProblem(
   if (state.pairs.has(blockPairKey(dependency))) {
     return 'DUPLICATE_DEPENDENCY';
   }
+  if (replaced !== undefined && linksSameBlocks(replaced, dependency)) {
+    return null;
+  }
   return closesCycle(state, dependency) ? 'DEPENDENCY_CYCLE' : null;
+}
+
+/** Tells whether two dependencies link the same blocks of the same tasks, their type deciding which block a whole task stands for. */
+function linksSameBlocks(left: Dependency, right: Dependency): boolean {
+  return left.type === right.type && blockPairKey(left) === blockPairKey(right);
 }
 
 /** Adds or replaces a tag after checking its fields. */

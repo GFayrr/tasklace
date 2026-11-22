@@ -39,6 +39,8 @@ import type {
   TasklaceBridge,
 } from '../../preload/bridge-contract';
 import { isRelayEvent, RelayState, type RelayBridge } from './relay-state.svelte';
+import { nextPaint } from '../app/next-paint';
+import { createPacedEvents } from './paced-events';
 
 export type CollaborationBridge = Pick<
   TasklaceBridge,
@@ -83,6 +85,8 @@ export interface CollaborationContext {
   readonly relayNotReopened: (failure: FileFailure) => void;
   readonly shareLater?: (share: () => void) => void;
   readonly randomBytes?: (count: number) => Uint8Array;
+  readonly receiving?: (waiting: boolean) => void;
+  readonly waitForPaint?: () => Promise<void>;
 }
 
 export type CollaborationMode =
@@ -107,6 +111,11 @@ export interface PresentPerson {
 }
 
 export const EMPTY_STATE_VECTOR = Uint8Array.of(0);
+
+/** Ignores that the page waits for a large change, for a page that does not show it. */
+function ignoreWaiting(): void {
+  return undefined;
+}
 
 const NOBODY_PLACED: ReadonlyMap<TaskId, readonly PresentPerson[]> = new Map();
 const MY_RELAY_ID = 'relay-me';
@@ -220,9 +229,15 @@ export class CollaborationState {
       changeRefused: context.relayChangeRefused,
       notReopened: context.relayNotReopened,
     });
-    context.bridge.onCollaborationEvent((event) => {
-      this.#receive(event);
-    });
+    context.bridge.onCollaborationEvent(
+      createPacedEvents({
+        handle: (event) => {
+          this.#receive(event);
+        },
+        announce: context.receiving ?? ignoreWaiting,
+        waitForPaint: context.waitForPaint ?? nextPaint,
+      }),
+    );
   }
 
   /** Returns what the page shares or joined. */
