@@ -540,7 +540,14 @@ describe('createScheduler with the real host', { timeout: PROPERTY_TEST_TIMEOUT_
           }
           answerAll();
         });
-        expect(seen.stopped ? current : seen.last).toBe(current);
+        if (seen.stopped) {
+          quietly(() => {
+            scheduler.request(current);
+            answerAll();
+          });
+        }
+        expect(seen.stopped).toBe(false);
+        expect(seen.last).toBe(current);
       }),
       { numRuns: 40 },
     );

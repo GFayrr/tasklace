@@ -30,11 +30,15 @@ function replacing(tasks: readonly Task[], ...replacements: readonly Task[]): re
   return tasks.map((task) => replacements.find((next) => next.id === task.id) ?? task);
 }
 
-/** Reads an outline and the outline a full build gives, for the same tasks, as comparable tables. */
+/** Reads an outline and the outline a full build gives, for the same tasks, as comparable tables, and finds each task again by its number. */
 function expectBuilt(outline: PlanOutline, tasks: readonly Task[], collapsed: ReadonlySet<TaskId>) {
-  expect(outlineShape(outline, tasks)).toEqual(
-    outlineShape(buildPlanOutline(tasks, collapsed), tasks),
+  const shape = outlineShape(outline, tasks);
+  expect(shape).toEqual(outlineShape(buildPlanOutline(tasks, collapsed), tasks));
+  const numbered = [...shape.wbsById];
+  expect(numbered.map(([, wbs]) => taskIdOfNumber(outline, wbs))).toEqual(
+    numbered.map(([id]) => id),
   );
+  expect(taskIdOfNumber(outline, '0')).toBeUndefined();
 }
 
 interface Shape {
@@ -158,6 +162,47 @@ describe('nextPlanOutline', () => {
         },
       ),
       { numRuns: 200 },
+    );
+  });
+
+  it('gives the outline a full build gives after a sequence of steps that place tasks one by one or sort their groups again, on the same records', () => {
+    const ids = Array.from(
+      { length: 80 },
+      (_unused, index) => `t${String(index).padStart(2, '0')}`,
+    );
+    const shape = fc.record({
+      present: fc.boolean(),
+      parent: fc.constantFrom(null, 't00', 't01', 't02'),
+      sortKey: fc.constantFrom(...SORT_KEYS),
+    });
+    const step = fc.record({
+      shapes: fc.array(shape, { minLength: ids.length, maxLength: ids.length }),
+      changing: fc.oneof(fc.integer({ min: 1, max: 4 }), fc.integer({ min: 70, max: ids.length })),
+      offset: fc.nat({ max: ids.length - 1 }),
+    });
+    /** Makes the task of an identifier in a shape, or nothing when the shape leaves it out. */
+    const taskOf = (id: string, { present, parent: parentId, sortKey }: Shape) =>
+      present
+        ? [workTask(id, { parentId: parentId === null ? null : testId(parentId), sortKey })]
+        : [];
+    fc.assert(
+      fc.property(fc.array(step, { minLength: 2, maxLength: 6 }), (steps) => {
+        let tasks: readonly Task[] = [];
+        let current = nextPlanOutline(null, tasks, NOTHING_COLLAPSED);
+        for (const { shapes, changing, offset } of steps) {
+          const changed = new Set(
+            Array.from({ length: changing }, (_unused, index) => (offset + index) % ids.length),
+          );
+          tasks = ids.flatMap((id, index) =>
+            changed.has(index)
+              ? taskOf(id, valueAt(shapes, index))
+              : tasks.filter((task) => task.id === testId(id)),
+          );
+          current = nextPlanOutline(current, tasks, NOTHING_COLLAPSED);
+          expectBuilt(current.outline, tasks, NOTHING_COLLAPSED);
+        }
+      }),
+      { numRuns: 100 },
     );
   });
 
