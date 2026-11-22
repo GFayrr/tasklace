@@ -23,6 +23,7 @@ import {
   unpackPlacements,
   withTimes,
   type PackedEntries,
+  type PackedKind,
 } from './packed-schedule';
 
 const PLAN = project([
@@ -57,16 +58,16 @@ const CONFLICT: TagConflict = {
 };
 
 /** Writes packed entries by hand, as a worker of this application never would. */
-function packed(
+function packed<Kind extends PackedKind>(
   ids: readonly unknown[],
   numbers: readonly number[],
   removed: readonly unknown[] = [],
-) {
-  return { ids, numbers: Float64Array.from(numbers), removed } as PackedEntries;
+): PackedEntries<Kind> {
+  return { ids, numbers: Float64Array.from(numbers), removed } as PackedEntries<Kind>;
 }
 
 /** Reads packed placements into a new table, giving the error it throws. */
-function placementsRefusal(entries: PackedEntries): unknown {
+function placementsRefusal(entries: PackedEntries<'placements'>): unknown {
   try {
     unpackPlacements(entries, new Map());
   } catch (error) {
@@ -91,52 +92,52 @@ describe('packed placements', () => {
   it.each([
     [
       'ends too soon',
-      packed([testId('a')], [HOUR, HOUR]),
+      packed<'placements'>([testId('a')], [HOUR, HOUR]),
       'The schedule worker sent a packed list that ends too soon.',
     ],
     [
       'is longer than its entries',
-      packed([testId('a')], [HOUR, HOUR, 0, HOUR]),
+      packed<'placements'>([testId('a')], [HOUR, HOUR, 0, HOUR]),
       'The schedule worker sent a packed list longer than its entries.',
     ],
     [
       'holds a time that is not whole quarter hours',
-      packed([testId('a')], [HOUR + 0.1, HOUR, 0]),
+      packed<'placements'>([testId('a')], [HOUR + 0.1, HOUR, 0]),
       `The schedule worker sent ${String(HOUR + 0.1)}, which is not a number of hours.`,
     ],
     [
       'holds an hour before the years handled',
-      packed([testId('a')], [MIN_PROJECT_HOUR - 1, HOUR, 0]),
+      packed<'placements'>([testId('a')], [MIN_PROJECT_HOUR - 1, HOUR, 0]),
       `The schedule worker sent the hour ${String(MIN_PROJECT_HOUR - 1)}, outside the years handled.`,
     ],
     [
       'holds an hour after the years handled',
-      packed([testId('a')], [HOUR, END_PROJECT_HOUR + 1, 0]),
+      packed<'placements'>([testId('a')], [HOUR, END_PROJECT_HOUR + 1, 0]),
       `The schedule worker sent the hour ${String(END_PROJECT_HOUR + 1)}, outside the years handled.`,
     ],
     [
       'counts more blocks than a task may have',
-      packed([testId('a')], [HOUR, HOUR, MAX_SEGMENTS_PER_TASK + 1]),
+      packed<'placements'>([testId('a')], [HOUR, HOUR, MAX_SEGMENTS_PER_TASK + 1]),
       `The schedule worker sent the count ${String(MAX_SEGMENTS_PER_TASK + 1)}, outside 0 to ${String(MAX_SEGMENTS_PER_TASK)}.`,
     ],
     [
       'counts blocks below none',
-      packed([testId('a')], [HOUR, HOUR, -1]),
+      packed<'placements'>([testId('a')], [HOUR, HOUR, -1]),
       `The schedule worker sent the count -1, outside 0 to ${String(MAX_SEGMENTS_PER_TASK)}.`,
     ],
     [
       'counts part of a block',
-      packed([testId('a')], [HOUR, HOUR, 0.5]),
+      packed<'placements'>([testId('a')], [HOUR, HOUR, 0.5]),
       `The schedule worker sent the count 0.5, outside 0 to ${String(MAX_SEGMENTS_PER_TASK)}.`,
     ],
     [
       'puts a value that is not a task identifier',
-      packed(['not an id'], [HOUR, HOUR, 0]),
+      packed<'placements'>(['not an id'], [HOUR, HOUR, 0]),
       'The schedule worker sent a value that is not a task identifier.',
     ],
     [
       'removes a value that is not a task identifier',
-      packed([], [], [7]),
+      packed<'placements'>([], [], [7]),
       'The schedule worker sent a value that is not a task identifier.',
     ],
   ])('refuses a list that %s', (_case, entries, message) => {

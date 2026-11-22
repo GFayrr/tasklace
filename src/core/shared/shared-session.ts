@@ -78,7 +78,7 @@ export interface SharedSession {
   readonly applyAll: (operations: readonly SharedOperation[]) => Result<void, ValidationIssues>;
   readonly merge: (update: Uint8Array) => Result<readonly SharedRepair[], MergeFailure>;
   readonly history: SessionHistory;
-  readonly prepare: () => void;
+  readonly prepareTrialCopy: () => void;
 }
 
 export interface SessionHistory {
@@ -91,13 +91,16 @@ export interface SessionHistory {
 interface SessionState {
   readonly documentId: DocumentId;
   state: ProjectState;
-  shadow: Y.Doc | null;
-  openedFrom: Uint8Array | null;
+  trial: TrialCopy;
   readonly repairClientId: number;
   project: Project | null;
   built: BuiltProject;
   stateChanged: boolean;
 }
+
+type TrialCopy =
+  | { readonly phase: 'pending'; readonly openedFrom: Uint8Array | null }
+  | { readonly phase: 'ready'; readonly copy: Y.Doc };
 
 interface BuiltProject {
   readonly state: ProjectState;
@@ -208,16 +211,15 @@ function validatedSession(
   const session: SessionState = {
     documentId,
     state,
-    shadow: null,
-    openedFrom: decodedFrom,
+    trial: { phase: 'pending', openedFrom: decodedFrom },
     repairClientId: newRepairClientId(document),
     project: opened,
     built: { state, project: opened },
     stateChanged: false,
   };
   document.on('update', (update: Uint8Array, origin: unknown) => {
-    if (origin === LOCAL_ORIGIN && session.shadow !== null) {
-      Y.applyUpdate(session.shadow, update);
+    if (origin === LOCAL_ORIGIN && session.trial.phase === 'ready') {
+      Y.applyUpdate(session.trial.copy, update);
     }
   });
   const shared: SharedSession = {
@@ -252,7 +254,7 @@ function validatedSession(
     applyAll: (operations) => applyOperationsToSession(session, document, operations),
     merge: (update) => mergeIntoSession(session, document, update),
     history: createHistory(session, document),
-    prepare: () => {
+    prepareTrialCopy: () => {
       trialCopy(session, document);
     },
   };
@@ -317,7 +319,7 @@ function replayStep(
   const replayed = tryMerge(session, shadow, Y.mergeUpdates(updates), repairUpdates);
   if (!replayed.ok) {
     moves.revert();
-    session.shadow = copyDocument(document, session.repairClientId);
+    session.trial = { phase: 'ready', copy: copyDocument(document, session.repairClientId) };
     session.stateChanged = true;
     restoreState(session, document);
     session.project = null;
@@ -338,10 +340,16 @@ function currentProject(session: SessionState): Project {
   }
   const { state, built } = session;
   const project =
-    built.state === state ? projectAfterChanges(state, built.project) : toProject(state);
-  forgetTouched(state);
+    built.state === state ? projectAfterChanges(state, built.project) : rebuiltProject(state);
   session.project = project;
   session.built = { state, project };
+  return project;
+}
+
+/** Builds the whole project of an indexed state rebuilt since the last project, forgetting what was touched, which that project already holds. */
+function rebuiltProject(state: ProjectState): Project {
+  const project = toProject(state);
+  forgetTouched(state);
   return project;
 }
 
@@ -474,7 +482,7 @@ function mergeIntoSession(
   const repairUpdates: Uint8Array[] = [];
   const merged = tryMerge(session, trialCopy(session, document), update, repairUpdates);
   if (!merged.ok) {
-    session.shadow = copyDocument(document, session.repairClientId);
+    session.trial = { phase: 'ready', copy: copyDocument(document, session.repairClientId) };
     restoreState(session, document);
     return merged;
   }
@@ -844,20 +852,19 @@ function sortRepairs(repairs: readonly SharedRepair[]): SharedRepair[] {
 
 /** Returns the trial copy of a session, made at its first need: decoded from the state the document was opened from and given what the document gained since, or copied from the document when it was not opened from a state. */
 function trialCopy(session: SessionState, document: Y.Doc): Y.Doc {
-  if (session.shadow !== null) {
-    return session.shadow;
+  if (session.trial.phase === 'ready') {
+    return session.trial.copy;
   }
-  const source = session.openedFrom;
-  const shadow =
+  const source = session.trial.openedFrom;
+  const copy =
     source === null
       ? copyDocument(document, session.repairClientId)
       : documentFrom(source, session.repairClientId);
   if (source !== null) {
-    Y.applyUpdate(shadow, Y.encodeStateAsUpdate(document, Y.encodeStateVector(shadow)));
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(document, Y.encodeStateVector(copy)));
   }
-  session.shadow = shadow;
-  session.openedFrom = null;
-  return shadow;
+  session.trial = { phase: 'ready', copy };
+  return copy;
 }
 
 /** Copies a document into a new one that writes under a given identity. */

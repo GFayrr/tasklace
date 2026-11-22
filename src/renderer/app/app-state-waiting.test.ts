@@ -18,12 +18,12 @@ vi.mock('../../core/shared/shared-session', async (importOriginal) => {
       }
       const session: SharedSession = {
         ...opened.value,
-        prepare: () => {
+        prepareTrialCopy: () => {
           prepared.names.push(opened.value.project().name);
           if (prepared.failure !== null) {
             throw prepared.failure;
           }
-          opened.value.prepare();
+          opened.value.prepareTrialCopy();
         },
       };
       return { ok: true, value: session };

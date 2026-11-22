@@ -49,7 +49,7 @@ describe('createScheduleHost', () => {
       value: {
         kind: 'changes',
         changes: {
-          placements: { ids: [], numbers: new Float64Array(0), removed: [] },
+          placements: { kind: 'placements', ids: [], numbers: new Float64Array(0), removed: [] },
           summaries: { put: [], removed: [] },
           wbsNumbers: { put: [], removed: [] },
           floats: { kind: 'same' },

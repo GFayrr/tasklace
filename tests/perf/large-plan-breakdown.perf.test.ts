@@ -235,8 +235,8 @@ describe.each(TASK_COUNTS)('where the time goes in a plan of %i tasks', (taskCou
       const withMerge = report('openCopy + merge (every task renamed)', () => {
         openCopy(origin).merge(update);
       });
-      const openingAlone = report('openCopy + prepare (trial copy made)', () => {
-        openCopy(origin).prepare();
+      const openingAlone = report('openCopy + prepareTrialCopy (trial copy made)', () => {
+        openCopy(origin).prepareTrialCopy();
       });
       console.info(`merge alone: about ${(withMerge - openingAlone).toFixed(0)} ms`);
 
@@ -250,12 +250,15 @@ describe.each(TASK_COUNTS)('where the time goes in a plan of %i tasks', (taskCou
       report('openSharedSessionFromState (page, until the plan can be shown)', () =>
         openSharedSessionFromState(read.value.state),
       );
-      report('openSharedSessionFromState + prepare (page, trial copy made after a paint)', () => {
-        const opened = openSharedSessionFromState(read.value.state);
-        if (opened.ok) {
-          opened.value.prepare();
-        }
-      });
+      report(
+        'openSharedSessionFromState + prepareTrialCopy (page, trial copy made after a paint)',
+        () => {
+          const opened = openSharedSessionFromState(read.value.state);
+          if (opened.ok) {
+            opened.value.prepareTrialCopy();
+          }
+        },
+      );
       expect(project.tasks).toHaveLength(taskCount);
     },
     TIMEOUT_MILLISECONDS,

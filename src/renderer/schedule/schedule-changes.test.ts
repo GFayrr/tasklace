@@ -72,7 +72,13 @@ describe('projectDeltaOf and projectAfterDelta', { timeout: PROPERTY_TEST_TIMEOU
       dependencies: [],
     };
     const delta = projectDeltaOf(START, next);
-    expect(delta.header).toEqual({ ...next, tasks: [], dependencies: [], tags: [] });
+    expect(delta.header).toEqual({
+      name: 'Other',
+      startDate: START.startDate,
+      calendar: START.calendar,
+      options: START.options,
+      baseline: START.baseline,
+    });
     expect(gone?.id).toBe(testId('c'));
     expect(delta.tasks).toEqual({ put: [workTask('d'), renamed], removed: [testId('c')] });
     expect(delta.dependencies).toEqual({ put: [], removed: [testId('a-b')] });
@@ -118,7 +124,7 @@ describe('scheduleDeltaOf and applyScheduleDelta', { timeout: PROPERTY_TEST_TIME
     const first = scheduleOf(START);
     const delta = scheduleDeltaOf(first, scheduleOf(START));
     expect(delta).toEqual({
-      placements: { ids: [], numbers: new Float64Array(0), removed: [] },
+      placements: { kind: 'placements', ids: [], numbers: new Float64Array(0), removed: [] },
       summaries: { put: [], removed: [] },
       wbsNumbers: { put: [], removed: [] },
       floats: { kind: 'same' },
@@ -136,7 +142,7 @@ describe('scheduleDeltaOf and applyScheduleDelta', { timeout: PROPERTY_TEST_TIME
         ...scheduleDeltaOf(scheduleOf(START), scheduleOf(START)),
         floats: {
           kind: 'changes',
-          changes: { ids: [], numbers: new Float64Array(0), removed: [] },
+          changes: { kind: 'floats', ids: [], numbers: new Float64Array(0), removed: [] },
         },
       });
     }).toThrow('Changes to the floats arrived for a schedule without floats.');

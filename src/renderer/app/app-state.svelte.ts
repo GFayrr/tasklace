@@ -465,7 +465,7 @@ export class AppState {
     return request;
   }
 
-  /** Returns the schedule shown, the latest computed for the open project even when older than its latest change, or null when none is computed or the latest computation failed. */
+  /** Returns the schedule shown, the latest computed for the open project even when older than its latest change, its tables changed in place by the next one, or null when none is computed or the latest failed. */
   get schedule(): Schedule | null {
     return this.#computed?.schedule ?? null;
   }
@@ -1632,7 +1632,7 @@ export class AppState {
     try {
       await this.#waitForPaint();
       if (this.#session === session) {
-        session.prepare();
+        session.prepareTrialCopy();
       }
     } catch (error) {
       console.error('The plan could not be got ready to take changes:', error);

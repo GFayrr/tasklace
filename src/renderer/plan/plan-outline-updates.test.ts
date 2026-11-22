@@ -239,9 +239,20 @@ describe('nextPlanOutline', () => {
     }
   });
 
+  it('refuses a basis whose records it did not make, since it changes only its own in place', () => {
+    const basis = fresh();
+    expect(() =>
+      nextPlanOutline(
+        { ...basis, table: { ...basis.table } },
+        replacing(TASKS, { ...second, name: 'Renamed' }),
+        NOTHING_COLLAPSED,
+      ),
+    ).toThrow('This table was not made by the outline of the plan.');
+  });
+
   it('fails loudly when the records do not hold a replaced task', () => {
     const empty = nextPlanOutline(null, [], NOTHING_COLLAPSED);
-    empty.table.reflects = TASKS;
+    Object.assign(empty.table, { reflects: TASKS });
     expect(() =>
       nextPlanOutline(
         { ...empty, tasks: TASKS },
@@ -250,7 +261,7 @@ describe('nextPlanOutline', () => {
       ),
     ).toThrow(`The outline holds no record of the task ${second.id}.`);
     const blank = nextPlanOutline(null, [], NOTHING_COLLAPSED);
-    blank.table.reflects = TASKS;
+    Object.assign(blank.table, { reflects: TASKS });
     expect(() =>
       nextPlanOutline(
         { ...blank, tasks: TASKS },
@@ -335,6 +346,13 @@ describe('nextIncoming', () => {
     const kept = nextIncoming(before, [toC, otherToC, { ...toD, lagHours: 2 }]);
     expect(kept.incoming.get(testId('c'))).toBe(listOfC);
     expect(kept.table).toBe(before.table);
+  });
+
+  it('refuses a grouping whose table it did not make', () => {
+    const own = nextIncoming(null, DEPENDENCIES);
+    expect(() => nextIncoming({ ...own, table: { ...own.table } }, DEPENDENCIES.slice(1))).toThrow(
+      'This table was not made by the outline of the plan.',
+    );
   });
 
   it('refuses an older grouping once a newer one changed the table they share', () => {

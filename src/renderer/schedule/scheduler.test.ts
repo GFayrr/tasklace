@@ -106,7 +106,7 @@ const THIRD = project([workTask('c')]);
 const NO_LINES = { kind: 'whole', lines: { ok: true, value: [] } };
 const DESCRIBED = { people: NO_LINES, dates: NO_LINES };
 const EMPTY_MAP_DELTA = { put: [], removed: [] };
-const EMPTY_PACKED = { ids: [], numbers: new Float64Array(0), removed: [] };
+const EMPTY_PACKED = { kind: 'placements', ids: [], numbers: new Float64Array(0), removed: [] };
 
 /** Writes a response of the current version to the first request, with a result and conflicts described without any line. */
 function responseWith(result: unknown, generation = 1) {
@@ -228,6 +228,8 @@ describe('createScheduler', () => {
     [changes({ placements: { put: [] } })],
     [changes({ placements: { ...EMPTY_PACKED, numbers: [] } })],
     [changes({ placements: { ...EMPTY_PACKED, ids: null } })],
+    [changes({ placements: { ...EMPTY_PACKED, kind: 'floats' } })],
+    [changes({ floats: { kind: 'changes', changes: EMPTY_PACKED } })],
     [changes({ placements: { ...EMPTY_PACKED, removed: null } })],
     [changes({ summaries: EMPTY_PACKED })],
     [changes({ floats: { kind: 'changes', changes: EMPTY_MAP_DELTA } })],
@@ -605,7 +607,14 @@ describe('createScheduler with the real host', { timeout: PROPERTY_TEST_TIMEOUT_
     scheduler.request(SECOND);
     first.received.shift();
     const unreadable = changes(
-      { placements: { ids: ['a'], numbers: Float64Array.from([1, 1, 0]), removed: [] } },
+      {
+        placements: {
+          kind: 'placements',
+          ids: ['a'],
+          numbers: Float64Array.from([1, 1, 0]),
+          removed: [],
+        },
+      },
       2,
     );
     const logged = quietly(() => {
