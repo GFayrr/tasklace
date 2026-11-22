@@ -93,6 +93,7 @@ import type { ZoomLevel } from '../plan/time-scale';
 import type { Scheduler, ScheduleListener } from '../schedule/scheduler';
 import type { Theme } from '../theme/theme';
 import { SettingsPanel } from './settings-panel.svelte';
+import { nextPaint } from './next-paint';
 import { relayEndText, relayFailureText } from '../collaboration/collaboration-text';
 import {
   CollaborationState,
@@ -234,7 +235,10 @@ export interface AppContext {
   readonly createId: () => NewIdentifier;
   readonly now: () => Date;
   readonly theme: Theme;
+  readonly waitForPaint?: () => Promise<void>;
 }
+
+export type Waiting = 'opening' | 'receiving' | 'preparing';
 
 /** Holds what the interface shows: the open project, its schedule, whether it is saved, what can be undone and the messages for the user. */
 export class AppState {
@@ -272,6 +276,9 @@ export class AppState {
   #keptChanges = $state.raw<KeptChanges | null>(null);
   #shareFailure = $state.raw<CollaborationFailure | null>(null);
   #fileActionRunning = $state(false);
+  #opening = $state(false);
+  #receiving = $state(false);
+  #preparingFor = $state.raw<SharedSession | null>(null);
   #report = $state.raw<Report | null>(null);
   #lastQuestion: Promise<unknown> = Promise.resolve();
   #collapsed = $state.raw<ReadonlySet<TaskId>>(NOTHING_COLLAPSED);
@@ -307,6 +314,7 @@ export class AppState {
   readonly locale: string;
   readonly theme: Theme;
   readonly #context: AppContext;
+  readonly #waitForPaint: () => Promise<void>;
   readonly #files: ProjectFiles;
   readonly #scheduler: Scheduler;
   #session: SharedSession | null = null;
@@ -322,6 +330,7 @@ export class AppState {
     this.messages = context.messages;
     this.locale = context.locale;
     this.theme = context.theme;
+    this.#waitForPaint = context.waitForPaint ?? nextPaint;
     this.#files = createProjectFiles(context.bridge, {
       failed: (error) => {
         this.#reportError(error);
@@ -337,6 +346,13 @@ export class AppState {
       },
       chooseLocalChanges: async (fileName) =>
         LOCAL_CHANGES_CHOICES[await this.#ask({ reason: 'localChanges', fileName })],
+      opening: async () => {
+        this.#opening = true;
+        await this.#waitForPaint();
+      },
+      openingDone: () => {
+        this.#opening = false;
+      },
     });
     this.updates = new UpdateState(context.bridge, context.now);
     this.setup = new SetupState(context.bridge);
@@ -372,6 +388,10 @@ export class AppState {
         this.#ownChangesKept(kept);
       },
       selectedTaskId: () => this.#selectedTaskId,
+      receiving: (waiting) => {
+        this.#receiving = waiting;
+      },
+      waitForPaint: this.#waitForPaint,
     });
     this.#scheduler = context.createScheduler({
       scheduled: (result, project, description) => {
@@ -536,6 +556,17 @@ export class AppState {
   /** Returns the summary tasks folded in the table and on the timeline. */
   get collapsed(): ReadonlySet<TaskId> {
     return this.#collapsed;
+  }
+
+  /** Returns what the page is busy with and tells meanwhile, the most pressing first, or null. */
+  get waiting(): Waiting | null {
+    if (this.#opening) {
+      return 'opening';
+    }
+    if (this.#receiving) {
+      return 'receiving';
+    }
+    return this.#preparingFor === null ? null : 'preparing';
   }
 
   /** Tells whether a file action started by the user runs, during which the project cannot be changed. */
@@ -1565,6 +1596,22 @@ export class AppState {
     this.collaboration.attached(session);
     this.closeCollaborationWindow();
     this.#refresh();
+    void this.#prepareTrialCopy(session);
+  }
+
+  /** Makes the trial copy of a newly opened session once the page has painted its plan, telling meanwhile that the plan is being got ready. */
+  async #prepareTrialCopy(session: SharedSession): Promise<void> {
+    this.#preparingFor = session;
+    try {
+      await this.#waitForPaint();
+      if (this.#session === session) {
+        session.prepare();
+      }
+    } finally {
+      if (this.#preparingFor === session) {
+        this.#preparingFor = null;
+      }
+    }
   }
 
   readonly #queueRefresh = (): void => {

@@ -84,6 +84,11 @@
     "exportPdf": "PDF…",
     "joinPlan": "Join a shared plan…"
   },
+  "waiting": {
+    "opening": "Opening the plan…",
+    "receiving": "Receiving changes…",
+    "preparing": "Getting the plan ready…"
+  },
   "saveStatus": {
     "saved": "All changes saved",
     "saving": "Saving…",

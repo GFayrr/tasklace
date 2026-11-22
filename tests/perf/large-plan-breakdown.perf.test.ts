@@ -235,7 +235,9 @@ describe.each(TASK_COUNTS)('where the time goes in a plan of %i tasks', (taskCou
       const withMerge = report('openCopy + merge (every task renamed)', () => {
         openCopy(origin).merge(update);
       });
-      const openingAlone = report('openCopy alone', () => openCopy(origin));
+      const openingAlone = report('openCopy + prepare (trial copy made)', () => {
+        openCopy(origin).prepare();
+      });
       console.info(`merge alone: about ${(withMerge - openingAlone).toFixed(0)} ms`);
 
       const file = encodeTasklaceFile(origin, zlibCompressor);
@@ -245,9 +247,15 @@ describe.each(TASK_COUNTS)('where the time goes in a plan of %i tasks', (taskCou
       if (!read.ok) {
         throw new Error('File refused');
       }
-      report('openSharedSessionFromState (page)', () =>
+      report('openSharedSessionFromState (page, until the plan can be shown)', () =>
         openSharedSessionFromState(read.value.state),
       );
+      report('openSharedSessionFromState + prepare (page, trial copy made after a paint)', () => {
+        const opened = openSharedSessionFromState(read.value.state);
+        if (opened.ok) {
+          opened.value.prepare();
+        }
+      });
       expect(project.tasks).toHaveLength(taskCount);
     },
     TIMEOUT_MILLISECONDS,

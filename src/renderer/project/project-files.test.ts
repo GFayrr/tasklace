@@ -38,6 +38,8 @@ const QUIET: ProjectFilesListener = {
   localCopyFailed: () => undefined,
   fileActionRunning: () => undefined,
   chooseLocalChanges: () => Promise.reject(new Error('No question was expected')),
+  opening: () => Promise.resolve(),
+  openingDone: () => undefined,
 };
 
 /** Returns a listener doing nothing but what a test gives it. */
@@ -117,6 +119,14 @@ function openedOf(documentId: DocumentId): BridgeResult<OpenedProject> {
     ok: true,
     value: { state, documentId, fileName: 'Plan.tasklace', warnings: [], localChanges: null },
   };
+}
+
+/** Returns the opened project of a successful answer, failing the test otherwise. */
+function unwrapped(answer: BridgeResult<OpenedProject>): OpenedProject {
+  if (!answer.ok) {
+    throw new Error(JSON.stringify(answer.error));
+  }
+  return answer.value;
 }
 
 /** Creates the sample project with a file service, failing the test when it is refused. */
@@ -588,6 +598,66 @@ describe('createProjectFiles', () => {
     expect(await files.create(SAMPLE)).toEqual(adoption.result);
     expect(files.session()).toBe(first);
     expect(files.hasFile()).toBe(false);
+  });
+
+  it('tells that it opens and lets the page paint it before reading the plan, then that it is done', async () => {
+    const { bridge, events } = fakeBridge(openedOf(TEST_DOCUMENT_ID));
+    let painted: () => void = () => undefined;
+    const files = createProjectFiles(
+      bridge,
+      listening({
+        opening: () => {
+          events.push('opening');
+          return new Promise((resolve) => {
+            painted = resolve;
+          });
+        },
+        openingDone: () => {
+          events.push('opened');
+        },
+      }),
+      manualTimer(),
+    );
+    const opening = files.open();
+    await settle();
+    expect(events).toEqual(['open', 'opening']);
+    expect(files.session()).toBeNull();
+    painted();
+    expect((await opening).ok).toBe(true);
+    expect(events).toEqual(['open', 'opening', 'opened', 'adopt']);
+  });
+
+  it('tells that the opening is done when the plan read is refused, and tells nothing when the main process opened nothing', async () => {
+    const steps: string[] = [];
+    const listener = listening({
+      opening: () => {
+        steps.push('opening');
+        return Promise.resolve();
+      },
+      openingDone: () => {
+        steps.push('opened');
+      },
+    });
+    const refused = fakeBridge({
+      ok: true,
+      value: { ...unwrapped(openedOf(TEST_DOCUMENT_ID)), documentId: OTHER_ID },
+    });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(await createProjectFiles(refused.bridge, listener, manualTimer()).open()).toEqual({
+        ok: false,
+        error: { code: 'INVALID_CONTENT' },
+      });
+    } finally {
+      logged.mockRestore();
+    }
+    expect(steps).toEqual(['opening', 'opened']);
+    const nothing = fakeBridge({ ok: false, error: { code: 'CANCELLED' } });
+    expect(await createProjectFiles(nothing.bridge, listener, manualTimer()).open()).toEqual({
+      ok: false,
+      error: { code: 'CANCELLED' },
+    });
+    expect(steps).toEqual(['opening', 'opened']);
   });
 
   it('refuses an opened state that cannot be decoded, logging why, without asking to adopt it', async () => {
