@@ -310,7 +310,7 @@ describe('conflicts whose times alone change', () => {
     return { schedule, description: describeConflicts(schedule, input) };
   };
 
-  it('sends only the times of the conflicts and of their lines when the project start moves, which give the page the full computation', () => {
+  it('sends only the times of the conflicts and of their lines when the project start moves, the page then holding what a full computation gives', () => {
     const before = computed(PLAN);
     const after = computed(LATER);
     expect(after.schedule.tagConflicts.conflicts).toHaveLength(1);

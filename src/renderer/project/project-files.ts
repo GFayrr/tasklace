@@ -241,7 +241,7 @@ export function createProjectFiles(
     listener.saveStatus('saved');
     return { ok: true, value: session };
   };
-  /** Opens a project the main process reads, after saving the open one, and adopts it. */
+  /** Opens a project the main process reads, after saving the open one, telling the page and letting it paint before reading the plan, then adopts it. */
   const load = async (
     opening: () => Promise<BridgeResult<OpenedProject>>,
     hasFile: boolean,

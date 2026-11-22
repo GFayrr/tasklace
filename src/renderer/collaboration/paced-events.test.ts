@@ -11,7 +11,7 @@ function message(number: number, size: number): CollaborationEvent {
   return { kind: 'peerMessage', peer: 1, message: bytes };
 }
 
-/** Returns a delivery events record, the number of each handled event and what the page was told, with paints released by the test. */
+/** Returns a paced delivery with the number of each event handled and what the page was told, the test releasing the paints. */
 function pacedRecord() {
   const handled: number[] = [];
   const told: string[] = [];

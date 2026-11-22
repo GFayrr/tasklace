@@ -600,7 +600,7 @@ describe('createProjectFiles', () => {
     expect(files.hasFile()).toBe(false);
   });
 
-  it('tells that it opens and lets the page paint it before reading the plan, then that it is done', async () => {
+  it('tells that it opens and lets the page paint that before reading the plan, then tells that the opening is done', async () => {
     const { bridge, events } = fakeBridge(openedOf(TEST_DOCUMENT_ID));
     let painted: () => void = () => undefined;
     const files = createProjectFiles(

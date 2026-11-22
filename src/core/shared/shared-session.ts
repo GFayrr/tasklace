@@ -191,7 +191,7 @@ function openSession(
   return read.ok ? success(validatedSession(document, read.value, documentId, decodedFrom)) : read;
 }
 
-/** Opens a session on a shared document whose project was validated, its trial copy being made at its first need or when the page asks for it ahead. */
+/** Opens a session on a shared document whose project was validated, its trial copy being made at its first need, or ahead when prepareTrialCopy is called. */
 function validatedSession(
   document: Y.Doc,
   project: Project,

@@ -15,7 +15,7 @@ describe('nextPaint', () => {
     vi.restoreAllMocks();
   });
 
-  it('resolves after the frame asked for, and after the work that frame queued', async () => {
+  it('resolves only after the callbacks of the frame it asked for have run', async () => {
     const steps: string[] = [];
     const painted = watched(steps);
     requestAnimationFrame(() => {

@@ -74,7 +74,7 @@ function holdsScheduleDelta(value: unknown): boolean {
   const tagConflicts: unknown = Reflect.get(Object(value), 'tagConflicts');
   return (
     holdsPacked(Reflect.get(Object(value), 'placements'), 'placements') &&
-    NUMBERED_TABLES.every((table) => holdsMapDelta(Reflect.get(Object(value), table))) &&
+    UNPACKED_TABLES.every((table) => holdsMapDelta(Reflect.get(Object(value), table))) &&
     holdsFloatsDelta(floats) &&
     (conflicts === null || Array.isArray(conflicts)) &&
     holdsTagConflictsDelta(tagConflicts)
@@ -166,7 +166,7 @@ function holdsTagReport(value: unknown): boolean {
 }
 
 const SCHEDULE_TABLES = ['placements', 'summaries', 'wbsNumbers'] as const;
-const NUMBERED_TABLES = ['summaries', 'wbsNumbers'] as const;
+const UNPACKED_TABLES = ['summaries', 'wbsNumbers'] as const;
 const FAILURE_KINDS = {
   calendar: true,
   startDate: true,

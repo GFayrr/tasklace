@@ -151,7 +151,7 @@ function startsOf(schedule: Schedule): Starts {
   return { ids, hours };
 }
 
-/** Counts the tasks of a schedule whose start is not one of the starts kept, a new task counting as moved. */
+/** Counts the tasks of a schedule whose start differs from the one kept for them, a new task counting as moved. */
 function movedTaskCount(base: Starts, schedule: Schedule): number {
   let kept = 0;
   base.ids.forEach((id, index) => {
@@ -563,7 +563,7 @@ export class AppState {
     return this.#collapsed;
   }
 
-  /** Returns what the page is busy with and tells meanwhile, the most pressing first, or null. */
+  /** Returns the wait the page tells the user about, opening before receiving before preparing, or null when it waits for nothing. */
   get waiting(): Waiting | null {
     if (this.#opening) {
       return 'opening';

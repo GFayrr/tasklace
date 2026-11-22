@@ -114,7 +114,7 @@ export function buildPlanOutline(
   return nextPlanOutline(null, tasks, collapsed).outline;
 }
 
-/** Gives the outline of the tasks from the one of an earlier list, keeping one record per task: the same if nothing changed, the replaced tasks swapped in if the tree and folds stay, else numbered again after placing the moved records. */
+/** Gives the outline of the tasks from the one of an earlier list, one record per task: the same if nothing changed, the replaced tasks swapped in if the tree and folds stay, else numbered again, an older basis being refused. */
 export function nextPlanOutline(
   basis: OutlineBasis | null,
   tasks: readonly Task[],
