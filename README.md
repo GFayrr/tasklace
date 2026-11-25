@@ -13,7 +13,7 @@
 A simple desktop application to create, edit, share and export Gantt charts, faithful to the rules of the Gantt method.
 
 > [!IMPORTANT]
-> Tasklace is a preview: planning, project settings, PDF export, and real-time collaboration on a local network or through an end-to-end encrypted relay. Version 0.3.0 is for Linux and Windows. The Windows files are not signed, so Windows warns before running them, as the [code signing policy](#code-signing-policy) explains.
+> Tasklace is a preview: planning, project settings, PDF export, and real-time collaboration on a local network or through an end-to-end encrypted relay. Version 0.4.0 is for Linux and Windows. The Windows files are not signed, so Windows warns before running them, as the [code signing policy](#code-signing-policy) explains.
 
 Tasklace is designed for students and professionals who want clear project plans without a steep learning curve. Every action should be obvious to a non-technical user: advanced features exist, but none is imposed.
 
