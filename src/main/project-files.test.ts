@@ -737,38 +737,38 @@ describe('regional format', () => {
 describe('the kind of project a window holds', () => {
   it('is none before any adoption, with a file once a file is adopted, and without file for a new project', async () => {
     const empty = {};
-    expect(windowProjectKind(empty as WebContents)).toBe('none');
+    expect(windowProjectKind(empty as unknown as WebContents)).toBe('none');
     const opened = await openedIn(join(folder, 'Plan.tasklace'));
-    expect(windowProjectKind(opened as WebContents)).toBe('withFile');
+    expect(windowProjectKind(opened as unknown as WebContents)).toBe('withFile');
     const fresh = {};
     const documentId = await request(IPC_CHANNELS.newProject, fresh);
-    expect(windowProjectKind(fresh as WebContents)).toBe('none');
+    expect(windowProjectKind(fresh as unknown as WebContents)).toBe('none');
     await request(IPC_CHANNELS.adoptProject, fresh, documentId);
-    expect(windowProjectKind(fresh as WebContents)).toBe('withoutFile');
+    expect(windowProjectKind(fresh as unknown as WebContents)).toBe('withoutFile');
   });
 
   it('is a joined plan once the page adopts the shared plan it joined', async () => {
     const joined = {};
     const documentId = requireDocumentId('7d3c1f9e-2b4a-4c6d-8e0f-1a2b3c4d5e6f');
-    offerSharedProject(joined as WebContents, {
+    offerSharedProject(joined as unknown as WebContents, {
       kind: 'loaded',
       state: Uint8Array.of(1),
       documentId,
       warnings: [],
       localChanges: null,
     });
-    expect(windowProjectKind(joined as WebContents)).toBe('none');
+    expect(windowProjectKind(joined as unknown as WebContents)).toBe('none');
     await request(IPC_CHANNELS.adoptProject, joined, documentId);
-    expect(windowProjectKind(joined as WebContents)).toBe('joinedPlan');
+    expect(windowProjectKind(joined as unknown as WebContents)).toBe('joinedPlan');
   });
 
   it('is none again once the page reloads, and the project it was offered can no longer be adopted', async () => {
     const opened = await openedIn(join(folder, 'Plan.tasklace'));
-    forgetWindowProject(opened as WebContents);
-    expect(windowProjectKind(opened as WebContents)).toBe('none');
+    forgetWindowProject(opened as unknown as WebContents);
+    expect(windowProjectKind(opened as unknown as WebContents)).toBe('none');
     const fresh = {};
     const documentId = await request(IPC_CHANNELS.newProject, fresh);
-    forgetWindowProject(fresh as WebContents);
+    forgetWindowProject(fresh as unknown as WebContents);
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       expect(await request(IPC_CHANNELS.adoptProject, fresh, documentId)).toEqual({
@@ -781,7 +781,7 @@ describe('the kind of project a window holds', () => {
     } finally {
       logged.mockRestore();
     }
-    expect(windowProjectKind(fresh as WebContents)).toBe('none');
+    expect(windowProjectKind(fresh as unknown as WebContents)).toBe('none');
   });
 });
 
@@ -1031,7 +1031,7 @@ describe('plans shared through a relay', () => {
 
   it('offers a joined plan as a file of its own named after the plan, listed first with its relay once adopted', async () => {
     const sender = {};
-    const opened = await files.offerRelayPlan(sender as WebContents, PLAN, RELAY);
+    const opened = await files.offerRelayPlan(sender as unknown as WebContents, PLAN, RELAY);
     const path = join(userData, SHARED, 'Thesis.tasklace');
     const task = tasks.at(-1);
     expect([
@@ -1055,7 +1055,7 @@ describe('plans shared through a relay', () => {
     ]);
     expect(await request(IPC_CHANNELS.adoptProject, sender, DOCUMENT_ID)).toEqual(success(null));
     expect([
-      windowProjectKind(sender as WebContents),
+      windowProjectKind(sender as unknown as WebContents),
       await request(IPC_CHANNELS.recentProjects, {}),
     ]).toEqual([
       'withFile',
@@ -1066,7 +1066,7 @@ describe('plans shared through a relay', () => {
   it('names a second joined plan of the same name apart from the first', async () => {
     await mkdir(join(userData, SHARED));
     await writeFile(join(userData, SHARED, 'Thesis.tasklace'), 'project');
-    const opened = await files.offerRelayPlan({} as WebContents, PLAN, RELAY);
+    const opened = await files.offerRelayPlan({} as unknown as WebContents, PLAN, RELAY);
     expect([opened.fileName, tasks.at(-1)]).toMatchObject([
       'Thesis 2.tasklace',
       { kind: 'saveProject', path: join(userData, SHARED, 'Thesis 2.tasklace') },
@@ -1087,10 +1087,10 @@ describe('plans shared through a relay', () => {
       );
     };
     await lastSavedIn(kept);
-    const again = await files.offerRelayPlan({} as WebContents, PLAN, RELAY);
+    const again = await files.offerRelayPlan({} as unknown as WebContents, PLAN, RELAY);
     const intoKept = tasks.at(-1);
     await lastSavedIn(join(folder, 'Thesis.tasklace'));
-    const elsewhere = await files.offerRelayPlan({} as WebContents, PLAN, RELAY);
+    const elsewhere = await files.offerRelayPlan({} as unknown as WebContents, PLAN, RELAY);
     expect([again.fileName, intoKept, elsewhere.fileName, tasks.at(-1)]).toMatchObject([
       'Old name.tasklace',
       { kind: 'saveProject', path: kept },
@@ -1103,13 +1103,13 @@ describe('plans shared through a relay', () => {
     const sender = {};
     runTask.mockResolvedValueOnce(failure({ code: 'WRITE_FAILED' }));
     const { answer, logged } = await quietly(() =>
-      files.offerRelayPlan(sender as WebContents, PLAN, RELAY),
+      files.offerRelayPlan(sender as unknown as WebContents, PLAN, RELAY),
     );
     expect(await request(IPC_CHANNELS.adoptProject, sender, DOCUMENT_ID)).toEqual(success(null));
     expect([
       answer,
       logged,
-      windowProjectKind(sender as WebContents),
+      windowProjectKind(sender as unknown as WebContents),
       await request(IPC_CHANNELS.recentProjects, {}),
     ]).toEqual([
       { state: STATE, documentId: DOCUMENT_ID, fileName: '', warnings: [], localChanges: null },
@@ -1126,7 +1126,7 @@ describe('plans shared through a relay', () => {
   it('offers a joined plan without a file when the folder of shared plans cannot be created, logging why', async () => {
     await writeFile(join(userData, SHARED), 'a file where the folder should be');
     const { answer, logged } = await quietly(() =>
-      files.offerRelayPlan({} as WebContents, PLAN, RELAY),
+      files.offerRelayPlan({} as unknown as WebContents, PLAN, RELAY),
     );
     expect([answer, logged.map((call): unknown => call[0]), tasks]).toEqual([
       { state: STATE, documentId: DOCUMENT_ID, fileName: '', warnings: [], localChanges: null },
@@ -1138,11 +1138,11 @@ describe('plans shared through a relay', () => {
   it('notes the relay of the plan of a window among the recent projects, keeps it when the file comes first again, and clears it', async () => {
     const path = join(folder, 'Thesis.tasklace');
     const sender = await openedIn(path);
-    await files.noteRelay(sender as WebContents, RELAY);
+    await files.noteRelay(sender as unknown as WebContents, RELAY);
     const noted = await request(IPC_CHANNELS.recentProjects, {});
     const again = await openedIn(path);
     const reopened = await request(IPC_CHANNELS.recentProjects, {});
-    await files.noteRelay(again as WebContents, null);
+    await files.noteRelay(again as unknown as WebContents, null);
     expect([noted, reopened, await request(IPC_CHANNELS.recentProjects, {})]).toEqual([
       success([{ name: 'Thesis', folder, relay: RELAY }]),
       success([{ name: 'Thesis', folder, relay: RELAY }]),
@@ -1152,7 +1152,7 @@ describe('plans shared through a relay', () => {
 
   it('notes nothing for a window without a project or without a file, and logs a list that cannot be written', async () => {
     const sender = await openedIn(join(folder, 'Thesis.tasklace'));
-    await files.noteRelay({} as WebContents, RELAY);
+    await files.noteRelay({} as unknown as WebContents, RELAY);
     const unsaved = {};
     const created = await request(IPC_CHANNELS.newProject, unsaved);
     await request(IPC_CHANNELS.adoptProject, unsaved, created);
@@ -1160,8 +1160,8 @@ describe('plans shared through a relay', () => {
     const refusal = new Error('disk full');
     recording.failure = refusal;
     const { logged } = await quietly(async () => {
-      await files.noteRelay(unsaved as WebContents, RELAY);
-      await files.noteRelay(sender as WebContents, RELAY);
+      await files.noteRelay(unsaved as unknown as WebContents, RELAY);
+      await files.noteRelay(sender as unknown as WebContents, RELAY);
     }).finally(() => {
       recording.failure = null;
     });
