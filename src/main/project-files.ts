@@ -745,7 +745,7 @@ export async function chooseFileToSave(
 }
 
 /** Tells whether a file the added extension leads to may be written, asking the user first when it already exists, since the save dialog could not warn about it. */
-async function mayReplace(window: BrowserWindow | null, path: string): Promise<boolean> {
+async function mayReplace(window: Electron.BrowserWindow | null, path: string): Promise<boolean> {
   if (!(await fileExists(path))) {
     return true;
   }
