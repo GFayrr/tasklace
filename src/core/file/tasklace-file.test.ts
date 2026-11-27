@@ -9,6 +9,7 @@ import { failure, success } from '../result';
 import {
   createSharedDocument,
   readDocumentId,
+  readFormatVersion,
   readSharedData,
   TAGS_ROOT,
   TASKS_ROOT,
@@ -166,6 +167,11 @@ function tampered(change: (document: Y.Doc) => void): Uint8Array {
   return encodeTasklaceFile(document, storingCompressor);
 }
 
+/** Gives the Yjs state a file written with the stand-in compressor holds. */
+function documentState(file: Uint8Array): Uint8Array {
+  return file.slice(HEADER_BYTES + 1);
+}
+
 /** Sorts the lists of a project by identifier and writes its calendar as a shared document holds it. */
 function sorted(input: Project): Project {
   /** Returns items ordered by identifier. */
@@ -312,6 +318,104 @@ describe('tasklace file', () => {
   it('starts with the signature, the version and no flags', () => {
     const file = fileOf(SAMPLE);
     expect([...file.subarray(0, 8)]).toEqual([0x54, 0x53, 0x4b, 0x4c, 1, 0, 0, 0]);
+  });
+});
+
+describe('the format version of a document', () => {
+  /** Writes the sample project as a file whose format version is set to a value, or removed for undefined. */
+  const withVersion = (value: unknown): Uint8Array =>
+    tampered((document) => {
+      const root = document.getMap('project');
+      if (value === undefined) {
+        root.delete('formatVersion');
+      } else {
+        root.set('formatVersion', value);
+      }
+    });
+
+  const COPY = {
+    nameOf: (name: string) => name,
+    documentId: requireDocumentId('33333333-3333-4333-8333-333333333333'),
+  };
+
+  it('is the first version in every new document', () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    expect([document.getMap('project').get('formatVersion'), readFormatVersion(document)]).toEqual(
+      [1, 'known'],
+    );
+  });
+
+  it('opens a document without one, as versions 0.1 to 0.4 wrote it, as the first version, writing nothing', () => {
+    const read = readTasklaceFile(withVersion(undefined), storingCompressor);
+    expect(read.ok && readSharedProject(read.value)).toEqual(
+      readSharedProject(createSharedDocument(SAMPLE, TEST_DOCUMENT_ID)),
+    );
+    expect(read.ok && read.value.getMap('project').has('formatVersion')).toBe(false);
+  });
+
+  it('refuses a document of a newer version before looking at its project, wherever it comes from', () => {
+    const newer = tampered((document) => {
+      document.getMap('project').set('formatVersion', 2);
+      taskEntry(document, 'a').set('fieldOfANewerVersion', true);
+    });
+    const state = documentState(newer);
+    expect([
+      readCode(newer),
+      readTasklaceDocument(newer, storingCompressor),
+      readSharedState(state),
+      copySharedState(state, COPY, storingCompressor),
+    ]).toEqual([
+      'NEWER_FORMAT',
+      failure({ code: 'NEWER_FORMAT' }),
+      failure({ code: 'NEWER_FORMAT' }),
+      failure({ code: 'NEWER_FORMAT' }),
+    ]);
+  });
+
+  it('refuses to save the state of a document of a newer version', () => {
+    const state = documentState(withVersion(2));
+    expect(checkStateToSave(state, TEST_DOCUMENT_ID)).toEqual(
+      failure({
+        code: 'INVALID_STATE',
+        issues: [{ path: 'formatVersion', code: 'UNSUPPORTED_VERSION' }],
+      }),
+    );
+  });
+
+  it('refuses a version that is not a whole number from the first one on', () => {
+    for (const value of [0, -1, 1.5, '1', null, true, Number.NaN]) {
+      expect(readTasklaceFile(withVersion(value), storingCompressor)).toEqual(
+        failure({
+          code: 'INVALID_PROJECT',
+          issues: [{ path: 'formatVersion', code: 'WRONG_TYPE' }],
+        }),
+      );
+    }
+  });
+
+  it('refuses an update that gives the document a newer version, and accepts one that removes it', () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    /** Makes, on a copy of the document, an update that sets or removes its format version. */
+    const updateSetting = (value: number | undefined): Uint8Array => {
+      const copy = documentOf(Y.encodeStateAsUpdate(document));
+      const before = Y.encodeStateVector(copy);
+      const root = copy.getMap('project');
+      if (value === undefined) {
+        root.delete('formatVersion');
+      } else {
+        root.set('formatVersion', value);
+      }
+      return Y.encodeStateAsUpdate(copy, before);
+    };
+    expect(mergeSharedUpdate(document, updateSetting(2))).toEqual(
+      failure({
+        kind: 'invalidProject',
+        issues: [{ path: 'formatVersion', code: 'UNSUPPORTED_VERSION' }],
+      }),
+    );
+    expect(document.getMap('project').get('formatVersion')).toBe(1);
+    expect(mergeSharedUpdate(document, updateSetting(undefined))).toEqual(success([]));
+    expect(readFormatVersion(document)).toBe('known');
   });
 });
 

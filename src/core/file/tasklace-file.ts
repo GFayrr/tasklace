@@ -5,6 +5,7 @@ import {
   createSharedDocument,
   DOCUMENT_ID_KEY,
   readDocumentId,
+  readFormatVersion,
   type DocumentId,
 } from '../shared/shared-document';
 import type { Project } from '../model/project';
@@ -178,11 +179,14 @@ export function holdsChangesMissingFrom(state: Uint8Array, other: Uint8Array): b
   return !Y.equalSnapshots(before, Y.snapshot(document));
 }
 
-/** Decodes a decompressed Yjs state and checks the project it holds and its document identifier. */
+/** Decodes a decompressed Yjs state and checks that a newer version of Tasklace did not write it, then the project it holds and its document identifier. */
 function validatedState(state: Uint8Array): Result<ValidatedFile, FileError> {
   const document = decodeState(state);
   if (!document.ok) {
     return document;
+  }
+  if (readFormatVersion(document.value) === 'newer') {
+    return failure({ code: 'NEWER_FORMAT' });
   }
   const project = validateSharedDocument(document.value);
   if (!project.ok) {
