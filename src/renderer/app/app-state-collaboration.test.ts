@@ -1,3 +1,4 @@
+import * as Y from 'yjs';
 import { testShownLink } from '../../core/testing/secrets';
 import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { describe, expect, it, vi } from 'vitest';
@@ -602,6 +603,42 @@ describe('a plan shared through a relay', () => {
     expect(app.notices.map((notice) => [notice.kind, notice.text, notice.lasting])).toEqual([
       ['error', english.relay.changeRefused, true],
     ]);
+  });
+
+  it('tells in a message that stays when a newer version of Tasklace wrote a change of the shared plan, which it then leaves', async () => {
+    const { app, control } = await openedAppOf(PLAN);
+    withRelaySettings(control);
+    await app.openShare();
+    control.collaboration.relay.shareResult = { ok: true, value: SHARED };
+    await app.shareThroughRelay('wss://relay.example.org');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const opened = control.openResult;
+    if (!opened.ok) {
+      throw new Error('No plan is open.');
+    }
+    const newer = new Y.Doc();
+    Y.applyUpdate(newer, opened.value.state);
+    const before = Y.encodeStateVector(newer);
+    newer.getMap('project').set('formatVersion', 2);
+    const listener = control.collaboration.listener;
+    listener?.({ kind: 'relayConnected', member: 1, members: [] });
+    listener?.({ kind: 'relayCaughtUp' });
+    listener?.({
+      kind: 'relayDelivery',
+      delivery: {
+        kind: 'update',
+        messageId: new Uint8Array(16).fill(9),
+        covers: 0,
+        bytes: encodeMessage({ kind: 'update', update: Y.encodeStateAsUpdate(newer, before) }),
+        compressedBytes: 1,
+        settled: 1,
+      },
+    });
+    await settle();
+    expect([
+      app.notices.map((notice) => [notice.kind, notice.text, notice.lasting]),
+      app.collaboration.relay.isActive,
+    ]).toEqual([[['error', english.collaboration.newerPlan, true]], false]);
   });
 
   it('tells in a message that stays when this computer can no longer open the link of a shared plan it opens', async () => {

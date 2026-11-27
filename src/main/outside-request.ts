@@ -1,6 +1,6 @@
 import { extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readRelayLink } from '../core/collaboration/relay/relay-link';
+import { isNewerRelayLink, readRelayLink } from '../core/collaboration/relay/relay-link';
 import { MAX_WAITING_OUTSIDE_FILES } from '../core/limits';
 import { success } from '../core/result';
 import { IPC_CHANNELS, type OutsideRequest } from '../preload/bridge-contract';
@@ -11,7 +11,7 @@ import { isStoredPath } from './stored-files';
 export type ReceivedRequest =
   | { readonly kind: 'file'; readonly path: string; readonly unopened: number }
   | { readonly kind: 'link'; readonly link: string }
-  | { readonly kind: 'unreadable'; readonly what: 'file' | 'link' };
+  | { readonly kind: 'unreadable'; readonly what: 'file' | 'link' | 'newerLink' };
 
 export interface OutsideRequests {
   readonly receive: (argv: readonly string[]) => void;
@@ -84,7 +84,7 @@ export function readOutsideRequest(argv: readonly string[]): ReceivedRequest | n
       return { kind: 'link', link: value.trim() };
     }
     console.warn('Tasklace was started with a link it cannot read.');
-    return { kind: 'unreadable', what: 'link' };
+    return { kind: 'unreadable', what: isNewerRelayLink(value) ? 'newerLink' : 'link' };
   }
   return readFileRequest(value, argv);
 }

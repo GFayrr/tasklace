@@ -340,9 +340,10 @@ describe('the format version of a document', () => {
 
   it('is the first version in every new document', () => {
     const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
-    expect([document.getMap('project').get('formatVersion'), readFormatVersion(document)]).toEqual(
-      [1, 'known'],
-    );
+    expect([document.getMap('project').get('formatVersion'), readFormatVersion(document)]).toEqual([
+      1,
+      'known',
+    ]);
   });
 
   it('opens a document without one, as versions 0.1 to 0.4 wrote it, as the first version, writing nothing', () => {
@@ -393,7 +394,7 @@ describe('the format version of a document', () => {
     }
   });
 
-  it('refuses an update that gives the document a newer version, and accepts one that removes it', () => {
+  it('refuses as newer an update that gives the document a newer version, and accepts one that removes it', () => {
     const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
     /** Makes, on a copy of the document, an update that sets or removes its format version. */
     const updateSetting = (value: number | undefined): Uint8Array => {
@@ -407,12 +408,7 @@ describe('the format version of a document', () => {
       }
       return Y.encodeStateAsUpdate(copy, before);
     };
-    expect(mergeSharedUpdate(document, updateSetting(2))).toEqual(
-      failure({
-        kind: 'invalidProject',
-        issues: [{ path: 'formatVersion', code: 'UNSUPPORTED_VERSION' }],
-      }),
-    );
+    expect(mergeSharedUpdate(document, updateSetting(2))).toEqual(failure({ kind: 'newerFormat' }));
     expect(document.getMap('project').get('formatVersion')).toBe(1);
     expect(mergeSharedUpdate(document, updateSetting(undefined))).toEqual(success([]));
     expect(readFormatVersion(document)).toBe('known');

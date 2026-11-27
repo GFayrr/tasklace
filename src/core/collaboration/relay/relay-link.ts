@@ -39,6 +39,8 @@ const LINK_SCHEME = 'tasklace';
 const EDIT_MARK = 'e1';
 const LINK_KEY_BYTES = RELAY_KEY_BYTES + RELAY_KEY_BYTES;
 const VIEW_MARK = 'v1';
+const LINK_FORMAT_VERSION = 1;
+const MARKED_LINK_PATTERN = /^tasklace:\/\/[^#]+#[ev](\d{1,4})\.[A-Za-z0-9_-]+$/;
 const LINK_KEYS_TEXT_LENGTH = encodeBase64Url(new Uint8Array(LINK_KEY_BYTES)).length;
 const SHOWN_KEY_CHARACTERS = 6;
 const LEFT_OUT = '…';
@@ -99,6 +101,13 @@ export function readRelayLink(text: string): Result<RelayLink, 'INVALID_LINK'> {
   return address === null || access === null
     ? failure('INVALID_LINK')
     : success({ address, access });
+}
+
+/** Tells whether a text has the form of the link of a shared plan made by a newer version of Tasklace, whose kind of link this version cannot read, without reading its keys. */
+export function isNewerRelayLink(text: string): boolean {
+  const trimmed = text.trim();
+  const match = trimmed.length > MAX_RELAY_LINK_LENGTH ? null : MARKED_LINK_PATTERN.exec(trimmed);
+  return match !== null && Number(match[1]) > LINK_FORMAT_VERSION;
 }
 
 /** Tells what a link a person pasted leads to, its relay and whether it edits, from its form alone without ever reading its keys, or returns null for text that cannot be such a link. */

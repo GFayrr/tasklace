@@ -378,6 +378,9 @@ export class AppState {
       relayChangeRefused: () => {
         this.#notify('error', this.messages.relay.changeRefused, null, true);
       },
+      newerPlan: () => {
+        this.#notify('error', this.messages.collaboration.newerPlan, null, true);
+      },
       relayNotReopened: (failure) => {
         const text = relayFailureText(this.messages, failure, '');
         if (text !== null) {
@@ -646,8 +649,7 @@ export class AppState {
       return;
     }
     if (request.kind === 'unreadable') {
-      const text = this.messages.setup;
-      this.#notify('warning', request.what === 'link' ? text.linkUnreadable : text.fileUnreadable);
+      this.#notify('warning', this.#unreadableText(request.what));
       return;
     }
     if (request.kind === 'link') {
@@ -661,6 +663,17 @@ export class AppState {
       const unopened = this.messages.setup.filesNotOpened;
       this.#notify('warning', countMessage(unopened, request.unopened, this.locale));
     }
+  }
+
+  /** Gives the text telling that what Tasklace was started with could not be read, a link made by a newer version of Tasklace saying so. */
+  #unreadableText(what: 'file' | 'link' | 'newerLink'): string {
+    const text = this.messages.setup;
+    const texts = {
+      file: text.fileUnreadable,
+      link: text.linkUnreadable,
+      newerLink: this.messages.relay.newerLink,
+    };
+    return texts[what];
   }
 
   /** Fills the join window with a link opened from outside, unless a plan is being joined, which the link never interrupts and which is told. */

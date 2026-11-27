@@ -1,3 +1,4 @@
+import * as Y from 'yjs';
 import { testShownLink } from '../../core/testing/secrets';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encodeMessage, readMessage } from '../../core/collaboration/messages';
@@ -22,6 +23,7 @@ import type {
   RelayReopened,
   ShownRelayLinks,
 } from '../../preload/bridge-contract';
+import { settle } from '../app/testing/fake-app-context';
 import { isRelayEvent, RelayState, type RelayBridge } from './relay-state.svelte';
 
 const ORIGIN = createSharedDocument(project([workTask('a'), workTask('b')]), TEST_DOCUMENT_ID);
@@ -164,6 +166,7 @@ function page(session: SharedSession | null = sessionOn(ORIGIN, 1)) {
     ended: (reason, relay) => told.push(['ended', reason, relay]),
     linkNotKept: () => told.push(['linkNotKept']),
     changeRefused: () => told.push(['changeRefused']),
+    newerPlan: () => told.push(['newerPlan']),
     notReopened: (failure) => told.push(['notReopened', failure.code]),
   });
   return {
@@ -515,6 +518,34 @@ describe('a plan shared through a relay while it lives', () => {
       'Theirs',
       [['The plan shared through a relay refused a message: UNSUPPORTED_VERSION.']],
       [['changeRefused']],
+    ]);
+  });
+
+  it('leaves the plan once a change written by a newer version of Tasklace comes, telling the person instead of a refused change', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const shared = await sharedPage();
+    const newer = new Y.Doc();
+    Y.applyUpdate(newer, Y.encodeStateAsUpdate(ORIGIN));
+    const before = Y.encodeStateVector(newer);
+    newer.getMap('project').set('formatVersion', 2);
+    shared.relay.receive({
+      kind: 'relayDelivery',
+      delivery: {
+        ...changeOfOther('Unused'),
+        bytes: encodeMessage({ kind: 'update', update: Y.encodeStateAsUpdate(newer, before) }),
+      },
+    });
+    await settle();
+    expect([
+      warn.mock.calls,
+      shared.told,
+      shared.relay.isActive,
+      shared.requests.filter(([name]) => name === 'stopCollaboration').length,
+    ]).toEqual([
+      [['The plan shared through a relay refused a message: newerFormat.']],
+      [['newerPlan']],
+      false,
+      1,
     ]);
   });
 

@@ -467,6 +467,19 @@ describe('shared session edge cases', () => {
     expect(sessionDocument(victim).getMap('project').get('documentId')).toBe(TEST_DOCUMENT_ID);
   });
 
+  it('refuses as newer an update that gives the plan a newer format version, leaving its document as it was', () => {
+    const [source, victim] = openSessions(BASE_PROJECT, 2);
+    if (source === undefined || victim === undefined) {
+      throw new Error('Missing session');
+    }
+    const newer = copyOf(sessionDocument(source));
+    newer.clientID = 78;
+    newer.getMap('project').set('formatVersion', 2);
+    const update = Y.encodeStateAsUpdate(newer, Y.encodeStateVector(sessionDocument(victim)));
+    expect(victim.merge(update)).toEqual({ ok: false, error: { kind: 'newerFormat' } });
+    expect(sessionDocument(victim).getMap('project').get('formatVersion')).toBe(1);
+  });
+
   it('refuses to open a document without identifier', () => {
     const document = copyOf(createSharedDocument(BASE_PROJECT, TEST_DOCUMENT_ID));
     document.getMap('project').delete('documentId');

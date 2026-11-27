@@ -407,6 +407,7 @@ describe('the shared plan through the bridge', () => {
       { kind: 'link', link },
       { kind: 'link', link: longest },
       { kind: 'unreadable', what: 'link' },
+      { kind: 'unreadable', what: 'newerLink' },
       { kind: 'unreadable', what: 'file' },
     ]) {
       answering(value);

@@ -1,3 +1,4 @@
+import * as Y from 'yjs';
 import { testShownLink } from '../../core/testing/secrets';
 import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -87,6 +88,7 @@ function side(session: SharedSession | null, ids: readonly string[]) {
     relayEnded: (reason, relay) => relayTold.push(['ended', reason, relay]),
     relayLinkNotKept: () => relayTold.push(['linkNotKept']),
     relayChangeRefused: () => relayTold.push(['changeRefused']),
+    newerPlan: () => relayTold.push(['newerPlan']),
     relayNotReopened: () => relayTold.push(['notReopened']),
     shareLater: (share) => {
       laterShares.push(share);
@@ -789,6 +791,37 @@ describe('sharing a plan from the page', () => {
       reconnecting,
       guest.collaboration.requests.filter(([name]) => name === 'findNextHost').length,
     ]).toEqual([1, { kind: 'guest', connection: 'reconnecting' }, 1]);
+  });
+
+  it('leaves a plan whose host sent a change written by a newer version of Tasklace, telling the person and keeping nothing apart', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { guest } = await sharedPair();
+    const session = guest.session();
+    if (session === null) {
+      throw new Error('The guest holds no plan.');
+    }
+    const newer = new Y.Doc();
+    Y.applyUpdate(newer, session.encodeState());
+    const before = Y.encodeStateVector(newer);
+    newer.getMap('project').set('formatVersion', 2);
+    emit(guest.collaboration, {
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'update', update: Y.encodeStateAsUpdate(newer, before) }),
+    });
+    await settle();
+    expect([
+      guest.relayTold,
+      guest.kept.length,
+      guest.state.mode,
+      guest.collaboration.requests.filter(([name]) => name === 'stop').length,
+      warnings.mock.calls,
+    ]).toEqual([
+      [['newerPlan']],
+      0,
+      { kind: 'idle' },
+      1,
+      [['The shared plan refused a message: newerFormat.']],
+    ]);
   });
 
   it('ignores a request to give way or the host leaving while it does not hold the matching role, and stops a turn to host it cannot take', () => {

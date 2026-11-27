@@ -82,6 +82,7 @@ export interface CollaborationContext {
   readonly relayEnded: (reason: RelayEndReason, relay: string) => void;
   readonly relayLinkNotKept: () => void;
   readonly relayChangeRefused: () => void;
+  readonly newerPlan: () => void;
   readonly relayNotReopened: (failure: FileFailure) => void;
   readonly shareLater?: (share: () => void) => void;
   readonly randomBytes?: (count: number) => Uint8Array;
@@ -227,6 +228,7 @@ export class CollaborationState {
       ended: context.relayEnded,
       linkNotKept: context.relayLinkNotKept,
       changeRefused: context.relayChangeRefused,
+      newerPlan: context.newerPlan,
       notReopened: context.relayNotReopened,
     });
     context.bridge.onCollaborationEvent(
@@ -967,6 +969,10 @@ export class CollaborationState {
         console.warn(
           `The shared plan refused a message${event.from === null ? '' : ` of ${event.from}`}: ${event.reason}.`,
         );
+        if (event.reason === 'newerFormat' && event.from === null) {
+          this.#context.newerPlan();
+          void this.stop();
+        }
         return;
       case 'roster':
         this.#participants = event.participants;

@@ -1,3 +1,4 @@
+import * as Y from 'yjs';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { describe, expect, it } from 'vitest';
 import { SNAPSHOT_AFTER_BYTES } from '../../limits';
@@ -344,6 +345,23 @@ describe('a member of a plan shared through a relay', () => {
       { kind: 'refused', reason: 'UNEXPECTED_MESSAGE' },
       { kind: 'refused', reason: 'malformedUpdate' },
     ]);
+  });
+
+  it('refuses a change written by a newer version of Tasklace, keeping nothing apart for it', () => {
+    const editor = harness(true, 1);
+    const newer = new Y.Doc();
+    Y.applyUpdate(newer, editor.session.encodeState());
+    const before = Y.encodeStateVector(newer);
+    newer.getMap('project').set('formatVersion', 2);
+    editor.member.receive({
+      kind: 'update',
+      messageId: new Uint8Array(16),
+      covers: 0,
+      compressedBytes: 1,
+      settled: 1,
+      bytes: encodeMessage({ kind: 'update', update: Y.encodeStateAsUpdate(newer, before) }),
+    });
+    expect(editor.events).toEqual([{ kind: 'refused', reason: 'newerFormat' }]);
   });
 
   it('follows who is in from their presence, telling who may edit, and forgets everyone once out', () => {

@@ -266,7 +266,7 @@ function isOutsideRequestOrNone(value: unknown): value is OutsideRequest | null 
       Number.isSafeInteger(id) &&
       Number.isSafeInteger(unopened) &&
       Number(unopened) >= 0) ||
-    (kind === 'unreadable' && (what === 'file' || what === 'link')) ||
+    (kind === 'unreadable' && (what === 'file' || what === 'link' || what === 'newerLink')) ||
     (kind === 'link' &&
       typeof link === 'string' &&
       link.length <= MAX_RELAY_LINK_LENGTH &&

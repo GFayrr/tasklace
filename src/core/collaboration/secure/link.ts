@@ -49,7 +49,7 @@ export interface Introduction {
   readonly endpoint: Endpoint;
 }
 
-export const LINK_VERSION = 1;
+export const LINK_VERSION = 2;
 export const PROOF_BYTES = 64;
 export const PLAN_KEY_BYTES = 32;
 export const REJOIN_TOKEN_BYTES = 32;

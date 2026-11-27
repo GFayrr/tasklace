@@ -193,22 +193,30 @@ describe('AppState and the setup', () => {
     ]);
   });
 
-  it('tells the user of a link or a file from outside it could not read, without opening anything', async () => {
+  it('tells the user of a link or a file from outside it could not read, a link of a newer version included, without opening anything', async () => {
     const { app, control } = await startedApp();
     control.setup.outsideResults = [
       { ok: true, value: { kind: 'unreadable', what: 'link' } },
       { ok: true, value: { kind: 'unreadable', what: 'file' } },
+      { ok: true, value: { kind: 'unreadable', what: 'newerLink' } },
     ];
+    await app.takeOutsideRequest();
     await app.takeOutsideRequest();
     await app.takeOutsideRequest();
     expect(app.collaborationWindow).toBeNull();
     expect(app.notices.map(({ kind, text }) => ({ kind, text }))).toEqual([
       { kind: 'warning', text: english.setup.linkUnreadable },
       { kind: 'warning', text: english.setup.fileUnreadable },
+      { kind: 'warning', text: english.relay.newerLink },
     ]);
-    expect([english.setup.linkUnreadable, english.setup.fileUnreadable]).toEqual([
+    expect([
+      english.setup.linkUnreadable,
+      english.setup.fileUnreadable,
+      english.relay.newerLink,
+    ]).toEqual([
       'The link you opened is not the link of a shared plan, or it was cut. Ask the person who sent it for the whole link.',
       'Tasklace could not open this file from where it was opened. Open it with “Open…” instead.',
+      'This link comes from a newer version of Tasklace. Update Tasklace to join this plan.',
     ]);
   });
 

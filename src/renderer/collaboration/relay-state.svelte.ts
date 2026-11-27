@@ -47,6 +47,7 @@ export interface RelayContext {
   readonly ended: (reason: RelayEndReason, relay: string) => void;
   readonly linkNotKept: () => void;
   readonly changeRefused: () => void;
+  readonly newerPlan: () => void;
   readonly notReopened: (failure: FileFailure) => void;
 }
 
@@ -492,7 +493,7 @@ export class RelayState {
         return;
       case 'refused':
         console.warn(`The plan shared through a relay refused a message: ${event.reason}.`);
-        this.#context.changeRefused();
+        this.#tellRefused(event.reason);
         return;
       case 'people':
         this.#people = event.people;
@@ -500,6 +501,16 @@ export class RelayState {
       case 'unsharedChanges':
         void this.#keepOwnChanges();
     }
+  }
+
+  /** Tells the person a change shared through the relay could not be added, leaving the plan when a newer version of Tasklace wrote it, since none of its changes could be added any more. */
+  #tellRefused(reason: Extract<RelayMemberEvent, { readonly kind: 'refused' }>['reason']): void {
+    if (reason !== 'newerFormat') {
+      this.#context.changeRefused();
+      return;
+    }
+    this.#context.newerPlan();
+    void this.stop();
   }
 
   /** Keeps apart, in a plan of its own on this computer, changes this computer holds that the relay lacks while only the link that reads the plan is held here. */

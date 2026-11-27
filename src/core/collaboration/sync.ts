@@ -348,14 +348,16 @@ export function createGuest(options: GuestOptions): Guest {
       unshared = true;
     }
   });
-  /** Merges what the host sent, asking it again for what is missing when the update depends on changes not received, and, when it cannot be merged, telling that this copy no longer follows the plan of the host. */
+  /** Merges what the host sent, asking again for what is missing, and when it cannot be merged tells that this copy no longer follows the plan of the host, keeping nothing apart when a newer Tasklace wrote it. */
   const mergeFromHost = (update: Uint8Array): void => {
     const merged = merger.merge(update);
     if (!merged.ok && merged.error === 'incompleteUpdate') {
       send({ kind: 'stateVector', vector: session.encodeStateVector() });
     } else if (!merged.ok) {
       report({ kind: 'refused', from: null, reason: merged.error });
-      report({ kind: 'unsharedChanges' });
+      if (merged.error !== 'newerFormat') {
+        report({ kind: 'unsharedChanges' });
+      }
     }
   };
   /** Sends the host what it lacks while this participant may edit, or tells that changes made while unable to share stay here. */

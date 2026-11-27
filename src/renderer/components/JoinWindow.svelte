@@ -1,6 +1,6 @@
 <script lang="ts">
   import { FIRST_PORT, isPort, LAST_PORT } from '../../core/collaboration/ports';
-  import { previewRelayLink } from '../../core/collaboration/relay/relay-link';
+  import { isNewerRelayLink, previewRelayLink } from '../../core/collaboration/relay/relay-link';
   import { readJoinCode } from '../../core/collaboration/secure/join-code';
   import { MAX_PARTICIPANT_NAME_LENGTH } from '../../core/limits';
   import type { NearbyPlan } from '../../preload/bridge-contract';
@@ -117,7 +117,9 @@
       return;
     }
     if (preview === null) {
-      refusal = app.messages.fileErrors.INVALID_LINK;
+      refusal = isNewerRelayLink(linkDraft)
+        ? relayText.newerLink
+        : app.messages.fileErrors.INVALID_LINK;
       return;
     }
     if (!(await keepName(name))) {
