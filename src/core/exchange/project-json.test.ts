@@ -215,6 +215,69 @@ describe('importProjectJson: round trip', () => {
   });
 });
 
+describe('importProjectJson: version 1 documents', () => {
+  const SPLIT_PROJECT = project(
+    [
+      splitTask('a', [
+        [7, 0],
+        [7, 1, at(2026, 10, 6, 13)],
+      ]),
+      workTask('b'),
+    ],
+    [link('a', 'b')],
+  );
+
+  /** Writes a project as a version 1 document whose dependencies leave out the blocks of their ends, as older exports did. */
+  const withoutBlockEnds = (input: Project): Data => {
+    const content = JSON.parse(exportProjectJson(input)) as Data;
+    const inner = content['project'] as Data;
+    const dependencies = (inner['dependencies'] as Data[]).map((dependency) =>
+      Object.fromEntries(
+        Object.entries(dependency).filter(
+          ([key]) => key !== 'predecessorBlock' && key !== 'successorBlock',
+        ),
+      ),
+    );
+    return { ...content, project: { ...inner, dependencies } };
+  };
+
+  it('reads the block fields a version 1 document leaves out as none and as the whole task', () => {
+    const document = withoutBlockEnds(SPLIT_PROJECT);
+    const [dependency] = (document['project'] as Data)['dependencies'] as Data[];
+    const [task] = (document['project'] as Data)['tasks'] as Data[];
+    expect([dependency, (task?.['segments'] as Data[])[0]]).toEqual([
+      { id: 'a-b', predecessorId: 'a', successorId: 'b', type: 'finishToStart', lagHours: 0 },
+      { durationHours: 7, gapDaysBefore: 0 },
+    ]);
+    expect(importProjectJson(JSON.stringify(document))).toEqual({
+      ok: true,
+      value: SPLIT_PROJECT,
+    });
+  });
+
+  it('keeps the block fields a version 1 document writes', () => {
+    const blockLink = { ...link('a', 'b'), predecessorBlock: 1, successorBlock: null };
+    const linked = project(SPLIT_PROJECT.tasks, [blockLink]);
+    expect(importProjectJson(exportProjectJson(linked))).toEqual({ ok: true, value: linked });
+  });
+
+  it('leaves lists and entries of an unexpected kind to the validation, without throwing', () => {
+    expect([
+      importIssues(projectFieldWith('tasks', 'x')),
+      importIssues(projectFieldWith('dependencies', 7)),
+      importIssues(projectFieldWith('dependencies', [null])),
+      importIssues(taskFieldWith(1, 'segments', 'x')),
+      importIssues(taskFieldWith(1, 'segments', [1])),
+    ]).toEqual([
+      issue('project.tasks', 'WRONG_TYPE'),
+      issue('project.dependencies', 'WRONG_TYPE'),
+      issue('project.dependencies[0]', 'WRONG_TYPE'),
+      issue('project.tasks[1].segments', 'WRONG_TYPE'),
+      issue('project.tasks[1].segments[0]', 'WRONG_TYPE'),
+    ]);
+  });
+});
+
 describe('project JSON: baseline', () => {
   it('writes the baseline dates in clear text and reads them back', () => {
     const baseline = {

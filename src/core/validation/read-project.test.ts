@@ -250,7 +250,7 @@ describe('readProject: shape of the data', () => {
     (data['tags'] as Data[])[0] = { ...DESIGN_TAG, pattern: 'dots' };
     (data['dependencies'] as Data[])[0] = { ...link('a', 'b'), note: '' };
     const tasks = data['tasks'] as Data[];
-    tasks[1] = { ...tasks[1], segments: [{ durationHours: 1, gapDaysBefore: 0, unit: 'h' }] };
+    tasks[1] = { ...tasks[1], segments: [{ durationHours: 1, gapDaysBefore: 0, startNoEarlierThan: null, unit: 'h' }] };
     expect(issuesOf(data)).toEqual([
       { path: 'extra', code: 'UNKNOWN_FIELD' },
       { path: 'calendar.timeZone', code: 'UNKNOWN_FIELD' },
@@ -424,20 +424,23 @@ describe('readProject: start dates of blocks', () => {
     { durationHours: 7, gapDaysBefore: 1, startNoEarlierThan: second },
   ];
 
-  it('reads the start date of a later block, a missing one meaning none', () => {
+  it('reads the start date of a later block, null meaning none', () => {
     const later = at(2026, 10, 6, 13);
     const read = readProject(taskWith(1, { segments: blocks(null, later) }), STORED_VALUE_CODEC);
     expect(read.ok && read.value.tasks[1]).toMatchObject({
       segments: [{ startNoEarlierThan: null }, { startNoEarlierThan: later }],
     });
+  });
+
+  it('refuses blocks without their start date, which only a version 1 JSON export could leave out', () => {
     const bare = [
       { durationHours: 7, gapDaysBefore: 0 },
       { durationHours: 7, gapDaysBefore: 1 },
     ];
-    const missing = readProject(taskWith(1, { segments: bare }), STORED_VALUE_CODEC);
-    expect(missing.ok && missing.value.tasks[1]).toMatchObject({
-      segments: [{ startNoEarlierThan: null }, { startNoEarlierThan: null }],
-    });
+    expect(issuesOf(taskWith(1, { segments: bare }))).toEqual([
+      { path: 'tasks[1].segments[0].startNoEarlierThan', code: 'MISSING_FIELD' },
+      { path: 'tasks[1].segments[1].startNoEarlierThan', code: 'MISSING_FIELD' },
+    ]);
   });
 
   it('refuses a start date on the first block, which the task start date stands for, and a wrong value', () => {
@@ -451,11 +454,18 @@ describe('readProject: start dates of blocks', () => {
 });
 
 describe('readProject: links to blocks', () => {
-  it('reads a missing block reference as the whole task', () => {
+  it('reads a null block reference as the whole task', () => {
+    const result = readProject(projectWith({ dependencies: [link('a', 'b')] }), STORED_VALUE_CODEC);
+    expect(result.ok && result.value.dependencies).toEqual([link('a', 'b')]);
+  });
+
+  it('refuses a dependency without the blocks of its ends', () => {
     const { id, predecessorId, successorId, type, lagHours } = link('a', 'b');
     const bare = { id, predecessorId, successorId, type, lagHours };
-    const result = readProject(projectWith({ dependencies: [bare] }), STORED_VALUE_CODEC);
-    expect(result.ok && result.value.dependencies).toEqual([link('a', 'b')]);
+    expect(issuesOf(projectWith({ dependencies: [bare] }))).toEqual([
+      { path: 'dependencies[0].predecessorBlock', code: 'MISSING_FIELD' },
+      { path: 'dependencies[0].successorBlock', code: 'MISSING_FIELD' },
+    ]);
   });
 });
 

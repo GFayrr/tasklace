@@ -524,17 +524,17 @@ function readSegment(
   return allDefined(segment) ? segment : undefined;
 }
 
-/** Reads the optional start date of a block, absent or null meaning none, which the first block never has since the task start date stands for it. */
+/** Reads the start date of a block, null meaning none, which the first block never has since the task start date stands for it. */
 function readBlockStart(
   field: Field,
   issues: IssueList,
   isFirst: boolean,
   codec: ValueCodec,
 ): ProjectHour | null | undefined {
-  if (field.value === undefined || field.value === null) {
+  if (field.value === null) {
     return null;
   }
-  if (isFirst) {
+  if (isFirst && field.value !== undefined) {
     issues.add(field.path, 'OUT_OF_RANGE');
     return undefined;
   }
@@ -561,12 +561,11 @@ function readDependency(field: Field, issues: IssueList): Dependency | undefined
   return allDefined(dependency) ? dependency : undefined;
 }
 
-/** Reads the block of a split task a dependency starts from or leads to, an absent or null value meaning the whole task. */
+/** Reads the block of a split task a dependency starts from or leads to, null meaning the whole task. */
 function readBlockReference(field: Field, issues: IssueList): number | null | undefined {
-  if (field.value === undefined || field.value === null) {
-    return null;
-  }
-  return readInteger(field, issues, 0, MAX_SEGMENTS_PER_TASK - 1);
+  return readNullable(field, issues, (item, list) =>
+    readInteger(item, list, 0, MAX_SEGMENTS_PER_TASK - 1),
+  );
 }
 
 /** Reads a baseline plan: when it was taken and the frozen dates of each task, at most once per task. */

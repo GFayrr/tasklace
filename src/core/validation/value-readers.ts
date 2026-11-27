@@ -266,7 +266,7 @@ function isPresent(field: Field, issues: IssueList): boolean {
 }
 
 /** Tells whether a value is a plain object, as produced by JSON parsing. */
-function isPlainObject(value: unknown): value is UnknownRecord {
+export function isPlainObject(value: unknown): value is UnknownRecord {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }

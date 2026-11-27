@@ -15,6 +15,7 @@ import {
   readEnum,
   readInteger,
   readRawString,
+  isPlainObject,
   readRecord,
   type Field,
 } from '../validation/value-readers';
@@ -76,7 +77,53 @@ export function importProjectJson(text: string): Result<Project, readonly Valida
   if (document === undefined || !hasSupportedHeader(document, issues)) {
     return failure(issues.issues);
   }
-  return readProject(childField(document, 'project', '').value, JSON_VALUE_CODEC, 'project');
+  const project = upgradedFromVersion1(childField(document, 'project', '').value);
+  return readProject(project, JSON_VALUE_CODEC, 'project');
+}
+
+/** Gives the untrusted project of a version 1 document with the block fields it could leave out written as null, the value they stood for: none for the start date of a block, the whole task for the end of a dependency. */
+function upgradedFromVersion1(project: unknown): unknown {
+  if (!isPlainObject(project)) {
+    return project;
+  }
+  return {
+    ...project,
+    tasks: mapList(project['tasks'], withBlockStarts),
+    dependencies: mapList(project['dependencies'], withBlockEnds),
+  };
+}
+
+/** Maps every item of a list, leaving a value that is not a list as it is for the validation to report. */
+function mapList(value: unknown, map: (item: unknown) => unknown): unknown {
+  return Array.isArray(value) ? value.map(map) : value;
+}
+
+/** Gives each block of a task that has blocks its start date as null where none is written, leaving anything else as it is. */
+function withBlockStarts(task: unknown): unknown {
+  return isPlainObject(task) && Object.hasOwn(task, 'segments')
+    ? { ...task, segments: mapList(task['segments'], withBlockStart) }
+    : task;
+}
+
+/** Gives a block with no start date written its start date as null, leaving anything else as it is. */
+function withBlockStart(segment: unknown): unknown {
+  return isPlainObject(segment) ? withNullWhereMissing(segment, ['startNoEarlierThan']) : segment;
+}
+
+/** Gives a dependency with no block written for an end the whole task as that end, leaving anything else as it is. */
+function withBlockEnds(dependency: unknown): unknown {
+  return isPlainObject(dependency)
+    ? withNullWhereMissing(dependency, ['predecessorBlock', 'successorBlock'])
+    : dependency;
+}
+
+/** Copies a record with null written under each given key it lacks. */
+function withNullWhereMissing(
+  record: Readonly<Record<string, unknown>>,
+  keys: readonly string[],
+): Record<string, unknown> {
+  const missing = keys.filter((key) => !Object.hasOwn(record, key));
+  return { ...record, ...Object.fromEntries(missing.map((key) => [key, null])) };
 }
 
 /** Parses JSON text, turning a syntax error into a failed result and letting any other error through. */
