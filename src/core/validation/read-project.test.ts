@@ -250,7 +250,10 @@ describe('readProject: shape of the data', () => {
     (data['tags'] as Data[])[0] = { ...DESIGN_TAG, pattern: 'dots' };
     (data['dependencies'] as Data[])[0] = { ...link('a', 'b'), note: '' };
     const tasks = data['tasks'] as Data[];
-    tasks[1] = { ...tasks[1], segments: [{ durationHours: 1, gapDaysBefore: 0, startNoEarlierThan: null, unit: 'h' }] };
+    tasks[1] = {
+      ...tasks[1],
+      segments: [{ durationHours: 1, gapDaysBefore: 0, startNoEarlierThan: null, unit: 'h' }],
+    };
     expect(issuesOf(data)).toEqual([
       { path: 'extra', code: 'UNKNOWN_FIELD' },
       { path: 'calendar.timeZone', code: 'UNKNOWN_FIELD' },

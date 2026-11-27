@@ -80,8 +80,7 @@ export function importProjectJson(text: string): Result<Project, readonly Valida
     return failure(issues.issues);
   }
   const content = childField(document, 'project', '').value;
-  const project =
-    version === FIRST_PROJECT_JSON_VERSION ? upgradedFromVersion1(content) : content;
+  const project = version === FIRST_PROJECT_JSON_VERSION ? upgradedFromVersion1(content) : content;
   return readProject(project, JSON_VALUE_CODEC, 'project');
 }
 
