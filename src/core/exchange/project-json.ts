@@ -22,7 +22,8 @@ import {
 import { stripLeadingByteOrderMark } from './byte-order-mark';
 
 export const PROJECT_JSON_FORMAT = 'tasklace';
-export const PROJECT_JSON_VERSION = 1;
+export const PROJECT_JSON_VERSION = 2;
+export const FIRST_PROJECT_JSON_VERSION = 1;
 
 const DOCUMENT_KEYS = ['format', 'version', 'project'];
 const WEEKDAY_NAMES = [
@@ -74,10 +75,13 @@ export function importProjectJson(text: string): Result<Project, readonly Valida
   }
   const issues = createIssueList();
   const document = readRecord({ value: parsed.value, path: '' }, issues, DOCUMENT_KEYS);
-  if (document === undefined || !hasSupportedHeader(document, issues)) {
+  const version = document === undefined ? undefined : readSupportedVersion(document, issues);
+  if (document === undefined || version === undefined) {
     return failure(issues.issues);
   }
-  const project = upgradedFromVersion1(childField(document, 'project', '').value);
+  const content = childField(document, 'project', '').value;
+  const project =
+    version === FIRST_PROJECT_JSON_VERSION ? upgradedFromVersion1(content) : content;
   return readProject(project, JSON_VALUE_CODEC, 'project');
 }
 
@@ -138,11 +142,11 @@ function parseJson(text: string): Result<unknown, 'INVALID_JSON'> {
   }
 }
 
-/** Checks the format name and the version of an imported document and tells whether no problem has been found so far. */
-function hasSupportedHeader(
+/** Checks the format name and the version of an imported document, giving the version when no problem has been found so far. */
+function readSupportedVersion(
   document: Readonly<Record<string, unknown>>,
   issues: IssueList,
-): boolean {
+): number | undefined {
   const format = readRawString(childField(document, 'format', ''), issues);
   if (format !== undefined && format !== PROJECT_JSON_FORMAT) {
     issues.add('format', 'UNSUPPORTED_FORMAT');
@@ -153,10 +157,13 @@ function hasSupportedHeader(
     0,
     Number.MAX_SAFE_INTEGER,
   );
-  if (version !== undefined && version !== PROJECT_JSON_VERSION) {
+  if (
+    version !== undefined &&
+    (version < FIRST_PROJECT_JSON_VERSION || version > PROJECT_JSON_VERSION)
+  ) {
     issues.add('version', 'UNSUPPORTED_VERSION');
   }
-  return issues.issues.length === 0;
+  return issues.issues.length === 0 ? version : undefined;
 }
 
 /** Reads a date written as text with a given parser. */
@@ -201,7 +208,7 @@ function baselineToJson(baseline: Baseline) {
   };
 }
 
-/** Converts a task into JSON-ready data with its date constraints in clear text, a block writing its start date only when it has one. */
+/** Converts a task into JSON-ready data with its date constraints and the start dates of its blocks in clear text, or null for none. */
 function taskToJson(task: Task) {
   if (task.kind === 'summary') {
     return task;
@@ -217,10 +224,9 @@ function taskToJson(task: Task) {
   if (task.kind === 'milestone') {
     return { ...task, ...dates };
   }
-  const segments = task.segments.map(({ startNoEarlierThan, ...segment }) =>
-    startNoEarlierThan === null
-      ? segment
-      : { ...segment, startNoEarlierThan: clearDate(startNoEarlierThan) },
-  );
+  const segments = task.segments.map((segment) => ({
+    ...segment,
+    startNoEarlierThan: clearDate(segment.startNoEarlierThan),
+  }));
   return { ...task, ...dates, segments };
 }
