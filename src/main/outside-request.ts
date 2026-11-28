@@ -3,7 +3,11 @@ import { fileURLToPath } from 'node:url';
 import { isNewerRelayLink, readRelayLink } from '../core/collaboration/relay/relay-link';
 import { MAX_WAITING_OUTSIDE_FILES } from '../core/limits';
 import { success } from '../core/result';
-import { IPC_CHANNELS, type OutsideRequest } from '../preload/bridge-contract';
+import {
+  IPC_CHANNELS,
+  type OutsideRequest,
+  type UnreadableOutside,
+} from '../preload/bridge-contract';
 import { handleChannel } from './ipc-channels';
 import type { TrustCheck } from './ipc-trust';
 import { isStoredPath } from './stored-files';
@@ -11,7 +15,7 @@ import { isStoredPath } from './stored-files';
 export type ReceivedRequest =
   | { readonly kind: 'file'; readonly path: string; readonly unopened: number }
   | { readonly kind: 'link'; readonly link: string }
-  | { readonly kind: 'unreadable'; readonly what: 'file' | 'link' | 'newerLink' };
+  | { readonly kind: 'unreadable'; readonly what: UnreadableOutside };
 
 export interface OutsideRequests {
   readonly receive: (argv: readonly string[]) => void;

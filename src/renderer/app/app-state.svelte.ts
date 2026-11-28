@@ -37,6 +37,7 @@ import type {
   RecentProject,
   TasklaceBridge,
   WelcomeChoices,
+  UnreadableOutside,
 } from '../../preload/bridge-contract';
 import { ownCopyName } from '../../core/collaboration/own-copy';
 import { createDayFormatter } from '../i18n/format';
@@ -678,13 +679,13 @@ export class AppState {
   }
 
   /** Gives the text telling that what Tasklace was started with could not be read, a link made by a newer version of Tasklace saying so. */
-  #unreadableText(what: 'file' | 'link' | 'newerLink'): string {
+  #unreadableText(what: UnreadableOutside): string {
     const text = this.messages.setup;
     const texts = {
       file: text.fileUnreadable,
       link: text.linkUnreadable,
       newerLink: this.messages.relay.newerLink,
-    };
+    } satisfies Record<UnreadableOutside, string>;
     return texts[what];
   }
 

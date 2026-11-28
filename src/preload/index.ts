@@ -8,6 +8,7 @@ import {
 import {
   BRIDGE_NAME,
   IPC_CHANNELS,
+  UNREADABLE_OUTSIDE,
   type BridgeResult,
   type CollaborationEvent,
   type FileAssociation,
@@ -23,6 +24,7 @@ import {
   type TasklaceBridge,
 } from './bridge-contract';
 import { isCollaborationEvent } from './collaboration-events';
+import { isOneOf } from '../core/one-of';
 import { readVersion } from '../core/version';
 import { MAX_FILE_PATH_LENGTH, MAX_RELAY_LINK_LENGTH } from '../core/limits';
 
@@ -266,7 +268,7 @@ function isOutsideRequestOrNone(value: unknown): value is OutsideRequest | null 
       Number.isSafeInteger(id) &&
       Number.isSafeInteger(unopened) &&
       Number(unopened) >= 0) ||
-    (kind === 'unreadable' && (what === 'file' || what === 'link' || what === 'newerLink')) ||
+    (kind === 'unreadable' && isOneOf(UNREADABLE_OUTSIDE, what)) ||
     (kind === 'link' &&
       typeof link === 'string' &&
       link.length <= MAX_RELAY_LINK_LENGTH &&

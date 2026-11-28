@@ -84,10 +84,14 @@ export interface UpdateSettings {
   readonly checkForNewVersions: boolean;
 }
 
+export const UNREADABLE_OUTSIDE = ['file', 'link', 'newerLink'] as const;
+
+export type UnreadableOutside = (typeof UNREADABLE_OUTSIDE)[number];
+
 export type OutsideRequest =
   | { readonly kind: 'file'; readonly id: number; readonly unopened: number }
   | { readonly kind: 'link'; readonly link: string }
-  | { readonly kind: 'unreadable'; readonly what: 'file' | 'link' | 'newerLink' };
+  | { readonly kind: 'unreadable'; readonly what: UnreadableOutside };
 
 export type FileAssociation =
   | { readonly kind: 'unavailable' }

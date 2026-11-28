@@ -19,11 +19,21 @@ import {
   readRecord,
   type Field,
 } from '../validation/value-readers';
+import { isOneOf } from '../one-of';
 import { stripLeadingByteOrderMark } from './byte-order-mark';
 
 export const PROJECT_JSON_FORMAT = 'tasklace';
 export const PROJECT_JSON_VERSION = 2;
 export const FIRST_PROJECT_JSON_VERSION = 1;
+
+const PROJECT_JSON_VERSIONS = [FIRST_PROJECT_JSON_VERSION, PROJECT_JSON_VERSION] as const;
+
+type ProjectJsonVersion = (typeof PROJECT_JSON_VERSIONS)[number];
+
+const UPGRADES: Readonly<Record<ProjectJsonVersion, (project: unknown) => unknown>> = {
+  [FIRST_PROJECT_JSON_VERSION]: upgradedFromVersion1,
+  [PROJECT_JSON_VERSION]: asWritten,
+};
 
 const DOCUMENT_KEYS = ['format', 'version', 'project'];
 const WEEKDAY_NAMES = [
@@ -80,8 +90,13 @@ export function importProjectJson(text: string): Result<Project, readonly Valida
     return failure(issues.issues);
   }
   const content = childField(document, 'project', '').value;
-  const project = version === FIRST_PROJECT_JSON_VERSION ? upgradedFromVersion1(content) : content;
+  const project = UPGRADES[version](content);
   return readProject(project, JSON_VALUE_CODEC, 'project');
+}
+
+/** Gives the untrusted project of a document of the latest version as it is written, nothing being left out of it. */
+function asWritten(project: unknown): unknown {
+  return project;
 }
 
 /** Gives the untrusted project of a version 1 document with the block fields it could leave out written as null, the value they stood for: none for the start date of a block, the whole task for the end of a dependency. */
@@ -145,7 +160,7 @@ function parseJson(text: string): Result<unknown, 'INVALID_JSON'> {
 function readSupportedVersion(
   document: Readonly<Record<string, unknown>>,
   issues: IssueList,
-): number | undefined {
+): ProjectJsonVersion | undefined {
   const format = readRawString(childField(document, 'format', ''), issues);
   if (format !== undefined && format !== PROJECT_JSON_FORMAT) {
     issues.add('format', 'UNSUPPORTED_FORMAT');
@@ -161,7 +176,9 @@ function readSupportedVersion(
   } else if (version !== undefined && version > PROJECT_JSON_VERSION) {
     issues.add('version', 'UNSUPPORTED_VERSION');
   }
-  return issues.issues.length === 0 ? version : undefined;
+  return issues.issues.length === 0 && isOneOf(PROJECT_JSON_VERSIONS, version)
+    ? version
+    : undefined;
 }
 
 /** Reads a date written as text with a given parser. */
