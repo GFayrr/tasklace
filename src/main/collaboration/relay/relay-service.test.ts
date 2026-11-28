@@ -701,6 +701,24 @@ describe('reopening a plan shared through a relay', () => {
     ]);
   });
 
+  it('refuses to join by link a plan a newer version of Tasklace wrote, offering nothing and keeping no link', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { owner, viewLink } = await sharedWithPlan();
+    const newer = new Y.Doc();
+    Y.applyUpdate(newer, PLAN_STATE);
+    newer.getMap('project').set('formatVersion', 2);
+    sendPlan(owner, encodeMessage({ kind: 'update', update: Y.encodeStateAsUpdate(newer) }));
+    await until(() => owner.kinds().filter((kind) => kind === 'relayDelivery').length === 2);
+    const linksBefore = links.kept.size;
+    const joined = await invoke(openPage(), IPC_CHANNELS.joinByLink, viewLink);
+    expect([joined, offered, links.kept.size - linksBefore, error.mock.calls]).toEqual([
+      { ok: false, error: { code: 'NEWER_FORMAT' } },
+      [],
+      0,
+      [['The log of the plan a link joined could not be read: NEWER_FORMAT.']],
+    ]);
+  });
+
   it('hands an empty state for a room nothing was put in yet', async () => {
     const owner = openPage(TEST_DOCUMENT_ID);
     await shared(owner);

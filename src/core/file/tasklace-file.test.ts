@@ -384,7 +384,7 @@ describe('the format version of a document', () => {
   });
 
   it('refuses a version that is not a whole number from the first one on', () => {
-    for (const value of [0, -1, 1.5, '1', null, true, Number.NaN]) {
+    for (const value of [0, -1, 1.5, '1', null, true, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(readTasklaceFile(withVersion(value), storingCompressor)).toEqual(
         failure({
           code: 'INVALID_PROJECT',
@@ -412,6 +412,44 @@ describe('the format version of a document', () => {
     expect(document.getMap('project').get('formatVersion')).toBe(1);
     expect(mergeSharedUpdate(document, updateSetting(undefined))).toEqual(success([]));
     expect(readFormatVersion(document)).toBe('known');
+  });
+});
+
+describe('the format version of a document, through merges and copies', () => {
+  /** Makes, on a copy of a document, an update that sets its format version to a value. */
+  const updateSetting = (document: Y.Doc, value: unknown): Uint8Array => {
+    const copy = documentOf(Y.encodeStateAsUpdate(document));
+    const before = Y.encodeStateVector(copy);
+    copy.getMap('project').set('formatVersion', value);
+    return Y.encodeStateAsUpdate(copy, before);
+  };
+
+  it('refuses an update that gives the document an invalid version, leaving it as it was', () => {
+    for (const value of [0, 1.5, '1']) {
+      const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+      expect(mergeSharedUpdate(document, updateSetting(document, value)), String(value)).toEqual(
+        failure({
+          kind: 'invalidProject',
+          issues: [{ path: 'formatVersion', code: 'WRONG_TYPE' }],
+        }),
+      );
+      expect(document.getMap('project').get('formatVersion')).toBe(1);
+    }
+  });
+
+  it('gives the separate plan of a copy the current version, even from a plan without one', () => {
+    const document = createSharedDocument(SAMPLE, TEST_DOCUMENT_ID);
+    document.getMap('project').delete('formatVersion');
+    const copy = copySharedState(
+      Y.encodeStateAsUpdate(document),
+      {
+        nameOf: (name: string) => name,
+        documentId: requireDocumentId('44444444-4444-4444-8444-444444444444'),
+      },
+      storingCompressor,
+    );
+    const read = copy.ok ? readTasklaceFile(copy.value, storingCompressor) : copy;
+    expect(read.ok && read.value.getMap('project').get('formatVersion')).toBe(1);
   });
 });
 

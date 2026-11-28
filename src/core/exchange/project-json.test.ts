@@ -302,6 +302,40 @@ describe('importProjectJson: version 1 documents', () => {
   });
 });
 
+describe('importProjectJson: version 1 documents of an unexpected shape', () => {
+  /** Imports a version 1 document holding the given project, giving its issues. */
+  const issuesOfVersion1 = (content: unknown): readonly ValidationIssue[] =>
+    importIssues({ format: PROJECT_JSON_FORMAT, version: 1, project: content });
+
+  it('reports a project that is not an object, without throwing while filling its block fields', () => {
+    expect([null, [], 'x'].map(issuesOfVersion1)).toEqual([
+      issue('project', 'WRONG_TYPE'),
+      issue('project', 'WRONG_TYPE'),
+      issue('project', 'WRONG_TYPE'),
+    ]);
+  });
+
+  it('reports tasks that are not objects, and an own __proto__ key of a task, without polluting objects', () => {
+    const content = sampleDocument()['project'] as Data;
+    const tasks = content['tasks'] as Data[];
+    const withProto = JSON.parse(
+      JSON.stringify({ ...tasks[1] }).replace('{', '{"__proto__":{"polluted":true},'),
+    ) as unknown;
+    expect([
+      issuesOfVersion1({ ...content, tasks: [null, 3] }),
+      issuesOfVersion1({ ...content, tasks: [tasks[0], withProto, ...tasks.slice(2)] }),
+      ({} as Data)['polluted'],
+    ]).toEqual([
+      [
+        { path: 'project.tasks[0]', code: 'WRONG_TYPE' },
+        { path: 'project.tasks[1]', code: 'WRONG_TYPE' },
+      ],
+      issue('project.tasks[1].__proto__', 'UNKNOWN_FIELD'),
+      undefined,
+    ]);
+  });
+});
+
 describe('project JSON: baseline', () => {
   it('writes the baseline dates in clear text and reads them back', () => {
     const baseline = {

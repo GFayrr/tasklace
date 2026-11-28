@@ -36,6 +36,16 @@ function projectOf(file: Uint8Array): Project {
   return project.value;
 }
 
+/** Tells whether a saved file holds a format version, giving it, or that it holds none. */
+function readFormatVersionOf(file: Uint8Array): unknown {
+  const read = readTasklaceFile(file, zlibCompressor);
+  if (!read.ok) {
+    throw new Error('A saved file could not be read.');
+  }
+  const root = read.value.getMap('project');
+  return root.has('formatVersion') ? root.get('formatVersion') : 'absent';
+}
+
 /** Orders the lists of a project by identifier and writes its calendar as a shared document holds it. */
 function sorted(input: Project): Project {
   /** Returns items ordered by identifier. */
@@ -142,9 +152,10 @@ describe('the files written by Tasklace 0.4.0', () => {
       expect([
         documentId !== null && checkStateToSave(state, documentId).ok,
         projectOf(saved).tasks.find(({ id }) => id === first.id)?.name,
+        readFormatVersionOf(saved),
         session.history.undo().ok,
         session.project().tasks.find(({ id }) => id === first.id)?.name,
-      ]).toEqual([true, 'Renamed', true, first.name]);
+      ]).toEqual([true, 'Renamed', 'absent', true, first.name]);
     }
   });
 

@@ -201,6 +201,8 @@ describe('the link of a shared plan made by a newer version of Tasklace', () => 
   it('is told apart from text that is no link and from the links this version reads, without reading its keys', () => {
     const edit = encodeRelayLink({ address: SCHOOL, access: EDIT });
     const view = encodeRelayLink({ address: SCHOOL, access: viewAccessOf(EDIT) });
+    const start = 'tasklace://relay.example.org/#e2.';
+    const longestNewer = `${start}${'k'.repeat(MAX_RELAY_LINK_LENGTH - start.length)}`;
     /** Gives a link with its mark replaced, as a newer version of Tasklace could write it. */
     const newer = (link: string, mark: string): string => link.replace(/#[ev]1\./, `#${mark}.`);
     expect([
@@ -214,7 +216,8 @@ describe('the link of a shared plan made by a newer version of Tasklace', () => 
       isNewerRelayLink(newer(edit, 'e12345')),
       isNewerRelayLink('https://relay.example.org/#e2.key'),
       isNewerRelayLink(`tasklace://relay.example.org/#e2.${'k'.repeat(MAX_RELAY_LINK_LENGTH)}`),
-    ]).toEqual([true, true, true, false, false, false, false, false, false, false]);
+      isNewerRelayLink(longestNewer),
+    ]).toEqual([true, true, true, false, false, false, false, false, false, false, true]);
   });
 });
 

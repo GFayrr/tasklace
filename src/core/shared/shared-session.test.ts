@@ -480,6 +480,84 @@ describe('shared session edge cases', () => {
     expect(sessionDocument(victim).getMap('project').get('formatVersion')).toBe(1);
   });
 
+  it('refuses an update that gives the plan an invalid format version, through the fast path, leaving its document as it was', () => {
+    for (const value of [0, -1, 1.5, '1', null, true]) {
+      const [source, victim] = openSessions(BASE_PROJECT, 2);
+      if (source === undefined || victim === undefined) {
+        throw new Error('Missing session');
+      }
+      const invalid = copyOf(sessionDocument(source));
+      invalid.clientID = 79;
+      invalid.getMap('project').set('formatVersion', value);
+      const update = Y.encodeStateAsUpdate(invalid, Y.encodeStateVector(sessionDocument(victim)));
+      expect(victim.merge(update), String(value)).toEqual({
+        ok: false,
+        error: { kind: 'invalidProject', issues: [{ path: 'formatVersion', code: 'WRONG_TYPE' }] },
+      });
+      expect(sessionDocument(victim).getMap('project').get('formatVersion')).toBe(1);
+    }
+  });
+
+  it('refuses as newer an update that also brings a field this version does not know, then still merges a valid change', () => {
+    const [source, victim] = openSessions(BASE_PROJECT, 2);
+    if (source === undefined || victim === undefined) {
+      throw new Error('Missing session');
+    }
+    const before = Y.encodeStateVector(sessionDocument(victim));
+    const newer = copyOf(sessionDocument(source));
+    newer.clientID = 80;
+    newer.getMap('project').set('formatVersion', 2);
+    entryOf(newer, testId('a')).set('fieldOfANewerVersion', 1);
+    expect(victim.merge(Y.encodeStateAsUpdate(newer, before))).toEqual({
+      ok: false,
+      error: { kind: 'newerFormat' },
+    });
+    const valid = copyOf(sessionDocument(source));
+    valid.clientID = 81;
+    valid.getMap('project').set('name', 'Renamed after the refusal');
+    expect(victim.merge(Y.encodeStateAsUpdate(valid, before))).toEqual({ ok: true, value: [] });
+    expect(victim.project().name).toBe('Renamed after the refusal');
+  });
+
+  it('merges an update that removes the format version, which a missing version stands for', () => {
+    const [source, victim] = openSessions(BASE_PROJECT, 2);
+    if (source === undefined || victim === undefined) {
+      throw new Error('Missing session');
+    }
+    const removed = copyOf(sessionDocument(source));
+    removed.clientID = 82;
+    removed.getMap('project').delete('formatVersion');
+    const update = Y.encodeStateAsUpdate(removed, Y.encodeStateVector(sessionDocument(victim)));
+    expect(victim.merge(update)).toEqual({ ok: true, value: [] });
+    expect(sessionDocument(victim).getMap('project').has('formatVersion')).toBe(false);
+  });
+
+  it('keeps the format version through a change, its undoing and a merge that needs a repair', () => {
+    const [source, victim] = openSessions(BASE_PROJECT, 2);
+    if (source === undefined || victim === undefined) {
+      throw new Error('Missing session');
+    }
+    const task = victim.project().tasks.find(({ id }) => id === testId('c'));
+    if (task === undefined) {
+      throw new Error('Missing task');
+    }
+    expect(victim.apply({ type: 'putTask', task: { ...task, name: 'Changed' } }).ok).toBe(true);
+    expect(victim.history.undo().ok).toBe(true);
+    const looped = copyOf(sessionDocument(source));
+    looped.clientID = 83;
+    const entry = new Y.Map<unknown>();
+    looped.getMap('dependencies').set('m-a', entry);
+    for (const [key, value] of Object.entries(link('m', 'a')).filter(([key]) => key !== 'id')) {
+      entry.set(key, value);
+    }
+    const update = Y.encodeStateAsUpdate(looped, Y.encodeStateVector(sessionDocument(victim)));
+    const merged = victim.merge(update);
+    expect([
+      merged.ok && merged.value.map(({ code }) => code),
+      sessionDocument(victim).getMap('project').get('formatVersion'),
+    ]).toEqual([['DEPENDENCY_REMOVED'], 1]);
+  });
+
   it('refuses to open a document without identifier', () => {
     const document = copyOf(createSharedDocument(BASE_PROJECT, TEST_DOCUMENT_ID));
     document.getMap('project').delete('documentId');

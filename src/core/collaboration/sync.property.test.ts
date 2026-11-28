@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { createSharedDocument } from '../shared/shared-document';
+import * as Y from 'yjs';
+import { createSharedDocument, readFormatVersion } from '../shared/shared-document';
 import type { SharedSession } from '../shared/shared-session';
 import { CONVERGENCE_TEST_TIMEOUT_MS } from '../testing/arbitraries';
 import { project, TEST_DOCUMENT_ID, workTask } from '../testing/project-builder';
@@ -20,6 +21,7 @@ const MAX_MARK = 99;
 const PACKETS_PER_GUEST_AND_STEP = 64;
 const FEW_EDITORS = 2;
 const LARGEST_TESTED_TEAM = 25;
+const NEWER_FORMAT_VERSION = 2;
 
 type Packet =
   | { readonly toHost: true; readonly from: ParticipantId; readonly message: CollaborationMessage }
@@ -31,6 +33,7 @@ type Step =
   | { readonly kind: 'reconnect' | 'rejoin'; readonly guest: number }
   | { readonly kind: 'grant' | 'revoke'; readonly guest: number }
   | { readonly kind: 'forge' }
+  | { readonly kind: 'forgeNewer' }
   | { readonly kind: 'hostLeaves' };
 
 /** Builds the steps of a scenario for a host and a number of guests, the last guest being in read only. */
@@ -51,6 +54,7 @@ function stepArbitrary(guestCount: number): fc.Arbitrary<Step> {
       guest: fc.nat({ max: guestCount - 1 }),
     }),
     fc.constant({ kind: 'forge' as const }),
+    fc.constant({ kind: 'forgeNewer' as const }),
     fc.constant({ kind: 'hostLeaves' as const }),
   );
 }
@@ -157,6 +161,23 @@ function playScenario(editors: readonly ParticipantId[], steps: readonly Step[])
       });
     }
   };
+  /** Sends the host, from the first guest who may edit, a change giving the plan the format version of a newer Tasklace, as a guest on a newer version would. */
+  const forgeNewer = (): void => {
+    const sender = editors[0];
+    const session = sender === undefined ? undefined : guests.get(sender)?.session;
+    if (sender === undefined || session === undefined) {
+      return;
+    }
+    const copy = new Y.Doc();
+    Y.applyUpdate(copy, session.encodeState());
+    const before = Y.encodeStateVector(copy);
+    copy.getMap('project').set('formatVersion', NEWER_FORMAT_VERSION);
+    queue.push({
+      toHost: true,
+      from: sender,
+      message: { kind: 'update', update: Y.encodeStateAsUpdate(copy, before) },
+    });
+  };
   /** Delivers, repeats or loses one queued packet, chosen by its position. */
   const handle = (step: Extract<Step, { kind: 'deliver' | 'duplicate' | 'drop' }>): void => {
     const [packet] = queue.splice(step.at % Math.max(queue.length, 1), 1);
@@ -224,6 +245,8 @@ function playScenario(editors: readonly ParticipantId[], steps: readonly Step[])
       edit(step);
     } else if (step.kind === 'forge') {
       forge();
+    } else if (step.kind === 'forgeNewer') {
+      forgeNewer();
     } else if (step.kind === 'hostLeaves') {
       hostLeaves();
     } else if ('at' in step) {
@@ -251,6 +274,9 @@ function playScenario(editors: readonly ParticipantId[], steps: readonly Step[])
     expect(guests.get(id)?.session.project()).toEqual(expected);
   }
   expect(expected.tasks.some((task) => task.name.startsWith(READER_MARK))).toBe(false);
+  const held = new Y.Doc();
+  Y.applyUpdate(held, hostSession.encodeState());
+  expect(readFormatVersion(held)).toBe('known');
 }
 
 describe('a shared plan over an unreliable network', () => {
