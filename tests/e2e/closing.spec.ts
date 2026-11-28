@@ -189,7 +189,11 @@ test('offers to close a window whose page crashed before any close request, and 
   });
   await crashPage();
   const code = await exitCode(exited, closed);
-  expect(code, code === TIMED_OUT ? await crashReport() : '').toBe(0);
+  const report =
+    code === 0
+      ? ''
+      : `exit code ${String(code)}, signal ${String(process.signalCode)}; ${await crashReport()}`;
+  expect(code, report).toBe(0);
 });
 
 test('offers to reload a window whose page crashed, which starts again with nothing open, checked through the main process since the crashed page cannot be driven any more', async () => {
