@@ -67,6 +67,9 @@ export function collaborationFailureText(
   if (failure.code === 'NO_NAME') {
     return messages.collaboration.noName;
   }
+  if (failure.code === 'NEWER_FORMAT') {
+    return messages.collaboration.newerJoin;
+  }
   return fileErrorMessage(messages, failure.code);
 }
 

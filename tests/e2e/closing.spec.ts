@@ -13,6 +13,8 @@ const STARTING_CLOSE_ATTEMPTS = 3;
 const EXIT_LIMIT_MS = 30_000;
 const QUESTION_LIMIT_MS = 30_000;
 const TIMED_OUT = 'timed out';
+const PROBE_LIMIT_MS = 1_000;
+const NO_ANSWER = 'no answer';
 
 let application: ElectronApplication;
 let page: Page;
@@ -148,15 +150,18 @@ async function recordCrashEvents(): Promise<void> {
   });
 }
 
-/** Describes what the main process saw after a crash and what the application logged, for the message of a failure. */
+/** Describes what the main process saw after a crash, giving up on a main process that does not answer, and what the application logged, or why its log could not be read, for the message of a failure. */
 async function crashReport(): Promise<string> {
-  const events = await application
+  const asked = application
     .evaluate(() => {
       const recorded: unknown = Reflect.get(globalThis, 'crashEvents');
       return Array.isArray(recorded) ? recorded.map(String) : [];
     })
     .catch((error: unknown) => [`events unavailable: ${String(error)}`]);
-  const log = await readFile(join(userData, 'logs', 'tasklace.log'), 'utf8').catch(() => '');
+  const events = await Promise.race([asked, delay(PROBE_LIMIT_MS, [NO_ANSWER])]);
+  const log = await readFile(join(userData, 'logs', 'tasklace.log'), 'utf8').catch(
+    (error: unknown) => `unavailable: ${String(error)}`,
+  );
   return `events: ${JSON.stringify(events)}; log: ${log}`;
 }
 

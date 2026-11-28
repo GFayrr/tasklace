@@ -83,8 +83,12 @@ export function readOutsideRequest(argv: readonly string[]): ReceivedRequest | n
     if (readRelayLink(value).ok) {
       return { kind: 'link', link: value.trim() };
     }
+    if (isNewerRelayLink(value)) {
+      console.warn('Tasklace was started with a link made by a newer version of Tasklace.');
+      return { kind: 'unreadable', what: 'newerLink' };
+    }
     console.warn('Tasklace was started with a link it cannot read.');
-    return { kind: 'unreadable', what: isNewerRelayLink(value) ? 'newerLink' : 'link' };
+    return { kind: 'unreadable', what: 'link' };
   }
   return readFileRequest(value, argv);
 }

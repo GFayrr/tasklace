@@ -293,6 +293,16 @@ describe('a member of a plan shared through a relay', () => {
     ]);
   });
 
+  it('tells that a newer version of Tasklace wrote the state of the relay on reopening, keeping nothing apart and sharing nothing once caught up', () => {
+    const editor = harness(true, 1);
+    const newer = new Y.Doc();
+    Y.applyUpdate(newer, editor.session.encodeState());
+    newer.getMap('project').set('formatVersion', 2);
+    editor.member.catchUpWith(Y.encodeStateAsUpdate(newer), 0);
+    editor.member.caughtUp();
+    expect([editor.events, editor.sent]).toEqual([[{ kind: 'newerPlan' }], []]);
+  });
+
   it('counts from the bytes it is given on reopening toward the next snapshot', () => {
     const editor = harness(true, 1);
     editor.member.catchUpWith(editor.session.encodeState(), SNAPSHOT_AFTER_BYTES - 1);
@@ -347,7 +357,7 @@ describe('a member of a plan shared through a relay', () => {
     ]);
   });
 
-  it('refuses a change written by a newer version of Tasklace, keeping nothing apart for it', () => {
+  it('tells that a newer version of Tasklace wrote a change, keeping nothing apart for it', () => {
     const editor = harness(true, 1);
     const newer = new Y.Doc();
     Y.applyUpdate(newer, editor.session.encodeState());
@@ -361,7 +371,7 @@ describe('a member of a plan shared through a relay', () => {
       settled: 1,
       bytes: encodeMessage({ kind: 'update', update: Y.encodeStateAsUpdate(newer, before) }),
     });
-    expect(editor.events).toEqual([{ kind: 'refused', reason: 'newerFormat' }]);
+    expect(editor.events).toEqual([{ kind: 'newerPlan' }]);
   });
 
   it('follows who is in from their presence, telling who may edit, and forgets everyone once out', () => {

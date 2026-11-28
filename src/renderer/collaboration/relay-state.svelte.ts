@@ -1,3 +1,4 @@
+import { askToStop } from './ask-to-stop';
 import {
   createRelayMember,
   type RelayMember,
@@ -126,6 +127,7 @@ export class RelayState {
   );
   #held: RelayEvent[] = [];
   #generation = 0;
+  #stopUnconfirmed = false;
   readonly #context: RelayContext;
 
   /** Starts with no plan shared through a relay. */
@@ -329,16 +331,16 @@ export class RelayState {
     }
   }
 
-  /** Leaves the plan shared through a relay, keeping the open plan as it is. */
+  /** Leaves the plan shared through a relay, keeping the open plan as it is, and asks the main process again when it did not confirm the last stop. */
   async stop(): Promise<void> {
-    if (!this.isActive) {
+    if (!this.isActive && !this.#stopUnconfirmed) {
       return;
     }
     this.#forget();
-    const stopped = await this.#context.bridge.stopCollaboration();
-    if (!stopped.ok) {
-      console.error('The plan shared through a relay could not be left:', stopped.error);
-    }
+    this.#stopUnconfirmed = !(await askToStop(
+      this.#context.bridge,
+      'The plan shared through a relay could not be left:',
+    ));
   }
 
   /** Forgets for good a plan whose room the relay no longer finds, with the link this computer kept for it, giving whether it was forgotten. */
@@ -493,7 +495,14 @@ export class RelayState {
         return;
       case 'refused':
         console.warn(`The plan shared through a relay refused a message: ${event.reason}.`);
-        this.#tellRefused(event.reason);
+        this.#context.changeRefused();
+        return;
+      case 'newerPlan':
+        console.warn(
+          'A newer version of Tasklace wrote the plan shared through a relay, so the page leaves it.',
+        );
+        this.#context.newerPlan();
+        void this.stop();
         return;
       case 'people':
         this.#people = event.people;
@@ -501,16 +510,6 @@ export class RelayState {
       case 'unsharedChanges':
         void this.#keepOwnChanges();
     }
-  }
-
-  /** Tells the person a change shared through the relay could not be added, leaving the plan when a newer version of Tasklace wrote it, since none of its changes could be added any more. */
-  #tellRefused(reason: Extract<RelayMemberEvent, { readonly kind: 'refused' }>['reason']): void {
-    if (reason !== 'newerFormat') {
-      this.#context.changeRefused();
-      return;
-    }
-    this.#context.newerPlan();
-    void this.stop();
   }
 
   /** Keeps apart, in a plan of its own on this computer, changes this computer holds that the relay lacks while only the link that reads the plan is held here. */

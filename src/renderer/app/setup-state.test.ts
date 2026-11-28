@@ -204,10 +204,10 @@ describe('AppState and the setup', () => {
     await app.takeOutsideRequest();
     await app.takeOutsideRequest();
     expect(app.collaborationWindow).toBeNull();
-    expect(app.notices.map(({ kind, text }) => ({ kind, text }))).toEqual([
-      { kind: 'warning', text: english.setup.linkUnreadable },
-      { kind: 'warning', text: english.setup.fileUnreadable },
-      { kind: 'warning', text: english.relay.newerLink },
+    expect(app.notices.map(({ kind, text, lasting }) => ({ kind, text, lasting }))).toEqual([
+      { kind: 'warning', text: english.setup.linkUnreadable, lasting: false },
+      { kind: 'warning', text: english.setup.fileUnreadable, lasting: false },
+      { kind: 'warning', text: english.relay.newerLink, lasting: true },
     ]);
     expect([
       english.setup.linkUnreadable,

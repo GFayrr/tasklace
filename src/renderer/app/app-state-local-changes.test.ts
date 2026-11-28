@@ -23,6 +23,7 @@ async function opening(changes?: Uint8Array) {
   fake.control.openResult = openedProjectOf(PLAN, {
     state,
     localChanges: changes ?? Y.encodeStateAsUpdate(document),
+    newerLocalCopySetAside: false,
   });
   const opened = app.open();
   await settle();
@@ -86,5 +87,18 @@ describe('opening a file whose local copy holds changes it lacks', () => {
       [[english.notices.localChangesLost, 'error', true]],
     ]);
     errors.mockRestore();
+  });
+});
+
+describe('opening a file whose local copy a newer version of Tasklace wrote', () => {
+  it('opens the file and tells, in a message that stays, that the copy was set aside unchanged', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    fake.control.openResult = openedProjectOf(PLAN, { newerLocalCopySetAside: true });
+    await app.open();
+    expect([
+      app.project?.name,
+      app.notices.map((notice) => [notice.kind, notice.text, notice.lasting]),
+    ]).toEqual(['Thesis', [['error', english.notices.newerLocalCopySetAside, true]]]);
   });
 });

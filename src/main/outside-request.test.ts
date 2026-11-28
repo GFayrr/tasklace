@@ -212,7 +212,7 @@ describe('readOutsideRequest', () => {
     }
     expect(warn.mock.calls).toEqual([
       ['Tasklace was started with a link it cannot read.'],
-      ['Tasklace was started with a link it cannot read.'],
+      ['Tasklace was started with a link made by a newer version of Tasklace.'],
       ['Tasklace was started with a link it cannot read.'],
       ['Tasklace was started with a project file whose path it cannot use.'],
       ['Tasklace was started with a project file whose path it cannot use.'],

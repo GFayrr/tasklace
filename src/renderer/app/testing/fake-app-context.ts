@@ -165,6 +165,7 @@ export function openedProjectOf(
       fileName: `${project.name}.tasklace`,
       warnings: [],
       localChanges: null,
+      newerLocalCopySetAside: false,
       ...overrides,
     },
   };

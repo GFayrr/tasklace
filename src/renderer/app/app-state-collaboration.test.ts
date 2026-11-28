@@ -70,6 +70,45 @@ function noticeTexts(app: AppState): string[] {
   return app.notices.map((notice) => notice.text);
 }
 
+describe('a plan a newer version of Tasklace wrote', () => {
+  it('tells, in words of its own that stay, that joining it needs a newer Tasklace, opening nothing', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    const { collaboration } = fake.control;
+    collaboration.settingsResult = {
+      ok: true,
+      value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
+    };
+    collaboration.openSharedResult = { ok: false, error: { code: 'NEWER_FORMAT' } };
+    await app.collaboration.loadSettings();
+    expect(await app.join(TARGET)).toEqual({ ok: true, value: null });
+    const me = app.collaboration.me;
+    if (me === null) {
+      throw new Error('The page did not join');
+    }
+    const guest: Participant = { ...HOST, id: me, name: 'Léa', isHost: false, rank: 1, color: 1 };
+    collaboration.listener?.({ kind: 'connected' });
+    collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'participants', you: me, participants: [HOST, guest] }),
+    });
+    collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'update', update: Uint8Array.of(0, 0) }),
+    });
+    collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'stateVector', vector: Uint8Array.of(0) }),
+    });
+    await settle();
+    await settle();
+    expect([
+      app.project,
+      app.notices.map((notice) => [notice.kind, notice.text, notice.lasting]),
+    ]).toEqual([null, [['error', english.collaboration.newerJoin, true]]]);
+  });
+});
+
 describe('a plan joined in read only', () => {
   it('opens the plan the host sent, checked by the main process, without file', async () => {
     const { app, control } = await joinedApp();

@@ -117,7 +117,14 @@ function openedOf(documentId: DocumentId): BridgeResult<OpenedProject> {
   const state = Y.encodeStateAsUpdate(createSharedDocument(SAMPLE, documentId));
   return {
     ok: true,
-    value: { state, documentId, fileName: 'Plan.tasklace', warnings: [], localChanges: null },
+    value: {
+      state,
+      documentId,
+      fileName: 'Plan.tasklace',
+      warnings: [],
+      localChanges: null,
+      newerLocalCopySetAside: false,
+    },
   };
 }
 
@@ -488,6 +495,7 @@ describe('createProjectFiles', () => {
         fileName: 'Plan.tasklace',
         warnings: [],
         localChanges: null,
+        newerLocalCopySetAside: false,
       },
     } as const;
     const { bridge } = fakeBridge(unreadable);
@@ -551,6 +559,7 @@ describe('createProjectFiles', () => {
         fileName: 'Plan.tasklace',
         warnings: [],
         localChanges: null,
+        newerLocalCopySetAside: false,
       },
     });
     const files = createProjectFiles(bridge, QUIET, manualTimer());
@@ -687,6 +696,7 @@ describe('createProjectFiles', () => {
         fileName: 'Plan.tasklace',
         warnings: [],
         localChanges: null,
+        newerLocalCopySetAside: false,
       },
     });
     const files = createProjectFiles(bridge, QUIET, manualTimer());
@@ -779,6 +789,7 @@ describe('a file whose local copy holds changes it lacks', () => {
         fileName: 'Plan.tasklace',
         warnings: [],
         localChanges: changes ?? Y.encodeStateAsUpdate(document),
+        newerLocalCopySetAside: false,
       },
     };
   };

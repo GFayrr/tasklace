@@ -284,6 +284,7 @@ export function offerSharedProject(sender: WebContents, loaded: LoadedProject): 
     fileName: '',
     warnings: [],
     localChanges: null,
+    newerLocalCopySetAside: false,
   };
 }
 
@@ -303,6 +304,7 @@ async function offerRelayPlan(
     fileName: path === null ? '' : basename(path),
     warnings: [],
     localChanges: null,
+    newerLocalCopySetAside: false,
   };
 }
 
@@ -704,6 +706,7 @@ function openedProject(loaded: LoadedProject, path: string): OpenedProject {
     fileName: basename(path),
     warnings: loaded.warnings,
     localChanges: loaded.localChanges,
+    newerLocalCopySetAside: loaded.newerLocalCopySetAside,
   };
 }
 

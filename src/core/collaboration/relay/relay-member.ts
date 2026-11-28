@@ -31,7 +31,8 @@ export type RelayMemberEvent =
       readonly reason: SyncRefusal | MessageRefusal | 'MISSING_CHANGES';
     }
   | { readonly kind: 'people'; readonly people: ReadonlyMap<number, RelayPerson> }
-  | { readonly kind: 'unsharedChanges' };
+  | { readonly kind: 'unsharedChanges' }
+  | { readonly kind: 'newerPlan' };
 
 export interface RelayMember {
   readonly caughtUp: () => void;
@@ -212,7 +213,9 @@ export function createRelayMember(options: RelayMemberOptions): RelayMember {
         return;
       }
       const merged = merger.merge(read.value.update);
-      if (!merged.ok && merged.error !== 'incompleteUpdate') {
+      if (!merged.ok && merged.error === 'newerFormat') {
+        report({ kind: 'newerPlan' });
+      } else if (!merged.ok && merged.error !== 'incompleteUpdate') {
         report({ kind: 'refused', reason: merged.error });
       }
       if (live) {
@@ -255,6 +258,10 @@ export function createRelayMember(options: RelayMemberOptions): RelayMember {
       const merged = state === null ? null : merger.merge(state);
       const refusal =
         merged === null || merged.ok || merged.error === 'incompleteUpdate' ? null : merged.error;
+      if (refusal === 'newerFormat') {
+        report({ kind: 'newerPlan' });
+        return;
+      }
       if (refusal !== null) {
         report({ kind: 'refused', reason: refusal });
         unshared = true;

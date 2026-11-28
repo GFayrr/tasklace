@@ -136,7 +136,13 @@ export const ISSUE_FAILURE_CODES = ['INVALID_PROJECT', 'INVALID_IMPORT', 'INVALI
 
 export type IssueFailureCode = (typeof ISSUE_FAILURE_CODES)[number];
 
-export const RELAY_ENDS = [...RELAY_REFUSALS, 'CLOSED', 'UNREACHABLE', 'UNTRUSTED'] as const;
+export const RELAY_ENDS = [
+  ...RELAY_REFUSALS,
+  'CLOSED',
+  'UNREACHABLE',
+  'UNTRUSTED',
+  'NEWER_PLAN',
+] as const;
 
 export type RelayEndReason = (typeof RELAY_ENDS)[number];
 
@@ -155,6 +161,7 @@ export interface OpenedProject {
   readonly fileName: string;
   readonly warnings: readonly ImportWarning[];
   readonly localChanges: Uint8Array | null;
+  readonly newerLocalCopySetAside: boolean;
 }
 
 export interface SavedProject {

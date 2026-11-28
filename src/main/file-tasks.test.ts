@@ -508,6 +508,7 @@ describe('reading the state of a shared plan', () => {
         documentId: TEST_DOCUMENT_ID,
         warnings: [],
         localChanges: null,
+        newerLocalCopySetAside: false,
       },
     });
     expect(read.ok && read.value.kind === 'loaded' && read.value.state.buffer.byteLength).toBe(
@@ -703,6 +704,33 @@ describe('the changes the local copy of an opened file holds', () => {
         [`The local copy ${copy} holds another document, so it was left aside.`],
       ],
       [],
+    ]);
+  });
+
+  it('sets aside a copy a newer version of Tasklace wrote, so that the next save keeps it, and tells so', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { state } = statesOf();
+    const newer = new Y.Doc();
+    Y.applyUpdate(newer, state);
+    newer.getMap('project').set('formatVersion', 2);
+    const path = await filesOf(state, Y.encodeStateAsUpdate(newer));
+    const opened = loadedOf(await runFileTask(opening(path)));
+    const names = await readdir(folder);
+    const aside = names.find((name) => name.startsWith(`${TEST_DOCUMENT_ID}.set-aside-`));
+    expect([
+      opened.localChanges,
+      opened.newerLocalCopySetAside,
+      names.includes(`${TEST_DOCUMENT_ID}.tasklace`),
+      aside === undefined ? [] : warnings.mock.calls,
+    ]).toEqual([
+      null,
+      true,
+      false,
+      [
+        [
+          `The local copy ${join(folder, `${TEST_DOCUMENT_ID}.tasklace`)} was written by a newer version of Tasklace, so it was set aside as ${join(folder, aside ?? '')}.`,
+        ],
+      ],
     ]);
   });
 

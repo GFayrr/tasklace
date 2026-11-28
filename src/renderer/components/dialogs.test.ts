@@ -173,6 +173,7 @@ describe('ClosePrompt', () => {
     control.openResult = openedProjectOf(plan, {
       state,
       localChanges: Y.encodeStateAsUpdate(document),
+      newerLocalCopySetAside: false,
     });
     const root = render(ClosePrompt, { app });
     const opening = app.open();

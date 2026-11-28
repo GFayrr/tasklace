@@ -141,7 +141,7 @@ function parseJson(text: string): Result<unknown, 'INVALID_JSON'> {
   }
 }
 
-/** Checks the format name and the version of an imported document, giving the version when no problem has been found so far. */
+/** Checks the format name and the version of an imported document, a version below the first being out of range and one above the latest coming from a newer Tasklace, giving the version when no problem has been found so far. */
 function readSupportedVersion(
   document: Readonly<Record<string, unknown>>,
   issues: IssueList,
@@ -156,10 +156,9 @@ function readSupportedVersion(
     0,
     Number.MAX_SAFE_INTEGER,
   );
-  if (
-    version !== undefined &&
-    (version < FIRST_PROJECT_JSON_VERSION || version > PROJECT_JSON_VERSION)
-  ) {
+  if (version !== undefined && version < FIRST_PROJECT_JSON_VERSION) {
+    issues.add('version', 'OUT_OF_RANGE');
+  } else if (version !== undefined && version > PROJECT_JSON_VERSION) {
     issues.add('version', 'UNSUPPORTED_VERSION');
   }
   return issues.issues.length === 0 ? version : undefined;

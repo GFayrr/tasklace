@@ -240,6 +240,8 @@ export interface AppContext {
 
 export type Waiting = 'opening' | 'receiving' | 'preparing';
 
+const JOINED = true;
+
 /** Holds what the interface shows: the open project, its schedule, whether it is saved, what can be undone and the messages for the user. */
 export class AppState {
   #project = $state.raw<Project | null>(null);
@@ -361,7 +363,8 @@ export class AppState {
       createId: context.createId,
       now: context.now,
       session: () => this.#session,
-      openShared: async (state) => (await this.#load(this.#files.openShared(state))) !== null,
+      openShared: async (state) =>
+        (await this.#load(this.#files.openShared(state), JOINED)) !== null,
       openJoined: async (opened) => (await this.#load(this.#files.openOffered(opened))) !== null,
       repaired: (repairs) => {
         this.#notifyRepairs(repairs);
@@ -380,6 +383,14 @@ export class AppState {
       },
       newerPlan: () => {
         this.#notify('error', this.messages.collaboration.newerPlan, null, true);
+      },
+      newerGuest: (name) => {
+        this.#notify(
+          'error',
+          fillMessage(this.messages.collaboration.newerGuest, { name }),
+          null,
+          true,
+        );
       },
       relayNotReopened: (failure) => {
         const text = relayFailureText(this.messages, failure, '');
@@ -649,7 +660,8 @@ export class AppState {
       return;
     }
     if (request.kind === 'unreadable') {
-      this.#notify('warning', this.#unreadableText(request.what));
+      const lasting = request.what === 'newerLink';
+      this.#notify('warning', this.#unreadableText(request.what), null, lasting);
       return;
     }
     if (request.kind === 'link') {
@@ -1544,9 +1556,16 @@ export class AppState {
     this.#notices = this.notices.filter((notice) => notice.id !== id);
   }
 
-  /** Shows a project read from a file, with its warnings and repairs, and returns it, or tells why it could not be read and returns null. */
-  async #load(opening: Promise<ActionResult<OpenedSession>>): Promise<OpenedSession | null> {
+  /** Shows a project read from a file or joined, with its warnings and repairs, and returns it, or tells why it could not be read, a joined plan of a newer version of Tasklace in words of its own, and returns null. */
+  async #load(
+    opening: Promise<ActionResult<OpenedSession>>,
+    joined = false,
+  ): Promise<OpenedSession | null> {
     const opened = await opening;
+    if (!opened.ok && joined && opened.error.code === 'NEWER_FORMAT') {
+      this.#notify('error', this.messages.collaboration.newerJoin, null, true);
+      return null;
+    }
     if (!opened.ok) {
       this.#showResult(opened);
       return null;
@@ -1562,6 +1581,9 @@ export class AppState {
     }
     this.#notifyRepairs(opened.value.session.openingRepairs);
     this.#tellLocalChanges(opened.value.localChanges);
+    if (opened.value.newerLocalCopySetAside) {
+      this.#notify('error', this.messages.notices.newerLocalCopySetAside, null, true);
+    }
     await this.loadRecentProjects();
     return opened.value;
   }

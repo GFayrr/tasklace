@@ -411,7 +411,7 @@ describe('importProjectJson: text and header', () => {
 
   it.each([
     [3, 'UNSUPPORTED_VERSION'],
-    [0, 'UNSUPPORTED_VERSION'],
+    [0, 'OUT_OF_RANGE'],
     [Number.MAX_SAFE_INTEGER, 'UNSUPPORTED_VERSION'],
     [-1, 'OUT_OF_RANGE'],
     ['1', 'WRONG_TYPE'],

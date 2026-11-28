@@ -77,6 +77,7 @@ export interface OpenedSession {
   readonly fileName: string;
   readonly warnings: readonly ImportWarning[];
   readonly localChanges: LocalChangesOutcome;
+  readonly newerLocalCopySetAside: boolean;
 }
 
 export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'failed';
@@ -264,7 +265,7 @@ export function createProjectFiles(
     if (!read.ok) {
       return read;
     }
-    const { fileName, warnings, localChanges } = opened.value;
+    const { fileName, warnings, localChanges, newerLocalCopySetAside } = opened.value;
     const choice = localChanges === null ? null : await listener.chooseLocalChanges(fileName);
     if (choice === 'cancel') {
       return { ok: false, error: { code: 'CANCELLED' } };
@@ -285,7 +286,13 @@ export function createProjectFiles(
         : { kind: choice === 'alone' ? 'setAside' : 'none' };
     return {
       ok: true,
-      value: { session: session.value, fileName, warnings, localChanges: outcome },
+      value: {
+        session: session.value,
+        fileName,
+        warnings,
+        localChanges: outcome,
+        newerLocalCopySetAside,
+      },
     };
   };
   /** Adds to an adopted project the changes its local copy holds, setting the copy aside when they cannot be added so that the next save does not replace them. */

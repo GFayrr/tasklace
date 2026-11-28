@@ -265,7 +265,7 @@ describe('a host and its guests', () => {
     expect(MAX_PENDING_UPDATE_BYTES).toBe(2 ** 26);
   });
 
-  it('refuses a change written by a newer version of Tasklace on both sides, a guest then keeping no version apart since it cannot take the plan again', () => {
+  it('tells a guest that a newer version of Tasklace wrote the plan of the host, keeping no version apart, and has the host refuse such a change of a guest', () => {
     const net = network();
     join(net, LEA, 'Léa');
     expect(net.host.setRight(LEA, true)).toEqual(success(null));
@@ -276,7 +276,7 @@ describe('a host and its guests', () => {
     net.guests.get(LEA)?.guest.receive({ kind: 'update', update });
     net.host.receive(LEA, { kind: 'update', update });
     expect(net.events.map(({ at, event }) => [at, event])).toEqual([
-      [LEA, { kind: 'refused', from: null, reason: 'newerFormat' }],
+      [LEA, { kind: 'newerPlan' }],
       [HOST, { kind: 'refused', from: LEA, reason: 'newerFormat' }],
     ]);
     expect(

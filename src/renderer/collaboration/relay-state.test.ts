@@ -196,6 +196,7 @@ function joined(canEdit: boolean, kept = true): BridgeResult<RelayJoined> {
       fileName: '',
       warnings: [],
       localChanges: null,
+      newerLocalCopySetAside: false,
     },
     shown: canEdit ? BOTH_LINKS : VIEW_LINK,
     relay: 'relay.example.org',
@@ -542,7 +543,11 @@ describe('a plan shared through a relay while it lives', () => {
       shared.relay.isActive,
       shared.requests.filter(([name]) => name === 'stopCollaboration').length,
     ]).toEqual([
-      [['The plan shared through a relay refused a message: newerFormat.']],
+      [
+        [
+          'A newer version of Tasklace wrote the plan shared through a relay, so the page leaves it.',
+        ],
+      ],
       [['newerPlan']],
       false,
       1,
@@ -665,6 +670,20 @@ describe('a plan shared through a relay while it lives', () => {
       false,
       ['stopCollaboration'],
       [['The plan shared through a relay could not be left:', { code: 'TASK_FAILED' }]],
+    ]);
+  });
+
+  it('asks the main process again at the next leaving while it did not confirm the last one, and no more once it did', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const shared = await sharedPage();
+    shared.answers.stop = failure({ code: 'TASK_FAILED' });
+    await shared.relay.stop();
+    shared.answers.stop = success(null);
+    await shared.relay.stop();
+    await shared.relay.stop();
+    expect(shared.requests.filter(([name]) => name === 'stopCollaboration')).toEqual([
+      ['stopCollaboration'],
+      ['stopCollaboration'],
     ]);
   });
 

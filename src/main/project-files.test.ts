@@ -84,6 +84,7 @@ const LOADED = {
   documentId: DOCUMENT_ID,
   warnings: [],
   localChanges: null,
+  newerLocalCopySetAside: false,
 } as const;
 const SAVED = { kind: 'saved', localCopySaved: true } as const;
 const LATER_TURNS = 64;
@@ -197,6 +198,7 @@ describe('opening projects', () => {
         ...LOADED,
         warnings: [{ path: '', code: 'UNKNOWN_COLUMN' }],
         localChanges: Uint8Array.of(4, 5),
+        newerLocalCopySetAside: false,
       }),
     );
     expect(await request(IPC_CHANNELS.openProject, sender)).toEqual({
@@ -207,6 +209,7 @@ describe('opening projects', () => {
         fileName: 'Thesis.tasklace',
         warnings: [{ path: '', code: 'UNKNOWN_COLUMN' }],
         localChanges: Uint8Array.of(4, 5),
+        newerLocalCopySetAside: false,
       },
     });
     expect(tasks).toEqual([{ kind: 'openProject', path, localCopyFolder: copiesIn(userData) }]);
@@ -756,6 +759,7 @@ describe('the kind of project a window holds', () => {
       documentId,
       warnings: [],
       localChanges: null,
+      newerLocalCopySetAside: false,
     });
     expect(windowProjectKind(joined as unknown as WebContents)).toBe('none');
     await request(IPC_CHANNELS.adoptProject, joined, documentId);
@@ -844,6 +848,7 @@ describe('keeping the changes a person could not share', () => {
         fileName: 'Thesis (my changes).tasklace',
         warnings: [],
         localChanges: null,
+        newerLocalCopySetAside: false,
       }),
     );
     expect(tasks.at(-1)).toEqual({
@@ -1050,6 +1055,7 @@ describe('plans shared through a relay', () => {
         fileName: 'Thesis.tasklace',
         warnings: [],
         localChanges: null,
+        newerLocalCopySetAside: false,
       },
       [path, STATE, DOCUMENT_ID, copiesIn(userData), true],
     ]);
@@ -1112,7 +1118,14 @@ describe('plans shared through a relay', () => {
       windowProjectKind(sender as unknown as WebContents),
       await request(IPC_CHANNELS.recentProjects, {}),
     ]).toEqual([
-      { state: STATE, documentId: DOCUMENT_ID, fileName: '', warnings: [], localChanges: null },
+      {
+        state: STATE,
+        documentId: DOCUMENT_ID,
+        fileName: '',
+        warnings: [],
+        localChanges: null,
+        newerLocalCopySetAside: false,
+      },
       [
         [
           `The plan joined through a relay could not be kept as ${join(userData, SHARED, 'Thesis.tasklace')}: WRITE_FAILED.`,
@@ -1129,7 +1142,14 @@ describe('plans shared through a relay', () => {
       files.offerRelayPlan({} as unknown as WebContents, PLAN, RELAY),
     );
     expect([answer, logged.map((call): unknown => call[0]), tasks]).toEqual([
-      { state: STATE, documentId: DOCUMENT_ID, fileName: '', warnings: [], localChanges: null },
+      {
+        state: STATE,
+        documentId: DOCUMENT_ID,
+        fileName: '',
+        warnings: [],
+        localChanges: null,
+        newerLocalCopySetAside: false,
+      },
       ['The folder of the shared plans could not be created:'],
       [],
     ]);

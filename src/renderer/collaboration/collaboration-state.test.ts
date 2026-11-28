@@ -89,6 +89,7 @@ function side(session: SharedSession | null, ids: readonly string[]) {
     relayLinkNotKept: () => relayTold.push(['linkNotKept']),
     relayChangeRefused: () => relayTold.push(['changeRefused']),
     newerPlan: () => relayTold.push(['newerPlan']),
+    newerGuest: (name) => relayTold.push(['newerGuest', name]),
     relayNotReopened: () => relayTold.push(['notReopened']),
     shareLater: (share) => {
       laterShares.push(share);
@@ -820,7 +821,40 @@ describe('sharing a plan from the page', () => {
       0,
       { kind: 'idle' },
       1,
-      [['The shared plan refused a message: newerFormat.']],
+      [['A newer version of Tasklace wrote the shared plan, so the page leaves it.']],
+    ]);
+  });
+
+  it('tells the host once that a guest who may edit uses a newer version of Tasklace, refusing its changes and staying in the plan', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { host, relay } = await sharedPair();
+    expect(host.state.setRight(LEA, true)).toBe(true);
+    await relay();
+    const session = host.session();
+    if (session === null) {
+      throw new Error('The host holds no plan.');
+    }
+    const newer = new Y.Doc();
+    Y.applyUpdate(newer, session.encodeState());
+    const before = Y.encodeStateVector(newer);
+    newer.getMap('project').set('formatVersion', 2);
+    const message = encodeMessage({ kind: 'update', update: Y.encodeStateAsUpdate(newer, before) });
+    emit(host.collaboration, { kind: 'peerMessage', peer: 1, message });
+    emit(host.collaboration, { kind: 'peerMessage', peer: 1, message });
+    await settle();
+    expect([
+      host.relayTold,
+      host.state.mode.kind,
+      host.collaboration.requests.filter(([name]) => name === 'stop').length,
+      warnings.mock.calls,
+    ]).toEqual([
+      [['newerGuest', 'Léa']],
+      'hosting',
+      0,
+      [
+        ['The shared plan refused a message of lea: newerFormat.'],
+        ['The shared plan refused a message of lea: newerFormat.'],
+      ],
     ]);
   });
 
@@ -972,6 +1006,27 @@ describe('sharing a plan from the page', () => {
     expect([host.state.mode, errors.mock.calls]).toEqual([
       { kind: 'idle' },
       [['The shared plan could not be stopped:', { code: 'TASK_FAILED' }]],
+    ]);
+  });
+
+  it('asks the main process again at the next stop while it did not confirm the last one, a rejected stop included', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { host } = await sharedPair();
+    host.collaboration.stopResult = { ok: false, error: { code: 'TASK_FAILED' } };
+    await host.state.stop();
+    host.collaboration.stopResult = { ok: true, value: null };
+    const rejected = new Error('The bridge is gone.');
+    const stops = vi.spyOn(host.bridge, 'stopCollaboration').mockRejectedValueOnce(rejected);
+    await host.state.stop();
+    await host.state.stop();
+    await host.state.stop();
+    expect([stops.mock.calls.length, host.state.mode, errors.mock.calls]).toEqual([
+      2,
+      { kind: 'idle' },
+      [
+        ['The shared plan could not be stopped:', { code: 'TASK_FAILED' }],
+        ['The shared plan could not be stopped:', rejected],
+      ],
     ]);
   });
 });
@@ -1218,6 +1273,7 @@ describe('a plan shared through a relay, seen from the page', () => {
           fileName: '',
           warnings: [],
           localChanges: null,
+          newerLocalCopySetAside: false,
         },
         shown: {
           edit: testShownLink('tasklace://relay.example.org/#e1.Hq7Lm2…'),
