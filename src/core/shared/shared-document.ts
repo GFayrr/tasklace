@@ -43,6 +43,10 @@ declare const DOCUMENT_ID_BRAND: unique symbol;
 export type DocumentId = string & { readonly [DOCUMENT_ID_BRAND]: true };
 
 export const DOCUMENT_ID_KEY = 'documentId';
+export const FORMAT_VERSION_KEY = 'formatVersion';
+export const DOCUMENT_FORMAT_VERSION = 1;
+
+export type FormatVersionReading = 'known' | 'newer' | 'invalid';
 
 const ROOTS: readonly string[] = [
   PROJECT_ROOT,
@@ -56,8 +60,10 @@ const PRESENT = true;
 const DAY_KEY_NUMBERS = 1;
 const RANGE_KEY_NUMBERS = 2;
 const DOCUMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const OLDEST_FORMAT_VERSION = 1;
 const PROJECT_FIELD_KEYS: readonly string[] = [
   DOCUMENT_ID_KEY,
+  FORMAT_VERSION_KEY,
   'name',
   'startDate',
   'criticalPathEnabled',
@@ -91,6 +97,7 @@ export function createSharedDocument(project: Project, documentId: DocumentId): 
   const document = new Y.Doc();
   document.transact(() => {
     document.getMap(PROJECT_ROOT).set(DOCUMENT_ID_KEY, documentId);
+    document.getMap(PROJECT_ROOT).set(FORMAT_VERSION_KEY, DOCUMENT_FORMAT_VERSION);
     writeSharedProject(document, project, null);
   });
   return document;
@@ -115,6 +122,18 @@ export function readDocumentId(document: Y.Doc): DocumentId | null {
   return isDocumentId(value) ? value : null;
 }
 
+/** Tells whether the format version of a shared document is one this version of Tasklace reads, a newer one, or invalid, a missing version standing for the first one, which versions 0.1 to 0.4 wrote without saying it. */
+export function readFormatVersion(document: Y.Doc): FormatVersionReading {
+  const value = document.getMap(PROJECT_ROOT).get(FORMAT_VERSION_KEY);
+  if (value === undefined) {
+    return 'known';
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < OLDEST_FORMAT_VERSION) {
+    return 'invalid';
+  }
+  return value > DOCUMENT_FORMAT_VERSION ? 'newer' : 'known';
+}
+
 /** Reads the raw content of a shared document as plain, still untrusted project data, lists sorted by identifier and tasks limited to the fields of their kind. */
 export function readSharedData(document: Y.Doc): SharedProjectData {
   return readData(document, keepFieldsOfKind);
@@ -133,6 +152,7 @@ export function findSchemaIssues(document: Y.Doc): readonly ValidationIssue[] {
   }
   checkFields(document.getMap(PROJECT_ROOT), PROJECT_ROOT, PROJECT_FIELD_KEYS, issues);
   checkDocumentId(document, issues);
+  checkFormatVersion(document, issues);
   for (const [root, allowedKeys] of ENTRY_KEYS_BY_ROOT) {
     checkEntries(document.getMap(root), root, allowedKeys, issues);
   }
@@ -150,6 +170,7 @@ export function findRootIssues(document: Y.Doc): readonly ValidationIssue[] {
   }
   checkFields(document.getMap(PROJECT_ROOT), PROJECT_ROOT, PROJECT_FIELD_KEYS, issues);
   checkDocumentId(document, issues);
+  checkFormatVersion(document, issues);
   for (const root of [...ENTRY_KEYS_BY_ROOT.map(([name]) => name), ...CALENDAR_ROOTS]) {
     checkSequenceContent(document.getMap(root), root, issues);
   }
@@ -378,6 +399,14 @@ function checkDocumentId(document: Y.Doc, issues: IssueList): void {
     issues.add(DOCUMENT_ID_KEY, 'MISSING_FIELD');
   } else if (!isDocumentId(value)) {
     issues.add(DOCUMENT_ID_KEY, 'INVALID_IDENTIFIER');
+  }
+}
+
+/** Reports a shared document whose format version is not a whole number from the first version on, or comes from a newer version of Tasklace. */
+function checkFormatVersion(document: Y.Doc, issues: IssueList): void {
+  const reading = readFormatVersion(document);
+  if (reading !== 'known') {
+    issues.add(FORMAT_VERSION_KEY, reading === 'newer' ? 'UNSUPPORTED_VERSION' : 'WRONG_TYPE');
   }
 }
 

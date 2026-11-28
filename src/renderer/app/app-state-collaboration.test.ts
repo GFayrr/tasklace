@@ -1,3 +1,4 @@
+import * as Y from 'yjs';
 import { testShownLink } from '../../core/testing/secrets';
 import { testDigest, testJoinCode } from '../../core/testing/secrets';
 import { describe, expect, it, vi } from 'vitest';
@@ -68,6 +69,45 @@ async function joinedApp(canEdit = false, fake = fakeAppContext()) {
 function noticeTexts(app: AppState): string[] {
   return app.notices.map((notice) => notice.text);
 }
+
+describe('a plan a newer version of Tasklace wrote', () => {
+  it('tells, in words of its own that stay, that joining it needs a newer Tasklace, opening nothing', async () => {
+    const fake = fakeAppContext();
+    const app = new AppState(fake.context);
+    const { collaboration } = fake.control;
+    collaboration.settingsResult = {
+      ok: true,
+      value: { name: 'Léa', port: 47_313, firewallNoticeSeen: true, relayAddress: null },
+    };
+    collaboration.openSharedResult = { ok: false, error: { code: 'NEWER_FORMAT' } };
+    await app.collaboration.loadSettings();
+    expect(await app.join(TARGET)).toEqual({ ok: true, value: null });
+    const me = app.collaboration.me;
+    if (me === null) {
+      throw new Error('The page did not join');
+    }
+    const guest: Participant = { ...HOST, id: me, name: 'Léa', isHost: false, rank: 1, color: 1 };
+    collaboration.listener?.({ kind: 'connected' });
+    collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'participants', you: me, participants: [HOST, guest] }),
+    });
+    collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'update', update: Uint8Array.of(0, 0) }),
+    });
+    collaboration.listener?.({
+      kind: 'hostMessage',
+      message: encodeMessage({ kind: 'stateVector', vector: Uint8Array.of(0) }),
+    });
+    await settle();
+    await settle();
+    expect([
+      app.project,
+      app.notices.map((notice) => [notice.kind, notice.text, notice.lasting]),
+    ]).toEqual([null, [['error', english.collaboration.newerJoin, true]]]);
+  });
+});
 
 describe('a plan joined in read only', () => {
   it('opens the plan the host sent, checked by the main process, without file', async () => {
@@ -602,6 +642,42 @@ describe('a plan shared through a relay', () => {
     expect(app.notices.map((notice) => [notice.kind, notice.text, notice.lasting])).toEqual([
       ['error', english.relay.changeRefused, true],
     ]);
+  });
+
+  it('tells in a message that stays when a newer version of Tasklace wrote a change of the shared plan, which it then leaves', async () => {
+    const { app, control } = await openedAppOf(PLAN);
+    withRelaySettings(control);
+    await app.openShare();
+    control.collaboration.relay.shareResult = { ok: true, value: SHARED };
+    await app.shareThroughRelay('wss://relay.example.org');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const opened = control.openResult;
+    if (!opened.ok) {
+      throw new Error('No plan is open.');
+    }
+    const newer = new Y.Doc();
+    Y.applyUpdate(newer, opened.value.state);
+    const before = Y.encodeStateVector(newer);
+    newer.getMap('project').set('formatVersion', 2);
+    const listener = control.collaboration.listener;
+    listener?.({ kind: 'relayConnected', member: 1, members: [] });
+    listener?.({ kind: 'relayCaughtUp' });
+    listener?.({
+      kind: 'relayDelivery',
+      delivery: {
+        kind: 'update',
+        messageId: new Uint8Array(16).fill(9),
+        covers: 0,
+        bytes: encodeMessage({ kind: 'update', update: Y.encodeStateAsUpdate(newer, before) }),
+        compressedBytes: 1,
+        settled: 1,
+      },
+    });
+    await settle();
+    expect([
+      app.notices.map((notice) => [notice.kind, notice.text, notice.lasting]),
+      app.collaboration.relay.isActive,
+    ]).toEqual([[['error', english.collaboration.newerPlan, true]], false]);
   });
 
   it('tells in a message that stays when this computer can no longer open the link of a shared plan it opens', async () => {

@@ -16,6 +16,7 @@ import {
   findSchemaIssues,
   LOCAL_ORIGIN,
   readDocumentId,
+  readFormatVersion,
   readSharedData,
   readSharedTaskUnions,
   REMOTE_ORIGIN,
@@ -52,6 +53,7 @@ export interface SharedRepair {
 export type MergeFailure =
   | { readonly kind: 'malformedUpdate'; readonly error: unknown }
   | { readonly kind: 'incompleteUpdate' }
+  | { readonly kind: 'newerFormat' }
   | { readonly kind: 'invalidProject'; readonly issues: readonly ValidationIssue[] }
   | { readonly kind: 'repairFailed'; readonly error: unknown };
 
@@ -188,6 +190,9 @@ function tryUpdate(document: Y.Doc, update: Uint8Array): Result<TrialMerge, Merg
   }
   if (readDocumentId(trial) !== readDocumentId(document)) {
     return failure({ kind: 'invalidProject', issues: [DOCUMENT_ID_CHANGED] });
+  }
+  if (readFormatVersion(trial) === 'newer') {
+    return failure({ kind: 'newerFormat' });
   }
   trial.clientID = repairClientId(document);
   try {

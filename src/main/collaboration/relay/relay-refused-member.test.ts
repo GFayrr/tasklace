@@ -35,7 +35,7 @@ vi.mock('../../../core/limits', async (importOriginal) => ({
 
 const ROOM_CHUNKS = 4;
 const REFUSED_PLAN_TASKS = 12_000;
-const EDITS_AFTER_REFUSAL = 64;
+const EDITS_AFTER_REFUSAL = 52;
 const SNAPSHOTS_OF_THE_EDITS = 2;
 const NAME_DIGITS = 5;
 const REFUSAL_TIMEOUT_MS = 120_000;

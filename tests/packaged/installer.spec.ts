@@ -20,6 +20,8 @@ const OTHER_COPY = 'C:\\Other\\Tasklace-0.1.0-portable.exe';
 const UNINSTALL_PATH = 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall';
 const UNINSTALL_KEYS = [`HKCU\\${UNINSTALL_PATH}`, `HKLM\\${UNINSTALL_PATH}`];
 const REG_NOTHING_FOUND = 1;
+const KEY_BEING_DELETED = 'marked for deletion';
+const STILL_BEING_REMOVED = -1;
 const UNINSTALLER = 'Uninstall Tasklace.exe';
 const REMOVAL_RETRIES = 10;
 const REMOVAL_RETRY_STEP_MS = 200;
@@ -161,13 +163,27 @@ async function keysThatExist(keys: readonly string[]): Promise<readonly string[]
   return keys.filter((_, index) => found[index]);
 }
 
+/** A search of the registry that reg.exe could not make, with what it wrote on its error output. */
+class RegistrySearchError extends Error {
+  /** Keeps the error output of reg.exe beside the message. */
+  constructor(
+    message: string,
+    readonly errors: string,
+  ) {
+    super(message);
+  }
+}
+
 /** Lists the keys of the installed programs with a value whose data contain a text, failing when the registry cannot tell. */
 async function uninstallEntries(text: string): Promise<readonly string[]> {
   const entries: string[] = [];
   for (const key of await keysThatExist(UNINSTALL_KEYS)) {
     const { code, output, errors } = await run('reg.exe', ['query', key, '/s', '/f', text, '/d']);
     if ((code !== 0 && code !== REG_NOTHING_FOUND) || errors !== '') {
-      throw new Error(`reg.exe could not search ${key}, ended with ${String(code)}: ${errors}`);
+      throw new RegistrySearchError(
+        `reg.exe could not search ${key}, ended with ${String(code)}: ${errors}`,
+        errors,
+      );
     }
     entries.push(...output.split(/\r?\n/).filter((line) => line.startsWith('HKEY_')));
   }
@@ -184,13 +200,48 @@ async function entryCountOf(target: string): Promise<number> {
   return (await entriesOf(target)).length;
 }
 
-/** Uninstalls Tasklace silently from its folder and waits until its program and its entry among the installed programs are gone, the uninstaller removing that entry only after the files. */
+/** Tells whether reg.exe only said that it met keys being deleted, which an uninstaller still at work explains. */
+function onlyMetKeysBeingDeleted(error: unknown): error is RegistrySearchError {
+  const lines = error instanceof RegistrySearchError ? error.errors.split(/\r?\n/) : [];
+  const written = lines.filter((line) => line.trim() !== '');
+  return written.length > 0 && written.every((line) => line.includes(KEY_BEING_DELETED));
+}
+
+/** Counts the keys of the installed programs that name an installation while its uninstaller removes them, a key the search meets as it is being deleted counting as not gone yet, the last such answer being kept for the message of a failure. */
+async function entryCountWhileRemoving(
+  target: string,
+  seen: { lastAnswer: string },
+): Promise<number> {
+  try {
+    return await entryCountOf(target);
+  } catch (error) {
+    if (onlyMetKeysBeingDeleted(error)) {
+      seen.lastAnswer = error.message;
+      return STILL_BEING_REMOVED;
+    }
+    throw error;
+  }
+}
+
+/** Uninstalls Tasklace silently and waits until its program and then its entry among the installed programs are gone, a wait that ends on keys still being deleted telling the last answer of reg.exe. */
 async function uninstall(target: string): Promise<void> {
   await run(win32.join(target, UNINSTALLER), ['/S']);
   await expect
     .poll(() => exists(win32.join(target, 'Tasklace.exe')), { timeout: INSTALL_WAIT_MS })
     .toBe(false);
-  await expect.poll(() => entryCountOf(target), { timeout: INSTALL_WAIT_MS }).toBe(0);
+  const seen = { lastAnswer: '' };
+  try {
+    await expect
+      .poll(() => entryCountWhileRemoving(target, seen), { timeout: INSTALL_WAIT_MS })
+      .toBe(0);
+  } catch (error) {
+    if (seen.lastAnswer === '') {
+      throw error;
+    }
+    throw new Error(`${String(error)}\nThe last answer of reg.exe: ${seen.lastAnswer}`, {
+      cause: error,
+    });
+  }
 }
 
 /** Removes an installation a test left behind, and any entry an installation stopped halfway left without its uninstaller, so that the next test never sees an existing installation. */

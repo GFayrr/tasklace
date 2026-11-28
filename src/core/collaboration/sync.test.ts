@@ -60,6 +60,15 @@ function network(shareLater?: (share: () => void) => void): Network {
   return { host, hostSession, guests, toHost, toGuests, events };
 }
 
+/** Makes an update that gives the plan of a session the format version of a newer Tasklace. */
+function newerUpdate(session: SharedSession): Uint8Array {
+  const copy = new Y.Doc();
+  Y.applyUpdate(copy, session.encodeState());
+  const before = Y.encodeStateVector(copy);
+  copy.getMap('project').set('formatVersion', 2);
+  return Y.encodeStateAsUpdate(copy, before);
+}
+
 /** Delivers every queued message, in order, until nothing is left to deliver. */
 function deliverAll(net: Network): void {
   for (let rounds = 0; net.toHost.length > 0 || net.toGuests.length > 0; rounds += 1) {
@@ -254,6 +263,26 @@ describe('a host and its guests', () => {
       net.toGuests.filter(({ message }) => message.kind === 'refused').map(({ to }) => to),
     ).toEqual([LEA]);
     expect(MAX_PENDING_UPDATE_BYTES).toBe(2 ** 26);
+  });
+
+  it('tells a guest that a newer version of Tasklace wrote the plan of the host, keeping no version apart, and has the host refuse such a change of a guest', () => {
+    const net = network();
+    join(net, LEA, 'Léa');
+    expect(net.host.setRight(LEA, true)).toEqual(success(null));
+    deliverAll(net);
+    net.events.splice(0);
+    net.toGuests.splice(0);
+    const update = newerUpdate(net.hostSession);
+    net.guests.get(LEA)?.guest.receive({ kind: 'update', update });
+    net.host.receive(LEA, { kind: 'update', update });
+    expect(net.events.map(({ at, event }) => [at, event])).toEqual([
+      [LEA, { kind: 'newerPlan' }],
+      [HOST, { kind: 'refused', from: LEA, reason: 'newerFormat' }],
+    ]);
+    expect(
+      net.toGuests.filter(({ message }) => message.kind === 'refused').map(({ to }) => to),
+    ).toEqual([LEA]);
+    expect(names(net.hostSession)).toEqual(['a', 'b']);
   });
 
   it('tells a guest whose change reached the host after its right was taken away, so that it keeps its version apart', () => {

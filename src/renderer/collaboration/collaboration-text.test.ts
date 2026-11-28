@@ -97,20 +97,23 @@ describe('the texts of a plan shared through a relay', () => {
       'This plan was given new links, so its old place on the relay is empty. Ask who shared it for the new links.',
       'The relay relay.example did not answer. Check your connection, or ask who sent you the link.',
       'The relay relay.example could not prove who it is, so Tasklace does not use it. Ask its owner to check its certificate.',
+      'This plan comes from a newer version of Tasklace, so Tasklace stopped following it through the relay relay.example. Update Tasklace to work on it again.',
     ]);
   });
 
-  it('tells why a plan could not be shared or joined through a relay, an address of its own included, and nothing for a cancelled choice', () => {
+  it('tells why a plan could not be shared or joined through a relay, an address and a plan of a newer Tasklace in words of their own, and nothing for a cancelled choice', () => {
     expect([
       relayFailureText(english, { code: 'RELAY_ENDED', reason: 'UNREACHABLE' }, 'relay.example'),
       relayFailureText(english, { code: 'INVALID_ADDRESS' }, 'relay'),
       relayFailureText(english, { code: 'NOT_SECURE' }, 'relay.example'),
       relayFailureText(english, { code: 'CANCELLED' }, 'relay.example'),
+      relayFailureText(english, { code: 'NEWER_FORMAT' }, 'relay.example'),
     ]).toEqual([
       'The relay relay.example did not answer. Check your connection, or ask who sent you the link.',
       english.relay.invalidAddress,
       english.fileErrors.NOT_SECURE,
       null,
+      'This plan comes from a newer version of Tasklace. Update Tasklace to join it.',
     ]);
   });
 });

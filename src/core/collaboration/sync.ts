@@ -34,7 +34,8 @@ export type SyncEvent =
       readonly you: ParticipantId;
       readonly participants: readonly Participant[];
     }
-  | { readonly kind: 'unsharedChanges' };
+  | { readonly kind: 'unsharedChanges' }
+  | { readonly kind: 'newerPlan' };
 
 export interface Outgoing {
   readonly to: ParticipantId;
@@ -348,11 +349,13 @@ export function createGuest(options: GuestOptions): Guest {
       unshared = true;
     }
   });
-  /** Merges what the host sent, asking it again for what is missing when the update depends on changes not received, and, when it cannot be merged, telling that this copy no longer follows the plan of the host. */
+  /** Merges what the host sent, asking again for what is missing, and when it cannot be merged tells that this copy no longer follows the plan of the host, or that a newer Tasklace wrote the plan, which this copy cannot follow at all. */
   const mergeFromHost = (update: Uint8Array): void => {
     const merged = merger.merge(update);
     if (!merged.ok && merged.error === 'incompleteUpdate') {
       send({ kind: 'stateVector', vector: session.encodeStateVector() });
+    } else if (!merged.ok && merged.error === 'newerFormat') {
+      report({ kind: 'newerPlan' });
     } else if (!merged.ok) {
       report({ kind: 'refused', from: null, reason: merged.error });
       report({ kind: 'unsharedChanges' });

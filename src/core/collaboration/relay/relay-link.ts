@@ -36,16 +36,21 @@ const MAX_HOST_LENGTH = 253;
 const MAX_PATH_LENGTH = 256;
 const SECURE_SCHEME = 'wss';
 const LINK_SCHEME = 'tasklace';
-const EDIT_MARK = 'e1';
+const LINK_FORMAT_VERSION = 1;
+const EDIT_MARK = `e${String(LINK_FORMAT_VERSION)}`;
 const LINK_KEY_BYTES = RELAY_KEY_BYTES + RELAY_KEY_BYTES;
-const VIEW_MARK = 'v1';
+const VIEW_MARK = `v${String(LINK_FORMAT_VERSION)}`;
+const MARKED_LINK_PATTERN = /^tasklace:\/\/[^#]+#[ev](\d{1,4})\.[A-Za-z0-9_-]+$/;
 const LINK_KEYS_TEXT_LENGTH = encodeBase64Url(new Uint8Array(LINK_KEY_BYTES)).length;
 const SHOWN_KEY_CHARACTERS = 6;
 const LEFT_OUT = '…';
 const ADDRESS_PATTERN = /^([a-z]+):\/\/([^/:[\]]+|\[[^\]]*\])(?::(\d{1,5}))?(\/[^#?]*)?$/i;
-const LINK_PATTERN =
-  /^tasklace:\/\/([^/:[\]]+|\[[^\]]*\])(?::(\d{1,5}))?(\/[^#?]*)?#([ev]1)\.([A-Za-z0-9_-]+)$/;
-const SHOWN_LINK_PATTERN = /^tasklace:\/\/[^#]+#[ev]1\.[A-Za-z0-9_-]{6}…$/;
+const LINK_PATTERN = new RegExp(
+  String.raw`^tasklace:\/\/([^/:[\]]+|\[[^\]]*\])(?::(\d{1,5}))?(\/[^#?]*)?#([ev]${String(LINK_FORMAT_VERSION)})\.([A-Za-z0-9_-]+)$`,
+);
+const SHOWN_LINK_PATTERN = new RegExp(
+  String.raw`^tasklace:\/\/[^#]+#[ev]${String(LINK_FORMAT_VERSION)}\.[A-Za-z0-9_-]{6}…$`,
+);
 const NAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
 const IPV6_PATTERN = /^\[[0-9a-f:.]{2,45}\]$/;
 const PATH_PATTERN = /^(\/[A-Za-z0-9._~-]*)+$/;
@@ -99,6 +104,13 @@ export function readRelayLink(text: string): Result<RelayLink, 'INVALID_LINK'> {
   return address === null || access === null
     ? failure('INVALID_LINK')
     : success({ address, access });
+}
+
+/** Tells whether a text has the form of the link of a shared plan made by a newer version of Tasklace, whose kind of link this version cannot read, without reading its keys. */
+export function isNewerRelayLink(text: string): boolean {
+  const trimmed = text.trim();
+  const match = trimmed.length > MAX_RELAY_LINK_LENGTH ? null : MARKED_LINK_PATTERN.exec(trimmed);
+  return match !== null && Number(match[1]) > LINK_FORMAT_VERSION;
 }
 
 /** Tells what a link a person pasted leads to, its relay and whether it edits, from its form alone without ever reading its keys, or returns null for text that cannot be such a link. */

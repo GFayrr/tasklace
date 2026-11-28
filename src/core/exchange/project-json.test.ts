@@ -113,7 +113,7 @@ function issue(path: string, code: ValidationIssue['code']): ValidationIssue[] {
 describe('exportProjectJson', () => {
   it('writes a compact versioned document', () => {
     const text = exportProjectJson(SAMPLE_PROJECT);
-    expect(text.startsWith('{"format":"tasklace","version":1,"project":{')).toBe(true);
+    expect(text.startsWith('{"format":"tasklace","version":2,"project":{')).toBe(true);
     expect(text).not.toMatch(/\n/);
     const document = JSON.parse(text) as Data;
     expect(document['format']).toBe(PROJECT_JSON_FORMAT);
@@ -144,7 +144,7 @@ describe('exportProjectJson', () => {
     expect(second).toMatchObject({ startNoEarlierThan: null, deadline: '2026-11-02T12:00' });
   });
 
-  it('writes the start date of a later block in clear text, leaves out an empty one, and refuses one written as a number', () => {
+  it('writes the start date of a later block in clear text, an empty one as null, and refuses one written as a number', () => {
     const dated = project([
       splitTask('a', [
         [7, 0],
@@ -154,7 +154,7 @@ describe('exportProjectJson', () => {
     const content = JSON.parse(exportProjectJson(dated)) as Data;
     const [task] = (content['project'] as Data)['tasks'] as Data[];
     expect(task?.['segments']).toEqual([
-      { durationHours: 7, gapDaysBefore: 0 },
+      { durationHours: 7, gapDaysBefore: 0, startNoEarlierThan: null },
       { durationHours: 7, gapDaysBefore: 1, startNoEarlierThan: '2026-10-06T13:00' },
     ]);
     const segments = task?.['segments'] as Data[];
@@ -212,6 +212,127 @@ describe('importProjectJson: round trip', () => {
     const { project: content, version, format } = sampleDocument();
     const text = JSON.stringify({ project: content, version, format });
     expect(importProjectJson(text)).toEqual({ ok: true, value: SAMPLE_PROJECT });
+  });
+});
+
+describe('importProjectJson: version 1 documents', () => {
+  const SPLIT_PROJECT = project(
+    [
+      splitTask('a', [
+        [7, 0],
+        [7, 1, at(2026, 10, 6, 13)],
+      ]),
+      workTask('b'),
+    ],
+    [link('a', 'b')],
+  );
+
+  /** Writes a project as a version 1 document leaves it, without the empty start dates of blocks, keeping the blocks of the ends of dependencies only when asked. */
+  const asVersion1 = (input: Project, withBlockEnds: boolean): Data => {
+    const content = JSON.parse(exportProjectJson(input)) as Data;
+    const inner = content['project'] as Data;
+    const tasks = (inner['tasks'] as Data[]).map((task) =>
+      Array.isArray(task['segments'])
+        ? { ...task, segments: (task['segments'] as Data[]).map(withoutEmpty) }
+        : task,
+    );
+    const dependencies = (inner['dependencies'] as Data[]).map((dependency) =>
+      withBlockEnds ? dependency : without(dependency, ['predecessorBlock', 'successorBlock']),
+    );
+    return { ...content, version: 1, project: { ...inner, tasks, dependencies } };
+  };
+
+  /** Copies a record without the given keys. */
+  const without = (record: Data, keys: readonly string[]): Data =>
+    Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
+
+  /** Copies a block without its start date when it has none, as version 1 wrote it. */
+  const withoutEmpty = (segment: Data): Data =>
+    segment['startNoEarlierThan'] === null ? without(segment, ['startNoEarlierThan']) : segment;
+
+  it('reads the block fields a version 1 document leaves out as none and as the whole task', () => {
+    const document = asVersion1(SPLIT_PROJECT, false);
+    const [dependency] = (document['project'] as Data)['dependencies'] as Data[];
+    const [task] = (document['project'] as Data)['tasks'] as Data[];
+    expect([dependency, (task?.['segments'] as Data[])[0]]).toEqual([
+      { id: 'a-b', predecessorId: 'a', successorId: 'b', type: 'finishToStart', lagHours: 0 },
+      { durationHours: 7, gapDaysBefore: 0 },
+    ]);
+    expect(importProjectJson(JSON.stringify(document))).toEqual({
+      ok: true,
+      value: SPLIT_PROJECT,
+    });
+  });
+
+  it('keeps the block fields a version 1 document writes', () => {
+    const blockLink = { ...link('a', 'b'), predecessorBlock: 1, successorBlock: null };
+    const linked = project(SPLIT_PROJECT.tasks, [blockLink]);
+    expect(importProjectJson(JSON.stringify(asVersion1(linked, true)))).toEqual({
+      ok: true,
+      value: linked,
+    });
+  });
+
+  it('refuses a version 2 document that leaves the same fields out', () => {
+    const document = { ...asVersion1(SPLIT_PROJECT, false), version: 2 };
+    expect(importIssues(document)).toEqual([
+      { path: 'project.tasks[0].segments[0].startNoEarlierThan', code: 'MISSING_FIELD' },
+      { path: 'project.tasks[1].segments[0].startNoEarlierThan', code: 'MISSING_FIELD' },
+      { path: 'project.dependencies[0].predecessorBlock', code: 'MISSING_FIELD' },
+      { path: 'project.dependencies[0].successorBlock', code: 'MISSING_FIELD' },
+    ]);
+  });
+
+  it('leaves lists and entries of an unexpected kind to the validation, without throwing', () => {
+    /** Marks a document as version 1, so that the fields it leaves out are filled before it is read. */
+    const first = (document: Data): Data => ({ ...document, version: 1 });
+    expect([
+      importIssues(first(projectFieldWith('tasks', 'x'))),
+      importIssues(first(projectFieldWith('dependencies', 7))),
+      importIssues(first(projectFieldWith('dependencies', [null]))),
+      importIssues(first(taskFieldWith(1, 'segments', 'x'))),
+      importIssues(first(taskFieldWith(1, 'segments', [1]))),
+    ]).toEqual([
+      issue('project.tasks', 'WRONG_TYPE'),
+      issue('project.dependencies', 'WRONG_TYPE'),
+      issue('project.dependencies[0]', 'WRONG_TYPE'),
+      issue('project.tasks[1].segments', 'WRONG_TYPE'),
+      issue('project.tasks[1].segments[0]', 'WRONG_TYPE'),
+    ]);
+  });
+});
+
+describe('importProjectJson: version 1 documents of an unexpected shape', () => {
+  /** Imports a version 1 document holding the given project, giving its issues. */
+  const issuesOfVersion1 = (content: unknown): readonly ValidationIssue[] =>
+    importIssues({ format: PROJECT_JSON_FORMAT, version: 1, project: content });
+
+  it('reports a project that is not an object, without throwing while filling its block fields', () => {
+    expect([null, [], 'x'].map(issuesOfVersion1)).toEqual([
+      issue('project', 'WRONG_TYPE'),
+      issue('project', 'WRONG_TYPE'),
+      issue('project', 'WRONG_TYPE'),
+    ]);
+  });
+
+  it('reports tasks that are not objects, and an own __proto__ key of a task, without polluting objects', () => {
+    const content = sampleDocument()['project'] as Data;
+    const tasks = content['tasks'] as Data[];
+    const withProto = JSON.parse(
+      JSON.stringify({ ...tasks[1] }).replace('{', '{"__proto__":{"polluted":true},'),
+    ) as unknown;
+    expect([
+      issuesOfVersion1({ ...content, tasks: [null, 3] }),
+      issuesOfVersion1({ ...content, tasks: [tasks[0], withProto, ...tasks.slice(2)] }),
+      ({} as Data)['polluted'],
+    ]).toEqual([
+      [
+        { path: 'project.tasks[0]', code: 'WRONG_TYPE' },
+        { path: 'project.tasks[1]', code: 'WRONG_TYPE' },
+      ],
+      issue('project.tasks[1].__proto__', 'UNKNOWN_FIELD'),
+      undefined,
+    ]);
   });
 });
 
@@ -323,8 +444,8 @@ describe('importProjectJson: text and header', () => {
   });
 
   it.each([
-    [2, 'UNSUPPORTED_VERSION'],
-    [0, 'UNSUPPORTED_VERSION'],
+    [3, 'UNSUPPORTED_VERSION'],
+    [0, 'OUT_OF_RANGE'],
     [Number.MAX_SAFE_INTEGER, 'UNSUPPORTED_VERSION'],
     [-1, 'OUT_OF_RANGE'],
     ['1', 'WRONG_TYPE'],
@@ -335,13 +456,13 @@ describe('importProjectJson: text and header', () => {
 
   it('rejects a version too large to be a JSON number', () => {
     const exported = exportProjectJson(SAMPLE_PROJECT);
-    const text = exported.replace('"version":1', '"version":1e400');
+    const text = exported.replace('"version":2', '"version":1e400');
     expect(text).not.toBe(exported);
     expect(importIssues(text)).toEqual(issue('version', 'WRONG_TYPE'));
   });
 
   it('checks the header before reading the project', () => {
-    expect(importIssues({ format: 'tasklace', version: 2, project: null })).toEqual(
+    expect(importIssues({ format: 'tasklace', version: 3, project: null })).toEqual(
       issue('version', 'UNSUPPORTED_VERSION'),
     );
   });

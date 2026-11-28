@@ -197,6 +197,7 @@ beforeEach(async () => {
         fileName: `${plan.name}.tasklace`,
         warnings: [],
         localChanges: null,
+        newerLocalCopySetAside: false,
       };
     },
     noteRelay: async (sender, relay) => {
@@ -475,6 +476,7 @@ describe('joining a plan by its link', () => {
             fileName: 'Test project.tasklace',
             warnings: [],
             localChanges: null,
+            newerLocalCopySetAside: false,
           },
           shown: { edit: null, view: shownOf(viewLink) },
           relay: relayLabel(),
@@ -678,6 +680,42 @@ describe('reopening a plan shared through a relay', () => {
         ['The log the relay gave for the reopened plan could not be read: INVALID_CONTENT.'],
         ['The log of the plan a link joined could not be read: INVALID_CONTENT.'],
       ],
+    ]);
+  });
+
+  it('ends a reopened plan whose log a newer version of Tasklace wrote as a newer plan, not as a broken relay', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { owner } = await sharedWithPlan();
+    const newer = new Y.Doc();
+    Y.applyUpdate(newer, PLAN_STATE);
+    newer.getMap('project').set('formatVersion', 2);
+    sendPlan(owner, encodeMessage({ kind: 'update', update: Y.encodeStateAsUpdate(newer) }));
+    await until(() => owner.kinds().filter((kind) => kind === 'relayDelivery').length === 2);
+    handlers.leave(asSender(owner));
+    const again = openPage(TEST_DOCUMENT_ID);
+    await invoke(again, IPC_CHANNELS.reopenSharedPlan, TEST_DOCUMENT_ID);
+    await until(() => again.kinds().includes('relayEnded'));
+    expect([again.events.at(-1), error.mock.calls]).toEqual([
+      { kind: 'relayEnded', reason: 'NEWER_PLAN' },
+      [['The log the relay gave for the reopened plan could not be read: NEWER_FORMAT.']],
+    ]);
+  });
+
+  it('refuses to join by link a plan a newer version of Tasklace wrote, offering nothing and keeping no link', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { owner, viewLink } = await sharedWithPlan();
+    const newer = new Y.Doc();
+    Y.applyUpdate(newer, PLAN_STATE);
+    newer.getMap('project').set('formatVersion', 2);
+    sendPlan(owner, encodeMessage({ kind: 'update', update: Y.encodeStateAsUpdate(newer) }));
+    await until(() => owner.kinds().filter((kind) => kind === 'relayDelivery').length === 2);
+    const linksBefore = links.kept.size;
+    const joined = await invoke(openPage(), IPC_CHANNELS.joinByLink, viewLink);
+    expect([joined, offered, links.kept.size - linksBefore, error.mock.calls]).toEqual([
+      { ok: false, error: { code: 'NEWER_FORMAT' } },
+      [],
+      0,
+      [['The log of the plan a link joined could not be read: NEWER_FORMAT.']],
     ]);
   });
 

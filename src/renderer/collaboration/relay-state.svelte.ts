@@ -1,3 +1,4 @@
+import { askToStop } from './ask-to-stop';
 import {
   createRelayMember,
   type RelayMember,
@@ -47,6 +48,7 @@ export interface RelayContext {
   readonly ended: (reason: RelayEndReason, relay: string) => void;
   readonly linkNotKept: () => void;
   readonly changeRefused: () => void;
+  readonly newerPlan: () => void;
   readonly notReopened: (failure: FileFailure) => void;
 }
 
@@ -125,6 +127,7 @@ export class RelayState {
   );
   #held: RelayEvent[] = [];
   #generation = 0;
+  #stopUnconfirmed = false;
   readonly #context: RelayContext;
 
   /** Starts with no plan shared through a relay. */
@@ -328,16 +331,16 @@ export class RelayState {
     }
   }
 
-  /** Leaves the plan shared through a relay, keeping the open plan as it is. */
+  /** Leaves the plan shared through a relay, keeping the open plan as it is, and asks the main process again when it did not confirm the last stop. */
   async stop(): Promise<void> {
-    if (!this.isActive) {
+    if (!this.isActive && !this.#stopUnconfirmed) {
       return;
     }
     this.#forget();
-    const stopped = await this.#context.bridge.stopCollaboration();
-    if (!stopped.ok) {
-      console.error('The plan shared through a relay could not be left:', stopped.error);
-    }
+    this.#stopUnconfirmed = !(await askToStop(
+      this.#context.bridge,
+      'The plan shared through a relay could not be left:',
+    ));
   }
 
   /** Forgets for good a plan whose room the relay no longer finds, with the link this computer kept for it, giving whether it was forgotten. */
@@ -493,6 +496,13 @@ export class RelayState {
       case 'refused':
         console.warn(`The plan shared through a relay refused a message: ${event.reason}.`);
         this.#context.changeRefused();
+        return;
+      case 'newerPlan':
+        console.warn(
+          'A newer version of Tasklace wrote the plan shared through a relay, so the page leaves it.',
+        );
+        this.#context.newerPlan();
+        void this.stop();
         return;
       case 'people':
         this.#people = event.people;

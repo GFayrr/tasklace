@@ -22,7 +22,7 @@ import {
   RELAY_RECORD_KINDS,
 } from '../../../core/collaboration/relay/relay-wire';
 import { MAX_COLLABORATION_MESSAGE_BYTES, MAX_UNCOMPRESSED_BYTES } from '../../../core/limits';
-import { failure, success } from '../../../core/result';
+import { failure, success, type Result } from '../../../core/result';
 import { isDocumentId, type DocumentId } from '../../../core/shared/shared-document';
 import {
   IPC_CHANNELS,
@@ -162,38 +162,41 @@ export function registerRelayHandlers(services: RelayServices): RelayHandlers {
         tell(sender, event);
       });
     };
-    /** Hands the page the state a reopened plan caught up to, then what came meanwhile, or ends the session for a log that is not the log of this plan. */
+    /** Hands the page the state a reopened plan caught up to, then what came meanwhile, or ends the session for a log that is not the log of this plan or that a newer version of Tasklace wrote. */
     const handOver = async (caughtUp: Gathered): Promise<void> => {
-      const state = await stateOf(caughtUp);
+      const read = await stateOf(caughtUp);
       if (relays.get(sender) !== relay) {
         return;
       }
-      if (state === undefined) {
+      if (!read.ok) {
         stop(sender);
-        tell(sender, { kind: 'relayEnded', reason: 'MALFORMED' });
+        tell(sender, { kind: 'relayEnded', reason: read.error });
         return;
       }
+      const state = read.value;
       tell(sender, { kind: 'relayState', state, bytesSinceSnapshot: caughtUp.bytesSinceSnapshot });
       tell(sender, { kind: 'relayCaughtUp' });
       release();
     };
-    /** Checks the log a reopened plan caught up to as the state of its plan, giving null for an empty log and undefined for a log that cannot be read or is not the log of this plan. */
-    const stateOf = async (caughtUp: Gathered): Promise<Uint8Array | null | undefined> => {
+    /** Checks the log a reopened plan caught up to as the state of its plan, giving null for an empty log, and the end of the session for a log a newer version of Tasklace wrote, one that cannot be read or one of another plan. */
+    const stateOf = async (
+      caughtUp: Gathered,
+    ): Promise<Result<Uint8Array | null, 'NEWER_PLAN' | 'MALFORMED'>> => {
       if (caughtUp.messages.length === 0) {
-        return null;
+        return success(null);
       }
       const loaded = await services.runTask({ kind: 'readRelayLog', messages: caughtUp.messages });
       if (!loaded.ok) {
         console.error(
           `The log the relay gave for the reopened plan could not be read: ${loaded.error.code}.`,
         );
-        return undefined;
+        return failure(loaded.error.code === 'NEWER_FORMAT' ? 'NEWER_PLAN' : 'MALFORMED');
       }
       if (loaded.value.documentId !== relay.documentId) {
         console.error('The relay gave a log that is not the log of the reopened plan.');
-        return undefined;
+        return failure('MALFORMED');
       }
-      return loaded.value.state;
+      return success(loaded.value.state);
     };
     /** Hands the page the state a reopened plan caught up to, ending the session when that fails unexpectedly so that nothing stays held. */
     const handOverOrEnd = (caughtUp: Gathered): void => {

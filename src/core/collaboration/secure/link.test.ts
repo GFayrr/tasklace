@@ -117,7 +117,7 @@ describe('the opening of a connection', () => {
     expect(guest.finish(new Uint8Array(PROOF_BYTES - 1))).toEqual(failure('MALFORMED'));
   });
 
-  it('refuses a hello or a reply of the wrong length, another version and a share that is no point', () => {
+  it('refuses a hello or a reply of the wrong length, another version, that of versions 0.1 to 0.4 included, and a share that is no point', () => {
     const host = startHostLink(SECRETS, seeded(1));
     expect(answerHostLink(host.hello.subarray(1), code('K7Q4MZ'), seeded(2))).toEqual(
       failure('MALFORMED'),
@@ -127,6 +127,12 @@ describe('the opening of a connection', () => {
     expect(answerHostLink(newer, code('K7Q4MZ'), seeded(2))).toEqual(
       failure('UNSUPPORTED_VERSION'),
     );
+    const preview = Uint8Array.from(host.hello);
+    preview[0] = 1;
+    expect([LINK_VERSION, answerHostLink(preview, code('K7Q4MZ'), seeded(2))]).toEqual([
+      2,
+      failure('UNSUPPORTED_VERSION'),
+    ]);
     const pointless = Uint8Array.from(host.hello);
     pointless.fill(255, 1 + 32, HELLO_BYTES);
     expect(answerHostLink(pointless, code('K7Q4MZ'), seeded(2))).toEqual(failure('INVALID_SHARE'));

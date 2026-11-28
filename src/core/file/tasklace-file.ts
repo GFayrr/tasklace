@@ -5,6 +5,7 @@ import {
   createSharedDocument,
   DOCUMENT_ID_KEY,
   readDocumentId,
+  readFormatVersion,
   type DocumentId,
 } from '../shared/shared-document';
 import type { Project } from '../model/project';
@@ -128,7 +129,7 @@ function readValidatedFile(
   return state.ok ? validatedState(state.value) : state;
 }
 
-/** Reads an untrusted Yjs state received from a shared plan with the checks of a file once decompressed: its size, its decoding, its project and its document identifier, giving the name of its plan too. */
+/** Reads an untrusted Yjs state received from a shared plan with the checks of a file once decompressed: its size, its decoding, its format version, its project and its document identifier, giving the name of its plan too. */
 export function readSharedState(state: Uint8Array): Result<SharedStateReading, FileError> {
   const read = checkedSharedState(state);
   return read.ok
@@ -140,7 +141,7 @@ export function readSharedState(state: Uint8Array): Result<SharedStateReading, F
     : read;
 }
 
-/** Reads the state of a shared plan received from another process or the network within the size of an uncompressed file, refusing an empty one, then decodes and checks it as the content of a file. */
+/** Reads the state of a shared plan received from another process or the network within the size of an uncompressed file, refusing an empty one, then decodes it and checks its format version and content as those of a file. */
 function checkedSharedState(state: Uint8Array): Result<ValidatedFile, FileError> {
   if (state.length > MAX_UNCOMPRESSED_BYTES) {
     return failure({ code: 'TOO_LARGE' });
@@ -178,11 +179,14 @@ export function holdsChangesMissingFrom(state: Uint8Array, other: Uint8Array): b
   return !Y.equalSnapshots(before, Y.snapshot(document));
 }
 
-/** Decodes a decompressed Yjs state and checks the project it holds and its document identifier. */
+/** Decodes a decompressed Yjs state and checks that a newer version of Tasklace did not write it, then the project it holds and its document identifier. */
 function validatedState(state: Uint8Array): Result<ValidatedFile, FileError> {
   const document = decodeState(state);
   if (!document.ok) {
     return document;
+  }
+  if (readFormatVersion(document.value) === 'newer') {
+    return failure({ code: 'NEWER_FORMAT' });
   }
   const project = validateSharedDocument(document.value);
   if (!project.ok) {

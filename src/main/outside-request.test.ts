@@ -198,6 +198,7 @@ describe('readOutsideRequest', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const unreadable = [
       ['tasklace://relay.school.example/#e1.short', 'link'],
+      ['tasklace://relay.school.example/#e2.keysOfANewerLink', 'newerLink'],
       [`TASKLACE://x --gpu-launcher="calc.exe"`, 'link'],
       ['Plans/Thesis.tasklace', 'file'],
       [`/${'a'.repeat(MAX_FILE_PATH_LENGTH)}.tasklace`, 'file'],
@@ -211,6 +212,7 @@ describe('readOutsideRequest', () => {
     }
     expect(warn.mock.calls).toEqual([
       ['Tasklace was started with a link it cannot read.'],
+      ['Tasklace was started with a link made by a newer version of Tasklace.'],
       ['Tasklace was started with a link it cannot read.'],
       ['Tasklace was started with a project file whose path it cannot use.'],
       ['Tasklace was started with a project file whose path it cannot use.'],

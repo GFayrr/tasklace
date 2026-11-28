@@ -131,6 +131,7 @@
     "localChangesAdded": "The changes kept on this computer were added to the plan.",
     "localChangesNotAdded": "The changes kept on this computer could not be added. They were set aside on this computer, and the file opened as it is.",
     "localChangesLost": "The changes kept on this computer could not be added nor set aside. The next save may replace them.",
+    "newerLocalCopySetAside": "The copy of this plan kept on this computer was written by a newer version of Tasklace, so it was set aside unchanged, next to the other copies. Update Tasklace to see the changes it holds.",
     "dismiss": "Dismiss",
     "clockOutOfRange": "The clock of this computer is outside the years Tasklace handles, so the new project starts on the first day Tasklace handles. Check the date of the computer, then set the start of the project in its settings.",
     "label": "Messages",
@@ -633,6 +634,9 @@
   },
   "collaboration": {
     "ownCopyName": "{plan} (my changes)",
+    "newerPlan": "Someone in this plan uses a newer version of Tasklace, so Tasklace took you out of it. Update Tasklace to work on it with the others again. Your plan stays open here.",
+    "newerJoin": "This plan comes from a newer version of Tasklace. Update Tasklace to join it.",
+    "newerGuest": "{name} uses a newer version of Tasklace, so their changes cannot be added to the plan until they use this version or you update Tasklace.",
     "ownChangesNotKept": "Your changes made in read only could not be kept apart. They stay only in the plan open here.",
     "keptTitle": "Your changes stay in your own copy",
     "keptBody": "You changed the plan while you were away, but you are in read only in “{plan}”, so your changes cannot be shared. They are kept in a separate plan, “{copy}”, on this computer. You now see the shared plan again.",
@@ -746,6 +750,7 @@
     "copyFailed": "The link could not be copied. Choose “Copy” again.",
     "linkNotKept": "This computer has no safe place for the link of a shared plan, so Tasklace does not keep it. Paste the link again to join next time.",
     "addressNotKept": "The address of the relay could not be kept on this computer.",
+    "newerLink": "This link comes from a newer version of Tasklace. Update Tasklace to join this plan.",
     "changeRefused": "A change shared through the relay could not be added to your plan, so your plan may now differ from the plan of the others.",
     "peopleNow": "People in this plan now",
     "you": "{name} · you",
@@ -785,7 +790,8 @@
       "RELAY_FAILED": "The relay {relay} could not keep this plan because of a problem on its side. Try again later, or ask its owner to check its log.",
       "CLOSED": "This plan was given new links, so its old place on the relay is empty. Ask who shared it for the new links.",
       "UNREACHABLE": "The relay {relay} did not answer. Check your connection, or ask who sent you the link.",
-      "UNTRUSTED": "The relay {relay} could not prove who it is, so Tasklace does not use it. Ask its owner to check its certificate."
+      "UNTRUSTED": "The relay {relay} could not prove who it is, so Tasklace does not use it. Ask its owner to check its certificate.",
+      "NEWER_PLAN": "This plan comes from a newer version of Tasklace, so Tasklace stopped following it through the relay {relay}. Update Tasklace to work on it again."
     }
   },
   "tasklace": {

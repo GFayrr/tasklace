@@ -30,6 +30,7 @@ import {
   LOCAL_ORIGIN,
   PROJECT_ROOT,
   readDocumentId,
+  readFormatVersion,
   readEntry,
   readHeaderData,
   REMOTE_ORIGIN,
@@ -510,6 +511,9 @@ function tryMerge(
   }
   if (readDocumentId(shadow) !== session.documentId) {
     return failure({ kind: 'invalidProject', issues: [DOCUMENT_ID_CHANGED] });
+  }
+  if (readFormatVersion(shadow) === 'newer') {
+    return failure({ kind: 'newerFormat' });
   }
   /** Keeps the updates a repair writes. */
   const collect = (repairUpdate: Uint8Array): void => {

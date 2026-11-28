@@ -15,13 +15,25 @@ import {
   readEnum,
   readInteger,
   readRawString,
+  isPlainObject,
   readRecord,
   type Field,
 } from '../validation/value-readers';
+import { isOneOf } from '../one-of';
 import { stripLeadingByteOrderMark } from './byte-order-mark';
 
 export const PROJECT_JSON_FORMAT = 'tasklace';
-export const PROJECT_JSON_VERSION = 1;
+export const PROJECT_JSON_VERSION = 2;
+export const FIRST_PROJECT_JSON_VERSION = 1;
+
+const PROJECT_JSON_VERSIONS = [FIRST_PROJECT_JSON_VERSION, PROJECT_JSON_VERSION] as const;
+
+type ProjectJsonVersion = (typeof PROJECT_JSON_VERSIONS)[number];
+
+const UPGRADES: Readonly<Record<ProjectJsonVersion, (project: unknown) => unknown>> = {
+  [FIRST_PROJECT_JSON_VERSION]: upgradedFromVersion1,
+  [PROJECT_JSON_VERSION]: asWritten,
+};
 
 const DOCUMENT_KEYS = ['format', 'version', 'project'];
 const WEEKDAY_NAMES = [
@@ -73,10 +85,63 @@ export function importProjectJson(text: string): Result<Project, readonly Valida
   }
   const issues = createIssueList();
   const document = readRecord({ value: parsed.value, path: '' }, issues, DOCUMENT_KEYS);
-  if (document === undefined || !hasSupportedHeader(document, issues)) {
+  const version = document === undefined ? undefined : readSupportedVersion(document, issues);
+  if (document === undefined || version === undefined) {
     return failure(issues.issues);
   }
-  return readProject(childField(document, 'project', '').value, JSON_VALUE_CODEC, 'project');
+  const content = childField(document, 'project', '').value;
+  const project = UPGRADES[version](content);
+  return readProject(project, JSON_VALUE_CODEC, 'project');
+}
+
+/** Gives the untrusted project of a document of the latest version as it is written, nothing being left out of it. */
+function asWritten(project: unknown): unknown {
+  return project;
+}
+
+/** Gives the untrusted project of a version 1 document with the block fields it could leave out written as null, the value they stood for: none for the start date of a block, the whole task for the end of a dependency. */
+function upgradedFromVersion1(project: unknown): unknown {
+  if (!isPlainObject(project)) {
+    return project;
+  }
+  return {
+    ...project,
+    tasks: mapList(project['tasks'], withBlockStarts),
+    dependencies: mapList(project['dependencies'], withBlockEnds),
+  };
+}
+
+/** Maps every item of a list, leaving a value that is not a list as it is for the validation to report. */
+function mapList(value: unknown, map: (item: unknown) => unknown): unknown {
+  return Array.isArray(value) ? value.map(map) : value;
+}
+
+/** Gives each block of a task that has blocks its start date as null where none is written, leaving anything else as it is. */
+function withBlockStarts(task: unknown): unknown {
+  return isPlainObject(task) && Object.hasOwn(task, 'segments')
+    ? { ...task, segments: mapList(task['segments'], withBlockStart) }
+    : task;
+}
+
+/** Gives a block with no start date written its start date as null, leaving anything else as it is. */
+function withBlockStart(segment: unknown): unknown {
+  return isPlainObject(segment) ? withNullWhereMissing(segment, ['startNoEarlierThan']) : segment;
+}
+
+/** Gives a dependency with no block written for an end the whole task as that end, leaving anything else as it is. */
+function withBlockEnds(dependency: unknown): unknown {
+  return isPlainObject(dependency)
+    ? withNullWhereMissing(dependency, ['predecessorBlock', 'successorBlock'])
+    : dependency;
+}
+
+/** Copies a record with null written under each given key it lacks. */
+function withNullWhereMissing(
+  record: Readonly<Record<string, unknown>>,
+  keys: readonly string[],
+): Record<string, unknown> {
+  const missing = keys.filter((key) => !Object.hasOwn(record, key));
+  return { ...record, ...Object.fromEntries(missing.map((key) => [key, null])) };
 }
 
 /** Parses JSON text, turning a syntax error into a failed result and letting any other error through. */
@@ -91,11 +156,11 @@ function parseJson(text: string): Result<unknown, 'INVALID_JSON'> {
   }
 }
 
-/** Checks the format name and the version of an imported document and tells whether no problem has been found so far. */
-function hasSupportedHeader(
+/** Checks the format name and the version of an imported document, a version below the first being out of range and one above the latest coming from a newer Tasklace, giving the version when no problem has been found so far. */
+function readSupportedVersion(
   document: Readonly<Record<string, unknown>>,
   issues: IssueList,
-): boolean {
+): ProjectJsonVersion | undefined {
   const format = readRawString(childField(document, 'format', ''), issues);
   if (format !== undefined && format !== PROJECT_JSON_FORMAT) {
     issues.add('format', 'UNSUPPORTED_FORMAT');
@@ -106,10 +171,14 @@ function hasSupportedHeader(
     0,
     Number.MAX_SAFE_INTEGER,
   );
-  if (version !== undefined && version !== PROJECT_JSON_VERSION) {
+  if (version !== undefined && version < FIRST_PROJECT_JSON_VERSION) {
+    issues.add('version', 'OUT_OF_RANGE');
+  } else if (version !== undefined && version > PROJECT_JSON_VERSION) {
     issues.add('version', 'UNSUPPORTED_VERSION');
   }
-  return issues.issues.length === 0;
+  return issues.issues.length === 0 && isOneOf(PROJECT_JSON_VERSIONS, version)
+    ? version
+    : undefined;
 }
 
 /** Reads a date written as text with a given parser. */
@@ -154,7 +223,7 @@ function baselineToJson(baseline: Baseline) {
   };
 }
 
-/** Converts a task into JSON-ready data with its date constraints in clear text, a block writing its start date only when it has one. */
+/** Converts a task into JSON-ready data, its date constraints and the start dates of its blocks written in clear text or as null for none, a summary task staying as it is. */
 function taskToJson(task: Task) {
   if (task.kind === 'summary') {
     return task;
@@ -170,10 +239,9 @@ function taskToJson(task: Task) {
   if (task.kind === 'milestone') {
     return { ...task, ...dates };
   }
-  const segments = task.segments.map(({ startNoEarlierThan, ...segment }) =>
-    startNoEarlierThan === null
-      ? segment
-      : { ...segment, startNoEarlierThan: clearDate(startNoEarlierThan) },
-  );
+  const segments = task.segments.map((segment) => ({
+    ...segment,
+    startNoEarlierThan: clearDate(segment.startNoEarlierThan),
+  }));
   return { ...task, ...dates, segments };
 }

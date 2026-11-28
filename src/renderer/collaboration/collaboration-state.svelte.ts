@@ -1,3 +1,4 @@
+import { askToStop } from './ask-to-stop';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { PRESENCE_SHARE_MILLISECONDS } from '../../core/limits';
 import {
@@ -82,6 +83,8 @@ export interface CollaborationContext {
   readonly relayEnded: (reason: RelayEndReason, relay: string) => void;
   readonly relayLinkNotKept: () => void;
   readonly relayChangeRefused: () => void;
+  readonly newerPlan: () => void;
+  readonly newerGuest: (name: string) => void;
   readonly relayNotReopened: (failure: FileFailure) => void;
   readonly shareLater?: (share: () => void) => void;
   readonly randomBytes?: (count: number) => Uint8Array;
@@ -209,6 +212,8 @@ export class CollaborationState {
   readonly #context: CollaborationContext;
   readonly relay: RelayState;
   #starting = false;
+  #stopUnconfirmed = false;
+  #toldNewer: readonly ParticipantId[] = [];
   #generation = 0;
   #presenceQueued = false;
 
@@ -227,6 +232,7 @@ export class CollaborationState {
       ended: context.relayEnded,
       linkNotKept: context.relayLinkNotKept,
       changeRefused: context.relayChangeRefused,
+      newerPlan: context.newerPlan,
       notReopened: context.relayNotReopened,
     });
     context.bridge.onCollaborationEvent(
@@ -455,17 +461,18 @@ export class CollaborationState {
     return joined;
   }
 
-  /** Stops sharing or leaves the plan joined, on the network or through a relay, keeping the open project as it is. */
+  /** Stops sharing or leaves the plan joined, on the network or through a relay, keeping the open project as it is, and asks the main process again when it did not confirm the last stop. */
   async stop(): Promise<void> {
-    if (this.#phase.kind === 'idle' && !this.#starting && !this.relay.isActive) {
+    const sharing = this.#phase.kind !== 'idle' || this.#starting || this.relay.isActive;
+    if (!sharing && !this.#stopUnconfirmed) {
       return;
     }
     this.#forget();
     this.relay.forget();
-    const stopped = await this.#context.bridge.stopCollaboration();
-    if (!stopped.ok) {
-      console.error('The shared plan could not be stopped:', stopped.error);
-    }
+    this.#stopUnconfirmed = !(await askToStop(
+      this.#context.bridge,
+      'The shared plan could not be stopped:',
+    ));
   }
 
   /** Lets a participant edit or puts it back in read only, which only the host can do. */
@@ -569,6 +576,7 @@ export class CollaborationState {
     this.#phase = { kind: 'idle' };
     this.#participants = [];
     this.#starting = false;
+    this.#toldNewer = [];
     this.#generation += 1;
   }
 
@@ -967,6 +975,14 @@ export class CollaborationState {
         console.warn(
           `The shared plan refused a message${event.from === null ? '' : ` of ${event.from}`}: ${event.reason}.`,
         );
+        if (event.reason === 'newerFormat' && event.from !== null) {
+          this.#tellNewerGuest(event.from);
+        }
+        return;
+      case 'newerPlan':
+        console.warn('A newer version of Tasklace wrote the shared plan, so the page leaves it.');
+        this.#context.newerPlan();
+        void this.stop();
         return;
       case 'roster':
         this.#participants = event.participants;
@@ -975,6 +991,16 @@ export class CollaborationState {
       case 'unsharedChanges':
         void this.#keepOwnChanges();
     }
+  }
+
+  /** Tells the host, once for each person, that a person uses a newer version of Tasklace whose changes cannot be added, keeping that person in the plan. */
+  #tellNewerGuest(id: ParticipantId): void {
+    const person = this.#participants.find((participant) => participant.id === id);
+    if (person === undefined || this.#toldNewer.includes(id)) {
+      return;
+    }
+    this.#toldNewer = [...this.#toldNewer, id];
+    this.#context.newerGuest(person.name);
   }
 
   /** Tells the person the plan has a new host once the first list of people from it arrives after the host left. */

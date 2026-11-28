@@ -26,7 +26,7 @@ import { failure, success, type Result } from '../core/result';
 import { readRelayLog } from '../core/collaboration/relay/relay-log';
 import { createSharedDocument, type DocumentId } from '../core/shared/shared-document';
 import type { FileFailure } from '../preload/bridge-contract';
-import { localCopyPath, saveLocalCopy } from './local-copies';
+import { localCopyPath, saveLocalCopy, setLocalCopyAside } from './local-copies';
 import { MissingCharacter, TooLargePdf, writeDirectPdf, type PrintFonts } from './pdf/direct-pdf';
 import { isMissingFile, isSystemError } from './stored-files';
 import { writeFileSafely } from './safe-write';
@@ -82,7 +82,12 @@ export interface LoadedProject {
   readonly documentId: DocumentId;
   readonly warnings: readonly CsvWarning[];
   readonly localChanges: Uint8Array | null;
+  readonly newerLocalCopySetAside: boolean;
 }
+
+type LocalCopyFinding = Pick<LoadedProject, 'localChanges' | 'newerLocalCopySetAside'>;
+
+const NOTHING_FOUND: LocalCopyFinding = { localChanges: null, newerLocalCopySetAside: false };
 
 export interface RelayPlan {
   readonly kind: 'relayPlan';
@@ -204,6 +209,7 @@ function sharedState(read: Result<SharedStateReading, FileError>): FileTaskResul
     documentId: read.value.documentId,
     warnings: [],
     localChanges: null,
+    newerLocalCopySetAside: false,
   });
 }
 
@@ -237,8 +243,8 @@ async function openProject(path: string, localCopyFolder: string): Promise<FileT
     return refusedFile(path, opened);
   }
   const file = { bytes: bytes.value, state: opened.value.state };
-  const localChanges = await readLocalChanges(localCopyFolder, opened.value.documentId, file);
-  return success({ ...opened.value, localChanges });
+  const found = await readLocalChanges(localCopyFolder, opened.value.documentId, file);
+  return success({ ...opened.value, ...found });
 }
 
 /** Logs a project file refused at its opening with the code of the refusal, which it gives back. */
@@ -247,33 +253,41 @@ function refusedFile(path: string, refusal: { readonly error: FileFailure }): Fi
   return failure(refusal.error);
 }
 
-/** Gives the state of the local copy of an opened file when it holds changes the file lacks, a copy with the same bytes holding none, a missing one neither, and one unreadable or of another document being logged and left aside. */
+/** Gives the changes the local copy of an opened file holds that the file lacks, setting aside a copy a newer Tasklace wrote so that the next save keeps it, and logging a copy unreadable or of another document. */
 async function readLocalChanges(
   folder: string,
   documentId: DocumentId,
   file: { readonly bytes: Uint8Array; readonly state: Uint8Array },
-): Promise<Uint8Array | null> {
+): Promise<LocalCopyFinding> {
   const path = localCopyPath(folder, documentId);
   if (path === null || !(await isPresent(path))) {
-    return null;
+    return NOTHING_FOUND;
   }
   const bytes = await readBytes(path, MAX_FILE_BYTES);
   if (bytes.ok && Buffer.compare(bytes.value, file.bytes) === 0) {
-    return null;
+    return NOTHING_FOUND;
   }
   const read = bytes.ok ? readTasklaceDocument(bytes.value, zlibCompressor) : bytes;
+  if (!read.ok && read.error.code === 'NEWER_FORMAT') {
+    const aside = await setLocalCopyAside(folder, documentId, new Date());
+    console.warn(
+      `The local copy ${path} was written by a newer version of Tasklace, so it was set aside as ${String(aside)}.`,
+    );
+    return { localChanges: null, newerLocalCopySetAside: true };
+  }
   if (!read.ok) {
     console.warn(
       `The local copy ${path} could not be read, so it was left aside: ${read.error.code}.`,
     );
-    return null;
+    return NOTHING_FOUND;
   }
   if (read.value.documentId !== documentId) {
     console.warn(`The local copy ${path} holds another document, so it was left aside.`);
-    return null;
+    return NOTHING_FOUND;
   }
   const { state } = read.value;
-  return holdsChangesMissingFrom(state, file.state) ? ownBytes(state) : null;
+  const localChanges = holdsChangesMissingFrom(state, file.state) ? ownBytes(state) : null;
+  return { localChanges, newerLocalCopySetAside: false };
 }
 
 /** Tells whether a file can be found, one that cannot be examined being logged and counted as missing. */
@@ -305,6 +319,7 @@ function loadedProjectOf(bytes: Uint8Array): Result<LoadedProject, FileFailure> 
     documentId,
     warnings: [],
     localChanges: null,
+    newerLocalCopySetAside: false,
   });
 }
 
@@ -372,7 +387,14 @@ function loaded(
   warnings: LoadedProject['warnings'],
 ): LoadedProject {
   const state = Y.encodeStateAsUpdate(createSharedDocument(project, documentId));
-  return { kind: 'loaded', state, documentId, warnings, localChanges: null };
+  return {
+    kind: 'loaded',
+    state,
+    documentId,
+    warnings,
+    localChanges: null,
+    newerLocalCopySetAside: false,
+  };
 }
 
 /** Checks the state to save and the size of its file, which must be one Tasklace can open again, then writes the project file safely when it has one and its local copy in every case, so that a failed file still leaves a local copy: the save fails when the file could not be written, or for a project without file when its local copy could not be, and otherwise tells whether the local copy was written. */

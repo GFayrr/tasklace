@@ -1,3 +1,4 @@
+import * as Y from 'yjs';
 import { testShownLink } from '../../core/testing/secrets';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encodeMessage, readMessage } from '../../core/collaboration/messages';
@@ -22,6 +23,7 @@ import type {
   RelayReopened,
   ShownRelayLinks,
 } from '../../preload/bridge-contract';
+import { settle } from '../app/testing/fake-app-context';
 import { isRelayEvent, RelayState, type RelayBridge } from './relay-state.svelte';
 
 const ORIGIN = createSharedDocument(project([workTask('a'), workTask('b')]), TEST_DOCUMENT_ID);
@@ -164,6 +166,7 @@ function page(session: SharedSession | null = sessionOn(ORIGIN, 1)) {
     ended: (reason, relay) => told.push(['ended', reason, relay]),
     linkNotKept: () => told.push(['linkNotKept']),
     changeRefused: () => told.push(['changeRefused']),
+    newerPlan: () => told.push(['newerPlan']),
     notReopened: (failure) => told.push(['notReopened', failure.code]),
   });
   return {
@@ -193,6 +196,7 @@ function joined(canEdit: boolean, kept = true): BridgeResult<RelayJoined> {
       fileName: '',
       warnings: [],
       localChanges: null,
+      newerLocalCopySetAside: false,
     },
     shown: canEdit ? BOTH_LINKS : VIEW_LINK,
     relay: 'relay.example.org',
@@ -518,6 +522,38 @@ describe('a plan shared through a relay while it lives', () => {
     ]);
   });
 
+  it('leaves the plan once a change written by a newer version of Tasklace comes, telling the person instead of a refused change', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const shared = await sharedPage();
+    const newer = new Y.Doc();
+    Y.applyUpdate(newer, Y.encodeStateAsUpdate(ORIGIN));
+    const before = Y.encodeStateVector(newer);
+    newer.getMap('project').set('formatVersion', 2);
+    shared.relay.receive({
+      kind: 'relayDelivery',
+      delivery: {
+        ...changeOfOther('Unused'),
+        bytes: encodeMessage({ kind: 'update', update: Y.encodeStateAsUpdate(newer, before) }),
+      },
+    });
+    await settle();
+    expect([
+      warn.mock.calls,
+      shared.told,
+      shared.relay.isActive,
+      shared.requests.filter(([name]) => name === 'stopCollaboration').length,
+    ]).toEqual([
+      [
+        [
+          'A newer version of Tasklace wrote the plan shared through a relay, so the page leaves it.',
+        ],
+      ],
+      [['newerPlan']],
+      false,
+      1,
+    ]);
+  });
+
   it('tells the repairs a change of the others needed, as when two people close a loop of links', async () => {
     const shared = await sharedPage();
     shared.session()?.apply({ type: 'putDependency', dependency: link('a', 'b') });
@@ -634,6 +670,20 @@ describe('a plan shared through a relay while it lives', () => {
       false,
       ['stopCollaboration'],
       [['The plan shared through a relay could not be left:', { code: 'TASK_FAILED' }]],
+    ]);
+  });
+
+  it('asks the main process again at the next leaving while it did not confirm the last one, and no more once it did', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const shared = await sharedPage();
+    shared.answers.stop = failure({ code: 'TASK_FAILED' });
+    await shared.relay.stop();
+    shared.answers.stop = success(null);
+    await shared.relay.stop();
+    await shared.relay.stop();
+    expect(shared.requests.filter(([name]) => name === 'stopCollaboration')).toEqual([
+      ['stopCollaboration'],
+      ['stopCollaboration'],
     ]);
   });
 

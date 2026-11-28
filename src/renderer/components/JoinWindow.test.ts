@@ -357,6 +357,13 @@ describe('joining a plan by its link', () => {
     ]);
   });
 
+  it('tells that a link comes from a newer version of Tasklace before asking the main process', async () => {
+    const { root, control } = await renderJoin({ name: 'Noah' });
+    typeIn(root, '#join-link', EDIT_LINK.replace('#e1.', '#e2.'));
+    await pressJoin(root);
+    expect([messageOf(root), relayRequests(control)]).toEqual([english.relay.newerLink, []]);
+  });
+
   it('keeps a new name first, and tells why the relay did not let the person in, naming the relay', async () => {
     const { root, control } = await renderJoin();
     control.collaboration.relay.joinResult = {
