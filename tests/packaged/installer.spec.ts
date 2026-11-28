@@ -20,6 +20,8 @@ const OTHER_COPY = 'C:\\Other\\Tasklace-0.1.0-portable.exe';
 const UNINSTALL_PATH = 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall';
 const UNINSTALL_KEYS = [`HKCU\\${UNINSTALL_PATH}`, `HKLM\\${UNINSTALL_PATH}`];
 const REG_NOTHING_FOUND = 1;
+const KEY_BEING_DELETED = 'marked for deletion';
+const STILL_BEING_REMOVED = -1;
 const UNINSTALLER = 'Uninstall Tasklace.exe';
 const REMOVAL_RETRIES = 10;
 const REMOVAL_RETRY_STEP_MS = 200;
@@ -184,13 +186,25 @@ async function entryCountOf(target: string): Promise<number> {
   return (await entriesOf(target)).length;
 }
 
+/** Counts the keys of the installed programs that name an installation while its uninstaller removes them, a key the search meets as it is being deleted counting as not gone yet. */
+async function entryCountWhileRemoving(target: string): Promise<number> {
+  try {
+    return await entryCountOf(target);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes(KEY_BEING_DELETED)) {
+      return STILL_BEING_REMOVED;
+    }
+    throw error;
+  }
+}
+
 /** Uninstalls Tasklace silently from its folder and waits until its program and its entry among the installed programs are gone, the uninstaller removing that entry only after the files. */
 async function uninstall(target: string): Promise<void> {
   await run(win32.join(target, UNINSTALLER), ['/S']);
   await expect
     .poll(() => exists(win32.join(target, 'Tasklace.exe')), { timeout: INSTALL_WAIT_MS })
     .toBe(false);
-  await expect.poll(() => entryCountOf(target), { timeout: INSTALL_WAIT_MS }).toBe(0);
+  await expect.poll(() => entryCountWhileRemoving(target), { timeout: INSTALL_WAIT_MS }).toBe(0);
 }
 
 /** Removes an installation a test left behind, and any entry an installation stopped halfway left without its uninstaller, so that the next test never sees an existing installation. */

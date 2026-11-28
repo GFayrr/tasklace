@@ -30,7 +30,7 @@ function fingerprintOf(content: Uint8Array | string): string {
 function projectOf(file: Uint8Array): Project {
   const read = readTasklaceFile(file, zlibCompressor);
   const project = read.ok ? readSharedProject(read.value) : null;
-  if (project === null || !project.ok) {
+  if (!project?.ok) {
     throw new Error('A file of version 0.4.0 could not be read.');
   }
   return project.value;

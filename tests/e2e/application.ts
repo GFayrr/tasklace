@@ -118,7 +118,7 @@ async function keepTraceOfFailure(application: ElectronApplication): Promise<voi
     });
 }
 
-/** Describes what an application that does not close shows: its windows, whether the save question is open and whether its page still answers. */
+/** Describes what an application that does not close shows: its windows, whether the save question is open, whether its page still answers, and what keeps its main process alive when that process answers. */
 async function describeStuckApplication(
   application: ElectronApplication,
   page: Page,
@@ -132,5 +132,8 @@ async function describeStuckApplication(
   const windows = application.windows().length;
   const prompt = await answer(page.getByRole('dialog', { name: 'Save this project?' }).isVisible());
   const pageState = await answer(page.evaluate(() => document.readyState));
-  return `windows=${String(windows)}, save question visible=${prompt}, page=${pageState}`;
+  const mainState = await answer(
+    application.evaluate(() => process.getActiveResourcesInfo().join(' ')),
+  );
+  return `windows=${String(windows)}, save question visible=${prompt}, page=${pageState}, main process holding=${mainState}`;
 }
