@@ -227,7 +227,7 @@ describe('importProjectJson: version 1 documents', () => {
     [link('a', 'b')],
   );
 
-  /** Writes a project as a version 1 document leaves it, without the empty start dates of blocks, and without the blocks of the ends of dependencies when asked. */
+  /** Writes a project as a version 1 document leaves it, without the empty start dates of blocks, keeping the blocks of the ends of dependencies only when asked. */
   const asVersion1 = (input: Project, withBlockEnds: boolean): Data => {
     const content = JSON.parse(exportProjectJson(input)) as Data;
     const inner = content['project'] as Data;

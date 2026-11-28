@@ -76,7 +76,7 @@ Off by default, each one turned on per project:
 
 ### Files and exports
 
-- `.tasklace` project files: compressed, checksummed and fully checked before opening, so that a damaged or forged file is refused without ever being loaded. Their [format](docs/file-format.md) is described, and every file written by version 1.0 or later will open in later versions.
+- `.tasklace` project files: compressed, checksummed and fully checked before opening, so that a damaged or forged file is refused without ever being loaded. Their [format](docs/file-format.md) is described, and every file written by any version, previews included, will open in later versions.
 - Automatic saving, a local copy of every project, and the last three projects at hand.
 - CSV import and export for Excel or LibreOffice, with regional dates and separators, errors reported by row and column, and protection against formula injection.
 - JSON import and export: compact documents with dates in clear text.

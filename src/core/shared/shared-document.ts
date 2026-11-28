@@ -122,7 +122,7 @@ export function readDocumentId(document: Y.Doc): DocumentId | null {
   return isDocumentId(value) ? value : null;
 }
 
-/** Tells whether a shared document is written in a format this version of Tasklace reads, a missing version standing for the first one, which versions 0.1 to 0.4 wrote without saying it. */
+/** Tells whether the format version of a shared document is one this version of Tasklace reads, a newer one, or invalid, a missing version standing for the first one, which versions 0.1 to 0.4 wrote without saying it. */
 export function readFormatVersion(document: Y.Doc): FormatVersionReading {
   const value = document.getMap(PROJECT_ROOT).get(FORMAT_VERSION_KEY);
   if (value === undefined) {

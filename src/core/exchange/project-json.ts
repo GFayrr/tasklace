@@ -223,7 +223,7 @@ function baselineToJson(baseline: Baseline) {
   };
 }
 
-/** Converts a task into JSON-ready data with its date constraints and the start dates of its blocks in clear text, or null for none. */
+/** Converts a task into JSON-ready data, its date constraints and the start dates of its blocks written in clear text or as null for none, a summary task staying as it is. */
 function taskToJson(task: Task) {
   if (task.kind === 'summary') {
     return task;

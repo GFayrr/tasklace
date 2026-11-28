@@ -4,8 +4,7 @@ Tasklace keeps a plan in a `.tasklace` file, and can also export it as JSON. Thi
 true from one version of Tasklace to the next. It is meant for anyone who wants to check what a file holds, read it
 without Tasklace, or review how Tasklace opens it.
 
-**Promise:** every file written by Tasklace 1.0 or later opens in every later version. Files written by the previews
-0.1 to 0.4 open too.
+**Promise:** every file written by any version of Tasklace, from the preview 0.1 on, opens in every later version.
 
 ## A `.tasklace` file
 
@@ -40,9 +39,9 @@ The Yjs document holds seven maps, and nothing else:
 | `workingTimeRanges` | `start,end` in hours, such as `8,17` or `13.5,17.25` | `true`                          |
 | `nonWorkingPeriods` | `firstDay,lastDay` as day numbers                    | `true`                          |
 
-Every value is a plain value (a number, a text, `true` or `false`, `null`, a list or an object), never another Yjs
-type. The calendar lists are maps whose keys are their content, so that two people adding a working day at the same
-time both keep it.
+Each task, link and tag is a Yjs map of its fields. Every field, in `project` and in those maps, holds a plain value (a
+number, a text, `true` or `false`, `null`, a list or an object), never another Yjs type. The calendar lists are maps
+whose keys are their content, so that two people adding a working day at the same time both keep it.
 
 **`project`:**
 
@@ -76,11 +75,16 @@ from or leads to, counted from 0, or `null` for the whole task).
 
 ## What Tasklace checks before opening a file
 
-Every file is treated as untrusted, and nothing of it is shown until all of these pass: the size of the file, the
-signature, the version and the flags, the checksum, the declared size (decompression stops there), the Yjs decoding,
-the exact shape of the document (an unknown map or field refuses the whole file), the format version, and finally the
-whole plan: every field, every reference between tasks, links and tags, the calendar, the hierarchy and the absence of
-loops between links. The same checks apply to a plan received from someone else in a shared plan.
+Every file is treated as untrusted, and nothing of it is shown until all of these pass, in this order: the size of the
+file, the signature, the version and the flags, the checksum, the declared size (decompression stops there), the Yjs
+decoding, the format version (a document of a newer version is refused before anything else in it is looked at), the
+exact shape of the document (an unknown map or field, or a format version that is not a whole number from 1, refuses
+the whole file), and finally the whole plan: every field, every reference between tasks, links and tags, the calendar,
+the hierarchy and the absence of loops between links.
+
+A plan received when joining a shared plan goes through the same checks. A change received while sharing one is
+refused when a newer version of Tasklace wrote it, and is otherwise repaired, in the same way on every computer, when it
+would break the plan.
 
 ## Versions and compatibility
 
@@ -93,15 +97,20 @@ Two numbers say what a file holds:
 
 The rules that follow from them:
 
-- A newer version of Tasklace reads every older document. When it needs to upgrade one, it does so in the same way on
-  every computer, so that people sharing a plan end up with the same plan.
-- An older version of Tasklace never opens a newer document or merges a newer change: it says that the plan comes from
-  a newer version of Tasklace and asks to update Tasklace. This holds for files, for joining a shared plan, and for
-  changes received while sharing one.
+- A newer version of Tasklace reads every older document. Only version 1 exists so far; when a later version needs to
+  upgrade an older document, it must do so in the same way on every computer, so that people sharing a plan end up
+  with the same plan.
+- From version 0.5 on, an older version of Tasklace never opens a newer document or merges a newer change: it says that
+  the plan comes from a newer version of Tasklace and asks to update Tasklace. This holds for files, for joining a
+  shared plan, for changes received while sharing one, and for a copy of the plan kept on this computer, which is set
+  aside unchanged rather than replaced. The previews 0.1 to 0.4 do not know `formatVersion` and refuse such a file as
+  damaged.
 - The document stays strict: a field or a map Tasklace does not know is refused, never kept or ignored.
 
-The messages of a shared plan and the links of a relay carry their own versions. From version 0.5 on, a person whose
-Tasklace differs is told so when joining; the previews 0.1 to 0.4 cannot join a plan of version 0.5 or later.
+The messages of a shared plan and the links of a relay carry their own versions, and from version 0.5 on a person whose
+Tasklace differs is told so when joining. On a local network, the previews 0.1 to 0.4 cannot join a plan shared by
+version 0.5 or later. Through a relay, they cannot join a plan created by version 0.5 or later, but plans that began in
+an older file stay open to them.
 
 ## The JSON export
 
@@ -118,12 +127,16 @@ Tasklace differs is told so when joining; the previews 0.1 to 0.4 cannot join a 
 `project` holds `name`, `startDate`, `calendar`, `options`, `tags`, `tasks`, `dependencies` and `baseline`, with the
 fields described above and these differences:
 
+- Tasks, links and tags are lists whose items carry their identifier as `id`.
+- The four options are grouped in `options`, and the calendar is `{ workingWeekdays, workingTimeRanges,
+nonWorkingPeriods }`, with ranges written `{ startHour, endHour }` and periods `{ firstDay, lastDay }`.
 - Instants are written `YYYY-MM-DDTHH:MM`, days `YYYY-MM-DD`, and weekdays by their names (`monday`).
-- A summary task holds only the fields of its kind.
+- Each task holds only the fields of its kind: a milestone has no `segments`, `hoursPerDay` or `dailyStartHour`, and a
+  summary task holds only `id`, `kind`, `name`, `parentId` and `sortKey`.
 - The identity of the document is not part of the export: an imported plan is a new plan.
 
 Version 2 writes every field, `null` included, and is read strictly. Version 1, written by the previews 0.1 to 0.4, is
-still read: a block without a start date has none, and a link without its blocks links the whole tasks. A document of a
-version above 2 is refused as coming from a newer version of Tasklace.
+still read: a block without a start date has none, and a link without its blocks links the whole tasks. A version below
+1 is refused, and a version above 2 is refused as coming from a newer version of Tasklace.
 
 An imported text is at most 512 Mi UTF-16 code units, and may start with one byte order mark.

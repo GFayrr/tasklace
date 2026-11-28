@@ -634,7 +634,7 @@
   },
   "collaboration": {
     "ownCopyName": "{plan} (my changes)",
-    "newerPlan": "Someone in this plan uses a newer version of Tasklace, so you left it. Update Tasklace to work on it again. Your plan stays open here.",
+    "newerPlan": "Someone in this plan uses a newer version of Tasklace, so Tasklace took you out of it. Update Tasklace to work on it with the others again. Your plan stays open here.",
     "newerJoin": "This plan comes from a newer version of Tasklace. Update Tasklace to join it.",
     "newerGuest": "{name} uses a newer version of Tasklace, so their changes cannot be added to the plan until they use this version or you update Tasklace.",
     "ownChangesNotKept": "Your changes made in read only could not be kept apart. They stay only in the plan open here.",

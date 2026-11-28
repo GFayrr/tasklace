@@ -133,7 +133,7 @@ describe('the files written by Tasklace 0.4.0', () => {
     ]);
   });
 
-  it('open as sessions that change, undo and save in the current format, the saved file opening again', () => {
+  it('open as sessions that change, undo and save, still without a format version, the saved file opening again', () => {
     for (const file of [RICH, LIVED]) {
       const opened = openTasklaceFile(file, zlibCompressor);
       if (!opened.ok) {
